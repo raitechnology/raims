@@ -1,0 +1,50 @@
+# dist
+/dist
+/export
+/rpmbuild
+/dpkgbuild
+# misc
+/notes
+/data
+/script
+/tmp
+# Build temporaries
+/RH5_*
+/RH6_*
+/RH7_*
+/RH8_*
+/FC*
+/UB*
+/DEB*
+# log files
+/*.log*
+# ads/adh cnf files
+/*.cnf
+# lbm conf files
+/*.conf
+# cache.xml files
+/*.xml*
+/*.txt
+/*.dtd
+/*.json
+# environment settings
+/*.env
+# backing stores, message files
+/*.dat
+# ssh keys
+/*.pem
+# misc sh scripts
+/*.sh
+# vim swap files
+.*.sw*
+.sw*
+# obj files
+*.o
+*.so
+*.out
+core.[0-9]?*
+# sourcetrail indexing
+/*.srctrl*
+# bear make output
+/compile_commands.json
+/.*history

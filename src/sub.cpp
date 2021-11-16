@@ -1,0 +1,741 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdint.h>
+#include <raims/session.h>
+
+using namespace rai;
+using namespace ms;
+using namespace kv;
+using namespace md;
+
+SubDB::SubDB( EvPoll &p,  UserDB &udb,  SessionMgr &smg ) noexcept
+     : user_db( udb ), mgr( smg ), my_src_fd( -1 ), next_inbox( 0 ),
+       sub_seqno( 0 ), sub_update_mono_time( 0 ), sub_tab( this->sub_list ),
+       pat_tab( this->sub_list, p.sub_route.pre_seed ),
+       bloom( (uint32_t) udb.rand.next() )
+{
+}
+/* my subscripion started */
+uint64_t
+SubDB::sub_start( const char *sub,  size_t sublen,  SubOnMsg *cb ) noexcept
+{
+  uint32_t h = kv_crc_c( sub, sublen, 0 );
+  if ( this->sub_tab.start( h, sub, sublen, this->sub_seqno + 1,
+                            cb ) == SUB_OK ) {
+    this->fwd_sub( S_JOIN, S_JOIN_SZ, sub, sublen, h, true );
+    return this->sub_seqno;
+  }
+  return 0;
+}
+/* my subscripion stopped */
+uint64_t
+SubDB::sub_stop( const char *sub,  size_t sublen ) noexcept
+{
+  uint32_t h = kv_crc_c( sub, sublen, 0 );
+  if ( this->sub_tab.stop( h, sub, sublen ) == SUB_OK ) {
+    this->fwd_sub( S_LEAVE, S_LEAVE_SZ, sub, sublen, h, false );
+    return this->sub_seqno;
+  }
+  return 0;
+}
+/* fwd a sub or unsub */
+void
+SubDB::fwd_sub( const char *psub,  size_t psublen,  const char *sub,
+                size_t sublen,  uint32_t hash,  bool is_start ) noexcept
+{
+  SubjectVar s( psub, psublen, sub, sublen );
+
+  MsgEst e( s.len() );
+  e.seqno  ()
+   .subject( sublen );
+
+  MsgCat m;
+  m.reserve( e.sz );
+
+  m.open( this->user_db.bridge_id.nonce, s.len() )
+   .seqno  ( ++this->sub_seqno )
+   .subject( sub, sublen );
+  uint32_t h = s.hash();
+  m.close( e.sz, h, CABA_RTR_ALERT );
+  m.sign( s.msg, s.len(), *this->user_db.session_key );
+
+  EvPublish pub( s.msg, s.len(), NULL, 0, m.msg, m.len(),
+                 this->my_src_fd, h, NULL, 0,
+                 (uint8_t) MSG_BUF_TYPE_ID, 'p' );
+  uint32_t  rcnt;
+  bool      rsz = false;
+
+  if ( is_start )
+    rsz = this->bloom.add( hash );
+  else
+    this->bloom.del( hash );
+
+  size_t count = this->user_db.transport_tab.count;
+  for ( size_t i = 0; i < count; i++ ) {
+    TransportRoute * rte = this->user_db.transport_tab.ptr[ i ];
+    rcnt = rte->sub_route.get_sub_route_count( hash );
+    if ( is_start ) {
+      /*rcnt = rte->sub_route.add_sub_route( hash, this->my_src_fd );*/
+      rte->sub_route.notify_sub( hash, sub, sublen, this->my_src_fd, rcnt, 's',
+                                 NULL, 0 );
+    }
+    else {
+      /*rcnt = rte->sub_route.del_sub_route( hash, this->my_src_fd );*/
+      rte->sub_route.notify_unsub( hash, sub, sublen, this->my_src_fd, rcnt,
+                                   's' );
+    }
+    rte->forward_to_connected_auth( pub );
+  }
+  if ( rsz )
+    this->resize_bloom();
+}
+/* request subs from peer */
+bool
+SubDB::send_subs_request( UserBridge &n,  uint64_t seqno ) noexcept
+{
+  if ( ! n.test_set( SUBS_REQUEST_STATE ) ) {
+    n.subs_mono_time = current_monotonic_time_ns();
+    this->user_db.subs_queue.push( &n );
+
+    InboxBuf ibx( n.bridge_id, _SUBS );
+
+    MsgEst e( ibx.len() );
+    e.seqno ()
+     .start ()
+     .end   ();
+
+    MsgCat   m;
+    m.reserve( e.sz );
+
+    m.open( this->user_db.bridge_id.nonce, ibx.len() )
+     .seqno ( ++n.send_inbox_seqno )
+     .start ( n.sub_seqno          )
+     .end   ( seqno                );
+    uint32_t h = ibx.hash();
+    m.close( e.sz, h, CABA_INBOX );
+    m.sign( ibx.buf, ibx.len(), *this->user_db.session_key );
+
+    return this->user_db.forward_to_inbox( n, ibx, h, m.msg, m.len(), true );
+  }
+  return true;
+}
+/* forward sub to peer inbox */
+bool
+SubDB::fwd_resub( UserBridge &n,  const char *sub,  size_t sublen,
+                  uint64_t from_seqno,  uint64_t seqno,  bool is_psub,
+                  const char *suf,  uint64_t token ) noexcept
+{
+  InboxBuf ibx( n.bridge_id, suf );
+
+  MsgEst e( ibx.len() );
+  e.seqno ();
+  if ( ! is_psub )
+    e.subject( sublen );
+  else
+    e.pattern( sublen );
+  e.start ()
+   .end   ()
+   .token ();
+
+  MsgCat   m;
+  m.reserve( e.sz );
+  m.open( this->user_db.bridge_id.nonce, ibx.len() )
+   .seqno( ++n.send_inbox_seqno );
+  if ( ! is_psub )
+    m.subject( sub, sublen );
+  else
+    m.pattern( sub, sublen );
+  m.start ( from_seqno )
+   .end   ( seqno      );
+  if ( token != 0 )
+    m.token  ( token );
+  uint32_t h = ibx.hash();
+  m.close( e.sz, h, CABA_INBOX );
+  m.sign( ibx.buf, ibx.len(), *this->user_db.session_key );
+
+  return this->user_db.forward_to_inbox( n, ibx, h, m.msg, m.len(), false );
+}
+/* locate sub */
+bool
+SubDB::find_fwd_sub( UserBridge &n,  uint32_t hash,
+                     uint64_t &from_seqno,  uint64_t seqno,
+                     const char *suf,  uint64_t token ) noexcept
+{
+  SubRoute * sub;
+  if ( (sub = this->sub_tab.find_sub( hash, seqno )) == NULL )
+    return true;
+  bool b = this->fwd_resub( n, sub->value, sub->len, from_seqno, seqno, false,
+                            suf ? suf : _RESUB, token );
+  from_seqno = seqno;
+  return b;
+}
+/* locate psub */
+bool
+SubDB::find_fwd_psub( UserBridge &n,  uint32_t hash,
+                      uint64_t &from_seqno,  uint64_t seqno,
+                      const char *suf,  uint64_t token ) noexcept
+{
+  PatRoute * sub;
+  if ( (sub = this->pat_tab.find_sub( hash, seqno )) == NULL )
+    return true;
+  bool b = this->fwd_resub( n, sub->value, sub->len, from_seqno, seqno, true,
+                            suf ? suf : _REPSUB, token );
+  from_seqno = seqno;
+  return b;
+}
+/* peer asks for subs in range start -> end */
+bool
+SubDB::recv_subs_request( const MsgFramePublish &,  UserBridge &n,
+                          const MsgHdrDecoder &dec ) noexcept
+{
+  uint64_t start = 0, end = 0, token = 0;
+  if ( dec.test( FID_START ) )
+    cvt_number<uint64_t>( dec.mref[ FID_START ], start );
+  if ( dec.test( FID_END ) )
+    cvt_number<uint64_t>( dec.mref[ FID_END ], end );
+  if ( dec.test( FID_TOKEN ) )
+    cvt_number<uint64_t>( dec.mref[ FID_TOKEN ], token );
+  if ( end == 0 )
+    end = this->sub_seqno;
+
+  SubListIter  iter( this->sub_list, start + 1, end );
+  uint64_t     from_seqno = start;
+  char         ret_buf[ 16 ];
+  const char * suf = dec.get_return( ret_buf, NULL );
+  bool         b   = true;
+  if ( iter.first() ) {
+    do {
+      if ( iter.action == ACTION_SUB_JOIN )
+        b &= this->find_fwd_sub( n, iter.hash, from_seqno, iter.seqno, suf,
+                                 token );
+      else if ( iter.action == ACTION_PSUB_START )
+        b &= this->find_fwd_psub( n, iter.hash, from_seqno, iter.seqno, suf,
+                                  token );
+    } while ( iter.next() );
+  }
+  if ( from_seqno < end ) {
+    InboxBuf ibx( n.bridge_id, suf ? suf : _RESUB );
+
+    MsgEst e( ibx.len() );
+    e.seqno  ()
+     .start  ()
+     .end    ()
+     .token  ();
+
+    MsgCat m;
+    m.reserve( e.sz );
+
+    m.open( this->user_db.bridge_id.nonce, ibx.len() )
+     .seqno  ( ++n.send_inbox_seqno )
+     .start  ( from_seqno           )
+     .end    ( end                  );
+    if ( token != 0 )
+      m.token( token );
+    uint32_t h = ibx.hash();
+    m.close( e.sz, h, CABA_INBOX );
+    m.sign( ibx.buf, ibx.len(), *this->user_db.session_key );
+
+    b &= this->user_db.forward_to_inbox( n, ibx, h, m.msg, m.len(), false );
+  }
+  return b;
+}
+
+void
+SubDB::print_bloom( BloomBits &b ) noexcept
+{
+  printf( "width %lu, count %lu, seed=%x\n", b.width, b.count, b.seed );
+  for ( size_t i = 0; i < b.width * 8; i++ ) {
+    uint8_t shft = i % 64;
+    size_t  off  = i / 64;
+    uint8_t bit = ( ( b.bits[ off ] >> shft ) & 1 );
+    printf( "%u", bit );
+  }
+  printf( "\n" );
+  for ( size_t j = 0; j < 4; j++ ) {
+    printf( "ht[ %lu ] = elem_count %lu tab_mask %lx\n", j,
+            b.ht[ j ]->elem_count, b.ht[ j ]->tab_mask );
+    size_t k;
+    if ( b.ht[ j ]->first( k ) ) {
+      do {
+        uint32_t h, v;
+        b.ht[ j ]->get( k, h, v );
+        printf( "%lu.%x = %u, ", k, h, v );
+      } while ( b.ht[ j ]->next( k ) );
+      printf( "\n" );
+    }
+  }
+}
+
+/* request subs from peer */
+bool
+SubDB::send_bloom_request( UserBridge &n ) noexcept
+{
+  if ( ! n.test_set( SUBS_REQUEST_STATE ) ) {
+    n.subs_mono_time = current_monotonic_time_ns();
+    this->user_db.subs_queue.push( &n );
+
+    InboxBuf ibx( n.bridge_id, _BLOOM_REQ );
+
+    MsgEst e( ibx.len() );
+    e.seqno();
+
+    MsgCat m;
+    m.reserve( e.sz );
+
+    m.open( this->user_db.bridge_id.nonce, ibx.len() )
+     .seqno( ++n.send_inbox_seqno );
+    uint32_t h = ibx.hash();
+    m.close( e.sz, h, CABA_INBOX );
+    m.sign( ibx.buf, ibx.len(), *this->user_db.session_key );
+
+    return this->user_db.forward_to_inbox( n, ibx, h, m.msg, m.len(), true );
+  }
+  return true;
+}
+
+bool
+SubDB::recv_bloom_request( const MsgFramePublish &,  UserBridge &n,
+                           const MsgHdrDecoder &dec ) noexcept
+{
+  BloomCodec  code;
+  if ( debug_sub ) {
+    n.printf( "bloom request\n" );
+    print_bloom( *this->bloom.bits );
+  }
+  this->bloom.encode( code );
+
+  char     ret_buf[ 16 ];
+  InboxBuf ibx( n.bridge_id, dec.get_return( ret_buf, _BLOOM_RPY ) );
+
+  MsgEst e( ibx.len() );
+  e.seqno    ()
+   .sub_seqno()
+   .bloom    ( code.code_sz * 4 );
+
+  MsgCat m;
+  m.reserve( e.sz );
+  m.open( this->user_db.bridge_id.nonce, ibx.len() )
+   .seqno    ( ++n.send_inbox_seqno )
+   .sub_seqno( this->sub_seqno      )
+   .bloom    ( code.ptr, code.code_sz * 4 );
+  uint32_t h = ibx.hash();
+  m.close( e.sz, h, CABA_INBOX );
+  m.sign( ibx.buf, ibx.len(), *this->user_db.session_key );
+
+  return this->user_db.forward_to_inbox( n, ibx, h, m.msg, m.len(), false );
+}
+
+bool
+SubDB::recv_bloom( const MsgFramePublish &pub,  UserBridge &n,
+                   const MsgHdrDecoder &dec ) noexcept
+{
+  if ( debug_sub )
+    n.printf( "recv bloom\n" );
+  if ( dec.test_2( FID_BLOOM, FID_SUB_SEQNO ) ) {
+    uint64_t sub_seqno = 0;
+    cvt_number<uint64_t>( dec.mref[ FID_SUB_SEQNO ], sub_seqno );
+    d_sub( "sub_seqno %lu >= %lu\n", sub_seqno, n.sub_seqno );
+    if ( sub_seqno >= n.sub_seqno ) {
+      if ( n.bloom.decode( dec.mref[ FID_BLOOM ].fptr,
+                           dec.mref[ FID_BLOOM ].fsize ) ) {
+        d_sub( "update_bloom count %lu\n", n.bloom.bits->count );
+        if ( debug_sub )
+          print_bloom( *n.bloom.bits );
+
+        n.sub_seqno = sub_seqno;
+        n.sub_recv_mono_time = current_monotonic_time_ns();
+        this->sub_update_mono_time = n.sub_recv_mono_time;
+        this->user_db.events.recv_bloom( n.uid, pub.rte.tport_id,
+                                         n.bloom.bits->count );
+      }
+      else {
+        n.printe( "failed to update bloom\n" );
+      }
+    }
+    return true;
+  }
+  return false;
+}
+
+bool
+SubDB::recv_bloom_result( const MsgFramePublish &pub,  UserBridge &n,
+                          const MsgHdrDecoder &dec ) noexcept
+{
+  if ( this->recv_bloom( pub, n, dec ) )
+    this->user_db.forward_pub( pub, n, dec );
+  if ( n.test_clear( SUBS_REQUEST_STATE ) )
+    this->user_db.subs_queue.remove( &n );
+  return true;
+}
+
+bool
+SubDB::recv_sub_start( const MsgFramePublish &pub,  UserBridge &n,
+                       const MsgHdrDecoder &dec ) noexcept
+{
+  if ( dec.test( FID_SUBJECT ) ) {
+    UserRoute      & u_rte  = *n.user_route;
+    TransportRoute & rte    = u_rte.rte;
+    size_t           sublen = dec.mref[ FID_SUBJECT ].fsize;
+    const char     * sub    = (const char *) dec.mref[ FID_SUBJECT ].fptr;
+    uint32_t         hash   = kv_crc_c( sub, sublen, 0 ),
+                     rcnt;
+    rcnt = rte.sub_route.get_sub_route_count( hash ) + 1;
+    n.bloom.add( hash );
+    rte.sub_route.notify_sub( hash, sub, sublen, u_rte.mcast_fd, rcnt, 's' );
+    if ( debug_sub )
+      n.printf( "start %.*s\n", (int) pub.subject_len, pub.subject );
+
+    this->user_db.forward_pub( pub, n, dec );
+  }
+  return true;
+}
+
+bool
+SubDB::recv_sub_stop( const MsgFramePublish &pub,  UserBridge &n,
+                      const MsgHdrDecoder &dec ) noexcept
+{
+  if ( dec.test( FID_SUBJECT ) ) {
+    UserRoute      & u_rte  = *n.user_route;
+    TransportRoute & rte    = u_rte.rte;
+    size_t           sublen = dec.mref[ FID_SUBJECT ].fsize;
+    const char     * sub    = (const char *) dec.mref[ FID_SUBJECT ].fptr;
+    uint32_t         hash   = kv_crc_c( sub, sublen, 0 ),
+                     rcnt;
+    rcnt = rte.sub_route.get_sub_route_count( hash ) - 1;
+    n.bloom.del( hash );
+    rte.sub_route.notify_unsub( hash, sub, sublen, u_rte.mcast_fd,
+                                rcnt, 's' );
+    if ( debug_sub )
+      n.printf( "stop %.*s\n", (int) pub.subject_len, pub.subject );
+
+    this->user_db.forward_pub( pub, n, dec );
+  }
+  return true;
+}
+
+bool
+SubDB::recv_resub_result( const MsgFramePublish &,  UserBridge &,
+                          const MsgHdrDecoder & ) noexcept
+{
+#if 0
+  if ( ! dec.test_2( FID_START, FID_END ) ) {
+    fprintf( stderr, "missing start end in recv subs request\n" );
+     return true;
+  }
+  uint64_t start = 0, seqno = 0;
+  cvt_number<uint64_t>( dec.mref[ FID_START ], start );
+  cvt_number<uint64_t>( dec.mref[ FID_END ], seqno );
+  if ( start == n.sub_seqno && seqno > start ) {
+    n.sub_seqno = seqno;
+    if ( dec.test( FID_SUBJECT ) ) {
+      UserRoute      & u_rte  = *n.user_route;
+      TransportRoute & rte    = u_rte.rte;
+      size_t           sublen = dec.mref[ FID_SUBJECT ].fsize;
+      const char     * sub    = (const char *) dec.mref[ FID_SUBJECT ].fptr;
+      uint32_t         hash   = kv_crc_c( sub, sublen, 0 ),
+                       rcnt;
+      rcnt = rte.sub_route.get_sub_route_count( hash ) + 1;
+      n.bloom.add( hash );
+      rte.sub_route.notify_sub( hash, sub, sublen, u_rte.mcast_fd,
+                                rcnt, 's' );
+    }
+    n.printf( "%.*s start %lu end %lu\n",
+            (int) pub.subject_len, pub.subject, start, seqno );
+  }
+  if ( n.test_clear( SUBS_REQUEST_STATE ) )
+    this->user_db.subs_queue.remove( &n );
+#endif
+  return true;
+}
+
+void
+SubDB::resize_bloom( void ) noexcept
+{
+  BloomBits *b = this->bloom.bits->resize( this->bloom.bits,
+                                           this->bloom.bits->seed );
+  this->bloom.bits = b;
+  this->index_bloom( *b );
+  if ( debug_sub )
+    print_bloom( *b );
+  this->user_db.events.resize_bloom( b->count );
+
+  BloomCodec code;
+  this->bloom.encode( code );
+
+  MsgEst e( Z_BLM_SZ );
+  e.seqno    ()
+   .sub_seqno()
+   .bloom    ( code.code_sz * 4 );
+
+  MsgCat m;
+  m.reserve( e.sz );
+
+  m.open( this->user_db.bridge_id.nonce, Z_BLM_SZ )
+   .seqno    ( ++this->user_db.send_peer_seqno )
+   .sub_seqno( this->sub_seqno      )
+   .bloom    ( code.ptr, code.code_sz * 4 );
+  m.close( e.sz, blm_h, CABA_RTR_ALERT );
+  m.sign( Z_BLM, Z_BLM_SZ, *this->user_db.session_key );
+
+  EvPublish pub( Z_BLM, Z_BLM_SZ, NULL, 0, m.msg, m.len(), this->my_src_fd,
+                 blm_h, NULL, 0, (uint8_t) MSG_BUF_TYPE_ID, 'p' );
+
+  size_t count = this->user_db.transport_tab.count;
+  for ( size_t i = 0; i < count; i++ ) {
+    TransportRoute * rte = this->user_db.transport_tab.ptr[ i ];
+    rte->forward_to_connected_auth( pub );
+  }
+}
+
+void
+SubDB::index_bloom( BloomBits &bits ) noexcept
+{
+  RouteLoc   loc;
+  SubRoute * rt;
+  PatRoute * pat;
+
+  bits.add( this->mgr.ibx.hash );
+  bits.add( this->mgr.mch.hash );
+  if ( (rt = this->sub_tab.tab.first( loc )) != NULL ) {
+    do {
+      bits.add( rt->hash );
+    } while ( (rt = this->sub_tab.tab.next( loc )) != NULL );
+  }
+
+  if ( (pat = this->pat_tab.tab.first( loc )) != NULL ) {
+    do {
+      if ( pat->ref_index == 0 )
+        bits.add( pat->hash );
+    } while ( (pat = this->pat_tab.tab.next( loc )) != NULL );
+  }
+}
+
+bool
+SubDB::match_subscription( const MsgFramePublish &pub,  uint64_t &seqno,
+                           SubOnMsg *&cb ) noexcept
+{
+  for ( uint8_t cnt = 0; cnt < pub.prefix_cnt; cnt++ ) {
+    if ( pub.subj_hash == pub.hash[ cnt ] ) {
+      SubRoute *rt = this->sub_tab.tab.find( pub.subj_hash,
+                                             pub.subject,
+                                             pub.subject_len );
+      if ( rt != NULL ) {
+        seqno = rt->start_seqno;
+        cb    = rt->on_data;
+        return true;
+      }
+    }
+    else {
+      RouteLoc   loc;
+      PatRoute * rt = this->pat_tab.tab.find_by_hash( pub.hash[ cnt ], loc );
+      while ( rt != NULL ) {
+        if ( rt->match( pub.subject, pub.subject_len ) ) {
+          seqno = rt->start_seqno;
+          cb    = rt->on_data;
+          d_sub( "n=%lu match=%.*s\n", seqno, (int) rt->len, rt->value );
+          return true;
+        }
+        rt = this->pat_tab.tab.find_next_by_hash( pub.hash[ cnt ], loc );
+      }
+    }
+  }
+  return false;
+}
+
+SubOnMsg *
+SubDB::match_any_sub( const char *sub,  uint16_t sublen ) noexcept
+{
+  uint32_t h = kv_crc_c( sub, sublen, 0 );
+  SubRoute *rt = this->sub_tab.tab.find( h, sub, sublen );
+  if ( rt != NULL )
+    return rt->on_data;
+  for ( uint16_t i = 0; i <= sublen; i++ ) {
+    if ( this->bloom.pref_count[ i ] != 0 ) {
+      h = kv_crc_c( sub, i, this->pat_tab.seed[ i ] );
+
+      RouteLoc   loc;
+      PatRoute * rt = this->pat_tab.tab.find_by_hash( h, loc );
+      while ( rt != NULL ) {
+        if ( rt->match( sub, sublen ) )
+          return rt->on_data;
+        rt = this->pat_tab.tab.find_next_by_hash( h, loc );
+      }
+    }
+  }
+  return NULL;
+}
+
+SeqnoStatus
+SubSeqno::restore_uid( uint32_t uid,  uint64_t seqno,  uint64_t time ) noexcept
+{
+  SeqnoSave id_val;
+  size_t    id_pos;
+  uint32_t  id_h;
+
+  if ( this->seqno_ht == NULL )
+    this->seqno_ht = UidSeqno::resize( NULL );
+  /* save the last uid */
+  id_h = kv_hash_uint( this->last_uid );
+  if ( ! this->seqno_ht->find( id_h, id_pos, id_val ) ) {
+    id_val.update( this->last_seqno, this->last_time );
+    this->seqno_ht->set_rsz( this->seqno_ht, id_h, id_pos, id_val );
+  }
+  /* find the uid which published */
+  id_h = kv_hash_uint( uid );
+  if ( ! this->seqno_ht->find( id_h, id_pos, id_val ) ) {
+    this->last_uid   = uid;
+    this->last_seqno = seqno;
+    this->last_time  = time;
+    return SEQNO_UID_FIRST;
+  }
+  /* restore the seqno of the last time uid published */
+  this->last_uid = uid;
+  id_val.restore( this->last_seqno, this->last_time );
+  return SEQNO_UID_NEXT;
+}
+
+uint32_t
+SubDB::inbox_start( uint32_t inbox_num,  SubOnMsg *cb ) noexcept
+{
+  char       num[ 16 ];
+  size_t     len;
+  uint32_t   h;
+  RouteLoc   loc;
+  InboxSub * ibx;
+
+  if ( inbox_num == 0 ) {
+    for (;;) {
+      inbox_num = ++this->next_inbox;
+      len = uint32_to_string( inbox_num, num );
+      h   = kv_hash_uint( inbox_num );
+      ibx = this->inbox_tab.upsert( h, num, len, loc );
+      if ( ibx != NULL && loc.is_new )
+        break;
+    }
+  }
+  else {
+    len = uint32_to_string( inbox_num, num );
+    h   = kv_hash_uint( inbox_num );
+    ibx = this->inbox_tab.upsert( h, num, len, loc );
+    if ( ibx == NULL )
+      return 0;
+  }
+  if ( loc.is_new ) {
+    ibx->init( cb );
+    d_sub( "create inbox: %u\n", inbox_num );
+    return inbox_num;
+  }
+  return 0;
+}
+
+void
+SubOnMsg::on_data( const SubMsgData & ) noexcept
+{
+}
+
+void
+AnyMatch::init_any( const char *s,  uint16_t sublen,  const uint32_t *pre_seed,  
+                    uint32_t uid_cnt ) noexcept
+{
+  size_t off = sizeof( AnyMatch ) - sizeof( kv::BloomMatch ) +
+               kv::BloomMatch::match_size( sublen );
+  char * ptr = &((char *) (void *) this)[ off ];
+  ::memcpy( ptr, s, sublen );
+  ptr[ sublen ] = '\0';
+
+  uid_cnt         = ( uid_cnt + 127 ) & ~(uint32_t) 127;
+  this->max_uid   = uid_cnt;
+  this->set_count = 0;
+  this->mono_time = 0;
+  this->sub       = ptr;
+  ptr            += ( ( (size_t) sublen + 8 ) & ~(size_t) 7 );
+  this->bits      = (uint64_t *) (void *) ptr;
+  ::memset( ptr, 0, uid_cnt / 8 );
+  this->match.init_match( sublen, pre_seed );
+}
+
+size_t
+AnyMatch::any_size( uint16_t sublen,  uint32_t uid_cnt ) noexcept
+{
+  size_t   len     = ( ( (size_t) sublen + 8 ) & ~(size_t) 7 );
+  uint32_t max_uid = ( uid_cnt + 127 ) & ~(uint32_t) 127;
+  len += sizeof( AnyMatch ) - sizeof( kv::BloomMatch ) +
+         kv::BloomMatch::match_size( sublen ) + (size_t) max_uid / 8;
+  return len;
+}
+
+AnyMatch *
+AnyMatchTab::get_match( const char *sub,  uint16_t sublen,  uint32_t h,
+                        const uint32_t *pre_seed,  uint32_t max_uid ) noexcept
+{
+  AnyMatch * any;
+  size_t     pos;
+  uint32_t   off;
+  if ( this->ht->find( h, pos, off ) ) {
+    any = (AnyMatch *) (void *) &this->tab.ptr[ off ];
+    if ( ::memcmp( any->sub, sub, sublen ) == 0 && any->sub[ sublen ] == '\0' &&
+         any->max_uid >= max_uid )
+      return any;
+    /* collision, toss tab */
+    this->tab.reset();
+    this->ht->clear_all();
+    this->max_off = 0;
+    this->ht->find( h, pos );
+  }
+  size_t     sz = AnyMatch::any_size( sublen, max_uid ) / 8;
+  uint64_t * p  = this->tab.resize( this->max_off + sz, false );
+
+  any = (AnyMatch *) (void *) &p[ this->max_off ];
+  any->init_any( sub, sublen, pre_seed, max_uid );
+  this->ht->set_rsz( this->ht, h, pos, this->max_off );
+  this->max_off += sz;
+  return any;
+}
+
+UserBridge *
+SubDB::any_match( const char *sub,  uint16_t sublen,  uint32_t h ) noexcept
+{
+  uint32_t     max_uid = this->user_db.next_uid,
+               uid     = 0,
+               pos;
+  AnyMatch   * any;
+  UserBridge * n;
+  any = this->any_tab.get_match( sub, sublen, h, this->pat_tab.seed, max_uid );
+  BitSetT<uint64_t> set( any->bits );
+  if ( any->mono_time < this->sub_update_mono_time ) {
+    for ( uid = 1; uid < max_uid; uid++ ) {
+      n = this->user_db.bridge_tab[ uid ];
+      if ( n != NULL && n->is_set( AUTHENTICATED_STATE ) ) {
+        if ( any->mono_time < n->sub_recv_mono_time ) {
+          if ( any->match.match_sub( h, sub, sublen, n->bloom ) ) {
+            if ( ! set.test_set( uid ) )
+              any->set_count++;
+          }
+          else {
+            if ( set.test_clear( uid ) )
+              any->set_count--;
+          }
+        }
+      }
+      else {
+        if ( set.test_clear( uid ) )
+          any->set_count--;
+      }
+    }
+    any->mono_time = this->sub_update_mono_time;
+  }
+  if ( any->set_count > 0 ) {
+    bool b = false;
+    if ( any->set_count == 1 ||
+         (pos = this->user_db.rand.next() % any->set_count) == 0 ) {
+      b = set.first( uid, any->max_uid );
+    }
+    else {
+      b = set.index( uid, pos, any->max_uid );
+    }
+    if ( b )
+      return this->user_db.bridge_tab[ uid ];
+  }
+  return NULL;
+}

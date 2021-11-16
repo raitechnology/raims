@@ -1,0 +1,393 @@
+#ifndef __rai_raims__caba_msg_buf_h__
+#define __rai_raims__caba_msg_buf_h__
+
+/* creates caba msgs */
+#define MSG_BUF_TYPE_ID 0x191c206
+
+/* 
+ * TYPE_SHIFT = 8, for 8 bit FID, leaves 3 bits unused,
+ *   fid alignment 16 bits, so fields are 1 byte padded when data is odd length
+ *   the first two bits indecate 10 == fixed size, 01 == field (not msg)
+ */
+static const uint16_t 
+  CLS_BOOL         = 0xc000U | ( BOOL_CLASS         << FID_TYPE_SHIFT ),
+  CLS_U_SHORT      = 0xc000U | ( U_SHORT_CLASS      << FID_TYPE_SHIFT ),
+  CLS_U_INT        = 0xc000U | ( U_INT_CLASS        << FID_TYPE_SHIFT ),
+  CLS_U_LONG       = 0xc000U | ( U_LONG_CLASS       << FID_TYPE_SHIFT ),
+  CLS_OPAQUE_16    = 0xc000U | ( OPAQUE_16_CLASS    << FID_TYPE_SHIFT ),
+  CLS_OPAQUE_32    = 0xc000U | ( OPAQUE_32_CLASS    << FID_TYPE_SHIFT ),
+  CLS_OPAQUE_64    = 0xc000U | ( OPAQUE_64_CLASS    << FID_TYPE_SHIFT ),
+  CLS_SHORT_STRING = 0x4000U | ( SHORT_STRING_CLASS << FID_TYPE_SHIFT ),
+  CLS_LONG_OPAQUE  = 0x4000U | ( LONG_OPAQUE_CLASS  << FID_TYPE_SHIFT );
+
+#if __cplusplus >= 201103L
+  /* these use OPAQUE_16 types */
+  static_assert( NONCE_SIZE == 16, "nonce not 16 bytes" );
+  static_assert( HMAC_SIZE == 16, "hmac not 16 bytes" );
+  static_assert( HASH_DIGEST_SIZE == 64, "digest not 64 bytes" );
+#endif
+
+template <class T>
+struct BMsgBufT {
+  char * out, * msg;
+  BMsgBufT( void *m ) : out( (char *) m ), msg( (char *) m ) {}
+
+  void emit_u16( uint16_t val ) {   /* tib sass is big endian */
+    val = __builtin_bswap16( val );
+    ::memcpy( this->out, &val, 2 );
+    this->out += 2;
+  }
+  void emit_u32( uint32_t val ) {
+    val = __builtin_bswap32( val );
+    ::memcpy( this->out, &val, 4 );
+    this->out += 4;
+  }
+  void emit_u64( uint64_t val ) {
+    val = __builtin_bswap64( val );
+    ::memcpy( this->out, &val, 8 );
+    this->out += 8;
+  }
+  T &b( uint8_t opt,  const void *in,  uint16_t in_len ) { /* string out */
+    this->emit_u16( CLS_SHORT_STRING | opt );
+    this->emit_u16( in_len );
+    ::memcpy( this->out, in, in_len );
+    this->out = &this->out[ in_len ];
+    if ( ( in_len & 1 ) != 0 )
+      *this->out++ = 0;
+    return (T &) *this;
+  }
+  T &o( uint8_t opt,  const void *in,  uint32_t in_len ) { /* opaque out */
+    this->emit_u16( CLS_LONG_OPAQUE | opt );
+    this->emit_u32( in_len );
+    ::memcpy( this->out, in, in_len );
+    this->out = &this->out[ in_len ];
+    if ( ( in_len & 1 ) != 0 )
+      *this->out++ = 0;
+    return (T &) *this;
+  }
+  T &u( uint8_t opt,  uint64_t n ) {  /* uint64/32/16 out */
+    if ( (uint64_t) ( n >> 32 ) == 0 ) {
+      if ( (uint64_t) ( n >> 16 ) == 0 ) {
+        this->emit_u16( CLS_U_SHORT | opt );
+        this->emit_u16( n );
+      }
+      else {
+        this->emit_u16( CLS_U_INT | opt );
+        this->emit_u32( n );
+      }
+    }
+    else {
+      this->emit_u16( CLS_U_LONG | opt );
+      this->emit_u64( n );
+    }
+    return (T &) *this;
+  }
+  T &i( uint8_t opt,  uint32_t n ) {  /* uint32/16 out */
+    if ( (uint32_t) ( n >> 16 ) == 0 ) {
+      this->emit_u16( CLS_U_SHORT | opt );
+      this->emit_u16( n );
+    }
+    else {
+      this->emit_u16( CLS_U_INT | opt );
+      this->emit_u32( n );
+    }
+    return (T &) *this;
+  }
+  T &w( uint8_t opt,  uint16_t n ) {  /* uint16 out */
+    this->emit_u16( CLS_U_SHORT | opt );
+    this->emit_u16( n );
+    return (T &) *this;
+  }
+  T &y( uint8_t opt,  uint8_t n ) {   /* bool out */
+    this->emit_u16( CLS_BOOL | opt );
+    this->out[ 0 ] = ( n ? 1 : 0 );
+    this->out[ 1 ] = 0;
+    this->out += 2;
+    return (T &) *this;
+  }
+  T &n( uint8_t opt,  const Nonce &val ) { /* digest out */
+    emit_u16( CLS_OPAQUE_16 | opt );
+    ::memcpy( this->out, val.nonce, NONCE_SIZE );
+    this->out += NONCE_SIZE;
+    return (T &) *this;
+  }
+  T &h( uint8_t opt,  const HmacDigest &val ) { /* digest out */
+    emit_u16( CLS_OPAQUE_16 | opt );
+    ::memcpy( this->out, val.dig, HMAC_SIZE );
+    this->out += HMAC_SIZE;
+    return (T &) *this;
+  }
+  T &k( uint8_t opt,  const HashDigest &val ) { /* digest out */
+    emit_u16( CLS_OPAQUE_64 | opt );
+    ::memcpy( this->out, val.dig, HASH_DIGEST_SIZE );
+    this->out += HASH_DIGEST_SIZE;
+    return (T &) *this;
+  }
+  T &x( uint8_t opt,  const HmacDigest &hmac,  const Nonce &nonce ) {
+    emit_u16( CLS_OPAQUE_32 | opt );
+    ::memcpy( this->out, hmac.dig, HMAC_SIZE );
+    this->out += HMAC_SIZE;
+    ::memcpy( this->out, nonce.nonce, NONCE_SIZE );
+    this->out += NONCE_SIZE;
+    return (T &) *this;
+  }
+  size_t len( void ) const { return this->out - this->msg; }
+};
+
+template <class T>
+struct MsgBufDigestT : public BMsgBufT<T> {
+  uint32_t * hdr;
+  char     * dig, * sub;
+  MsgBufDigestT( void *m ) : BMsgBufT<T>( m ), hdr( 0 ), dig( 0 ), sub( 0 ) {}
+  T &  open       ( const Nonce &bridge,  uint16_t sublen ) {
+    this->hdr  = (uint32_t *) (void *) this->out;
+    this->out += 8;
+    this->n( FID_BRIDGE, bridge );
+    this->emit_u16( CLS_OPAQUE_16 | FID_DIGEST );
+    this->dig  = this->out;
+    this->out += HMAC_SIZE;/* skip some space for digest */
+    this->sub  = this->out;
+    this->out += /*fid:sz:sub*/ 4 + sublen; /* skip subject */
+    if ( ( sublen & 1 ) != 0 )
+      this->out++;
+    return (T &) *this;
+  }
+  T &  open_submsg( void ) {
+    this->hdr  = (uint32_t *) (void *) this->out;
+    this->out += /*fid:sz*/ 6;
+    return (T &) *this;
+  }
+  void close_msg  ( uint32_t h,  CabaFlags caba ) {
+    uint32_t sz = this->len() - 8,
+             fl = ( (uint32_t) caba.flags << CABA_LENGTH_BITS );
+    if ( sz <= CABA_LENGTH_MASK )
+      sz |= fl; /* <flags><length> */
+    else {
+      sz  = fl; /* length bits == 0 */
+      h   = sz; /* size too big, use the hash field */
+    }
+    this->hdr[ 0 ] = __builtin_bswap32( sz );
+    this->hdr[ 1 ] = __builtin_bswap32( h );
+  }
+  void close_submsg( uint8_t opt ) {
+    size_t sz = this->len();
+
+    char * sav = this->out;
+    this->out = (char *) (void *) this->hdr;
+    this->emit_u16( CLS_LONG_OPAQUE | opt );
+    this->emit_u32( sz - 6 );
+    this->out = sav;
+  }
+  T &  session    ( const HmacDigest &hmac,  const Nonce &bridge ) {
+    return this->x( FID_SESSION, hmac, bridge ); }
+  T &  bridge2    ( const Nonce &bridge ) {
+    return this->n( FID_BRIDGE, bridge ); }
+  T &  user_hmac  ( const HmacDigest &hmac ) {
+    return this->h( FID_USER_HMAC, hmac ); }
+  T &  auth_key   ( const HashDigest &key ) {
+    return this->k( FID_AUTH_KEY, key ); }
+  T &  sess_key   ( const HashDigest &key ) {
+    return this->k( FID_SESS_KEY, key ); }
+
+  T &  subject    ( const char *in, size_t in_len ) {
+    return this->b( FID_SUBJECT, in, in_len ); }
+  T &  pattern    ( const char *in, size_t in_len ) {
+    return this->b( FID_PATTERN, in, in_len ); }
+  T &  ucast_url  ( const char *in, size_t in_len ) {
+    return this->b( FID_UCAST_URL, in, in_len ); }
+  T &  mesh_url   ( const char *in, size_t in_len ) {
+    return this->b( FID_MESH_URL, in, in_len ); }
+  T &  prefix     ( const char *in, size_t in_len ) {
+    return this->b( FID_PREFIX, in, in_len ); }
+  T &  wildcard   ( const char *in, size_t in_len ) {
+    return this->b( FID_WILDCARD, in, in_len ); }
+  T &  format     ( const char *in, size_t in_len ) {
+    return this->b( FID_FORMAT, in, in_len ); }
+  T &  dictionary ( const char *in, size_t in_len ) {
+    return this->b( FID_DICTIONARY, in, in_len ); }
+  T &  tport      ( const char *in, size_t in_len ) {
+    return this->b( FID_TPORT, in, in_len ); }
+  T &  user       ( const char *in, size_t in_len ) {
+    return this->b( FID_USER, in, in_len ); }
+  T &  service    ( const char *in, size_t in_len ) {
+    return this->b( FID_SERVICE, in, in_len ); }
+  T &  create     ( const char *in, size_t in_len ) {
+    return this->b( FID_CREATE, in, in_len ); }
+  T &  expires    ( const char *in, size_t in_len ) {
+    return this->b( FID_EXPIRES, in, in_len ); }
+
+  T  & sync_bridge( const Nonce &bridge ) {
+    return this->n( FID_SYNC_BRIDGE, bridge ); }
+  T  & uid_csum   ( const Nonce &csum ) {
+    return this->n( FID_UID_CSUM, csum ); }
+  T  & mesh_csum  ( const Nonce &csum ) {
+    return this->n( FID_MESH_CSUM, csum ); }
+
+  T  & mesh_filter( const void *in, size_t in_len ) {
+    return this->o( FID_MESH_FILTER, in, in_len ); }
+  T  & bloom      ( const void *in, size_t in_len ) {
+    return this->o( FID_BLOOM, in, in_len ); }
+  T  & data       ( const void *in, size_t in_len ) {
+    return this->o( FID_DATA, in, in_len ); }
+
+  T  & cnonce( const Nonce &val ) { return this->n( FID_CNONCE, val ); }
+
+  T  & seqno      ( uint64_t n )  { return this->u( FID_SEQNO, n ); }
+  T  & sub_seqno  ( uint64_t n )  { return this->u( FID_SUB_SEQNO, n ); }
+  T  & time       ( uint64_t n )  { return this->u( FID_TIME, n ); }
+  T  & uptime     ( uint64_t n )  { return this->u( FID_UPTIME, n ); }
+  T  & link_state ( uint64_t n )  { return this->u( FID_LINK_STATE, n ); }
+  T  & auth_seqno ( uint64_t n )  { return this->u( FID_AUTH_SEQNO, n ); }
+  T  & auth_time  ( uint64_t n )  { return this->u( FID_AUTH_TIME, n ); }
+  T  & start      ( uint64_t n )  { return this->u( FID_START, n ); }
+  T  & end        ( uint64_t n )  { return this->u( FID_END, n ); }
+  T  & ref_seqno  ( uint64_t n )  { return this->u( FID_REF_SEQNO, n ); }
+  T  & token      ( uint64_t n )  { return this->u( FID_TOKEN, n ); }
+
+  T  & interval   ( uint32_t n )  { return this->i( FID_INTERVAL, n ); }
+  T  & ref_count  ( uint32_t n )  { return this->i( FID_REF_COUNT, n ); }
+  T  & ret        ( uint32_t n )  { return this->i( FID_RET, n ); }
+  T  & dict_csum  ( uint32_t n )  { return this->i( FID_DICT_CSUM, n ); }
+  T  & enti_csum  ( uint32_t n )  { return this->i( FID_ENTI_CSUM, n ); }
+  T  & fmt        ( uint32_t n )  { return this->i( FID_FMT, n ); }
+  T  & adj_info   ( uint32_t n )  { return this->i( FID_ADJ_INFO, n ); }
+  T  & hops       ( uint32_t n )  { return this->i( FID_HOPS, n ); }
+  T  & tportid    ( uint32_t n )  { return this->i( FID_TPORTID, n ); }
+  T  & uid_count  ( uint32_t n )  { return this->i( FID_UID_COUNT, n ); }
+  T  & link_add   ( uint8_t n )   { return this->y( FID_LINK_ADD, n ); }
+  T  & start_ack  ( uint8_t n )   { return this->y( FID_START_ACK, n ); }
+  T  & stop_ack   ( uint8_t n )   { return this->y( FID_STOP_ACK, n ); }
+  T  & initial    ( uint8_t n )   { return this->y( FID_INITIAL, n ); }
+  T  & database   ( uint16_t n )  { return this->w( FID_DATABASE, n ); }
+  T  & auth_stage ( uint16_t n )  { return this->w( FID_AUTH_STAGE, n ); }
+  /* insert sub_fid : subject, opt_fid 1 */
+  void insert_subject( const char *subject, size_t sublen ) {
+    char * sav = this->out;
+    this->out = this->sub;
+    this->b( FID_SUB, subject, sublen );
+    this->out = sav;
+  }
+  void insert_digest( const HashDigest &ha1 ) {
+    MeowHmacDigest hmac;
+    hmac.calc_2( ha1, /* msg -> digest */
+                      this->msg, this->dig - this->msg,
+                      /* digest -> end, skip over digest */
+                      &this->dig[ HMAC_SIZE ],
+                      this->out - &this->dig[ HMAC_SIZE ] );
+    ::memcpy( this->dig, hmac.dig, HMAC_SIZE );
+  }
+  /* sign the message */
+  void sign( const char *sub,  size_t sublen,  const HashDigest &ha1 ) {
+    this->insert_subject( sub, sublen );
+    this->insert_digest( ha1 );
+  }
+  void sign_debug( const char *sub,  size_t sublen,  const HashDigest &ha1 ) {
+    printf( "sub: %.*s\n", (int) sublen, sub );
+    printf( "ha1: " ); ha1.print(); printf( "\n" );
+    this->insert_subject( sub, sublen );
+    ::memset( this->dig, 0, HMAC_SIZE );
+    md::MDHexDump::print_hex( this->msg, this->out - this->msg );
+    this->insert_digest( ha1 );
+  }
+};
+
+static inline size_t fid_est( uint32_t fid, size_t len ) {
+  switch ( fid ) {
+    case FID_DATA:
+    case FID_MESH_FILTER:
+    case FID_BLOOM:
+      return 2 + 4 + len + 1; /* long opaque, aligned */
+    case FID_PEER_DB:
+    case FID_MESH_DB:
+    case FID_ADJACENCY:
+      return 2 + 4 + 8 + len + 1; /* long opaque, msg, aligned */
+    default:
+      return 2 + 2 + len + 1; /* strings are aligned on 2 byte boundary */
+  }
+}
+static inline size_t fid_est( uint32_t fid ) {
+  switch ( fid ) {
+    case FID_SESSION:     return 2 + HMAC_SIZE + NONCE_SIZE;
+    case FID_DIGEST:
+    case FID_USER_HMAC:   return 2 + HMAC_SIZE;
+    case FID_BRIDGE:
+    case FID_CNONCE:
+    case FID_SYNC_BRIDGE:
+    case FID_UID_CSUM:
+    case FID_MESH_CSUM:   return 2 + NONCE_SIZE;
+    case FID_AUTH_KEY:
+    case FID_SESS_KEY:    return 2 + HASH_DIGEST_SIZE;
+    default:              return 2 +  8; /* 64 bit int */
+  }
+}
+
+struct MsgEst {
+  size_t sz;
+  MsgEst( size_t sublen ) : sz( fid_est( FID_BRIDGE ) +
+                                fid_est( FID_DIGEST ) +
+                                fid_est( FID_SUB, sublen ) + 8 ) {}
+  MsgEst() : sz( 6 /* fid : <size> */ ) {}
+  MsgEst & session    ( void ) { sz += fid_est( FID_SESSION ); return *this; }
+  MsgEst & bridge2    ( void ) { sz += fid_est( FID_BRIDGE ); return *this; }
+  MsgEst & user_hmac  ( void ) { sz += fid_est( FID_USER_HMAC ); return *this; }
+  MsgEst & auth_key   ( void ) { sz += fid_est( FID_AUTH_KEY ); return *this; }
+  MsgEst & sess_key   ( void ) { sz += fid_est( FID_SESS_KEY ); return *this; }
+
+  MsgEst & subject    ( size_t l ) { sz += fid_est( FID_SUBJECT, l ); return *this; }
+  MsgEst & pattern    ( size_t l ) { sz += fid_est( FID_PATTERN, l ); return *this; }
+  MsgEst & ucast_url  ( size_t l ) { sz += fid_est( FID_UCAST_URL, l ); return *this; }
+  MsgEst & mesh_url   ( size_t l ) { sz += fid_est( FID_MESH_URL, l ); return *this; }
+  MsgEst & prefix     ( size_t l ) { sz += fid_est( FID_PREFIX, l ); return *this; }
+  MsgEst & wildcard   ( size_t l ) { sz += fid_est( FID_WILDCARD, l ); return *this; }
+  MsgEst & format     ( size_t l ) { sz += fid_est( FID_FORMAT, l ); return *this; }
+  MsgEst & dictionary ( size_t l ) { sz += fid_est( FID_DICTIONARY, l ); return *this; }
+  MsgEst & tport      ( size_t l ) { sz += fid_est( FID_TPORT, l ); return *this; }
+  MsgEst & user       ( size_t l ) { sz += fid_est( FID_USER, l ); return *this; }
+  MsgEst & service    ( size_t l ) { sz += fid_est( FID_SERVICE, l ); return *this; }
+  MsgEst & create     ( size_t l ) { sz += fid_est( FID_CREATE, l ); return *this; }
+  MsgEst & expires    ( size_t l ) { sz += fid_est( FID_EXPIRES, l ); return *this; }
+
+  MsgEst & sync_bridge( void ) { sz += fid_est( FID_SYNC_BRIDGE ); return *this; }
+  MsgEst & uid_csum   ( void ) { sz += fid_est( FID_UID_CSUM ); return *this; }
+  MsgEst & mesh_csum  ( void ) { sz += fid_est( FID_MESH_CSUM ); return *this; }
+
+  MsgEst & mesh_filter( size_t l ) { sz += fid_est( FID_MESH_FILTER, l ); return *this; }
+  MsgEst & bloom      ( size_t l ) { sz += fid_est( FID_BLOOM, l ); return *this; }
+  MsgEst & data       ( size_t l ) { sz += fid_est( FID_DATA, l ); return *this; }
+  MsgEst & peer_db    ( size_t l ) { sz += fid_est( FID_PEER_DB, l ); return *this; }
+  MsgEst & mesh_db    ( size_t l ) { sz += fid_est( FID_MESH_DB, l ); return *this; }
+  MsgEst & adjacency  ( size_t l ) { sz += fid_est( FID_ADJACENCY, l ); return *this; }
+  /*MsgEst & digest     ( void ) { sz += fid_est( FID_DIGEST ); return *this; }*/
+  MsgEst & cnonce     ( void ) { sz += fid_est( FID_CNONCE ); return *this; }
+
+  MsgEst & seqno      ( void ) { sz += fid_est( FID_SEQNO ); return *this; }
+  MsgEst & sub_seqno  ( void ) { sz += fid_est( FID_SUB_SEQNO ); return *this; }
+  MsgEst & time       ( void ) { sz += fid_est( FID_TIME ); return *this; }
+  MsgEst & uptime     ( void ) { sz += fid_est( FID_UPTIME ); return *this; }
+  MsgEst & link_state ( void ) { sz += fid_est( FID_LINK_STATE ); return *this; }
+  MsgEst & auth_seqno ( void ) { sz += fid_est( FID_AUTH_SEQNO ); return *this; }
+  MsgEst & auth_time  ( void ) { sz += fid_est( FID_AUTH_TIME ); return *this; }
+  MsgEst & start      ( void ) { sz += fid_est( FID_START ); return *this; }
+  MsgEst & end        ( void ) { sz += fid_est( FID_END ); return *this; }
+  MsgEst & ref_seqno  ( void ) { sz += fid_est( FID_REF_SEQNO ); return *this; }
+  MsgEst & token      ( void ) { sz += fid_est( FID_TOKEN ); return *this; }
+
+  MsgEst & interval   ( void ) { sz += fid_est( FID_INTERVAL ); return *this; }
+  MsgEst & ref_count  ( void ) { sz += fid_est( FID_REF_COUNT ); return *this; }
+  MsgEst & ret        ( void ) { sz += fid_est( FID_RET ); return *this; }
+  MsgEst & dict_csum  ( void ) { sz += fid_est( FID_DICT_CSUM ); return *this; }
+  MsgEst & enti_csum  ( void ) { sz += fid_est( FID_ENTI_CSUM ); return *this; }
+  MsgEst & fmt        ( void ) { sz += fid_est( FID_FMT ); return *this; }
+  MsgEst & adj_info   ( void ) { sz += fid_est( FID_ADJ_INFO ); return *this; }
+  MsgEst & hops       ( void ) { sz += fid_est( FID_HOPS ); return *this; }
+  MsgEst & tportid    ( void ) { sz += fid_est( FID_TPORTID ); return *this; }
+  MsgEst & uid_count  ( void ) { sz += fid_est( FID_UID_COUNT ); return *this; }
+  MsgEst & link_add   ( void ) { sz += fid_est( FID_LINK_ADD ); return *this; }
+  MsgEst & start_ack  ( void ) { sz += fid_est( FID_START_ACK ); return *this; }
+  MsgEst & stop_ack   ( void ) { sz += fid_est( FID_STOP_ACK ); return *this; }
+  MsgEst & initial    ( void ) { sz += fid_est( FID_INITIAL ); return *this; }
+  MsgEst & database   ( void ) { sz += fid_est( FID_DATABASE ); return *this; }
+  MsgEst & auth_stage ( void ) { sz += fid_est( FID_AUTH_STAGE ); return *this; }
+};
+
+#endif

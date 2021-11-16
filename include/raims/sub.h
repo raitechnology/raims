@@ -1,0 +1,367 @@
+#ifndef __rai_raims__sub_h__
+#define __rai_raims__sub_h__
+
+#include <raikv/route_ht.h>
+#include <raikv/key_hash.h>
+#include <raims/sub_list.h>
+
+namespace rai {
+namespace ms {
+
+/*
+ * tab[ subject ] -> hash, start_seqno > stop_seqno = sub active
+ *                         start_seqno < stop_seqno = sub inactive
+ *                   initial : true
+ *                   expires : stamp
+ *                   return : 2
+ *
+ * ptab[ prefix ] -> phash, start_seqno, stop_seqno
+ *                   subject : SUB.*.HELLO
+ *                   pattern : (?s)\ASUB\.*\.HELLO\Z
+ *                   expires : stamp
+ */
+enum SubStatus {
+  SUB_OK          = 0, /* subscribe operation success */
+  SUB_EXISTS      = 1, /* subject already subscribed */
+  SUB_NOT_FOUND   = 2, /* subject not subscribed */
+  SUB_REMOVED     = 3, /* last uid unsubscribed, subject dropped */
+  SUB_PAT_OK      = 4, /* pattern subscribe success */
+  SUB_PAT_REMOVED = 5, /* pattern unsub removed */
+  SUB_ERROR       = 6  /* alloc error */
+};
+
+static inline const char *sub_status_string( SubStatus status ) {
+  static const char *status_string[] = {
+    "OK", "EXISTS", "NOT_FOUND", "REMOVED", "PAT_OK", "PAT_REMOVED", "ERROR"
+  };
+  if ( (uint8_t) status <= 6 )
+    return status_string[ (uint8_t) status ];
+  return "BAD";
+}
+
+struct SubMsgData;
+struct MsgFramePublish;
+struct MsgHdrDecoder;
+struct SubOnMsg {
+  SubOnMsg() {}
+  virtual void on_data( const SubMsgData &val ) noexcept;
+};
+
+struct SubRoute {
+  uint64_t   start_seqno, /* sequence of subscription start */
+             expires;     /* if time limited subscription */
+  SubOnMsg * on_data;
+  uint32_t   hash;        /* hash crc of the value[] */
+  uint16_t   len;
+  char       value[ 2 ];
+
+  void start( uint64_t seqno,  SubOnMsg *cb ) {
+    this->start_seqno = seqno;
+    this->expires     = 0;
+    this->on_data     = cb;
+  }
+};
+
+struct SubTab {
+  kv::RouteVec<SubRoute> tab; /* hash indexed SubRoute */
+  SubList & list;             /* subscription list for replay */
+
+  SubTab( SubList &l ) : list( l ) {}
+
+  SubStatus start( uint32_t h,  const char *sub,  size_t sublen,
+                   uint64_t seqno,  SubOnMsg *cb ) {
+    kv::RouteLoc loc;
+    SubRoute *rt = this->tab.upsert( h, sub, sublen, loc );
+    if ( rt == NULL )
+      return SUB_ERROR;
+    if ( loc.is_new ) {
+      rt->start( seqno, cb );
+      this->list.push( seqno, h, ACTION_SUB_JOIN );
+      return SUB_OK;
+    }
+    return SUB_EXISTS;
+  }
+
+  SubStatus stop( uint32_t h,  const char *sub,  size_t sublen ) {
+    kv::RouteLoc loc;
+    SubRoute *rt = this->tab.find( h, sub, sublen, loc );
+    if ( rt == NULL ) {
+      printf( "\"%.*s\" not found\n", (int) sublen, sub );
+      return SUB_NOT_FOUND;
+    }
+    if ( ! this->list.pop( rt->start_seqno ) ) {
+      printf( "stop %.*s seqno %lu not found\n", 
+              (int) sublen, sub, rt->start_seqno );
+    }
+    this->tab.remove( loc );
+    return SUB_OK;
+  }
+
+  SubRoute *find_sub( uint32_t hash, uint64_t seqno ) {
+    kv::RouteLoc loc;
+    SubRoute *rt = this->tab.find_by_hash( hash, loc );
+    while ( rt != NULL ) {
+      if ( rt->start_seqno == seqno )
+         break;
+      rt = this->tab.find_next_by_hash( hash, loc );
+    }
+    return rt;
+  }
+
+  void release( void ) {
+    this->tab.release();
+  }
+};
+
+struct Pub {
+  uint64_t seqno;
+  uint32_t hash;
+  uint16_t len;
+  char     value[ 2 ]; /* prefix */
+  
+  void init( void ) {
+    this->seqno = 0;
+  }
+  uint64_t next_seqno( void ) {
+    return ++this->seqno;
+  }
+};
+
+typedef kv::RouteVec<Pub> PubTab;
+
+struct SeqnoSave {
+  uint32_t save[ 4 ];
+
+  SeqnoSave() {}
+  SeqnoSave( const SeqnoSave &sv ) {
+    for ( size_t i = 0; i < 4; i++ )
+      this->save[ i ] = sv.save[ i ];
+  }
+  SeqnoSave &operator=( const SeqnoSave &sv ) {
+    for ( size_t i = 0; i < 4; i++ )
+      this->save[ i ] = sv.save[ i ];
+    return *this;
+  }
+
+  void update( uint64_t seqno,  uint64_t time ) {
+    ::memcpy( &this->save[ 0 ], &seqno, sizeof( uint64_t ) );
+    ::memcpy( &this->save[ 2 ], &time, sizeof( uint64_t ) );
+  }
+  void restore( uint64_t &seqno,  uint64_t &time ) const {
+    ::memcpy( &seqno, &this->save[ 0 ], sizeof( uint64_t ) );
+    ::memcpy( &time, &this->save[ 2 ], sizeof( uint64_t ) );
+  }
+};
+
+typedef kv::IntHashTabT<uint32_t,SeqnoSave> UidSeqno;
+
+enum SeqnoStatus {
+  SEQNO_UID_FIRST  = 0, /* first time uid published */
+  SEQNO_UID_NEXT   = 1, /* is next in the sequnce */
+  SEQNO_UID_REPEAT = 2  /* is a repeated sequence */
+};
+
+struct SubSeqno {
+  uint32_t   hash,        /* hash of subject */
+             last_uid;    /* last uid publisher */
+  uint64_t   last_seqno,  /* seqno of last msg used by uid */
+             last_time,   /* time of last msg */
+             start_seqno, /* the seqno of the sub start */
+             sub_seqno;   /* the seqno when the sub was matched */
+  SubOnMsg * on_data;
+  UidSeqno * seqno_ht;    /* uid -> to saved seqno/time pairs */
+  uint16_t   len;         /* len of subject */
+  char       value[ 2 ];  /* subject */
+
+  SeqnoStatus init( uint32_t uid,  uint64_t seqno,  uint64_t start,
+                    uint64_t time,  uint64_t sub_sno,  SubOnMsg *cb ) {
+    this->last_uid    = uid;
+    this->last_seqno  = seqno;
+    this->last_time   = time;
+    this->start_seqno = start;
+    this->sub_seqno   = sub_sno;
+    this->on_data     = cb;
+    this->seqno_ht    = NULL;
+    return SEQNO_UID_FIRST;
+  }
+  /* check that seqno is next published by uid (or first) */
+  SeqnoStatus update( uint32_t uid,  uint64_t seqno,  uint64_t time,
+                      uint64_t &last_seqno_recvd,
+                      uint64_t &last_time_recvd ) {
+    /* if not the last uid published */
+    if ( this->last_uid != uid ) {
+      if ( this->restore_uid( uid, seqno, time ) == SEQNO_UID_FIRST )
+        return SEQNO_UID_FIRST;
+    }
+    return this->update_last( seqno, time, last_seqno_recvd,
+                              last_time_recvd );
+  }
+  SeqnoStatus restore_uid( uint32_t uid,  uint64_t seqno,
+                           uint64_t time ) noexcept;
+  /* set the next seqno */
+  SeqnoStatus update_last( uint64_t seqno,  uint64_t time,
+                           uint64_t &last_seqno_recvd,
+                           uint64_t &last_time_recvd ) {
+    SeqnoStatus status = SEQNO_UID_REPEAT; /* if repeated */
+    last_seqno_recvd = this->last_seqno;
+    last_time_recvd  = this->last_time;
+    if ( seqno > this->last_seqno ) {
+      this->last_seqno = seqno;
+      status = SEQNO_UID_NEXT;
+    }
+    if ( time > this->last_time ) {
+      this->last_time = time;
+      status = SEQNO_UID_NEXT;
+    }
+    return status;
+  }
+
+  void release( void ) {
+    if ( this->seqno_ht != NULL )
+      delete this->seqno_ht;
+  }
+};
+
+struct InboxSub {
+  SubOnMsg * on_data;
+  uint32_t   hash;
+  uint16_t   len;
+  char       value[ 2 ];
+
+  void init( SubOnMsg *cb ) {
+    this->on_data = cb;
+  }
+};
+
+typedef kv::RouteVec<SubSeqno> SeqnoTab;
+typedef kv::RouteVec<InboxSub> InboxTab;
+
+struct AnyMatch {
+  uint32_t       max_uid,
+                 set_count;
+  const char   * sub;
+  uint64_t     * bits,
+                 mono_time;
+  kv::BloomMatch match;
+
+  void init_any( const char *s,  uint16_t sublen,  const uint32_t *pre_seed,
+                 uint32_t uid_cnt ) noexcept;
+  static size_t any_size( uint16_t sublen,  uint32_t uid_cnt ) noexcept;
+};
+
+struct AnyMatchTab {
+  kv::ArraySpace<uint64_t, 256> tab;
+  kv::UIntHashTab * ht;
+  size_t            max_off;
+
+  AnyMatchTab() : ht( 0 ), max_off( 0 ) {
+    this->ht = kv::UIntHashTab::resize( NULL );
+  }
+  AnyMatch *get_match( const char *sub,  uint16_t sublen,  uint32_t h,
+                       const uint32_t *pre_seed,  uint32_t max_uid ) noexcept;
+};
+
+}
+}
+
+#include <raims/pat.h>
+
+namespace rai {
+namespace ms {
+
+struct UserDB;
+struct SessionMgr;
+struct UserBridge;
+
+struct SubDB {
+  UserDB     & user_db;
+  SessionMgr & mgr;
+  uint32_t     my_src_fd,      /* subs routed to my_src_fd */
+               next_inbox;     /* next inbox sub free */
+  uint64_t     sub_seqno,      /* sequence number for my subs */
+               sub_update_mono_time; /* last time any sub recvd */
+  SeqnoTab     seqno_tab;      /* sub -> seqno, time */
+  InboxTab     inbox_tab;      /* inbox -> seqno, time */
+  SubTab       sub_tab;        /* subject -> { state, seqno } */
+  PatTab       pat_tab;        /* pattern -> { state, seqno } */
+  SubList      sub_list;       /* list of { seqno, subscriptions } */
+  PubTab       pub_tab;        /* subject -> seqno */
+  AnyMatchTab  any_tab;
+  kv::BloomRef bloom;
+
+  SubDB( kv::EvPoll &p,  UserDB &udb,  SessionMgr &smg ) noexcept;
+
+  void init( uint32_t src_fd ) {
+    this->my_src_fd = src_fd;
+    this->sub_seqno = 0;
+    this->sub_update_mono_time = 0;
+  }
+  /* start a new sub for this session */
+  uint64_t sub_start( const char *sub,  size_t sublen,
+                      SubOnMsg *cb ) noexcept;
+  uint64_t sub_stop( const char *sub,  size_t sublen ) noexcept;
+  /* start a new pattern sub for this session */
+  uint64_t psub_start( const char *pat,  size_t patlen,
+                       WildFmt fmt,  SubOnMsg *cb ) noexcept;
+  uint64_t psub_stop( const char *pat,  size_t patlen,  WildFmt fmt ) noexcept;
+
+  uint32_t inbox_start( uint32_t inbox_num,  SubOnMsg *cb ) noexcept;
+
+  void resize_bloom( void ) noexcept;
+
+  static void print_bloom( kv::BloomBits &bits ) noexcept;
+
+  void index_bloom( kv::BloomBits &bits ) noexcept;
+
+    /* sub start stop */
+  bool recv_sub_start( const MsgFramePublish &pub,  UserBridge &n,
+                       const MsgHdrDecoder &dec ) noexcept;
+  bool recv_sub_stop( const MsgFramePublish &pub,  UserBridge &n,
+                      const MsgHdrDecoder &dec ) noexcept;
+  bool recv_resub_result( const MsgFramePublish &pub,  UserBridge &n,
+                          const MsgHdrDecoder &dec ) noexcept;
+  /* pattern start stop */
+  bool recv_repsub_result( const MsgFramePublish &pub,  UserBridge &n,
+                           const MsgHdrDecoder &dec ) noexcept;
+  bool recv_psub_start( const MsgFramePublish &pub,  UserBridge &n,
+                         const MsgHdrDecoder &dec ) noexcept;
+  bool recv_psub_stop( const MsgFramePublish &pub,  UserBridge &n,
+                       const MsgHdrDecoder &dec ) noexcept;
+  /* subscripiont start forward */
+  void fwd_sub( const char *psub,  size_t psublen,  const char *sub,
+                size_t sublen,  uint32_t hash,  bool is_start ) noexcept;
+  void fwd_psub( PatCtx &ctx ) noexcept;
+  /* reassert subscription forward */
+  bool fwd_resub( UserBridge &n,  const char *sub,  size_t sublen,
+                  uint64_t from_seqno,  uint64_t seqno,  bool is_psub,
+                  const char *suf,  uint64_t token ) noexcept;
+  bool find_fwd_sub( UserBridge &n,  uint32_t hash,  uint64_t &from_seqno,
+                     uint64_t seqno,  const char *suf,
+                     uint64_t token ) noexcept;
+  bool find_fwd_psub( UserBridge &n,  uint32_t hash,  uint64_t &from_seqno,
+                      uint64_t seqno,  const char *suf,
+                      uint64_t token ) noexcept;
+  /* request subscriptions from node */
+  bool send_subs_request( UserBridge &n,  uint64_t seqno ) noexcept;
+
+  /* recv sub request result */
+  bool send_bloom_request( UserBridge &n ) noexcept;
+  bool recv_bloom_request( const MsgFramePublish &pub,  UserBridge &n,
+                           const MsgHdrDecoder &dec ) noexcept;
+  bool recv_bloom( const MsgFramePublish &pub,  UserBridge &n,
+                   const MsgHdrDecoder &dec ) noexcept;
+  bool recv_bloom_result( const MsgFramePublish &pub,  UserBridge &n,
+                          const MsgHdrDecoder &dec ) noexcept;
+  bool recv_subs_request( const MsgFramePublish &pub,  UserBridge &n,
+                          const MsgHdrDecoder &dec ) noexcept;
+  bool match_subscription( const MsgFramePublish &pub,
+                           uint64_t &seqno,  SubOnMsg *&cb ) noexcept;
+  SubOnMsg *match_any_sub( const char *sub,  uint16_t sublen ) noexcept;
+
+  UserBridge *any_match( const char *sub,  uint16_t sublen,
+                         uint32_t h ) noexcept;
+};
+
+}
+}
+#endif

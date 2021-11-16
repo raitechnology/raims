@@ -1,0 +1,19 @@
+[submodule "raikv"]
+	path = raikv
+	url = https://github.com/raitechnology/raikv.git
+[submodule "raimd"]
+	path = raimd
+	url = https://github.com/raitechnology/raimd.git
+[submodule "sassrv"]
+	path = sassrv
+	url = https://github.com/raitechnology/sassrv.git
+[submodule "raids"]
+	path = raids
+	url = https://github.com/raitechnology/raids.git
+[submodule "openpgm"]
+	path = openpgm
+	url = https://github.com/raitechnology/openpgm.git
+	branch = rai
+[submodule "linecook"]
+	path = linecook
+	url = https://github.com/injinj/linecook.git
