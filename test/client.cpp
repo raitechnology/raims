@@ -236,7 +236,7 @@ main( int argc, char *argv[] )
   }
   int status = 0;
   if ( ti != NULL ) {
-    tport = tree->find_transport( ti, ::strlen( ti ), conn );
+    tport = tree->find_transport( ti, ::strlen( ti ), &conn );
     if ( tport == NULL ) {
       fprintf( stderr, "transport %s not found\n", ti );
       status = -1;
@@ -249,7 +249,7 @@ main( int argc, char *argv[] )
       ti = get_arg( argc, argv, i, "-t", NULL );
       if ( ti == NULL || ti[ 0 ] == '-' )
         break;
-      tport = tree->find_transport( ti, ::strlen( ti ), conn );
+      tport = tree->find_transport( ti, ::strlen( ti ), &conn );
       if ( tport == NULL ) {
         fprintf( stderr, "transport %s not found\n", ti );
         status = -1;

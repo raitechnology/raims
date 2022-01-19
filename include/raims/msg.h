@@ -9,9 +9,6 @@
 
 namespace rai {
 namespace ms {
-
-static const uint32_t CABA_TYPE_ID = 0x191c206;
-
 /*
 bytes 0 -> 3 are type, opt, message size
  1               8               16              24              32   
@@ -207,9 +204,9 @@ enum MsgFid {
   FID_UID          = 35 , /* uid reference */
   FID_UID_COUNT    = 36 , /* how many peers, sent with hello */
 
-  FID_SUBJECT      = 37 , /* subject or wildcard of (un)subscribe */
+  FID_SUBJECT      = 37 , /* subject of subscription */
   FID_PATTERN      = 38 , /* pattern subject wildcard */
-  FID_PREFIX       = 39 , /* XXX */
+  FID_REPLY        = 39 , /* publish reply */
   FID_WILDCARD     = 40 , /* XXX */
   FID_UCAST_URL    = 41 , /* unicast route for inbox data */
   FID_MESH_URL     = 42 , /* mesh route for interconnecting uids */
@@ -323,8 +320,9 @@ enum PublishType {
   U_MCAST_PING      = 35, /* _M.ping */
   U_MCAST           = 36, /* _M.> */
   /* other subject */
-  MCAST_SUBJECT     = 37, /* not _XX subject */
-  UNKNOWN_SUBJECT   = 38  /* init, not resolved */
+  U_INBOX_ANY_RTE   = 37, /* _I.Nonce.any, external inbox */
+  MCAST_SUBJECT     = 38, /* not _XX subject */
+  UNKNOWN_SUBJECT   = 39  /* init, not resolved */
 };
 #ifdef INCLUDE_MSG_CONST
 static const char *publish_type_str[] = {
@@ -362,6 +360,7 @@ static const char *publish_type_str[] = {
   "u_inbox",
   "u_mcast_ping",
   "u_mcast",
+  "u_inbox_any_rte",
   "mcast_subject",
   "unknown_subject"
 };
@@ -494,8 +493,9 @@ enum MsgFrameStatus {
 };
 
 enum MsgFrameFlags {
-  MSG_FRAME_ACK_CONTROL   = 1, /* if ack / trace was handled */
-  MSG_FRAME_TPORT_CONTROL = 2  /* if transport routing was handled */
+  MSG_FRAME_ACK_CONTROL      = 1, /* if ack / trace was handled */
+  MSG_FRAME_TPORT_CONTROL    = 2, /* if transport routing was handled */
+  MSG_FRAME_EXTERNAL_CONTROL = 4  /* if external routing was handled */
 };
 
 struct TransportRoute;
@@ -508,13 +508,13 @@ struct MsgFramePublish : public kv::EvPublish {
   uint32_t         flags; /* MsgFrameFlags */
   MsgHdrDecoder    dec;   /* hdr field decoder */
 
-  MsgFramePublish( const char *subj,  size_t subj_len,  CabaMsg *m,
-                   uint32_t src,  uint32_t hash,  uint8_t msg_encoding,
-                   TransportRoute &r ) :
-    EvPublish( subj, subj_len, NULL, 0, &((uint8_t *) m->msg_buf)[ m->msg_off ],
-               m->msg_end - m->msg_off, src, hash, NULL, 0, msg_encoding, 'X' ),
-    n( 0 ), rte( r ), status( FRAME_STATUS_UNKNOWN ),
-    flags( 0 ), dec( m ) {}
+  MsgFramePublish( const char *subj,  uint16_t subj_len,  CabaMsg *m,
+                   uint32_t src_fd,  uint32_t hash,  uint32_t enc,
+                   TransportRoute &r,  kv::RoutePublish &sub_rt ) :
+    EvPublish( subj, subj_len, NULL, 0,
+               &((uint8_t *) m->msg_buf)[ m->msg_off ], m->msg_end - m->msg_off,
+               sub_rt, src_fd, hash, enc, 'X' ),
+    n( 0 ), rte( r ), status( FRAME_STATUS_UNKNOWN ), flags( 0 ), dec( m ) {}
 
   void print( const char *what ) const noexcept;
   const char *status_string( void ) const noexcept;
@@ -645,7 +645,7 @@ static FidTypeName fid_type_name[] = {
 
 { FID_SUBJECT     , SHORT_STRING                     , "subject" },
 { FID_PATTERN     , SHORT_STRING                     , "pattern" },
-{ FID_PREFIX      , SHORT_STRING                     , "prefix" },
+{ FID_REPLY       , SHORT_STRING                     , "reply" },
 { FID_WILDCARD    , SHORT_STRING                     , "wildcard" },
 { FID_UCAST_URL   , SHORT_STRING                     , "ucast_url" },
 { FID_MESH_URL    , SHORT_STRING                     , "mesh_url" },

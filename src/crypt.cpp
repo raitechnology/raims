@@ -10,7 +10,6 @@
 #include <openssl/sha.h>
 #include <openssl/aes.h>
 #include <raims/crypt.h>
-#include <raims/ecdh.h>
 #include <raims/user.h>
 #include <raikv/key_hash.h>
 #include <raims/kdf.h>

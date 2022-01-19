@@ -2,8 +2,7 @@
 #define __rai_raims__caba_msg_buf_h__
 
 /* creates caba msgs */
-#define MSG_BUF_TYPE_ID 0x191c206
-
+static const uint32_t CABA_TYPE_ID = 0x191c206;
 /* 
  * TYPE_SHIFT = 8, for 8 bit FID, leaves 3 bits unused,
  *   fid alignment 16 bits, so fields are 1 byte padded when data is odd length
@@ -193,14 +192,14 @@ struct MsgBufDigestT : public BMsgBufT<T> {
     return this->b( FID_SUBJECT, in, in_len ); }
   T &  pattern    ( const char *in, size_t in_len ) {
     return this->b( FID_PATTERN, in, in_len ); }
+  T &  reply      ( const char *in, size_t in_len ) {
+    return this->b( FID_REPLY, in, in_len ); }
+  T &  wildcard   ( const char *in, size_t in_len ) {
+    return this->b( FID_WILDCARD, in, in_len ); }
   T &  ucast_url  ( const char *in, size_t in_len ) {
     return this->b( FID_UCAST_URL, in, in_len ); }
   T &  mesh_url   ( const char *in, size_t in_len ) {
     return this->b( FID_MESH_URL, in, in_len ); }
-  T &  prefix     ( const char *in, size_t in_len ) {
-    return this->b( FID_PREFIX, in, in_len ); }
-  T &  wildcard   ( const char *in, size_t in_len ) {
-    return this->b( FID_WILDCARD, in, in_len ); }
   T &  format     ( const char *in, size_t in_len ) {
     return this->b( FID_FORMAT, in, in_len ); }
   T &  dictionary ( const char *in, size_t in_len ) {
@@ -335,10 +334,10 @@ struct MsgEst {
 
   MsgEst & subject    ( size_t l ) { sz += fid_est( FID_SUBJECT, l ); return *this; }
   MsgEst & pattern    ( size_t l ) { sz += fid_est( FID_PATTERN, l ); return *this; }
+  MsgEst & reply      ( size_t l ) { sz += fid_est( FID_REPLY, l ); return *this; }
+  MsgEst & wildcard   ( size_t l ) { sz += fid_est( FID_WILDCARD, l ); return *this; }
   MsgEst & ucast_url  ( size_t l ) { sz += fid_est( FID_UCAST_URL, l ); return *this; }
   MsgEst & mesh_url   ( size_t l ) { sz += fid_est( FID_MESH_URL, l ); return *this; }
-  MsgEst & prefix     ( size_t l ) { sz += fid_est( FID_PREFIX, l ); return *this; }
-  MsgEst & wildcard   ( size_t l ) { sz += fid_est( FID_WILDCARD, l ); return *this; }
   MsgEst & format     ( size_t l ) { sz += fid_est( FID_FORMAT, l ); return *this; }
   MsgEst & dictionary ( size_t l ) { sz += fid_est( FID_DICTIONARY, l ); return *this; }
   MsgEst & tport      ( size_t l ) { sz += fid_est( FID_TPORT, l ); return *this; }

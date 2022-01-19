@@ -185,17 +185,26 @@ UserDB::add_unknown_adjacency( UserBridge &n ) noexcept
         UserBridge *n2 = this->bridge_tab[ p->uid ];
         if ( n2 != NULL ) {
           AdjacencySpace *set = n2->adjacency.get( p->tport );
+          char str64[ NONCE_B64_LEN + 1 ];
           if ( p->tport_sv.len > 0 ) {
             set->tport = p->tport_sv;
           }
           if ( n2->unknown_refs != 0 ) {
             if ( p->add ) {
-              if ( ! set->test_set( n.uid ) )
+              if ( ! set->test_set( n.uid ) ) {
                 n2->uid_csum ^= p->nonce;
+                if ( debug_lnk )
+                  n2->printf( "unk add csum( %s )\n",
+                              n2->uid_csum.to_base64_str( str64 ) );
+              }
             }
             else {
-              if ( set->test_clear( n.uid ) )
+              if ( set->test_clear( n.uid ) ) {
                 n2->uid_csum ^= p->nonce;
+                if ( debug_lnk )
+                  n2->printf( "unk del csum( %s )\n",
+                              n2->uid_csum.to_base64_str( str64 ) );
+              }
             }
             changed = true;
             if ( --n2->unknown_refs == 0 )
@@ -243,9 +252,15 @@ UserDB::remove_adjacency( const UserBridge &n ) noexcept
       continue;
     for ( uint32_t tport_id = 0; tport_id < n2->adjacency.count; tport_id++ ) {
       AdjacencySpace *set = n2->adjacency[ tport_id ];
+      char str64[ NONCE_B64_LEN + 1 ];
       if ( set != NULL ) {
-        if ( set->test_clear( n.uid ) )
+        if ( set->test_clear( n.uid ) ) {
           n2->uid_csum ^= n.bridge_id.nonce;
+          if ( debug_lnk )
+            n2->printf( "rem adj %s csum( %s )\n",
+                        n.peer.user.val,
+                        n2->uid_csum.to_base64_str( str64 ) );
+        }
       }
     }
   }
@@ -288,19 +303,9 @@ UserDB::push_user_route( UserBridge &n,  UserRoute &u_rte ) noexcept
                                        this->link_state_seqno + 1, true );
       }
       if ( list.sys_route_refs++ == 0 ) {
+        d_lnk( "push sys_route %u\n", fd );
         rte.connected_auth.add( fd );
-        rte.sub_route.add_sub_route_str( X_HELLO, X_HELLO_SZ, fd );
-        rte.sub_route.add_sub_route_str( X_HB   , X_HB_SZ   , fd );
-        rte.sub_route.add_sub_route_str( X_BYE  , X_BYE_SZ  , fd );
-
-        rte.sub_route.add_sub_route_str( Z_BLM  , Z_BLM_SZ  , fd );
-        rte.sub_route.add_sub_route_str( Z_ADJ  , Z_ADJ_SZ  , fd );
-
-        rte.sub_route.add_pattern_route_str( S_JOIN , S_JOIN_SZ , fd );
-        rte.sub_route.add_pattern_route_str( S_LEAVE, S_LEAVE_SZ, fd );
-
-        rte.sub_route.add_pattern_route_str( P_PSUB , P_PSUB_SZ , fd );
-        rte.sub_route.add_pattern_route_str( P_PSTOP, P_PSTOP_SZ, fd );
+        rte.sub_route.create_bloom_route( fd, &this->auth_bloom );
       }
       if ( this->start_time > n.start_time ) {
         if ( n.start_time == 0 )
@@ -325,6 +330,8 @@ UserDB::push_user_route( UserBridge &n,  UserRoute &u_rte ) noexcept
 void
 UserDB::pop_source_route( UserBridge &n ) noexcept
 {
+  if ( debug_lnk )
+    n.printf( "pop_source_route\n" );
   if ( n.test_clear( IN_ROUTE_LIST_STATE ) ) {
     uint32_t count = this->transport_tab.count;
     for ( uint32_t i = 0; i < count; i++ ) {
@@ -362,19 +369,14 @@ UserDB::pop_user_route( UserBridge &n,  UserRoute &u_rte ) noexcept
                                        this->link_state_seqno + 1, false );
       }
       if ( --list.sys_route_refs == 0 ) {
+        d_lnk( "pop sys_route %u\n", fd );
         rte.connected_auth.remove( fd );
-        rte.sub_route.del_sub_route_str( X_HELLO, X_HELLO_SZ, fd );
-        rte.sub_route.del_sub_route_str( X_HB,    X_HB_SZ   , fd );
-        rte.sub_route.del_sub_route_str( X_BYE,   X_BYE_SZ  , fd );
-
-        rte.sub_route.del_sub_route_str( Z_BLM,   Z_BLM_SZ  , fd );
-        rte.sub_route.del_sub_route_str( Z_ADJ,   Z_ADJ_SZ  , fd );
-
-        rte.sub_route.del_pattern_route_str( S_JOIN , S_JOIN_SZ , fd );
-        rte.sub_route.del_pattern_route_str( S_LEAVE, S_LEAVE_SZ, fd );
-
-        rte.sub_route.del_pattern_route_str( P_PSUB , P_PSUB_SZ , fd );
-        rte.sub_route.del_pattern_route_str( P_PSTOP, P_PSTOP_SZ, fd );
+        BloomRoute *b = this->auth_bloom.get_bloom_by_fd( fd );
+        b->del_bloom_ref( &this->auth_bloom );
+        if ( b->nblooms == 0 ) {
+          rte.sub_route.bloom_list.pop( b );
+          delete b;
+        }
       }
       if ( rte.oldest_uid == n.uid ) {
         uint64_t t = this->start_time;
@@ -403,11 +405,11 @@ UserDB::close_source_route( uint32_t fd ) noexcept
   while ( ! list.is_empty() ) {
     UserRoute  * u_ptr     = list.pop_hd();
     UserBridge & n         = u_ptr->n;
-    bool         has_route = false;
+    /*bool         has_route = false;*/
 
     this->pop_user_route( n, *u_ptr );
     u_ptr->hops = UserRoute::NO_HOPS;
-
+#if 0
     uint32_t count = this->transport_tab.count;
     for ( uint32_t i = 0; i < count; i++ ) {
       if ( (u_ptr = n.user_route_ptr( *this, i )) == NULL )
@@ -419,9 +421,14 @@ UserDB::close_source_route( uint32_t fd ) noexcept
       n.clear( IN_ROUTE_LIST_STATE );
       return &n;
     }
+#endif
     u_ptr = n.primary( *this );
-    if ( ! u_ptr->is_valid() )
+    if ( ! u_ptr->is_valid() ) {
       this->add_inbox_route( n, NULL );
+      u_ptr = n.primary( *this );
+      if ( ! u_ptr->is_valid() )
+        return &n;
+    }
   }
   return NULL;
 }
@@ -506,8 +513,9 @@ UserDB::send_adjacency_change( void ) noexcept
   for ( size_t i = 0; i < count; i++ ) {
     TransportRoute *rte = this->transport_tab.ptr[ i ];
     if ( rte->connect_count > 0 ) {
-      EvPublish pub( Z_ADJ, Z_ADJ_SZ, NULL, 0, m.msg, m.len(), this->my_src_fd,
-                     adj_h, NULL, 0, (uint8_t) MSG_BUF_TYPE_ID, 'p' );
+      EvPublish pub( Z_ADJ, Z_ADJ_SZ, NULL, 0, m.msg, m.len(),
+                     rte->sub_route, this->my_src_fd, adj_h,
+                     CABA_TYPE_ID, 'p' );
       rte->forward_to_connected( pub );
     }
   }
@@ -575,16 +583,25 @@ UserDB::recv_adjacency_change( const MsgFramePublish &pub,  UserBridge &n,
       if ( rec.test( FID_BRIDGE ) && set != NULL ) {
         size_t   pos;
         uint32_t uid = 0;
+        char     str64[ NONCE_B64_LEN + 1 ];
         if ( this->node_ht->find( rec.nonce, pos, uid ) ||
              this->zombie_ht->find( rec.nonce, pos, uid ) ) {
           if ( uid != n.uid ) {
             if ( rec.add ) {
-              if ( ! set->test_set( uid ) )
+              if ( ! set->test_set( uid ) ) {
                 n.uid_csum ^= rec.nonce;
+                if ( debug_lnk )
+                  n.printf( "recv adj add csum ( %s )\n",
+                            n.uid_csum.to_base64_str( str64 ) );
+              }
             }
             else {
-              if ( set->test_clear( uid ) )
+              if ( set->test_clear( uid ) ) {
                 n.uid_csum ^= rec.nonce;
+                if ( debug_lnk )
+                  n.printf( "recv adj del csum ( %s )\n",
+                            n.uid_csum.to_base64_str( str64 ) );
+              }
             }
           }
         }
@@ -961,6 +978,8 @@ UserDB::recv_adjacency_result( const MsgFramePublish &pub,  UserBridge &n,
       AdjacencyRec::print_rec_list( rec_list, "recv_result" );
 
     sync->uid_csum.zero();
+    if ( debug_lnk )
+      sync->printf( "zero uid_csum\n" );
     this->peer_dist.clear_cache_if_dirty();
     if ( sync->unknown_refs != 0 )
       this->clear_unknown_adjacency( *sync );
@@ -995,10 +1014,15 @@ UserDB::recv_adjacency_result( const MsgFramePublish &pub,  UserBridge &n,
       if ( rec.test( FID_BRIDGE ) && set != NULL ) {
         size_t   pos;
         uint32_t uid = 0;
+        char     str64[ NONCE_B64_LEN + 1 ];
         if ( this->node_ht->find( rec.nonce, pos, uid ) ||
              this->zombie_ht->find( rec.nonce, pos, uid ) ) {
           if ( uid != sync->uid && set != NULL ) {
             sync->uid_csum ^= rec.nonce;
+            if ( debug_lnk )
+              sync->printf( "recv adj update %.*s csum( %s )\n",
+                            (int) rec.user_len, rec.user,
+                            sync->uid_csum.to_base64_str( str64 ) );
             set->add( uid );
           }
         }

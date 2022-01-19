@@ -53,7 +53,8 @@ enum ByeReason {
   BYE_ORPHANED   = 3,
   BYE_SOURCE     = 4,
   BYE_DROPPED    = 5,
-  MAX_BYE        = 6
+  BYE_PING       = 6,
+  MAX_BYE        = 7
 };
 
 #ifdef INCLUDE_AUTH_CONST
@@ -73,7 +74,8 @@ static const char *bye_reason[] = {
   "bye",
   "orphaned",
   "source_close",
-  "dropped"
+  "dropped",
+  "ping"
 };
 #if __cplusplus >= 201103L
 static_assert( MAX_AUTH == ( sizeof( auth_stage ) / sizeof( auth_stage[ 0 ] ) ), "auth_stage" );

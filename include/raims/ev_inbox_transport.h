@@ -280,7 +280,12 @@ struct EvInboxTransport : public kv::EvUdp {
   InboxDestArray   dest;    /* peer by dest address */
   MsgFrameDecoder  msg_in;  /* decodes messages when ready */
   size_t           out_count; /* count of packets ready for sending */
-  uint64_t         cur_mono;  /* updated when timer expires */
+  uint64_t         total_sent_count,
+                   total_recv_count,
+                   duplicate_count, /* count of duplicate pkts received */
+                   repair_count,    /* count of retransmitted pkts */
+                   cur_mono_time,  /* updated when timer expires */
+                   last_mono_time;  /* for stats ival */
   InboxPktList     out;     /* packets ready to send */
   InboxPeerList    active;  /* list of peers for acks and retransmits */
 
@@ -288,21 +293,24 @@ struct EvInboxTransport : public kv::EvUdp {
   EvInboxTransport( kv::EvPoll &p,  TransportRoute &r )
     : kv::EvUdp( p, p.register_type( "inbox_sock" ) ),
       rte( r ), mtu( 1500 ), id( (uint32_t) kv_current_realtime_ms() ),
-      src( RESOLVE_SRC ), dest( RESOLVE_DEST ), out_count( 0 ), cur_mono( 0 ) {}
+      src( RESOLVE_SRC ), dest( RESOLVE_DEST ), out_count( 0 ),
+      total_sent_count( 0 ), total_recv_count( 0 ),
+      duplicate_count( 0 ), repair_count( 0 ), 
+      cur_mono_time( 0 ), last_mono_time( 0 ) {}
 
   void push_active_send( InboxPeer &p ) { /* send ack after timer */
-    p.send_timer     = this->cur_mono;
+    p.send_timer     = this->cur_mono_time;
     p.send_timer_cnt = 0;
     p.push_active( this->active, ACTIVE_SEND );
   }
   void push_active_recv( InboxPeer &p ) { /* recv ack after timer */
     if ( ( p.state & ACTIVE_RECV ) == 0 ) {
-      p.recv_timer = this->cur_mono;
+      p.recv_timer = this->cur_mono_time;
       p.push_active( this->active, ACTIVE_RECV );
     }
   }
   void push_active_window( InboxPeer &p ) { /* retransmit after timer */
-    p.window_timer     = this->cur_mono;
+    p.window_timer     = this->cur_mono_time;
     p.window_timer_cnt = 0;
     p.push_active( this->active, ACTIVE_WINDOW );
   }
@@ -343,12 +351,12 @@ struct InboxPublish : public kv::EvPublish {
   uint32_t     peer_uid,
                url_hash;
 
-  InboxPublish( const char *subj,  size_t subj_len,  const void *mesg,
-                size_t mesg_len,  uint32_t src,  uint32_t hash,
-                uint8_t msg_encoding,  const char *url,  uint32_t uid,
+  InboxPublish( const char *subj,  uint16_t subj_len,  const void *data,
+                uint32_t data_len,  kv::RoutePublish &src_rt,  uint32_t src_fd,
+                uint32_t hash, uint32_t enc,  const char *url,  uint32_t uid,
                 uint32_t url_h ) :
-    EvPublish( subj, subj_len, NULL, 0, mesg, mesg_len, src, hash, NULL, 0,
-               msg_encoding, 'I' ),
+    EvPublish( subj, subj_len, NULL, 0, data, data_len, src_rt, src_fd, hash,
+               enc, 'I' ),
     peer_url( url ), peer_uid( uid ), url_hash( url_h ) {}
 };
 

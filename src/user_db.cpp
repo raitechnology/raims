@@ -19,7 +19,8 @@ UserDB::UserDB( EvPoll &/*p*/,  ConfigTree::User &u,
   : user( u ), svc( s ), sub_db( sdb ), string_tab( st ), events( ev ),
     session_key( 0 ), hello_key( 0 ), cnonce( 0 ), node_ht( 0 ), zombie_ht( 0 ),
     uid_tab( 0 ), peer_ht( 0 ), peer_key_ht( 0 ), peer_keys( 0 ),
-    hb_interval( HB_DEFAULT_INTERVAL ), peer_dist( *this )
+    auth_bloom( 0, "auth" ), hb_interval( HB_DEFAULT_INTERVAL ),
+    peer_dist( *this )
 {
   this->start_mono_time = current_monotonic_time_ns(); 
   this->start_time      = current_realtime_ns();
@@ -121,7 +122,15 @@ UserDB::init( const CryptPass &pwd,  uint32_t my_fd,
       i++;
     }
   }
-  /*::memset( my_pub_der, 0, sizeof( my_pub_der ) );*/
+  this->auth_bloom.add( hello_h );
+  this->auth_bloom.add( hb_h ); 
+  this->auth_bloom.add( bye_h );
+  this->auth_bloom.add( blm_h );
+  this->auth_bloom.add( adj_h );
+  this->auth_bloom.add_route( S_JOIN_SZ, join_h );
+  this->auth_bloom.add_route( S_LEAVE_SZ, leave_h );
+  this->auth_bloom.add_route( P_PSUB_SZ, psub_h );
+  this->auth_bloom.add_route( P_PSTOP_SZ, pstop_h );
   return b;
 }
 
@@ -159,15 +168,15 @@ UserDB::forward_to( UserBridge &n,  const char *sub,
   u_rte.bytes_sent += msg_len;
   u_rte.msgs_sent++;
   if ( u_rte.is_set( UCAST_URL_STATE | UCAST_URL_SRC_STATE ) == 0 ) {
-    EvPublish pub( sub, sublen, NULL, 0, msg, msg_len, this->my_src_fd, h, NULL, 0,
-                   (uint8_t) MSG_BUF_TYPE_ID, 'p' );
+    EvPublish pub( sub, sublen, NULL, 0, msg, msg_len, u_rte.rte.sub_route,
+                   this->my_src_fd, h, CABA_TYPE_ID, 'p' );
     /*d_usr( "forwrd %.*s to (%s) inbox %u\n",
             (int) sublen, sub, n.peer.user.val, u_rte.inbox_fd );*/
     return u_rte.rte.sub_route.forward_to( pub, u_rte.inbox_fd );
   }
   if ( u_rte.is_set( UCAST_URL_SRC_STATE ) == 0 ) {
-    InboxPublish ipub( sub, sublen, msg, msg_len, this->my_src_fd,
-                       h, (uint8_t) MSG_BUF_TYPE_ID, u_rte.ucast_url, n.uid,
+    InboxPublish ipub( sub, sublen, msg, msg_len, u_rte.rte.sub_route,
+                       this->my_src_fd, h, CABA_TYPE_ID, u_rte.ucast_url, n.uid,
                        u_rte.url_hash );
     /*d_usr( "forward %.*s to (%s) ucast( %s ) inbox %u\n",
        (int) sublen, sub, n.peer.user.val, u_rte.ucast_url, u_rte.inbox_fd );*/
@@ -175,9 +184,9 @@ UserDB::forward_to( UserBridge &n,  const char *sub,
   }
   const UserRoute  & u_src = *u_rte.ucast_src;
   const UserBridge & n_src = u_src.n;
-  InboxPublish isrc( sub, sublen, msg, msg_len, this->my_src_fd,
-                     h, (uint8_t) MSG_BUF_TYPE_ID, u_src.ucast_url, n_src.uid,
-                     u_src.url_hash );
+  InboxPublish isrc( sub, sublen, msg, msg_len, u_src.rte.sub_route,
+                     this->my_src_fd, h, CABA_TYPE_ID, u_src.ucast_url,
+                     n_src.uid, u_src.url_hash );
   /*d_usr( "forward %.*s to (%s) ucast( %s ) inbox %u\n",
        (int) sublen, sub, n.peer.user.val, u_src.ucast_url, u_src.inbox_fd );*/
   return u_src.rte.sub_route.forward_to( isrc, u_src.inbox_fd );
@@ -285,6 +294,7 @@ UserDB::release( void ) noexcept
   this->challenge_queue.reset();
   this->subs_queue.reset();
   this->adj_queue.reset();
+  this->ping_queue.reset();
   this->pending_queue.reset();
   this->uid_authenticated.reset();
   this->random_walk.reset();
@@ -300,7 +310,7 @@ UserDB::check_user_timeout( uint64_t current_mono_time,
                             uint64_t current_time ) noexcept
 {
   UserBridge *n;
-  bool adj_req_timeout = false;
+  bool req_timeout = false;
   while ( this->subs_queue.num_elems > 0 ) {
     n = this->subs_queue.heap[ 0 ];
     if ( current_mono_time < n->subs_timeout() )
@@ -319,7 +329,35 @@ UserDB::check_user_timeout( uint64_t current_mono_time,
       n->printf( "adjacency request timeout\n" );
     n->clear( ADJACENCY_REQUEST_STATE );
     this->adj_queue.pop();
-    adj_req_timeout = true;
+    if ( ! n->test_set( PING_STATE ) ) {
+      n->ping_mono_time = current_mono_time;
+      this->ping_queue.push( n );
+      this->send_ping_request( *n );
+    }
+    req_timeout = true;
+  }
+
+  while ( this->ping_queue.num_elems > 0 ) {
+    n = this->ping_queue.heap[ 0 ];
+    if ( current_mono_time < n->ping_timeout() )
+      break;
+    this->ping_queue.pop();
+    if ( ++n->ping_fail_count >= 3 ) {
+      if ( debug_usr )
+        n->printf( "ping request timeout\n" );
+      if ( n->ping_fail_count > 6 && this->adjacency_unknown.is_empty() ) {
+        n->clear( PING_STATE );
+        this->remove_authenticated( *n, BYE_PING );
+        n = NULL;
+      }
+      else
+        req_timeout = true;
+    }
+    if ( n != NULL ) {
+      n->ping_mono_time = current_mono_time;
+      this->ping_queue.push( n );
+      this->send_ping_request( *n );
+    }
   }
 
   if ( this->pending_queue.num_elems > 0 )
@@ -356,7 +394,7 @@ UserDB::check_user_timeout( uint64_t current_mono_time,
   UserBridge *m;
   bool run_peer_inc = false;
   this->peer_dist.clear_cache_if_dirty();
-  if ( this->peer_dist.inc_run_count == 0 || adj_req_timeout ||
+  if ( this->peer_dist.inc_run_count == 0 || req_timeout ||
        this->peer_dist.inc_running ) {
     run_peer_inc = true;
   }
@@ -370,19 +408,27 @@ UserDB::check_user_timeout( uint64_t current_mono_time,
     bool b = this->peer_dist.find_inconsistent2( n, m );
     if ( b ) {
       if ( n != NULL && m != NULL ) {
-        d_usr( "find_inconsistent2 from %s(%u) to %s(%u)\n", 
-                 n->peer.user.val, n->uid, m->peer.user.val, m->uid );
-        this->send_adjacency_request2( *n, *m, DIJKSTRA_SYNC_REQ );
+        if ( ! n->is_set( PING_STATE ) ) {
+          d_usr( "find_inconsistent2 from %s(%u) to %s(%u)\n", 
+                   n->peer.user.val, n->uid, m->peer.user.val, m->uid );
+          this->send_adjacency_request2( *n, *m, DIJKSTRA_SYNC_REQ );
+        }
+        else if ( n->ping_fail_count >= 3 )
+          m = NULL;
       }
-      else if ( n != NULL && m == NULL ) {
-        if ( this->adjacency_unknown.is_empty() &&
-             n->start_mono_time + (uint64_t) n->hb_interval * 2 * SEC_TO_NS <
-               current_mono_time ) {
+
+      if ( n != NULL && m == NULL ) {
+        uint64_t ns,
+                 hb_timeout_ns = (uint64_t) n->hb_interval * 2 * SEC_TO_NS;
+        ns = n->start_mono_time + hb_timeout_ns; /* if hb and still orphaned */
+
+        if ( this->adjacency_unknown.is_empty() && ns < current_mono_time ) {
           d_usr( "find_inconsistent2 orphaned %s(%u)\n", 
                    n->peer.user.val, n->uid );
-          this->remove_authenticated( *n, BYE_ORPHANED );
+          this->remove_authenticated( *n,
+            n->ping_fail_count ?  BYE_PING : BYE_ORPHANED );
         }
-        else {
+        else { /* n != NULL && m == NULL */
           for ( size_t j = 0; j < n->adjacency.count; j++ ) {
             AdjacencySpace * p = n->adjacency.ptr[ j ];
             uint32_t uid2;
@@ -1067,7 +1113,8 @@ UserDB::remove_authenticated( UserBridge &n,  ByeReason bye ) noexcept
     this->events.auth_remove( n.uid, bye );
     this->uid_authenticated.remove( n.uid );
     this->pop_source_route( n );
-    this->remove_adjacency( n );
+    if ( bye != BYE_HB_TIMEOUT )
+      this->remove_adjacency( n );
     this->uid_auth_count--;
     this->sub_db.sub_update_mono_time = current_monotonic_time_ns();
     d_usr( "--- uid_auth_count=%u -%s\n", this->uid_auth_count,
@@ -1092,18 +1139,14 @@ UserDB::remove_authenticated( UserBridge &n,  ByeReason bye ) noexcept
     this->subs_queue.remove( &n );
   if ( n.test_clear( ADJACENCY_REQUEST_STATE ) )
     this->adj_queue.remove( &n );
+  if ( n.test_clear( PING_STATE ) )
+    this->ping_queue.remove( &n );
 
   n.bloom.unlink( true );
   n.bloom.zero();
   n.sub_seqno = 0;
   n.link_state_seqno = 0;
   n.uid_csum.zero();
-#if 0
-  if ( n.subject_count( SUB_HT ) != 0 )
-    this->cancel_subscriptions( n );
-  if ( n.subject_count( PAT_HT ) != 0 )
-    this->cancel_pattern_subs( n );
-#endif
 
   if ( this->node_ht->find( n.bridge_id.nonce, n_pos ) )
     this->node_ht->remove( n_pos );
@@ -1115,15 +1158,6 @@ UserDB::remove_authenticated( UserBridge &n,  ByeReason bye ) noexcept
   for ( size_t i = 0; i < n.max_route; i++ )
     n.user_route_ptr( *this, i )->reset();
 
-#if 0
-    id_h = kv_hash_uint( n.uid );
-    if ( this->uid_tab->find( id_h, id_pos ) ) {
-      this->uid_tab->remove( id_pos );
-      this->free_uid_count++;
-    }
-    this->dead_ht->upsert_rsz( this->dead_ht, n.bridge_id.nonce, n.uid );
-    n.state = DEAD_STATE;
-#endif
   if ( ! this->adjacency_change.is_empty() )
     this->send_adjacency_change();
   if ( send_del )
@@ -1169,9 +1203,14 @@ UserDB::add_transport( TransportRoute &rte ) noexcept
     if ( ! n.is_set( AUTHENTICATED_STATE ) )
       continue;
 
-    if ( count == 2 && ! n.bloom.has_link( t->router_rt->r ) )
+    if ( count == 2 && ! n.bloom.has_link( t->router_rt->r ) ) {
       t->router_rt->add_bloom_ref( &n.bloom );
+      d_usr( "add_bloom_ref( %s, %s )\n", n.peer.user.val,
+              t->transport.tport.val );
+    }
     rte.router_rt->add_bloom_ref( &n.bloom );
+    d_usr( "add_bloom_ref( %s, %s )\n", n.peer.user.val,
+           rte.transport.tport.val );
   }
 }
 
@@ -1211,8 +1250,15 @@ UserDB::add_inbox_route( UserBridge &n,  UserRoute *primary ) noexcept
     n.printe( "add inbox no valid route\n" );
     return;
   }
-  n.primary_route = primary->rte.tport_id;
-
+  if ( n.primary_route != primary->rte.tport_id ) {
+    n.primary_route = primary->rte.tport_id;
+    n.hb_seqno = 0;
+    if ( n.is_set( IN_HB_QUEUE_STATE ) ) {
+      n.hb_mono_time = current_monotonic_time_ns();
+      this->hb_queue.remove( &n );
+      this->hb_queue.push( &n );
+    }
+  }
   if ( ! primary->test_set( INBOX_ROUTE_STATE ) ) {
     if ( debug_usr )
       n.printf( "add inbox_route %.*s -> %u (%s) (bcast %u)\n",
@@ -1239,8 +1285,11 @@ UserDB::add_inbox_route( UserBridge &n,  UserRoute *primary ) noexcept
   if ( count > 1 ) {
     for ( size_t i = 0; i < count; i++ ) {
       TransportRoute *t = this->transport_tab.ptr[ i ];
-      if ( ! n.bloom.has_link( t->router_rt->r ) )
+      if ( ! n.bloom.has_link( t->router_rt->r ) ) {
         t->router_rt->add_bloom_ref( &n.bloom );
+        d_usr( "add_bloom_ref( %s, %s )\n", n.peer.user.val,
+               t->transport.tport.val );
+      }
     }
   }
 }
@@ -1356,6 +1405,8 @@ rai::ms::user_state_string( uint32_t state,  char *buf ) noexcept
     s = cat( s, "subs_request", s > buf );
   if ( ( state & ADJACENCY_REQUEST_STATE ) != 0 )
     s = cat( s, "adj_request", s > buf );
+  if ( ( state & PING_STATE ) != 0 )
+    s = cat( s, "ping", s > buf );
   if ( ( state & ZOMBIE_STATE ) != 0 )
     s = cat( s, "zombie", s > buf );
   if ( ( state & DEAD_STATE ) != 0 )
@@ -1394,6 +1445,8 @@ rai::ms::user_state_abrev( uint32_t state,  char *buf ) noexcept
     s = cat( s, "subs", s > buf );
   if ( ( state & ADJACENCY_REQUEST_STATE ) != 0 )
     s = cat( s, "adj", s > buf );
+  if ( ( state & PING_STATE ) != 0 )
+    s = cat( s, "ping", s > buf );
   if ( ( state & ZOMBIE_STATE ) != 0 )
     s = cat( s, "zomb", s > buf );
   if ( ( state & DEAD_STATE ) != 0 )

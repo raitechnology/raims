@@ -17,7 +17,7 @@ struct EvTcpTransportListen : public kv::EvTcpListen {
   EvTcpTransportListen( kv::EvPoll &p, TransportRoute &r ) noexcept;
   /* EvListen */
   virtual bool accept( void ) noexcept;
-  int listen( const char *ip,  int port,  int opts ) noexcept;
+  virtual int listen( const char *ip,  int port,  int opts ) noexcept;
   virtual void release( void ) noexcept final;
 };
 
@@ -40,46 +40,49 @@ struct EvTcpTransport : public kv::EvConnection {
   virtual bool on_msg( kv::EvPublish &pub ) noexcept; /* fwd to NATS network */
 };
 
+static const size_t MAX_TCP_HOST_LEN = 256;
 struct EvTcpTransportParameters {
   const char * host;    /* connect host */
   int          port,    /* connect port */
                opts,    /* tcp opts */
                timeout; /* connect timeout seconds */
   bool         edge;    /* if listen edge true, don't create transport*/
+  char         buf[ MAX_TCP_HOST_LEN ];
   void * operator new( size_t, void *ptr ) { return ptr; }
-  EvTcpTransportParameters( const char *h = NULL,  int p = 4222,
+  EvTcpTransportParameters( const char *h = NULL,  int p = 0,
                             int o = ( kv::DEFAULT_TCP_CONNECT_OPTS &
                                      ~kv::OPT_REUSEPORT &
-                                     ~kv::OPT_VERBOSE ) | kv::OPT_CONNECT_NB )
-    : host( h ), port( p ), opts( o ), timeout( 15 ), edge( false ) {}
+                                     ~kv::OPT_VERBOSE ) | kv::OPT_CONNECT_NB,
+                            int t = 15, bool e = false )
+    : host( h ), port( p ), opts( o ), timeout( t ), edge( e ) {
+    this->buf[ 0 ] = '\0';
+  }
 
-  void copy( const EvTcpTransportParameters &p,  char *host_buf ) {
-    if ( p.host != NULL ) {
-      this->host = host_buf;
-      ::strcpy( host_buf, p.host );
+  EvTcpTransportParameters *copy( void ) const {
+    void *m = ::malloc( sizeof( EvTcpTransportParameters ) );
+    EvTcpTransportParameters *p = new ( m )
+      EvTcpTransportParameters( NULL, this->port, this->opts, this->timeout,
+                                this->edge );
+    if ( this->host != NULL ) {
+      ::strcpy( p->buf, this->buf );
+      p->host = p->buf;
     }
-    else {
-      this->host = NULL;
-    }
-    this->port    = p.port;
-    this->opts    = p.opts;
-    this->timeout = p.timeout;
-    this->edge    = p.edge;
+    return p;
   }
 };
 
 struct EvTcpTransportClient : public EvTcpTransport {
-  EvTcpTransportParameters parm;
-  char host_buf[ 256 ];
+  /*EvTcpTransportParameters parm;
+  char host_buf[ 256 ];*/
   void * operator new( size_t, void *ptr ) { return ptr; }
 
   EvTcpTransportClient( kv::EvPoll &p,  uint8_t t )
-    : EvTcpTransport( p, t ), parm( this->host_buf ) {
-    this->host_buf[ 0 ] = '\0';
+    : EvTcpTransport( p, t )/*, parm( this->host_buf )*/ {
+    /*this->host_buf[ 0 ] = '\0';*/
     this->fwd_all_msgs = false;
   }
-
-  bool connect( kv::EvConnectionNotify *n ) noexcept;
+  bool connect( EvTcpTransportParameters &p,
+                kv::EvConnectionNotify *n ) noexcept;
 };
 
 struct EvTcpTransportService : public EvTcpTransport {

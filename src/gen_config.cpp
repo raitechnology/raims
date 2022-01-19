@@ -806,8 +806,9 @@ GenCfg::ask_commit( bool auto_yes ) noexcept
   if ( ! auto_yes ) {
     char yn[ 80 ];
     printf( "OK? " ); fflush( stdout );
-    fgets( yn, sizeof( yn ), stdin );
-    abort = ! ( yn[ 0 ] == 'y' || yn[ 0 ] == 'Y' );
+    abort = ( fgets( yn, sizeof( yn ), stdin ) == NULL );
+    if ( ! abort )
+      abort = ! ( yn[ 0 ] == 'y' || yn[ 0 ] == 'Y' );
   }
   if ( ! abort ) {
     if ( this->list.commit_phase1() ) {

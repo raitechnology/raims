@@ -23,7 +23,7 @@ EvInboxTransport::listen( const char *ip,  int port ) noexcept
     static uint64_t inbox_timer_id;
     this->timer_id = ( (uint64_t) this->sock_type << 56 ) |
       __sync_fetch_and_add( &inbox_timer_id, 1 );
-    this->cur_mono = current_monotonic_time_ns();
+    this->cur_mono_time = current_monotonic_time_ns();
     this->poll.timer.add_timer_micros( this->fd, 250, this->timer_id, 0 );
     d_ibx( "inbox fd %u (%s)\n", this->fd, this->peer_address.buf );
     return true;
@@ -79,8 +79,10 @@ EvInboxTransport::process( void ) noexcept
         p = this->resolve_src_uid( dest_uid, dest_peer_id, addr, addrlen );
       }
       if ( p != NULL ) {
-        d_ibx( "%u.%u pkt %s (src=%u,dest=%u,p.src=%u,p.dest=%u,r=%u)\n",
-            p->peer_id, dest_peer_id, pkt->code.to_str(), src_uid, dest_uid,
+        d_ibx( "%u.%u recv[%s] "
+            "d_no %u s_no %u in_no %u src %u dest %u p.src %u p.dest %u r %u\n",
+            p->peer_id, dest_peer_id, pkt->code.to_str(),
+            pkt->dest_seqno, pkt->src_seqno, p->in_seqno, src_uid, dest_uid,
             p->src_uid, p->dest_uid, p->resolved()?1:0 );
         /*d_ibx( "recv[%.4s] rcv seqno %u (snd %u)\n",
             (char *) &pkt->code, pkt->src_seqno, pkt->dest_seqno );*/
@@ -157,19 +159,22 @@ EvInboxTransport::repair_window( InboxPeer &p ) noexcept
   while ( seqno_cmp( el->pkt.src_seqno, p.out_window_seqno ) > 0 ) {
     p.out.pop_tl();
     el->pkt.code.set_repair();
-    el->pkt.src_seqno  = p.out_seqno;
+    /*el->pkt.src_seqno  = p.out_seqno;*/
     el->pkt.dest_seqno = p.in_seqno;
+    d_ibx( "%u.%u rexmit s_no %u d_no %u\n",
+            el->window.peer.peer_id, el->window.peer.dest_peer_id,
+            el->pkt.src_seqno, p.in_seqno );
     rexmit.push_hd( el );
     cnt++;
     if ( p.out.is_empty() )
       break;
+    el = p.out.tl;
   }
   if ( ! rexmit.is_empty() ) {
     el = rexmit.hd;
-    d_ibx( "%u.%u rexmit push %lu\n", el->window.peer.peer_id,
-                                       el->window.peer.dest_peer_id, cnt );
     this->out.push_tl( rexmit );
     this->out_count += cnt;
+    this->repair_count += cnt;
     this->idle_push( EV_WRITE );
     return true;
   }
@@ -200,6 +205,8 @@ EvInboxTransport::dispatch_msg( InboxPeer &p,  InboxPkt &pkt ) noexcept
   this->push_active_recv( p );
   if ( seqno_cmp( p.in_seqno + 1, pkt.src_seqno ) == 0 ) {
     p.in_seqno = pkt.src_seqno;
+    this->total_recv_count++;
+
     if ( ! pkt.code.is_fragment ) {
       /* latest seq, no need to put in recv window */
       this->dispatch_msg2( pkt.msg(), pkt.msg_len );
@@ -219,17 +226,20 @@ EvInboxTransport::dispatch_msg( InboxPeer &p,  InboxPkt &pkt ) noexcept
         if ( seqno_cmp( el->pkt.src_seqno, pkt.src_seqno ) == 0 ) {
           d_ibx( "repeated in pkt %u, before edge\n", pkt.src_seqno );
           p.state |= DUP_RECV;
+          this->duplicate_count++;
           return;
         }
         break;
       }
     }
+    this->total_recv_count++;
     InboxPktElem *x = p.copy_pkt_to_window( pkt );
     p.in.insert_before( x, el ); /* out of order, save to recv window */
   }
   else {
     d_ibx( "repeated in pkt %u, consumed %u\n", pkt.src_seqno, p.in_seqno );
     p.state |= DUP_RECV;
+    this->duplicate_count++;
     return;
   }
   /* check if pkt sequences are in order and ready to dispatch */
@@ -299,7 +309,7 @@ EvInboxTransport::dispatch_msg2( const void *msg,  size_t msg_len ) noexcept
     uint32_t     h      = this->msg_in.msg->subhash;
     this->msgs_recv++;
     MsgFramePublish pub( sub, sublen, this->msg_in.msg, this->fd, h,
-                         (uint8_t) CABA_TYPE_ID, this->rte );
+                         CABA_TYPE_ID, this->rte, this->rte.sub_route );
     d_ibx( "ibx dispatch( %.*s )\n", (int) pub.subject_len, pub.subject );
     this->rte.sub_route.forward_msg( pub );
   }
@@ -349,7 +359,7 @@ EvInboxTransport::write( void ) noexcept
     oh.msg_hdr.msg_controllen = 0;
     oh.msg_hdr.msg_flags      = 0;
     oh.msg_len                = 0;
-    d_ibx( "%u.%u send[%s] snd seqno %u (rcv %u) (src=%d,dest=%d)\n",
+    d_ibx( "%u.%u send[%s] s_no %u r_no %u src %d dest %d\n",
            p.peer_id, p.dest_peer_id, el->pkt.code.to_str(), el->pkt.src_seqno,
            el->pkt.dest_seqno, p.src_uid, p.dest_uid );
     if ( el->pkt.code.is_data() ) {
@@ -410,20 +420,29 @@ EvInboxTransport::timer_expire( uint64_t tid, uint64_t ) noexcept
   if ( tid != this->timer_id )
     return false;
   int ack_cnt = 0;
-  this->cur_mono = current_monotonic_time_ns();
+  this->cur_mono_time = current_monotonic_time_ns();
+  if ( debug_ibx ) {
+    if ( this->cur_mono_time - this->last_mono_time > 1000000000ULL * 10 ) {
+      printf( "duplicate pkt count %lu\n", this->duplicate_count );
+      printf( "repair    pkt count %lu\n", this->repair_count );
+      printf( "total     pkt sent  %lu\n", this->total_sent_count );
+      printf( "total     pkt recv  %lu\n", this->total_recv_count );
+      this->last_mono_time = this->cur_mono_time;
+    }
+  }
   for ( InboxPeer *p = this->active.hd; p != NULL; ) {
     InboxPeer * next    = p->next;
     bool        is_sack = false,
                 is_rack = false;
 
     if ( ( p->state & ACTIVE_WINDOW ) != 0 ) {
-      if ( p->window_timer_expire( this->cur_mono ) ) {
+      if ( p->window_timer_expire( this->cur_mono_time ) ) {
         if ( ! this->check_window( *p ) )
           p->state &= ~ACTIVE_WINDOW;
       }
     }
     if ( ( p->state & ACTIVE_RECV ) != 0 ) {
-      if ( p->recv_timer_expire( this->cur_mono ) ) {
+      if ( p->recv_timer_expire( this->cur_mono_time ) ) {
         if ( seqno_cmp( p->in_ack_seqno, p->in_seqno ) != 0 ||
              ( p->state & DUP_RECV ) != 0 )
           is_rack = true;
@@ -431,7 +450,7 @@ EvInboxTransport::timer_expire( uint64_t tid, uint64_t ) noexcept
       }
     }
     if ( ( p->state & ACTIVE_SEND ) != 0 ) {
-      if ( p->send_timer_expire( this->cur_mono ) ) {
+      if ( p->send_timer_expire( this->cur_mono_time ) ) {
         if ( seqno_cmp( p->out_ack_seqno, p->out_seqno ) != 0 )
           is_sack = true;
         else
@@ -536,6 +555,7 @@ EvInboxTransport::post_msg( InboxPeer &p,  const void *msg,
 
     this->out.push_tl( el );
     this->out_count++;
+    this->total_sent_count++;
     return;
   }
   const uint8_t * msg_ptr = (const uint8_t *) msg;
@@ -562,6 +582,7 @@ EvInboxTransport::post_msg( InboxPeer &p,  const void *msg,
     msg_ptr = &msg_ptr[ frag_size ];
     this->out.push_tl( el );
     this->out_count++;
+    this->total_sent_count++;
   }
 }
 

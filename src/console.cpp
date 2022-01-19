@@ -6,16 +6,24 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <time.h>
+#include <errno.h>
 #include <sys/time.h>
 #include <raikv/logger.h>
 #include <raids/term.h>
 #define IMPORT_CONSOLE_CMDS
 #define IMPORT_EVENT_DATA
+#define IMPORT_DEBUG_STRINGS
 #include <raims/session.h>
 #include <raims/ev_tcp_transport.h>
 #include <raims/ev_telnet.h>
 #include <linecook/linecook.h>
 #include <linecook/ttycook.h>
+
+namespace rai {
+namespace kv {
+extern uint32_t kv_debug;
+}
+}
 
 using namespace rai;
 using namespace ms;
@@ -30,7 +38,7 @@ Console::Console( SessionMgr &m ) noexcept
          type_fmt( ANSI_BLUE "%-10s %3d" ANSI_NORMAL " : " ),
          prompt( 0 ), max_log( 64 * 1024 ), log_index( 0 ), log_ptr( 0 ),
          inbox_num( 0 ), log_filename( 0 ), log_fd( -1 ), next_rotate( 1 ),
-         mute_log( false ), last_secs( 0 ), last_ms( 0 )
+         log_status( 0 ), mute_log( false ), last_secs( 0 ), last_ms( 0 )
 {
   time_t t = time( NULL ), t2;
   struct tm tm;
@@ -297,8 +305,12 @@ Console::flush_output( void ) noexcept
   if ( this->log_index < this->log.count ) {
     const char * lptr = &this->log.ptr[ this->log_index ];
     size_t       lsz  = this->log.count - this->log_index;
-    if ( this->log_fd >= 0 )
-      ::write( this->log_fd, lptr, lsz );
+    if ( this->log_fd >= 0 ) {
+      if ( (size_t) ::write( this->log_fd, lptr, lsz ) != lsz )
+        this->log_status = errno;
+      else
+        this->log_status = 0;
+    }
     if ( ! this->mute_log )
       b &= this->colorize_log( lptr, lsz );
     if ( this->log_ptr == 0 && this->log_index >= this->max_log )
@@ -1402,9 +1414,32 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
         this->user_db.peer_dist.invalidate( INVALID_NONE );
         this->printf( "recalculate peer dist\n" );
       }
+      else if ( len >= 2 && ::memcmp( arg, "kv", 2 ) == 0 ) {
+        this->printf( "kv debug on\n" );
+        kv_debug = 1;
+      }
+      else if ( len >= 4 && ::memcmp( arg, "nokv", 4 ) == 0 ) {
+        this->printf( "kv debug off\n" );
+        kv_debug = 0;
+      }
       else {
         dbg_flags = string_to_uint64( arg, len );
-        this->printf( "debug flags set to 0x%x\n", dbg_flags );
+        char buf[ 80 ];
+        size_t sz = 0;
+        for ( size_t i = 0; i < debug_str_count; i++ ) {
+          if ( ( dbg_flags & ( 1 << i ) ) != 0 ) {
+            if ( sz > 0 )
+              sz = cat80( buf, sz, "," );
+            sz = cat80( buf, sz, debug_str[ i ] );
+          }
+        }
+        if ( sz > 0 ) {
+          buf[ sz ] = '\0';
+          this->printf( "debug flags set to 0x%x (%s)\n", dbg_flags, buf );
+        }
+        else {
+          this->printf( "debug flags cleared\n" );
+        }
       }
       break;
 
@@ -1431,39 +1466,41 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
       if ( len == 0 )
         goto help;
       this->printf( "start(%.*s) seqno = %lu\n", (int) len, arg,
-        this->sub_db.sub_start( arg, len, this ) );
+        this->sub_db.internal_sub_start( arg, len, this ) );
       break;
     case CMD_SUB_STOP: /* unsub */
       if ( len == 0 )
         goto help;
       this->printf( "stop(%.*s) seqno = %lu\n", 
-        (int) len, arg, this->sub_db.sub_stop( arg, len ) );
+        (int) len, arg, this->sub_db.internal_sub_stop( arg, len ) );
       break;
     case CMD_PSUB_START: /* psub */
       if ( len == 0 )
         goto help;
       this->printf( "pstart(%.*s) seqno = %lu\n", 
         (int) len, arg,
-        this->sub_db.psub_start( arg, len, RV_WILD_FMT, this ) );
+        this->sub_db.internal_psub_start( arg, len, RV_PATTERN_FMT, this ) );
       break;
     case CMD_PSUB_STOP: /* pstop */
       if ( len == 0 )
         goto help;
       this->printf( "pstop(%.*s) seqno = %lu\n", 
-        (int) len, arg, this->sub_db.psub_stop( arg, len, RV_WILD_FMT ) );
+        (int) len, arg,
+        this->sub_db.internal_psub_stop( arg, len, RV_PATTERN_FMT ) );
       break;
     case CMD_GSUB_START: /* gsub */
       if ( len == 0 )
         goto help;
       this->printf( "gstart(%.*s) seqno = %lu\n", 
         (int) len, arg,
-        this->sub_db.psub_start( arg, len, GLOB_WILD_FMT, this ) );
+        this->sub_db.internal_psub_start( arg, len, GLOB_PATTERN_FMT, this ) );
       break;
     case CMD_GSUB_STOP: /* gstop */
       if ( len == 0 )
         goto help;
       this->printf( "gstop(%.*s) seqno = %lu\n", 
-        (int) len, arg, this->sub_db.psub_stop( arg, len, GLOB_WILD_FMT ) );
+        (int) len, arg,
+        this->sub_db.internal_psub_stop( arg, len, GLOB_PATTERN_FMT ) );
       break;
 
     case CMD_RPC:
@@ -1520,32 +1557,20 @@ Console::find_tport( const char *name,  uint32_t len,
                      uint32_t &tport_id ) noexcept
 {
   if ( len > 0 ) {
-    ConfigTree::Transport * tport;
-    for ( tport = this->tree.transports.hd; tport != NULL;
-          tport = tport->next ) {
-      if ( len != 0 ) {
-        if ( len != tport->tport.len )
-          continue;
-        if ( ::memcmp( name, tport->tport.val, len ) != 0 )
-          continue;
-      }
-      uint32_t count = this->user_db.transport_tab.count;
-      for ( uint32_t t = 0; t < count; t++ ) {
-        TransportRoute *rte = this->user_db.transport_tab.ptr[ t ];
-        if ( &rte->transport == tport ) {
-          tree_idx = tport;
-          tport_id = t;
-          if ( rte->is_set( TPORT_IS_SHUTDOWN ) )
-            return T_IS_DOWN;
-          this->printf( "transport \"%.*s\" is running tport %u\n",
-                        (int) len, name, tport_id );
-          return T_IS_RUNNING;
-        }
-      }
+    ConfigTree::Transport * tport = this->tree.find_transport( name, len );
+    TransportRoute * rte = this->user_db.transport_tab.find_transport( tport );
+    if ( rte != NULL ) {
       tree_idx = tport;
-      tport_id = count;
-      return T_CFG_EXISTS;
+      tport_id = rte->tport_id;
+      if ( rte->is_set( TPORT_IS_SHUTDOWN ) )
+        return T_IS_DOWN;
+      this->printf( "transport \"%.*s\" is running tport %u\n",
+                    (int) len, name, tport_id );
+      return T_IS_RUNNING;
     }
+    tree_idx = tport;
+    tport_id = this->user_db.transport_tab.count;
+    return T_CFG_EXISTS;
   }
   this->printf( "transport \"%.*s\" not found\n", (int) len, name );
   return T_NO_EXIST;
@@ -1677,26 +1702,24 @@ Console::config_param( const char *param, size_t plen,
   ConfigTree::Parameters *p;
   ConfigTree::StringPair *sp;
   for ( p = this->tree.parameters.hd; p != NULL; p = p->next ) {
-    for ( sp = p->parms.hd; sp != NULL; sp = sp->next ) {
-      if ( sp->name.equals( param, plen ) ) {
-        if ( vlen > 0 ) {
-          this->string_tab.reref_string( value, vlen, sp->value );
-        }
-        else {
-          p->parms.unlink( sp );
-          this->free_pairs.push_tl( sp );
-        }
-        return;
+    sp = p->parms.get_pair( param, plen );
+    if ( sp != NULL ) {
+      if ( vlen > 0 )
+        this->string_tab.reref_string( value, vlen, sp->value );
+      else {
+        p->parms.unlink( sp );
+        this->free_pairs.push_tl( sp );
       }
+      return;
     }
   }
   if ( vlen == 0 ) {
     this->printf( "notfound: %.*s\n", (int) plen, param );
   }
   else {
-    p = this->make<ConfigTree::Parameters>();
+    p = this->string_tab.make<ConfigTree::Parameters>();
     if ( this->free_pairs.is_empty() )
-      sp = this->make<ConfigTree::StringPair>();
+      sp = this->string_tab.make<ConfigTree::StringPair>();
     else
       sp = this->free_pairs.pop_hd();
     this->string_tab.ref_string( param, plen, sp->name );
@@ -1720,13 +1743,9 @@ Console::config_tport( const char *param,  size_t plen,
                        size_t ) noexcept
 {
   this->change_prompt( param, plen );
-  for ( this->cfg_tport = this->tree.transports.hd; this->cfg_tport != NULL;
-        this->cfg_tport = this->cfg_tport->next ) {
-    if ( this->cfg_tport->tport.equals( param, plen ) )
-      break;
-  }
+  this->cfg_tport = this->tree.find_transport( param, plen );
   if ( this->cfg_tport == NULL ) {
-    this->cfg_tport = this->make<ConfigTree::Transport>();
+    this->cfg_tport = this->string_tab.make<ConfigTree::Transport>();
     this->string_tab.ref_string( param, plen, this->cfg_tport->tport );
     this->cfg_tport->tport_id = this->tree.transport_cnt++;
     this->tree.transports.push_tl( this->cfg_tport );
@@ -1737,20 +1756,16 @@ void
 Console::config_tport_route( const char *param, size_t plen,
                              const char *value, size_t vlen ) noexcept
 {
-  ConfigTree::StringPair *sp;
-  for ( sp = this->cfg_tport->route.hd; sp != NULL; sp = sp->next ) {
-    if ( sp->name.equals( param, plen ) )
-      break;
-  }
+  ConfigTree::StringPair *sp = this->cfg_tport->route.get_pair( param, plen );
   if ( sp == NULL ) {
     if ( this->free_pairs.is_empty() )
-      sp = this->make<ConfigTree::StringPair>();
+      sp = this->string_tab.make<ConfigTree::StringPair>();
     else
       sp = this->free_pairs.pop_hd();
     this->string_tab.ref_string( param, plen, sp->name );
     this->cfg_tport->route.push_tl( sp );
   }
-  this->string_tab.ref_string( value, vlen, sp->value );
+  this->string_tab.reref_string( value, vlen, sp->value );
 }
 
 void
@@ -2861,7 +2876,7 @@ Console::show_reachable( void ) noexcept
     TransportRoute *rte = this->user_db.transport_tab.ptr[ t ];
     if ( rte->is_set( TPORT_IS_MESH ) && rte->listener != NULL ) {
       tab[ i++ ].set_tport( rte->transport.tport, "mesh" );
-      rte->uid_names( *rte->uid_in_mesh, buf, sizeof( buf ) );
+      this->user_db.uid_names( *rte->uid_in_mesh, buf, sizeof( buf ) );
       this->tab_string( buf, tab[ i++ ] );
     }
     else {
@@ -3062,8 +3077,14 @@ Console::show_blooms( void ) noexcept
         subs  += ref->pref_count[ SUB_RTE ];
         if ( ref == &this->sub_db.bloom )
           s = "sub";
+        else if ( ref == &this->sub_db.internal )
+          s = "int";
+        else if ( ref == &this->sub_db.external )
+          s = "ext";
         else if ( ref == &this->mgr.sys_bloom )
           s = "sys";
+        else if ( ref == &this->user_db.auth_bloom )
+          s = "auth";
         else if ( ref == &this->mgr.router_bloom )
           s = rtr_str; /* emtpy */
         else {

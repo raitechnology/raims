@@ -59,13 +59,14 @@ enum UserNonceState {
   IN_HB_QUEUE_STATE       =   0x20, /* is a member of the heartbeat queue */
   SUBS_REQUEST_STATE      =   0x40, /* is a member of the subs queue */
   ADJACENCY_REQUEST_STATE =   0x80, /* is a member of the adj queue */
-  ZOMBIE_STATE            =  0x100, /* timed out, no clear dead signal */
-  DEAD_STATE              =  0x200, /* dead from bye or z.del */
-  UCAST_URL_STATE         =  0x400, /* has ucast url */
-  UCAST_URL_SRC_STATE     =  0x800, /* routes through a ucast url */
-  MESH_URL_STATE          = 0x1000, /* has a mesh url */
-  HAS_HB_STATE            = 0x2000, /* recvd a hb */
-  IS_INIT_STATE           = 0x4000  /* if initialized with reset() */
+  PING_STATE              =  0x100, /* is a member of the ping queue */
+  ZOMBIE_STATE            =  0x200, /* timed out, no clear dead signal */
+  DEAD_STATE              =  0x400, /* dead from bye or z.del */
+  UCAST_URL_STATE         =  0x800, /* has ucast url */
+  UCAST_URL_SRC_STATE     = 0x1000, /* routes through a ucast url */
+  MESH_URL_STATE          = 0x2000, /* has a mesh url */
+  HAS_HB_STATE            = 0x4000, /* recvd a hb */
+  IS_INIT_STATE           = 0x8000  /* if initialized with reset() */
 };
 static const size_t MAX_NONCE_STATE_STRING = 16 * 16; /* 16 states * 16 chars*/
 char *user_state_string( uint32_t state,  char *buf ) noexcept;
@@ -161,6 +162,7 @@ struct UserBridge : public UserStateTest<UserBridge> {
                      subs_mono_time,      /* time subs reqeust sent */
                      sub_recv_mono_time,  /* time subscription reqeust recv */
                      adj_mono_time,       /* time adjacency reqeust sent */
+                     ping_mono_time,  
                      round_trip_time,     /* ping/pong */
                      start_time,          /* start timestamp */
                      ping_send_time,
@@ -175,13 +177,14 @@ struct UserBridge : public UserStateTest<UserBridge> {
                      unknown_refs,        /* link refs are yet to be resolved */
                      ping_send_count,
                      ping_recv_count,
-                     pong_recv_count;     /* ping counters */
+                     pong_recv_count,
+                     ping_fail_count;     /* ping counters */
   StageAuth          auth[ 2 ];           /* auth handshake state */
   UserRoute        * u_buf[ 16 ];         /* indexes user_route */
   void * operator new( size_t, void *ptr ) { return ptr; }
 
   UserBridge( const PeerEntry &pentry,  uint32_t seed )
-      : peer( pentry ), bloom( seed ) {
+      : peer( pentry ), bloom( seed, pentry.user.val ) {
     this->peer_key.zero();
     this->uid_csum.zero();
     this->hb_cnonce.zero();
@@ -244,6 +247,12 @@ struct UserBridge : public UserStateTest<UserBridge> {
   }
   static bool is_adj_older( UserBridge *r1,  UserBridge *r2 ) {
     return r1->adj_timeout() > r2->adj_timeout();
+  }
+  uint64_t ping_timeout( void ) const {
+    return this->ping_mono_time + SEC_TO_NS * 5;
+  }
+  static bool is_ping_older( UserBridge *r1,  UserBridge *r2 ) {
+    return r1->ping_timeout() > r2->ping_timeout();
   }
 
   uint32_t make_inbox_subject( char *ibx,  const char *suffix ) {
@@ -326,6 +335,8 @@ typedef struct kv::PrioQueue< UserBridge *,
                         UserBridge::is_subs_older >      UserSubsQueue;
 typedef struct kv::PrioQueue< UserBridge *,
                         UserBridge::is_adj_older >       UserAdjQueue;
+typedef struct kv::PrioQueue< UserBridge *,
+                        UserBridge::is_ping_older >      UserPingQueue;
 typedef struct kv::PrioQueue< UserPendingRoute *,
                         UserPendingRoute::is_pending_older > UserPendingQueue;
 
@@ -371,6 +382,7 @@ struct UserDB {
   UserChallengeQueue    challenge_queue; /* throttle auth challenge */
   UserSubsQueue         subs_queue;      /* throttle subs request */
   UserAdjQueue          adj_queue;       /* throttle adjacency request */
+  UserPingQueue         ping_queue;      /* test pingable */
   UserPendingQueue      pending_queue;   /* retry user/peer resolve */
   AdjPendingList        adjacency_unknown; /* adjacency recv not resolved */
   AdjChangeList         adjacency_change;  /* adjacency send pending */
@@ -381,6 +393,7 @@ struct UserDB {
 
   kv::BitSpace          uid_authenticated, /* uids authenticated */
                         random_walk;
+  kv::BloomRef          auth_bloom;
   uint32_t              hb_interval,
                         next_uid,        /* next_uid available */
                         free_uid_count,  /* num uids freed */
@@ -462,6 +475,7 @@ struct UserDB {
   bool on_heartbeat( const MsgFramePublish &pub,  UserBridge &n,
                      MsgHdrDecoder &dec ) noexcept;
   void interval_ping( uint64_t curr_mono,  uint64_t curr_time ) noexcept;
+  void send_ping_request( UserBridge &n ) noexcept;
   bool recv_ping_request( const MsgFramePublish &pub,  UserBridge &n,
                           const MsgHdrDecoder &dec ) noexcept;
   bool recv_pong_result( const MsgFramePublish &pub,  UserBridge &n,
@@ -622,6 +636,9 @@ struct UserDB {
 
   bool forward_pub( const MsgFramePublish &pub, const UserBridge &n,
                     const MsgHdrDecoder &dec ) noexcept;
+  void debug_uids( kv::BitSpace &uids,  Nonce &csum ) noexcept;
+  const char * uid_names( const kv::BitSpace &uids,  char *buf,
+                          size_t buflen ) noexcept;
 };
 
 }

@@ -21,7 +21,7 @@ struct EvPgmTransportParameters {
   void * operator new( size_t, void *ptr ) { return ptr; }
   EvPgmTransportParameters( const char *n = NULL,  int p = 9000 )
     : network( n ), port( p ),
-      mtu( 1500 ), txw_sqns( 1024 ), rxw_sqns( 256 ), mcast_loop( 2 ) {}
+      mtu( 16384 ), txw_sqns( 16 * 1024 ), rxw_sqns( 16 * 1024 ), mcast_loop( 0 ) {}
 };
 
 struct EvPgmTransport : public kv::EvSocket {
@@ -31,7 +31,8 @@ struct EvPgmTransport : public kv::EvSocket {
   FragList                 frag_list;
   uint32_t                 recv_highwater,
                            send_highwater;
-  uint64_t                 timer_id;
+  uint64_t                 timer_id,
+                           stats_timer;
   /*size_t                 * tport_count;
   uint32_t                 not_fd2;*/
   kv::EvConnectionNotify * notify;

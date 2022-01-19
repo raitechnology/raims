@@ -23,11 +23,12 @@ namespace ms {
 enum SubStatus {
   SUB_OK          = 0, /* subscribe operation success */
   SUB_EXISTS      = 1, /* subject already subscribed */
-  SUB_NOT_FOUND   = 2, /* subject not subscribed */
-  SUB_REMOVED     = 3, /* last uid unsubscribed, subject dropped */
-  SUB_PAT_OK      = 4, /* pattern subscribe success */
-  SUB_PAT_REMOVED = 5, /* pattern unsub removed */
-  SUB_ERROR       = 6  /* alloc error */
+  SUB_UPDATED     = 2,
+  SUB_NOT_FOUND   = 3, /* subject not subscribed */
+  SUB_REMOVED     = 4, /* last uid unsubscribed, subject dropped */
+  SUB_PAT_OK      = 5, /* pattern subscribe success */
+  SUB_PAT_REMOVED = 6, /* pattern unsub removed */
+  SUB_ERROR       = 7  /* alloc error */
 };
 
 static inline const char *sub_status_string( SubStatus status ) {
@@ -47,18 +48,139 @@ struct SubOnMsg {
   virtual void on_data( const SubMsgData &val ) noexcept;
 };
 
+enum SubFlags {
+  INTERNAL_SUB = 1,
+  EXTERNAL_SUB = 2
+};
+
+struct SubRefs {
+  static const uint32_t ALL_MASK = ~(uint32_t) 0;
+  uint32_t internal_ref  : 1,
+           external_refs : 31;
+  uint32_t tport_mask;
+
+  void init( uint32_t flags,  uint32_t tport_id ) {
+    this->internal_ref  = 0;
+    this->external_refs = 0;
+    this->tport_mask    = 0;
+    this->add( flags, tport_id );
+  }
+  bool add( uint32_t flags,  uint32_t tport_id ) {
+    if ( ( flags & INTERNAL_SUB ) != 0 ) {
+      if ( this->internal_ref != 0 )
+        return false;
+      this->internal_ref = 1;
+    }
+    else {
+      if ( tport_id >= 32 )
+        this->tport_mask = ALL_MASK;
+      else {
+        uint32_t mask = 1U << tport_id;
+        if ( ( this->tport_mask & mask ) != 0 )
+          return false;
+        this->tport_mask |= mask;
+      }
+      this->external_refs++;
+    }
+    return true;
+  }
+  bool rem( uint32_t flags,  uint32_t tport_id ) {
+    if ( ( flags & INTERNAL_SUB ) != 0 ) {
+      if ( this->internal_ref == 0 )
+        return false;
+      this->internal_ref = 0;
+    }
+    else {
+      if ( this->external_refs == 0 )
+        return false;
+      if ( this->tport_mask != ALL_MASK && tport_id < 32 ) {
+        uint32_t mask = 1U << tport_id;
+        if ( ( this->tport_mask & mask ) == 0 )
+          return false;
+        this->tport_mask &= ~mask;
+      }
+      this->external_refs--;
+    }
+    return true;
+  }
+  bool is_empty( void ) const {
+    return ( this->internal_ref == 0 && this->external_refs == 0 );
+  }
+  bool test( uint32_t flags ) const {
+    if ( ( flags & INTERNAL_SUB ) != 0 && this->internal_ref != 0 )
+      return true;
+    if ( ( flags & EXTERNAL_SUB ) != 0 && this->external_refs != 0 )
+      return true;
+    return false;
+  }
+  uint32_t ref_count( void ) const {
+    return this->internal_ref + this->external_refs;
+  }
+};
+
+struct SubArgs {
+  const char * sub;
+  uint16_t     sublen;
+  bool         is_start;
+  SubOnMsg   * cb;
+  uint64_t     seqno;
+  uint32_t     flags,
+               hash,
+               tport_id,
+               sub_count,
+               internal_count,
+               external_count;
+
+  SubArgs( const char *s,  uint16_t len,  bool start,  SubOnMsg *on_msg,
+          uint64_t n,  uint32_t fl,  uint32_t tp ) :
+    sub( s ), sublen( len ), is_start( start ), cb( on_msg ), seqno( n ),
+    flags( fl ), hash( kv_crc_c( s, len, 0 ) ), tport_id( tp ),
+    sub_count( 0 ), internal_count( 0 ), external_count( 0 ) {}
+};
+
 struct SubRoute {
-  uint64_t   start_seqno, /* sequence of subscription start */
-             expires;     /* if time limited subscription */
+  uint64_t   start_seqno; /* sequence of subscription start */
   SubOnMsg * on_data;
+  SubRefs    ref;
   uint32_t   hash;        /* hash crc of the value[] */
   uint16_t   len;
   char       value[ 2 ];
 
-  void start( uint64_t seqno,  SubOnMsg *cb ) {
-    this->start_seqno = seqno;
-    this->expires     = 0;
-    this->on_data     = cb;
+  void start( SubArgs &ctx ) {
+    this->start_seqno = ctx.seqno;
+    this->on_data     = ctx.cb;
+    this->ref.init( ctx.flags, ctx.tport_id );
+    ctx.sub_count      = 1;
+    ctx.internal_count = this->ref.internal_ref;
+    ctx.external_count = this->ref.external_refs;
+  }
+  bool add( SubArgs &ctx ) {
+    if ( this->ref.add( ctx.flags, ctx.tport_id ) ) {
+      if ( ( ctx.flags & INTERNAL_SUB ) != 0 )
+        this->on_data = ctx.cb;
+      ctx.sub_count      = this->ref.ref_count();
+      ctx.internal_count = this->ref.internal_ref;
+      ctx.external_count = this->ref.external_refs;
+      ctx.seqno          = this->start_seqno;
+      return true;
+    }
+    return false;
+  }
+  bool rem( SubArgs &ctx ) {
+    if ( this->ref.rem( ctx.flags, ctx.tport_id ) ) {
+      if ( ( ctx.flags & INTERNAL_SUB ) != 0 )
+        this->on_data = NULL;
+      ctx.sub_count      = this->ref.ref_count();
+      ctx.internal_count = this->ref.internal_ref;
+      ctx.external_count = this->ref.external_refs;
+      if ( ctx.sub_count == 0 )
+        return true;
+      ctx.seqno = this->start_seqno;
+    }
+    return false;
+  }
+  bool test( uint32_t flags ) const {
+    return this->ref.test( flags );
   }
 };
 
@@ -68,30 +190,33 @@ struct SubTab {
 
   SubTab( SubList &l ) : list( l ) {}
 
-  SubStatus start( uint32_t h,  const char *sub,  size_t sublen,
-                   uint64_t seqno,  SubOnMsg *cb ) {
+  SubStatus start( SubArgs &ctx ) {
     kv::RouteLoc loc;
-    SubRoute *rt = this->tab.upsert( h, sub, sublen, loc );
+    SubRoute *rt = this->tab.upsert( ctx.hash, ctx.sub, ctx.sublen, loc );
     if ( rt == NULL )
       return SUB_ERROR;
     if ( loc.is_new ) {
-      rt->start( seqno, cb );
-      this->list.push( seqno, h, ACTION_SUB_JOIN );
+      rt->start( ctx );
+      this->list.push( ctx.seqno, ctx.hash, ACTION_SUB_JOIN );
       return SUB_OK;
     }
+    if ( rt->add( ctx ) )
+      return SUB_UPDATED;
     return SUB_EXISTS;
   }
 
-  SubStatus stop( uint32_t h,  const char *sub,  size_t sublen ) {
+  SubStatus stop( SubArgs &ctx ) {
     kv::RouteLoc loc;
-    SubRoute *rt = this->tab.find( h, sub, sublen, loc );
+    SubRoute *rt = this->tab.find( ctx.hash, ctx.sub, ctx.sublen, loc );
     if ( rt == NULL ) {
-      printf( "\"%.*s\" not found\n", (int) sublen, sub );
+      printf( "\"%.*s\" not found\n", (int) ctx.sublen, ctx.sub );
       return SUB_NOT_FOUND;
     }
+    if ( ! rt->rem( ctx ) )
+      return SUB_UPDATED;
     if ( ! this->list.pop( rt->start_seqno ) ) {
       printf( "stop %.*s seqno %lu not found\n", 
-              (int) sublen, sub, rt->start_seqno );
+              (int) ctx.sublen, ctx.sub, rt->start_seqno );
     }
     this->tab.remove( loc );
     return SUB_OK;
@@ -114,15 +239,18 @@ struct SubTab {
 };
 
 struct Pub {
-  uint64_t seqno;
+  int64_t  seqno;
   uint32_t hash;
   uint16_t len;
   char     value[ 2 ]; /* prefix */
   
-  void init( void ) {
-    this->seqno = 0;
+  void init( bool is_inbox ) {
+    this->seqno = ( is_inbox ? -1 : 0 );
   }
-  uint64_t next_seqno( void ) {
+  bool is_inbox( void ) const {
+    return this->seqno < 0;
+  }
+  int64_t next_seqno( void ) {
     return ++this->seqno;
   }
 };
@@ -158,8 +286,12 @@ typedef kv::IntHashTabT<uint32_t,SeqnoSave> UidSeqno;
 enum SeqnoStatus {
   SEQNO_UID_FIRST  = 0, /* first time uid published */
   SEQNO_UID_NEXT   = 1, /* is next in the sequnce */
-  SEQNO_UID_REPEAT = 2  /* is a repeated sequence */
+  SEQNO_UID_REPEAT = 2, /* is a repeated sequence */
+  SEQNO_NOT_SUBSCR = 3, /* subscription not matched */
+  SEQNO_ERROR      = 4
 };
+
+const char *seqno_status_string( SeqnoStatus status ) noexcept;
 
 struct SubSeqno {
   uint32_t   hash,        /* hash of subject */
@@ -167,21 +299,24 @@ struct SubSeqno {
   uint64_t   last_seqno,  /* seqno of last msg used by uid */
              last_time,   /* time of last msg */
              start_seqno, /* the seqno of the sub start */
-             sub_seqno;   /* the seqno when the sub was matched */
-  SubOnMsg * on_data;
+             update_seqno;/* the seqno when the sub was matched */
+  SubOnMsg * on_data;     /* callback cached */
   UidSeqno * seqno_ht;    /* uid -> to saved seqno/time pairs */
+  uint32_t   tport_mask;  /* tport cached */
   uint16_t   len;         /* len of subject */
   char       value[ 2 ];  /* subject */
 
   SeqnoStatus init( uint32_t uid,  uint64_t seqno,  uint64_t start,
-                    uint64_t time,  uint64_t sub_sno,  SubOnMsg *cb ) {
-    this->last_uid    = uid;
-    this->last_seqno  = seqno;
-    this->last_time   = time;
-    this->start_seqno = start;
-    this->sub_seqno   = sub_sno;
-    this->on_data     = cb;
-    this->seqno_ht    = NULL;
+                    uint64_t time,  uint64_t upd_sno,  SubOnMsg *cb,
+                    uint32_t mask ) {
+    this->last_uid     = uid;
+    this->last_seqno   = seqno;
+    this->last_time    = time;
+    this->start_seqno  = start;
+    this->update_seqno = upd_sno;
+    this->on_data      = cb;
+    this->seqno_ht     = NULL;
+    this->tport_mask   = mask;
     return SEQNO_UID_FIRST;
   }
   /* check that seqno is next published by uid (or first) */
@@ -220,6 +355,20 @@ struct SubSeqno {
     if ( this->seqno_ht != NULL )
       delete this->seqno_ht;
   }
+};
+
+struct SeqnoArgs {
+  const MsgFramePublish & pub;
+  uint64_t   time,        /* message time */
+             last_seqno,  /* last message seqno */
+             last_time,   /* last message time */
+             start_seqno; /* subscription start */
+  SubOnMsg * cb;          /* callback for subscription */
+  uint32_t   tport_mask;  /* tports matched */
+
+  SeqnoArgs( const MsgFramePublish &p )
+    : pub( p ), time( 0 ), last_seqno( 0 ), last_time( 0 ), start_seqno( 0 ),
+      cb( 0 ), tport_mask( 0 ) {}
 };
 
 struct InboxSub {
@@ -276,42 +425,67 @@ struct UserBridge;
 struct SubDB {
   UserDB     & user_db;
   SessionMgr & mgr;
-  uint32_t     my_src_fd,      /* subs routed to my_src_fd */
-               next_inbox;     /* next inbox sub free */
-  uint64_t     sub_seqno,      /* sequence number for my subs */
+  uint32_t     my_src_fd,    /* subs routed to my_src_fd */
+               next_inbox;   /* next inbox sub free */
+  uint64_t     sub_seqno,    /* sequence number for my subs */
+               update_seqno, /* sequence number updated for ext and int subs */
                sub_update_mono_time; /* last time any sub recvd */
-  SeqnoTab     seqno_tab;      /* sub -> seqno, time */
-  InboxTab     inbox_tab;      /* inbox -> seqno, time */
-  SubTab       sub_tab;        /* subject -> { state, seqno } */
-  PatTab       pat_tab;        /* pattern -> { state, seqno } */
-  SubList      sub_list;       /* list of { seqno, subscriptions } */
-  PubTab       pub_tab;        /* subject -> seqno */
+  SeqnoTab     seqno_tab;    /* sub -> seqno, time */
+  InboxTab     inbox_tab;    /* inbox -> seqno, time */
+  SubTab       sub_tab;      /* subject -> { state, seqno } */
+  PatTab       pat_tab;      /* pattern -> { state, seqno } */
+  SubList      sub_list;     /* list of { seqno, subscriptions } */
+  PubTab       pub_tab;      /* subject -> seqno */
   AnyMatchTab  any_tab;
-  kv::BloomRef bloom;
+  kv::BloomRef bloom,
+               internal,
+               external;
 
   SubDB( kv::EvPoll &p,  UserDB &udb,  SessionMgr &smg ) noexcept;
 
   void init( uint32_t src_fd ) {
     this->my_src_fd = src_fd;
     this->sub_seqno = 0;
+    this->update_seqno = 0;
     this->sub_update_mono_time = 0;
   }
+  uint64_t sub_start( SubArgs &ctx ) noexcept;
+  uint64_t sub_stop( SubArgs &ctx ) noexcept;
+  void update_bloom( SubArgs &ctx ) noexcept;
   /* start a new sub for this session */
-  uint64_t sub_start( const char *sub,  size_t sublen,
-                      SubOnMsg *cb ) noexcept;
-  uint64_t sub_stop( const char *sub,  size_t sublen ) noexcept;
+  uint64_t internal_sub_start( const char *sub,  uint16_t sublen,
+                               SubOnMsg *cb ) noexcept;
+  uint64_t internal_sub_stop( const char *sub,  uint16_t sublen ) noexcept;
   /* start a new pattern sub for this session */
-  uint64_t psub_start( const char *pat,  size_t patlen,
-                       WildFmt fmt,  SubOnMsg *cb ) noexcept;
-  uint64_t psub_stop( const char *pat,  size_t patlen,  WildFmt fmt ) noexcept;
+  uint64_t internal_psub_start( const char *pat,  uint16_t patlen,
+                                kv::PatternFmt fmt,  SubOnMsg *cb ) noexcept;
+  uint64_t internal_psub_stop( const char *pat,  uint16_t patlen,
+                               kv::PatternFmt fmt ) noexcept;
 
   uint32_t inbox_start( uint32_t inbox_num,  SubOnMsg *cb ) noexcept;
+
+  uint64_t psub_start( PatternArgs &ctx ) noexcept;
+  uint64_t psub_stop( PatternArgs &ctx ) noexcept;
+  void update_bloom( PatternArgs &ctx ) noexcept;
+  bool add_bloom( PatternArgs &ctx,  kv::BloomRef &b ) noexcept;
+  void del_bloom( PatternArgs &ctx,  kv::BloomRef &b ) noexcept;
+
+  /* start a new sub for external tport */
+  uint64_t external_sub_start( kv::NotifySub &sub, uint32_t tport_id ) noexcept;
+  uint64_t external_sub_stop( kv::NotifySub &sub,  uint32_t tport_id ) noexcept;
+  /* start a new pattern sub external tport */
+  uint64_t external_psub_start( kv::NotifyPattern &pat,
+                                uint32_t tport_id ) noexcept;
+  uint64_t external_psub_stop( kv::NotifyPattern &pat,
+                               uint32_t tport_id ) noexcept;
+  SeqnoStatus match_seqno( SeqnoArgs &ctx ) noexcept;
+  bool match_subscription( SeqnoArgs &ctx ) noexcept;
 
   void resize_bloom( void ) noexcept;
 
   static void print_bloom( kv::BloomBits &bits ) noexcept;
 
-  void index_bloom( kv::BloomBits &bits ) noexcept;
+  void index_bloom( kv::BloomBits &bits,  uint32_t flags ) noexcept;
 
     /* sub start stop */
   bool recv_sub_start( const MsgFramePublish &pub,  UserBridge &n,
@@ -328,9 +502,8 @@ struct SubDB {
   bool recv_psub_stop( const MsgFramePublish &pub,  UserBridge &n,
                        const MsgHdrDecoder &dec ) noexcept;
   /* subscripiont start forward */
-  void fwd_sub( const char *psub,  size_t psublen,  const char *sub,
-                size_t sublen,  uint32_t hash,  bool is_start ) noexcept;
-  void fwd_psub( PatCtx &ctx ) noexcept;
+  void fwd_sub( SubArgs &ctx ) noexcept;
+  void fwd_psub( PatternArgs &ctx ) noexcept;
   /* reassert subscription forward */
   bool fwd_resub( UserBridge &n,  const char *sub,  size_t sublen,
                   uint64_t from_seqno,  uint64_t seqno,  bool is_psub,
@@ -354,8 +527,6 @@ struct SubDB {
                           const MsgHdrDecoder &dec ) noexcept;
   bool recv_subs_request( const MsgFramePublish &pub,  UserBridge &n,
                           const MsgHdrDecoder &dec ) noexcept;
-  bool match_subscription( const MsgFramePublish &pub,
-                           uint64_t &seqno,  SubOnMsg *&cb ) noexcept;
   SubOnMsg *match_any_sub( const char *sub,  uint16_t sublen ) noexcept;
 
   UserBridge *any_match( const char *sub,  uint16_t sublen,

@@ -12,31 +12,159 @@ using namespace kv;
 using namespace md;
 
 uint64_t
-SubDB::psub_start( const char *pat,  size_t patlen,  WildFmt fmt,
-                   SubOnMsg *cb ) noexcept
+SubDB::psub_start( PatternArgs &ctx ) noexcept
 {
-  PatCtx ctx( pat, patlen, fmt, true, cb, this->sub_seqno + 1 );
-  if ( this->pat_tab.start( ctx ) == SUB_OK ) {
-    this->fwd_psub( ctx );
-    return this->sub_seqno;
+  SubStatus status = this->pat_tab.start( ctx );
+  if ( status == SUB_OK || status == SUB_UPDATED ) {
+    this->update_bloom( ctx );
+    if ( status == SUB_OK ) {
+      this->fwd_psub( ctx );
+      return this->sub_seqno;
+    }
+    if ( status == SUB_UPDATED )
+      return ctx.seqno;
   }
   return 0;
 }
 
 uint64_t
-SubDB::psub_stop( const char *pat,  size_t patlen,  WildFmt fmt ) noexcept
+SubDB::psub_stop( PatternArgs &ctx ) noexcept
 {
-  PatCtx ctx( pat, patlen, fmt, false, NULL, 0 );
-  if ( this->pat_tab.stop( ctx ) == SUB_OK ) {
-    this->fwd_psub( ctx );
-    this->pat_tab.remove( ctx );
-    return this->sub_seqno;
+  SubStatus status = this->pat_tab.stop( ctx );
+  if ( status == SUB_OK || status == SUB_UPDATED ) {
+    this->update_bloom( ctx );
+    if ( status == SUB_OK ) {
+      this->fwd_psub( ctx );
+      this->pat_tab.remove( ctx );
+      return this->sub_seqno;
+    }
+    if ( status == SUB_UPDATED )
+      return ctx.seqno;
   }
   return 0;
 }
 
+bool
+SubDB::add_bloom( PatternArgs &ctx,  BloomRef &b ) noexcept
+{
+  bool rsz = false;
+  if ( ctx.rt->detail_type == NO_DETAIL )
+    rsz = b.add_route( ctx.cvt.prefixlen, ctx.hash );
+  else if ( ctx.rt->detail_type == SUFFIX_MATCH )
+    rsz = b.add_suffix_route( ctx.cvt.prefixlen, ctx.hash, ctx.rt->u.suffix );
+  else if ( ctx.rt->detail_type == SHARD_MATCH )
+    rsz = b.add_shard_route( ctx.cvt.prefixlen, ctx.hash, ctx.rt->u.shard );
+  else
+    fprintf( stderr, "bad detail\n" );
+  return rsz;
+}
+
 void
-SubDB::fwd_psub( PatCtx &ctx ) noexcept
+SubDB::del_bloom( PatternArgs &ctx,  BloomRef &b ) noexcept
+{
+  if ( ctx.rt->detail_type == NO_DETAIL )
+    b.del_route( ctx.cvt.prefixlen, ctx.hash );
+  else if ( ctx.rt->detail_type == SUFFIX_MATCH )
+    b.del_suffix_route( ctx.cvt.prefixlen, ctx.hash, ctx.rt->u.suffix );
+  else if ( ctx.rt->detail_type == SHARD_MATCH )
+    b.del_shard_route( ctx.cvt.prefixlen, ctx.hash, ctx.rt->u.shard );
+  else
+    fprintf( stderr, "bad detail\n" );
+}
+
+void
+SubDB::update_bloom( PatternArgs &ctx ) noexcept
+{
+  bool rsz = false;
+  this->update_seqno++;
+  if ( ctx.is_start ) {
+    if ( ctx.sub_count == 1 )
+      rsz = this->add_bloom( ctx, this->bloom );
+    if ( ( ctx.flags & INTERNAL_SUB ) != 0 && ctx.internal_count == 1 )
+      rsz |= this->add_bloom( ctx, this->internal );
+    if ( ( ctx.flags & EXTERNAL_SUB ) != 0 && ctx.external_count == 1 )
+      rsz |= this->add_bloom( ctx, this->external );
+  }
+  else {
+    if ( ctx.sub_count == 0 )
+      this->del_bloom( ctx, this->bloom );
+    if ( ( ctx.flags & INTERNAL_SUB ) != 0 && ctx.internal_count == 0 )
+      this->del_bloom( ctx, this->internal );
+    if ( ( ctx.flags & EXTERNAL_SUB ) != 0 && ctx.external_count == 0 )
+      this->del_bloom( ctx, this->external );
+  }
+  if ( rsz )
+    this->resize_bloom();
+}
+
+static bool
+cvt_wild( PatternCvt &cvt,  const char *pat,  uint16_t patlen,
+          const uint32_t *seed,  PatternFmt fmt,  uint32_t &hash ) noexcept
+{
+  if ( fmt == RV_PATTERN_FMT ) {
+    if ( cvt.convert_rv( pat, patlen ) != 0 ) {
+      fprintf( stderr, "bad pattern: %.*s\n", (int) patlen, pat );
+      return false;
+    }
+  }
+  else if ( fmt == GLOB_PATTERN_FMT ) {
+    if ( cvt.convert_glob( pat, patlen ) != 0 ) {
+      fprintf( stderr, "bad pattern: %.*s\n", (int) patlen, pat );
+      return false;
+    }
+  }
+  else {
+    fprintf( stderr, "bad pattern fmt(%u): %.*s\n", fmt,
+             (int) patlen, pat );
+    return false;
+  }
+  hash = kv_crc_c( pat, cvt.prefixlen, seed[ cvt.prefixlen ] );
+  return true;
+}
+
+uint64_t
+SubDB::internal_psub_start( const char *pat,  uint16_t patlen,  PatternFmt fmt,
+                            SubOnMsg *cb ) noexcept
+{
+  PatternCvt cvt;
+  PatternArgs ctx( pat, patlen, cvt, true, cb, this->sub_seqno + 1,
+                   INTERNAL_SUB, 0 );
+  if ( ! cvt_wild( cvt, pat, patlen, this->pat_tab.seed, fmt, ctx.hash ) )
+    return 0;
+  return this->psub_start( ctx );
+}
+
+uint64_t
+SubDB::internal_psub_stop( const char *pat,  uint16_t patlen,
+                           PatternFmt fmt ) noexcept
+{
+  PatternCvt cvt;
+  PatternArgs ctx( pat, patlen, cvt, false, NULL, 0, INTERNAL_SUB, 0 );
+  if ( ! cvt_wild( cvt, pat, patlen, this->pat_tab.seed, fmt, ctx.hash ) )
+    return 0;
+  return this->psub_stop( ctx );
+}
+
+uint64_t
+SubDB::external_psub_start( NotifyPattern &pat,  uint32_t tport_id ) noexcept
+{
+  PatternArgs ctx( pat.pattern, pat.pattern_len, pat.cvt, true, NULL,
+                   this->sub_seqno + 1, EXTERNAL_SUB, tport_id );
+  ctx.hash = pat.prefix_hash;
+  return this->psub_start( ctx );
+}
+
+uint64_t
+SubDB::external_psub_stop( NotifyPattern &pat,  uint32_t tport_id ) noexcept
+{
+  PatternArgs ctx( pat.pattern, pat.pattern_len, pat.cvt, false, NULL, 0,
+                   EXTERNAL_SUB, tport_id );
+  ctx.hash = pat.prefix_hash;
+  return this->psub_stop( ctx );
+}
+
+void
+SubDB::fwd_psub( PatternArgs &ctx ) noexcept
 {
   const char * sub_prefix = ( ctx.is_start ? P_PSUB : P_PSTOP );
   size_t       sub_prelen = ( ctx.is_start ? P_PSUB_SZ : P_PSTOP_SZ );
@@ -54,95 +182,32 @@ SubDB::fwd_psub( PatCtx &ctx ) noexcept
   m.open( this->user_db.bridge_id.nonce, s.len() )
    .seqno    ( ++this->sub_seqno )
    .pattern  ( ctx.pat, ctx.patlen )
-   .fmt      ( (uint32_t) ctx.fmt )
-   .ref_count( ctx.count );
+   .fmt      ( (uint32_t) ctx.cvt.fmt );
   uint32_t h = s.hash();
   m.close( e.sz, h, CABA_RTR_ALERT );
   m.sign( s.msg, s.len(), *this->user_db.session_key );
 
-  EvPublish pub( s.msg, s.len(), NULL, 0, m.msg, m.len(), this->my_src_fd, h,
-                 NULL, 0, (uint8_t) MSG_BUF_TYPE_ID, 'p' );
-  uint32_t rcnt;
-  bool     rsz = false;
-
-  d_sub( "psub(%.*s) %lu", (int) ctx.patlen, ctx.pat, ctx.cvt.prefixlen );
-  if ( ctx.is_start ) {
-    if ( ctx.rt->detail_type == NO_DETAIL )
-      rsz = this->bloom.add_route( ctx.cvt.prefixlen, ctx.hash );
-    else if ( ctx.rt->detail_type == SUFFIX_MATCH )
-      rsz = this->bloom.add_suffix_route( ctx.cvt.prefixlen, ctx.hash,
-                                          ctx.rt->u.suffix );
-    else if ( ctx.rt->detail_type == SHARD_MATCH )
-      rsz = this->bloom.add_shard_route( ctx.cvt.prefixlen, ctx.hash,
-                                         ctx.rt->u.shard );
-    else {
-      fprintf( stderr, "bad detail\n" );
-      rsz = false;
-    }
-  }
-  else {
-    if ( ctx.rt->detail_type == NO_DETAIL )
-      this->bloom.del_route( ctx.cvt.prefixlen, ctx.hash );
-    else if ( ctx.rt->detail_type == SUFFIX_MATCH )
-      this->bloom.del_suffix_route( ctx.cvt.prefixlen, ctx.hash,
-                                    ctx.rt->u.suffix );
-    else if ( ctx.rt->detail_type == SHARD_MATCH )
-      this->bloom.del_shard_route( ctx.cvt.prefixlen, ctx.hash,
-                                   ctx.rt->u.shard );
-    else {
-      fprintf( stderr, "bad detail\n" );
-    }
-  }
+  d_sub( "psub(%.*s) %lu\n", (int) ctx.patlen, ctx.pat, ctx.cvt.prefixlen );
   size_t count = this->user_db.transport_tab.count;
   for ( size_t i = 0; i < count; i++ ) {
     TransportRoute *rte = this->user_db.transport_tab.ptr[ i ];
-    rcnt = rte->sub_route.get_route_count( ctx.cvt.prefixlen, ctx.hash );
-    if ( ctx.is_start ) {
-      rte->sub_route.notify_psub( ctx.hash, ctx.cvt.out, ctx.cvt.off,
-                                  ctx.pat, ctx.cvt.prefixlen,
-                                  this->my_src_fd, ctx.count + rcnt, 's' );
-    }
-    else {
-      rte->sub_route.notify_punsub( ctx.hash, ctx.cvt.out, ctx.cvt.off,
-                                    ctx.pat, ctx.cvt.prefixlen,
-                                    this->my_src_fd, ctx.count + rcnt, 's' );
-    }
-    rte->forward_to_connected_auth( pub );
-  }
-  if ( rsz )
-    this->resize_bloom();
-}
-
-bool
-PatCtx::cvt_wild( const uint32_t *seed ) noexcept
-{
-  if ( this->fmt == RV_WILD_FMT ) {
-    if ( this->cvt.convert_rv( this->pat, this->patlen ) != 0 ) {
-      fprintf( stderr, "bad pattern: %.*s\n", (int) this->patlen, this->pat );
-      return false;
+    if ( ! rte->is_set( TPORT_IS_EXTERNAL ) ) {
+      NotifyPattern npat( ctx.cvt, ctx.pat, ctx.patlen, ctx.hash,
+                          this->my_src_fd, false, 'M' );
+      if ( ctx.is_start )
+        rte->sub_route.do_notify_psub( npat );
+      else
+        rte->sub_route.do_notify_punsub( npat );
+      EvPublish pub( s.msg, s.len(), NULL, 0, m.msg, m.len(),
+                     rte->sub_route, this->my_src_fd, h, CABA_TYPE_ID, 'p' );
+      rte->forward_to_connected_auth( pub );
     }
   }
-  else if ( this->fmt == GLOB_WILD_FMT ) {
-    if ( this->cvt.convert_glob( this->pat, this->patlen ) != 0 ) {
-      fprintf( stderr, "bad pattern: %.*s\n", (int) this->patlen, this->pat );
-      return false;
-    }
-  }
-  else {
-    fprintf( stderr, "bad pattern fmt(%u): %.*s\n", this->fmt,
-             (int) this->patlen, this->pat );
-    return false;
-  }
-  this->hash = kv_crc_c( this->pat, this->cvt.prefixlen,
-                         seed[ this->cvt.prefixlen ] );
-  return true;
 }
 
 SubStatus
-PatTab::start( PatCtx &ctx ) noexcept
+PatTab::start( PatternArgs &ctx ) noexcept
 {
-  if ( ! ctx.cvt_wild( this->seed ) )
-    return SUB_ERROR;
   ctx.rt = this->tab.upsert( ctx.hash, ctx.pat, ctx.patlen, ctx.loc );
   if ( ctx.rt == NULL )
     return SUB_ERROR;
@@ -152,35 +217,34 @@ PatTab::start( PatCtx &ctx ) noexcept
       return SUB_ERROR;
     }
     this->list.push( ctx.seqno, ctx.hash, ACTION_PSUB_START );
-    this->prefix_count( ctx );
     return SUB_OK;
   }
+  if ( ctx.rt->add( ctx ) )
+    return SUB_UPDATED;
   return SUB_EXISTS;
 }
 
 SubStatus
-PatTab::stop( PatCtx &ctx ) noexcept
+PatTab::stop( PatternArgs &ctx ) noexcept
 {
-  if ( ! ctx.cvt_wild( this->seed ) )
-    return SUB_ERROR;
   ctx.rt = this->tab.find( ctx.hash, ctx.pat, ctx.patlen, ctx.loc );
   if ( ctx.rt == NULL )
     return SUB_NOT_FOUND;
-  this->prefix_count( ctx );
-  ctx.count -= 1;
+  if ( ! ctx.rt->rem( ctx ) )
+    return SUB_UPDATED;
   return SUB_OK;
 }
 
 void
-PatTab::remove( PatCtx &ctx ) noexcept
+PatTab::remove( PatternArgs &ctx ) noexcept
 {
   this->list.pop( ctx.rt->start_seqno );
   ctx.rt->release();
   this->tab.remove( ctx.loc );
 }
-
+#if 0
 void
-PatTab::prefix_count( PatCtx &ctx ) noexcept
+PatTab::prefix_count( PatternArgs &ctx ) noexcept
 {
   RouteLoc   loc;
   PatRoute * rt = this->tab.find_by_hash( ctx.hash, loc );
@@ -193,7 +257,7 @@ PatTab::prefix_count( PatCtx &ctx ) noexcept
     rt = this->tab.find_next_by_hash( ctx.hash, loc );
   }
 }
-
+#endif
 PatRoute *
 PatTab::find_sub( uint32_t hash, uint64_t seqno ) noexcept
 {
@@ -234,18 +298,19 @@ PatTab::release( void ) noexcept
 }
 
 bool
-PatRoute::start( PatCtx &ctx ) noexcept
+PatRoute::start( PatternArgs &ctx ) noexcept
 {
   size_t erroff;
   int    error;
   bool   pattern_success = false;
   this->re = NULL;
   this->md = NULL;
-  this->on_data = ctx.cb;
   /* if prefix matches, no need for pcre2 */
   if ( ctx.cvt.prefixlen + 1 == ctx.patlen &&
-       ( ( ctx.fmt == RV_WILD_FMT && ctx.pat[ ctx.cvt.prefixlen ] == '>' ) ||
-         ( ctx.fmt == GLOB_WILD_FMT && ctx.pat[ ctx.cvt.prefixlen ] == '*' ) ) )
+       ( ( ctx.cvt.fmt == RV_PATTERN_FMT &&
+           ctx.pat[ ctx.cvt.prefixlen ] == '>' ) ||
+         ( ctx.cvt.fmt == GLOB_PATTERN_FMT &&
+           ctx.pat[ ctx.cvt.prefixlen ] == '*' ) ) )
     pattern_success = true;
   else {
     this->re = pcre2_compile( (uint8_t *) ctx.cvt.out, ctx.cvt.off, 0, &error,
@@ -262,17 +327,50 @@ PatRoute::start( PatCtx &ctx ) noexcept
     }
   }
   if ( pattern_success && this->from_pattern( ctx.cvt ) ) {
-    this->start_seqno = ctx.seqno;
-    this->expires     = 0;
-    this->ref_index   = 0;
     this->prefix_len  = ctx.cvt.prefixlen;
-
+    this->start_seqno = ctx.seqno;
+    this->on_data     = ctx.cb;
+    this->ref.init( ctx.flags, ctx.tport_id );
+    ctx.sub_count      = 1;
+    ctx.internal_count = this->ref.internal_ref;
+    ctx.external_count = this->ref.external_refs;
     return true;
   }
   if ( this->md != NULL )
     pcre2_match_data_free( this->md );
   if ( this->re != NULL )
     pcre2_code_free( this->re );
+  return false;
+}
+
+bool
+PatRoute::add( PatternArgs &ctx ) noexcept
+{
+  if ( this->ref.add( ctx.flags, ctx.tport_id ) ) {
+    if ( ( ctx.flags & INTERNAL_SUB ) != 0 )
+      this->on_data = ctx.cb;
+    ctx.sub_count      = this->ref.ref_count();
+    ctx.internal_count = this->ref.internal_ref;
+    ctx.external_count = this->ref.external_refs;
+    ctx.seqno          = this->start_seqno;
+    return true;
+  }
+  return false;
+}
+
+bool
+PatRoute::rem( PatternArgs &ctx ) noexcept
+{
+  if ( this->ref.rem( ctx.flags, ctx.tport_id ) ) {
+    if ( ( ctx.flags & INTERNAL_SUB ) != 0 )
+      this->on_data = NULL;
+    ctx.sub_count      = this->ref.ref_count();
+    ctx.internal_count = this->ref.internal_ref;
+    ctx.external_count = this->ref.external_refs;
+    if ( ctx.sub_count == 0 )
+      return true;
+    ctx.seqno = this->start_seqno;
+  }
   return false;
 }
 
@@ -307,32 +405,35 @@ bool
 SubDB::recv_psub_start( const MsgFramePublish &pub,  UserBridge &n,
                         const MsgHdrDecoder &dec ) noexcept
 {
-  if ( dec.test_3( FID_PATTERN, FID_REF_COUNT, FID_FMT ) ) {
+  if ( dec.test_2( FID_PATTERN, FID_FMT ) ) {
     UserRoute      & u_rte  = *n.user_route;
     TransportRoute & rte    = u_rte.rte;
+    PatternCvt       cvt;
     BloomDetail      d;
-    uint32_t         rcnt, cnt, fmt;
+    uint32_t         fmt;
 
-    dec.get_ival<uint32_t>( FID_REF_COUNT, cnt );
     dec.get_ival<uint32_t>( FID_FMT, fmt );
 
-    PatCtx ctx( (const char *) dec.mref[ FID_PATTERN ].fptr,
-                dec.mref[ FID_PATTERN ].fsize, (WildFmt) fmt, true, NULL, 0 );
-
-    if ( ! ctx.cvt_wild( this->pat_tab.seed ) )
+    PatternArgs ctx( (const char *) dec.mref[ FID_PATTERN ].fptr,
+                     dec.mref[ FID_PATTERN ].fsize, cvt,
+                     true, NULL, 0, 0, 0 );
+    if ( ! cvt_wild( cvt, ctx.pat, ctx.patlen, this->pat_tab.seed,
+                     (PatternFmt) fmt, ctx.hash ) )
       return true;
-    rcnt = rte.sub_route.get_route_count( ctx.cvt.prefixlen, ctx.hash ) + 1;
     if ( d.from_pattern( ctx.cvt ) ) {
-      if ( d.detail_type == NO_DETAIL )
+      if ( d.detail_type == NO_DETAIL ) {
         n.bloom.add_route( ctx.cvt.prefixlen, ctx.hash );
-      else if ( d.detail_type == SUFFIX_MATCH )
+      }
+      else if ( d.detail_type == SUFFIX_MATCH ) {
         n.bloom.add_suffix_route( ctx.cvt.prefixlen, ctx.hash, d.u.suffix );
-      else if ( d.detail_type == SHARD_MATCH )
+      }
+      else if ( d.detail_type == SHARD_MATCH ) {
         n.bloom.add_shard_route( ctx.cvt.prefixlen, ctx.hash, d.u.shard );
+      }
     }
-    rte.sub_route.notify_psub( ctx.hash, ctx.cvt.out, ctx.cvt.off, ctx.pat,
-                               ctx.cvt.prefixlen, u_rte.mcast_fd,
-                               rcnt + ctx.count, 's' );
+    NotifyPattern npat( ctx.cvt, ctx.pat, ctx.patlen, ctx.hash,
+                        u_rte.mcast_fd, false, 'M' );
+    rte.sub_route.do_notify_psub( npat );
     if ( debug_sub )
       n.printf( "psub_start %.*s\n", (int) pub.subject_len, pub.subject );
     this->user_db.forward_pub( pub, n, dec );
@@ -344,32 +445,32 @@ bool
 SubDB::recv_psub_stop( const MsgFramePublish &pub,  UserBridge &n,
                        const MsgHdrDecoder &dec ) noexcept
 {
-  if ( dec.test_3( FID_PATTERN, FID_REF_COUNT, FID_FMT ) ) {
+  if ( dec.test_2( FID_PATTERN, FID_FMT ) ) {
     UserRoute      & u_rte  = *n.user_route;
     TransportRoute & rte    = u_rte.rte;
+    PatternCvt       cvt;
     BloomDetail      d;
-    uint32_t         rcnt, cnt, fmt;
+    uint32_t         fmt;
 
-    dec.get_ival<uint32_t>( FID_REF_COUNT, cnt );
     dec.get_ival<uint32_t>( FID_FMT, fmt );
 
-    PatCtx ctx( (const char *) dec.mref[ FID_PATTERN ].fptr,
-                dec.mref[ FID_PATTERN ].fsize, (WildFmt) fmt, false, NULL, 0 );
-
-    if ( ! ctx.cvt_wild( this->pat_tab.seed ) )
+    PatternArgs ctx( (const char *) dec.mref[ FID_PATTERN ].fptr,
+                     dec.mref[ FID_PATTERN ].fsize, cvt,
+                     false, NULL, 0, 0, 0 );
+    if ( ! cvt_wild( cvt, ctx.pat, ctx.patlen, this->pat_tab.seed,
+                     (PatternFmt) fmt, ctx.hash ) )
       return true;
-    rcnt = rte.sub_route.get_route_count( ctx.cvt.prefixlen, ctx.hash ) - 1;
-    if ( d.from_pattern( ctx.cvt ) ) {
+    if ( d.from_pattern( cvt ) ) {
       if ( d.detail_type == NO_DETAIL )
-        n.bloom.del_route( ctx.cvt.prefixlen, ctx.hash );
+        n.bloom.del_route( cvt.prefixlen, ctx.hash );
       else if ( d.detail_type == SUFFIX_MATCH )
-        n.bloom.del_suffix_route( ctx.cvt.prefixlen, ctx.hash, d.u.suffix );
+        n.bloom.del_suffix_route( cvt.prefixlen, ctx.hash, d.u.suffix );
       else if ( d.detail_type == SHARD_MATCH )
-        n.bloom.del_shard_route( ctx.cvt.prefixlen, ctx.hash, d.u.shard );
+        n.bloom.del_shard_route( cvt.prefixlen, ctx.hash, d.u.shard );
     }
-    rte.sub_route.notify_punsub( ctx.hash, ctx.cvt.out, ctx.cvt.off, ctx.pat,
-                                 ctx.cvt.prefixlen,
-                                 u_rte.mcast_fd, rcnt + cnt, 's' );
+    NotifyPattern npat( cvt, ctx.pat, ctx.patlen, ctx.hash,
+                        u_rte.mcast_fd, false, 'M' );
+    rte.sub_route.do_notify_punsub( npat );
     if ( debug_sub )
       n.printf( "psub_stop %.*s\n", (int) pub.subject_len, pub.subject );
     this->user_db.forward_pub( pub, n, dec );

@@ -148,7 +148,7 @@ struct PgmSendBuf {
 };
 
 struct PgmSock {
-  static const size_t MSG_VEC_SIZE = 4;
+  static const size_t MSG_VEC_SIZE = 16;
   pgm_sock_t            * sock;                /* pgm protocol sock */
   pgm_time_t              timeout_usecs;       /* set to current timeout */
   struct pgm_msgv_t       msgv[ MSG_VEC_SIZE ];/* vector of recv bufs */
@@ -181,6 +181,8 @@ struct PgmSock {
                           mcast_hops;          /* ttl */
   int                     status;              /* current status */
   bool                    is_connected;        /* success opening transport */
+  uint32_t                src_stats[ 64 ],
+                          recv_stats[ 64 ];
 
   PgmSock() noexcept;
   uint64_t my_tsi( void ) const {
@@ -192,6 +194,8 @@ struct PgmSock {
   bool start_pgm( const char *network,  int svc,  int &fd ) noexcept;
   bool fwd_msg( const void *data,  size_t size ) noexcept;
   bool recv_msgs( void ) noexcept;
+  void print_lost( void ) noexcept;
+  void print_stats( void ) noexcept;
   void close_pgm( void ) noexcept;
   void release( void ) noexcept;
   void put_send_window( const void *data,  size_t size,

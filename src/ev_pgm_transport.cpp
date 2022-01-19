@@ -15,7 +15,8 @@ using namespace md;
 EvPgmTransport::EvPgmTransport( EvPoll &p,  TransportRoute &r ) noexcept
     : EvSocket( p, p.register_type( "pgm" ) ), rte( r ),
       recv_highwater( 15 * 1024 ), send_highwater( 31 * 1024 ),
-      notify( 0 ), backpressure( false ), fwd_all_msgs( false )
+      stats_timer( 0 ), notify( 0 ), backpressure( false ),
+      fwd_all_msgs( false )
 {
   static uint64_t pgm_timer_id;
   this->timer_id = ( (uint64_t) this->sock_type << 56 ) |
@@ -70,14 +71,7 @@ EvPgmTransport::on_msg( EvPublish &pub ) noexcept
 {
   if ( pub.src_route == (uint32_t) this->fd )
     return true;
-  /*static uint32_t t1;
-  uint32_t t2 = kv_crc_c( pub.msg, pub.msg_len, 0 ),
-           t3 = t1;
-  t1 = t2;
-  t2 -= t3;
-  if ( t2 == 0 )*/
-  d_pgm( "pgm on_msg( %.*s )\n", (int) pub.subject_len,
-          pub.subject );
+  d_pgm( "pgm on_msg( %.*s )\n", (int) pub.subject_len, pub.subject );
   this->msgs_sent++;
   this->bytes_sent += pub.msg_len;
   if ( pub.msg_len <= this->pgm.geom.max_tsdu ) {
@@ -227,7 +221,7 @@ EvPgmTransport::dispatch_msg( void ) noexcept
   uint16_t     sublen = this->msg_in.msg->sublen;
   uint32_t     h      = this->msg_in.msg->subhash;
   MsgFramePublish pub( sub, sublen, this->msg_in.msg, this->fd, h,
-                       (uint8_t) CABA_TYPE_ID, this->rte );
+                       CABA_TYPE_ID, this->rte, this->rte.sub_route );
   d_pgm( "pgm dispatch( %.*s )\n", (int) pub.subject_len, pub.subject );
   this->backpressure = this->rte.sub_route.forward_not_fd( pub, this->fd );
 }
@@ -269,5 +263,15 @@ EvPgmTransport::timer_expire( uint64_t tid,  uint64_t ) noexcept
   if ( tid != this->timer_id )
     return false;
   this->idle_push( EV_READ_LO );
+  if ( this->pgm.lost_count > 0 )
+    this->pgm.print_lost();
+  if ( debug_pgm ) {
+    uint64_t now = this->poll.current_coarse_ns();
+    if ( this->stats_timer < now ) {
+      static const uint64_t NS = 1000 * 1000 * 1000;
+      this->stats_timer = now + NS;
+      this->pgm.print_stats();
+    }
+  }
   return true;
 }

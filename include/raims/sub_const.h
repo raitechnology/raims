@@ -72,7 +72,8 @@ extern const size_t X_HELLO_SZ,
                     P_PSUB_SZ,
                     P_PSTOP_SZ;
 /* hashes of above */
-extern uint32_t     hello_h, hb_h, bye_h, add_h, del_h, blm_h, adj_h;
+extern uint32_t     hello_h, hb_h, bye_h, add_h, del_h, blm_h, adj_h,
+                    join_h, leave_h, psub_h, pstop_h;
 
 #ifdef DECLARE_SUB_CONST
 
@@ -100,8 +101,8 @@ const size_t        X_HELLO_SZ = sizeof( X_HELLO ) - 1,
                     P_PSUB_SZ  = sizeof( P_PSUB  ) - 1,
                     P_PSTOP_SZ = sizeof( P_PSTOP ) - 1;
 
-uint32_t            hello_h, hb_h, bye_h, add_h, del_h, blm_h, adj_h;
-
+uint32_t            hello_h, hb_h, bye_h, add_h, del_h, blm_h, adj_h,
+                    join_h, leave_h, psub_h, pstop_h;
 #endif
 
 }

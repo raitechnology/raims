@@ -85,12 +85,12 @@ EvTcpTransportListen::release( void ) noexcept
 }
 
 bool
-EvTcpTransportClient::connect( EvConnectionNotify *n ) noexcept
+EvTcpTransportClient::connect( EvTcpTransportParameters &p,
+                               EvConnectionNotify *n ) noexcept
 {
   if ( this->fd != -1 )
     return false;
   this->is_connect = true;
-  EvTcpTransportParameters & p = this->parm;
   if ( EvTcpConnection::connect( *this, p.host, p.port, p.opts ) != 0 )
     return false;
   /*this->tport_count = &this->rte->mgr.user_db.transport_tab.count;
@@ -153,7 +153,8 @@ EvTcpTransport::dispatch_msg( void ) noexcept
   uint16_t     sublen = this->msg_in.msg->sublen;
   uint32_t     h      = this->msg_in.msg->subhash;
   MsgFramePublish pub( sub, sublen, this->msg_in.msg, this->fd, h,
-                       (uint8_t) CABA_TYPE_ID, *this->rte );
+                       (uint8_t) CABA_TYPE_ID, *this->rte,
+                       this->rte->sub_route );
   d_tcp( "ev_tcp(%s) dispatch( %.*s )\n", this->rte->name,
          (int) pub.subject_len, pub.subject );
   this->msgs_recv++;

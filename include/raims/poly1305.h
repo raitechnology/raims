@@ -5,8 +5,8 @@
  * poly1305-donna-unrolled.c from https://github.com/floodyberry/poly1305-donna
  */
 
-#ifndef POLY1305_H
-#define POLY1305_H
+#ifndef __rai__raims__poly1305_h__
+#define __rai__raims__poly1305_h__
 
 #include <stdint.h>
 #include <sys/types.h>

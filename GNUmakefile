@@ -62,14 +62,15 @@ math_lib    := -lm
 thread_lib  := -pthread -lrt
 
 # test submodules exist (they don't exist for dist_rpm, dist_dpkg targets)
-have_md_submodule    := $(shell if [ -f ./raimd/GNUmakefile ]; then echo yes; else echo no; fi )
-have_dec_submodule   := $(shell if [ -f ./raimd/libdecnumber/GNUmakefile ]; then echo yes; else echo no; fi )
-have_kv_submodule    := $(shell if [ -f ./raikv/GNUmakefile ]; then echo yes; else echo no; fi )
-have_ds_submodule    := $(shell if [ -f ./raids/GNUmakefile ]; then echo yes; else echo no; fi )
-have_lc_submodule    := $(shell if [ -f ./linecook/GNUmakefile ]; then echo yes; else echo no; fi )
-have_h3_submodule    := $(shell if [ -f ./raids/h3/GNUmakefile ]; then echo yes; else echo no; fi )
-have_rdb_submodule   := $(shell if [ -f ./raids/rdbparser/GNUmakefile ]; then echo yes; else echo no; fi )
-have_pgm_submodule   := $(shell if [ -f ./openpgm/GNUmakefile ]; then echo yes; else echo no; fi )
+have_md_submodule     := $(shell if [ -f ./raimd/GNUmakefile ]; then echo yes; else echo no; fi )
+have_dec_submodule    := $(shell if [ -f ./raimd/libdecnumber/GNUmakefile ]; then echo yes; else echo no; fi )
+have_kv_submodule     := $(shell if [ -f ./raikv/GNUmakefile ]; then echo yes; else echo no; fi )
+have_ds_submodule     := $(shell if [ -f ./raids/GNUmakefile ]; then echo yes; else echo no; fi )
+have_lc_submodule     := $(shell if [ -f ./linecook/GNUmakefile ]; then echo yes; else echo no; fi )
+have_h3_submodule     := $(shell if [ -f ./raids/h3/GNUmakefile ]; then echo yes; else echo no; fi )
+have_rdb_submodule    := $(shell if [ -f ./raids/rdbparser/GNUmakefile ]; then echo yes; else echo no; fi )
+have_pgm_submodule    := $(shell if [ -f ./openpgm/GNUmakefile ]; then echo yes; else echo no; fi )
+have_sassrv_submodule := $(shell if [ -f ./sassrv/GNUmakefile ]; then echo yes; else echo no; fi )
 
 lnk_lib     := $(libd)/libraims.a
 dlnk_lib    :=
@@ -181,12 +182,26 @@ lnk_lib     += -lopenpgm_st
 dlnk_lib    += -lopenpgm_st
 endif
 
+ifeq (yes,$(have_sassrv_submodule))
+sassrv_lib  := sassrv/$(libd)/libsassrv.a
+sassrv_dll  := sassrv/$(libd)/libsassrv.so
+lnk_lib     += $(sassrv_lib)
+lnk_dep     += $(sassrv_lib)
+dlnk_lib    += -Lsassrv/$(libd) -lsassrv
+dlnk_dep    += $(pgm_dll)
+rpath9       = ,-rpath,$(pwd)/sassrv/$(libd)
+includes    += -Isassrv/include
+else
+lnk_lib     += -lsassrv
+dlnk_lib    += -lsassrv
+endif
+
 lnk_lib     += -lpcre2-32 -lpcre2-8 -lcrypto -llzf
 dlnk_lib    += -lpcre2-32 -lpcre2-8 -lcrypto -llzf
 rpath       := -Wl,-rpath,$(pwd)/$(libd)$(rpath1)$(rpath2)$(rpath3)$(rpath4)$(rpath5)$(rpath6)$(rpath7)$(rpath8)$(rpath9)
 
 .PHONY: everything
-everything: $(kv_lib) $(dec_lib) $(md_lib) $(lc_lib) $(h3_lib) $(rdb_lib) $(ds_lib) $(pgm_lib) all
+everything: $(kv_lib) $(dec_lib) $(md_lib) $(lc_lib) $(h3_lib) $(rdb_lib) $(ds_lib) $(pgm_lib) $(sassrv_lib) all
 
 clean_subs :=
 dlnk_dll_depend :=
@@ -274,9 +289,9 @@ all_depends :=
 gen_files   :=
 
 libraims_files := config user transport ev_tcp_transport ev_pgm_transport \
-                 pgm_sock ev_inbox_transport ev_telnet msg session heartbeat \
-                 user_db auth peer link_state sub pat crypt ecdh rsa \
-                 gen_config console poly1305
+                 pgm_sock ev_inbox_transport ev_telnet ev_rv_transport \
+		 msg session heartbeat user_db auth peer link_state sub \
+		 pat crypt poly1305 ec25519 ed25519 gen_config console
 libraims_objs  := $(addprefix $(objd)/, $(addsuffix .o, $(libraims_files)))
 libraims_dbjs  := $(addprefix $(objd)/, $(addsuffix .fpic.o, $(libraims_files)))
 libraims_deps  := $(addprefix $(dependd)/, $(addsuffix .d, $(libraims_files))) \
@@ -346,27 +361,49 @@ $(bind)/polytest: $(polytest_objs) $(polytest_libs) $(lnk_dep)
 all_exes    += $(bind)/polytest
 all_depends += $(polytest_deps)
 
-ecdhtest_files := ecdhtest
-ecdhtest_objs  := $(addprefix $(objd)/, $(addsuffix .o, $(ecdhtest_files)))
-ecdhtest_deps  := $(addprefix $(dependd)/, $(addsuffix .d, $(ecdhtest_files)))
-ecdhtest_libs  :=
-ecdhtest_lnk   := $(lnk_lib)
+#ecdhtest_files := ecdhtest
+#ecdhtest_objs  := $(addprefix $(objd)/, $(addsuffix .o, $(ecdhtest_files)))
+#ecdhtest_deps  := $(addprefix $(dependd)/, $(addsuffix .d, $(ecdhtest_files)))
+#ecdhtest_libs  :=
+#ecdhtest_lnk   := $(lnk_lib)
 
-$(bind)/ecdhtest: $(ecdhtest_objs) $(ecdhtest_libs) $(lnk_dep)
+#$(bind)/ecdhtest: $(ecdhtest_objs) $(ecdhtest_libs) $(lnk_dep)
 
-all_exes    += $(bind)/ecdhtest
-all_depends += $(ecdhtest_deps)
+#all_exes    += $(bind)/ecdhtest
+#all_depends += $(ecdhtest_deps)
 
-rsatest_files := rsatest
-rsatest_objs  := $(addprefix $(objd)/, $(addsuffix .o, $(rsatest_files)))
-rsatest_deps  := $(addprefix $(dependd)/, $(addsuffix .d, $(rsatest_files)))
-rsatest_libs  :=
-rsatest_lnk   := $(lnk_lib)
+curvetest_files := curvetest
+curvetest_objs  := $(addprefix $(objd)/, $(addsuffix .o, $(curvetest_files)))
+curvetest_deps  := $(addprefix $(dependd)/, $(addsuffix .d, $(curvetest_files)))
+curvetest_libs  :=
+curvetest_lnk   := $(lnk_lib)
 
-$(bind)/rsatest: $(rsatest_objs) $(rsatest_libs) $(lnk_dep)
+$(bind)/curvetest: $(curvetest_objs) $(curvetest_libs) $(lnk_dep)
 
-all_exes    += $(bind)/rsatest
-all_depends += $(rsatest_deps)
+all_exes    += $(bind)/curvetest
+all_depends += $(curvetest_deps)
+
+dsatest_files := dsatest
+dsatest_objs  := $(addprefix $(objd)/, $(addsuffix .o, $(dsatest_files)))
+dsatest_deps  := $(addprefix $(dependd)/, $(addsuffix .d, $(dsatest_files)))
+dsatest_libs  :=
+dsatest_lnk   := $(lnk_lib)
+
+$(bind)/dsatest: $(dsatest_objs) $(dsatest_libs) $(lnk_dep)
+
+all_exes    += $(bind)/dsatest
+all_depends += $(dsatest_deps)
+
+#rsatest_files := rsatest
+#rsatest_objs  := $(addprefix $(objd)/, $(addsuffix .o, $(rsatest_files)))
+#rsatest_deps  := $(addprefix $(dependd)/, $(addsuffix .d, $(rsatest_files)))
+#rsatest_libs  :=
+#rsatest_lnk   := $(lnk_lib)
+
+#$(bind)/rsatest: $(rsatest_objs) $(rsatest_libs) $(lnk_dep)
+
+#all_exes    += $(bind)/rsatest
+#all_depends += $(rsatest_deps)
 
 parse_config_files := parse_config
 parse_config_objs  := $(addprefix $(objd)/, $(addsuffix .o, $(parse_config_files)))
@@ -378,17 +415,6 @@ $(bind)/parse_config: $(parse_config_objs) $(parse_config_libs) $(lnk_dep)
 
 all_exes    += $(bind)/parse_config
 all_depends += $(parse_config_deps)
-
-#test_server_files := server
-#test_server_objs  := $(addprefix $(objd)/, $(addsuffix .o, $(test_server_files)))
-#test_server_deps  := $(addprefix $(dependd)/, $(addsuffix .d, $(test_server_files)))
-#test_server_libs  :=
-#test_server_lnk   := $(lnk_lib)
-
-#$(bind)/test_server: $(test_server_objs) $(test_server_libs) $(lnk_dep)
-
-#all_exes    += $(bind)/test_server
-#all_depends += $(test_server_deps)
 
 test_client_files := client
 test_client_objs  := $(addprefix $(objd)/, $(addsuffix .o, $(test_client_files)))

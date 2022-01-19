@@ -2,8 +2,8 @@
 #define __rai__raims__user_h__
 
 #include <raikv/util.h>
-#include <raims/ecdh.h>
-#include <raims/rsa.h>
+#include <raims/ec25519.h>
+#include <raims/ed25519.h>
 #include <raims/crypt.h>
 #include <raims/config_tree.h>
 #include <raimd/md_msg.h>
@@ -14,11 +14,28 @@ static const size_t MAX_USER_LEN    = 128, /* strlen( user ) */
                     MAX_SERVICE_LEN = 128, /* strlen( service ) */
                     MAX_TIME_LEN    = 32;  /* strlen( create ) */
 
+typedef EC25519 ECDH; /* elliptic curve diffie-hellman */
+typedef ED25519 DSA;  /* digital signature algo */
+
 static const size_t
-       MAX_ECDH_CIPHER_PRI_LEN     = MAX_ECDH_DER_PRI_LEN + HMAC_SIZE,
-       MAX_ECDH_CIPHER_PUB_LEN     = MAX_ECDH_DER_PUB_LEN + HMAC_SIZE,
-       MAX_ECDH_CIPHER_PRI_B64_LEN = KV_BASE64_SIZE( MAX_ECDH_CIPHER_PRI_LEN ),
-       MAX_ECDH_CIPHER_PUB_B64_LEN = KV_BASE64_SIZE( MAX_ECDH_CIPHER_PUB_LEN );
+       ECDH_KEY_LEN            = EC25519_KEY_LEN,
+       ECDH_CIPHER_KEY_LEN     = EC25519_KEY_LEN + HMAC_SIZE,
+       ECDH_CIPHER_B64_LEN     = KV_BASE64_SIZE( ECDH_CIPHER_KEY_LEN ),
+       DSA_KEY_LEN             = ED25519_KEY_LEN,
+       DSA_SIGN_LEN            = ED25519_SIG_LEN,
+       DSA_CIPHER_KEY_LEN      = DSA_KEY_LEN + HMAC_SIZE,
+       DSA_CIPHER_B64_LEN      = KV_BASE64_SIZE( DSA_CIPHER_KEY_LEN ),
+       DSA_CIPHER_SIGN_LEN     = DSA_SIGN_LEN + HMAC_SIZE,
+       DSA_CIPHER_SIGN_B64_LEN = KV_BASE64_SIZE( DSA_CIPHER_SIGN_LEN );
+#if 0
+static const size_t 
+       MAX_RSA_CIPHER_PRI_LEN      = MAX_RSA_DER_PRI_LEN + HMAC_SIZE,
+       MAX_RSA_CIPHER_PUB_LEN      = MAX_RSA_DER_PUB_LEN + HMAC_SIZE,
+       MAX_RSA_CIPHER_SIGN_LEN     = MAX_RSA_SIGN_LEN + HMAC_SIZE,
+       MAX_RSA_CIPHER_PRI_B64_LEN  = KV_BASE64_SIZE( MAX_RSA_CIPHER_PRI_LEN ),
+       MAX_RSA_CIPHER_PUB_B64_LEN  = KV_BASE64_SIZE( MAX_RSA_CIPHER_PUB_LEN ),
+       MAX_RSA_CIPHER_SIGN_B64_LEN = KV_BASE64_SIZE( MAX_RSA_CIPHER_SIGN_LEN );
+#endif
 
 static inline void copy_max( char *out,  size_t &out_len,   size_t max_len,
                              const void *in,  size_t in_len ) {
@@ -56,8 +73,8 @@ struct UserBuf {
          create[ MAX_TIME_LEN ],
          expires[ MAX_TIME_LEN ],
          revoke[ MAX_TIME_LEN ],
-         pri[ KV_ALIGN( MAX_ECDH_CIPHER_PRI_B64_LEN, 4 ) ],
-         pub[ KV_ALIGN( MAX_ECDH_CIPHER_PUB_B64_LEN, 4 ) ];
+         pri[ KV_ALIGN( ECDH_CIPHER_B64_LEN, 4 ) ],
+         pub[ KV_ALIGN( ECDH_CIPHER_B64_LEN, 4 ) ];
   size_t user_len,
          service_len,
          create_len,
@@ -93,12 +110,12 @@ struct UserBuf {
   bool gen_key( const char *user,  size_t ulen,  const char *svc,  size_t slen,
               const char *expire,  size_t elen, const CryptPass &pwd ) noexcept;
   /* encrypt the keys, pub or pri */
-  bool put_ecdh( const CryptPass &pwd,  OpenSsl_ECDH &ec,
+  bool put_ecdh( const CryptPass &pwd,  ECDH &ec,
                  WhichPubPri put_op ) noexcept;
   /* decrypt the keys, pub or pri */
-  bool get_ecdh( const CryptPass &pwd,  OpenSsl_ECDH &ec,
-                 WhichPubPri get_op,  void *pub_der_out = NULL,
-                 size_t *pub_sz_out = NULL ) const noexcept;
+  bool get_ecdh( const CryptPass &pwd,  ECDH &ec,
+                 WhichPubPri get_op,  void *pub_key_out = NULL,
+                 size_t *pub_key_len = NULL ) const noexcept;
   /* print for config */
   bool print_yaml( int indent,  const char *fn = NULL,
                    bool include_pri = false ) noexcept;
@@ -113,21 +130,13 @@ struct UserBuf {
                     const CryptPass &new_pwd ) noexcept;
 };
 
-static const size_t 
-       MAX_RSA_CIPHER_PRI_LEN      = MAX_RSA_DER_PRI_LEN + HMAC_SIZE,
-       MAX_RSA_CIPHER_PUB_LEN      = MAX_RSA_DER_PUB_LEN + HMAC_SIZE,
-       MAX_RSA_CIPHER_SIGN_LEN     = MAX_RSA_SIGN_LEN + HMAC_SIZE,
-       MAX_RSA_CIPHER_PRI_B64_LEN  = KV_BASE64_SIZE( MAX_RSA_CIPHER_PRI_LEN ),
-       MAX_RSA_CIPHER_PUB_B64_LEN  = KV_BASE64_SIZE( MAX_RSA_CIPHER_PUB_LEN ),
-       MAX_RSA_CIPHER_SIGN_B64_LEN = KV_BASE64_SIZE( MAX_RSA_CIPHER_SIGN_LEN );
-
 struct RevokeElem;
 struct UserElem {
   UserElem   * next;
   RevokeElem * revoke;
   UserBuf      user;
   size_t       sig_len;
-  char         sig[ MAX_RSA_CIPHER_SIGN_B64_LEN ];
+  char         sig[ DSA_CIPHER_SIGN_B64_LEN ];
 
  void * operator new( size_t, void *ptr ) { return ptr; }
  void operator delete( void *ptr ) { ::free( ptr ); }
@@ -142,7 +151,7 @@ struct UserElem {
   }
   UserElem( const UserElem &b ) : next( 0 ), revoke( 0 ), user( b.user ) {
     this->sig_len = b.sig_len;
-    ::memcpy( this->sig, b.sig, MAX_RSA_CIPHER_SIGN_B64_LEN );
+    ::memcpy( this->sig, b.sig, DSA_CIPHER_SIGN_B64_LEN );
   }
   ~UserElem() {
     this->sig_len = 0;
@@ -162,7 +171,7 @@ struct RevokeElem {
   RevokeElem * next;
   UserElem   * user;
   size_t       sig_len;
-  char         sig[ MAX_RSA_CIPHER_SIGN_B64_LEN ];
+  char         sig[ DSA_CIPHER_SIGN_B64_LEN ];
 
  void * operator new( size_t, void *ptr ) { return ptr; }
  void operator delete( void *ptr ) { ::free( ptr ); }
@@ -181,7 +190,7 @@ struct RevokeElem {
 };
 
 struct UserHmacData {
-  OpenSsl_ECDH   ec;
+  ECDH           ec;
   UserBuf      & user;
   HashDigest     kdf_hash;
   PolyHmacDigest user_hmac,
@@ -208,19 +217,19 @@ typedef kv::SLinkList<RevokeElem> RevokeList;
 struct ServiceBuf {
   char       service[ MAX_SERVICE_LEN ],
              create[ MAX_TIME_LEN ],
-             pri[ KV_ALIGN( MAX_RSA_CIPHER_PRI_B64_LEN, 4 ) ],
-             pub[ KV_ALIGN( MAX_RSA_CIPHER_PUB_B64_LEN, 4 ) ],
-             pub_der[ KV_ALIGN( MAX_RSA_DER_PRI_LEN, 4 ) ];
+             pri[ KV_ALIGN( DSA_CIPHER_B64_LEN, 4 ) ],
+             pub[ KV_ALIGN( DSA_CIPHER_B64_LEN, 4 ) ],
+             pub_key[ KV_ALIGN( DSA_KEY_LEN, 4 ) ];
   size_t     service_len,
              create_len,
              pri_len,
              pub_len,
-             pub_der_len;
+             pub_key_len;
   UserList   users;
   RevokeList revoke;
 
   ServiceBuf() : service_len( 0 ), create_len( 0 ), pri_len( 0 ), pub_len( 0 ),
-                 pub_der_len( 0 ) {}
+                 pub_key_len( 0 ) {}
   ~ServiceBuf() {
     this->release();
   }
@@ -248,12 +257,12 @@ struct ServiceBuf {
   /* generate a key pair, pri[] pub[] are encrypted with pass + times */
   bool gen_key( const char *svc,  size_t slen,  const CryptPass &pwd ) noexcept;
   /* sign the users in list users with pri key */
-  bool sign_users( OpenSsl_RSA *rsa,  const CryptPass &pwd ) noexcept;
+  bool sign_users( DSA *dsa,  const CryptPass &pwd ) noexcept;
   /* encrypt the keys, pub or pri */
-  bool put_rsa( const CryptPass &pwd,  OpenSsl_RSA &rsa,
+  bool put_dsa( const CryptPass &pwd,  DSA &dsa,
                 WhichPubPri put_op ) noexcept;
   /* decrypt the keys, pub or pri */
-  bool get_rsa( const CryptPass &pwd,  OpenSsl_RSA &rsa,
+  bool get_dsa( const CryptPass &pwd,  DSA &dsa,
                 WhichPubPri get_op ) noexcept;
   /* append user to users list and revoke, if revoked */
   void add_user( const UserBuf &u ) noexcept;
@@ -298,7 +307,9 @@ struct HmacDecrypt : public HmacKdf {
   size_t  cipher_len,
           plain_len;
 
-  HmacDecrypt( uint64_t & c ) : HmacKdf( c ) {}
+  HmacDecrypt( uint64_t & c ) : HmacKdf( c ), cipher_len( 0 ), plain_len( 0 ) {
+    this->zero();
+  }
   ~HmacDecrypt() { this->zero(); }
   void zero( void ) volatile {
     ::memset( (void *) this->cipher, 0, sizeof( this->cipher ) );
@@ -339,8 +350,9 @@ struct HmacEncrypt : public HmacKdf {
   size_t     cipher_len,
              plain_len;
 
-  HmacEncrypt( uint64_t & c ) : HmacKdf( c ) {}
-
+  HmacEncrypt( uint64_t & c ) : HmacKdf( c ), cipher_len( 0 ), plain_len( 0 ) {
+    this->zero();
+  }
   ~HmacEncrypt() { this->zero(); }
   void zero( void ) volatile {
     ::memset( (void *) this->cipher, 0, sizeof( this->cipher ) );

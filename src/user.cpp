@@ -3,7 +3,6 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <raims/crypt.h>
-#include <raims/ecdh.h>
 #include <raims/user.h>
 #include <raimd/md_types.h>
 
@@ -44,9 +43,9 @@ UserBuf::copy( const ConfigTree::User &u ) noexcept
             u.expires.len );
   copy_max( this->revoke, this->revoke_len, MAX_TIME_LEN, u.revoke.val,
             u.revoke.len );
-  copy_max( this->pri, this->pri_len, MAX_ECDH_CIPHER_PRI_B64_LEN,
+  copy_max( this->pri, this->pri_len, ECDH_CIPHER_B64_LEN,
             u.pri.val, u.pri.len );
-  copy_max( this->pub, this->pub_len, MAX_ECDH_CIPHER_PUB_B64_LEN,
+  copy_max( this->pub, this->pub_len, ECDH_CIPHER_B64_LEN,
             u.pub.val, u.pub.len );
   if ( this->pri_len == 0 )
     this->pri[ 0 ] = '\0';
@@ -54,10 +53,10 @@ UserBuf::copy( const ConfigTree::User &u ) noexcept
     this->pub[ 0 ] = '\0';
   if ( this->pri_len != u.pri.len )
     fprintf( stderr, "pri len %u > %lu\n", u.pri.len,
-             MAX_ECDH_CIPHER_PRI_B64_LEN );
+             ECDH_CIPHER_B64_LEN );
   if ( this->pub_len != u.pub.len )
     fprintf( stderr, "pub len %u > %lu\n", u.pub.len,
-             MAX_ECDH_CIPHER_PUB_B64_LEN );
+             ECDH_CIPHER_B64_LEN );
 }
 
 static size_t
@@ -72,6 +71,7 @@ timestamp_now( char *time,  size_t maxlen )
       uint64_t r;
       rand::fill_urandom_bytes( &r, sizeof( r ) );
       stamp.stamp += r % i;
+      break;
     }
   }
   return stamp.get_string( time, maxlen );
@@ -89,9 +89,8 @@ UserBuf::gen_key( const char *user,  size_t ulen,  const char *svc,
   copy_max( this->expires, this->expires_len, MAX_TIME_LEN, expire, elen );
   this->create_len = timestamp_now( this->create, sizeof( this->create ) );
 
-  OpenSsl_ECDH ec;
-  if ( ! ec.gen_key() )
-    return false;
+  ECDH ec;
+  ec.gen_key();
   return this->put_ecdh( pwd, ec, DO_BOTH );
 }
 
@@ -130,59 +129,59 @@ UserBuf::get_revoke( void ) const noexcept
 }
 
 bool
-UserBuf::put_ecdh( const CryptPass &pwd,  OpenSsl_ECDH &ec,
+UserBuf::put_ecdh( const CryptPass &pwd,  ECDH &ec,
                    WhichPubPri put_op ) noexcept
 {
   uint64_t ctr = 0;
-  HmacEncrypt< MAX_ECDH_CIPHER_PRI_LEN, MAX_ECDH_DER_PRI_LEN > der( ctr );
+  HmacEncrypt< ECDH_CIPHER_KEY_LEN, ECDH_KEY_LEN > cipher( ctr );
 
-  der.init_kdf( *this, pwd );
+  cipher.init_kdf( *this, pwd );
   if ( (put_op & DO_PUB) != 0 ) {
-    if ( ! ec.i2d_public( der.plain, der.plain_len ) )
-      return false;
+    ec.pub.copy_to( cipher.plain );
+    cipher.plain_len = ECDH_KEY_LEN;
     this->pub_len = sizeof( this->pub );
-    if ( ! der.encrypt( this->pub, this->pub_len ) )
+    if ( ! cipher.encrypt( this->pub, this->pub_len ) )
       return false;
   }
   if ( (put_op & DO_PRI) != 0 ) {
-    if ( ! ec.i2d_private( der.plain, der.plain_len ) ) /* encode to der */
-      return false;
-    ctr = aes_ctr_off( MAX_ECDH_DER_PUB_LEN );
+    ec.pri.copy_to( cipher.plain );
+    cipher.plain_len = ECDH_KEY_LEN;
+    ctr = aes_ctr_off( ECDH_CIPHER_KEY_LEN );
     this->pri_len = sizeof( this->pri );
-    if ( ! der.encrypt( this->pri, this->pri_len ) )
+    if ( ! cipher.encrypt( this->pri, this->pri_len ) )
       return false;
   }
   return true;
 }
 
 bool
-UserBuf::get_ecdh( const CryptPass &pwd,  OpenSsl_ECDH &ec,  WhichPubPri get_op,
-                   void *pub_der_out, size_t *pub_sz_out ) const noexcept
+UserBuf::get_ecdh( const CryptPass &pwd,  ECDH &ec,  WhichPubPri get_op,
+                   void *pub_key, size_t *pub_key_len ) const noexcept
 {
   uint64_t ctr = 0;
-  HmacDecrypt< MAX_ECDH_CIPHER_PRI_LEN, MAX_ECDH_DER_PRI_LEN > der( ctr );
+  HmacDecrypt< ECDH_CIPHER_KEY_LEN, ECDH_KEY_LEN > cipher( ctr );
 
-  der.init_kdf( *this, pwd );
+  cipher.init_kdf( *this, pwd );
   if ( (get_op & DO_PUB) != 0 ) {
     if ( this->pub_len == 0 )
       return false;
-    if ( ! der.decrypt( *this, this->pub, this->pub_len ) )
+    if ( ! cipher.decrypt( *this, this->pub, this->pub_len ) )
       return false;
-    if ( ! ec.d2i_public( der.plain, der.plain_len ) )
-      return false;
-    if ( pub_der_out != NULL ) {
-      ::memcpy( pub_der_out, der.plain, der.plain_len );
-      *pub_sz_out = der.plain_len;
+    ec.pub = cipher.plain;
+    if ( pub_key != NULL ) {
+      if ( *pub_key_len < cipher.plain_len )
+        return false;
+      ::memcpy( pub_key, cipher.plain, cipher.plain_len );
+      *pub_key_len = cipher.plain_len;
     }
   }
   if ( (get_op & DO_PRI) != 0 ) {
     if ( this->pri_len == 0 )
       return false;
-    ctr += aes_ctr_off( MAX_ECDH_DER_PUB_LEN );
-    if ( ! der.decrypt( *this, this->pri, this->pri_len ) )
+    ctr += aes_ctr_off( ECDH_CIPHER_KEY_LEN );
+    if ( ! cipher.decrypt( *this, this->pri, this->pri_len ) )
       return false;
-    if ( ! ec.d2i_private( der.plain, der.plain_len ) )
-      return false;
+    ec.pri = cipher.plain;
   }
   return true;
 }
@@ -217,15 +216,15 @@ cmp_revoke_elem( const RevokeElem &x,  const RevokeElem &y ) noexcept
 bool
 UserHmacData::decrypt( const CryptPass &pwd,  WhichPubPri get_op ) noexcept
 {
-  uint8_t pub_der[ MAX_ECDH_DER_PUB_LEN ];
-  size_t  pub_len;
+  uint8_t pub_key[ ECDH_KEY_LEN ];
+  size_t  pub_len = sizeof( pub_key );
 
-  if ( ! this->user.get_ecdh( pwd, this->ec, get_op, pub_der, &pub_len ) ) {
+  if ( ! this->user.get_ecdh( pwd, this->ec, get_op, pub_key, &pub_len ) ) {
     fprintf( stderr, "Unable to get key for user \"%.*s\"\n",
              (int) this->user.user_len, this->user.user );
     return false;
   }
-  this->kdf_hash.kdf_bytes( pub_der, pub_len );
+  this->kdf_hash.kdf_bytes( pub_key, pub_len );
   this->user_hmac.calc_4( this->kdf_hash, 
                           this->user.user,    this->user.user_len,
                           this->user.service, this->user.service_len,
@@ -248,17 +247,12 @@ UserHmacData::calc_secret_hmac( UserHmacData &data2,
                                 PolyHmacDigest &secret_hmac ) noexcept
 {
   HashDigest ha;
-  uint8_t    secret[ MAX_ECDH_SECRET_LEN ];
-  size_t     secret_len = sizeof( secret );
+  ECDH       tmp;
 
-  if ( ! this->ec.shared_secret( this->ec.pri, data2.ec.pub,
-                                 secret, secret_len ) ) {
-    fprintf( stderr, "Unable to get secret for user %.*s and %.*s\n",
-             (int) this->user.user_len, this->user.user,
-             (int) data2.user.user_len, data2.user.user );
-    return false;
-  }
-  ha.kdf_bytes( secret, secret_len );
+  tmp.pri = this->ec.pri;
+  tmp.pub = data2.ec.pub;
+  tmp.shared_secret();
+  ha.kdf_bytes( tmp.secret, sizeof( tmp.secret ) );
 
   if ( this->user_hmac < data2.user_hmac )
     secret_hmac.calc_2( ha, this->user_hmac.dig, HMAC_SIZE,
@@ -273,11 +267,10 @@ void
 UserHmacData::calc_hello_key( ServiceBuf &svc,  HashDigest &ha ) noexcept
 {
   PolyHmacDigest svc_hmac;
-  ha.kdf_bytes( svc.pub_der, svc.pub_der_len );
+  ha.kdf_bytes( svc.pub_key, svc.pub_key_len );
   svc_hmac.calc_2( ha, svc.service, svc.service_len, 
                        svc.create, svc.create_len );
-  ha.kdf_bytes( svc_hmac.dig, HMAC_SIZE,
-                this->user_hmac.dig, HMAC_SIZE );
+  ha.kdf_bytes( svc_hmac.dig, HMAC_SIZE, this->user_hmac.dig, HMAC_SIZE );
 }
 
 static void
@@ -297,7 +290,7 @@ print_pkerr( size_t pri_len,  size_t pub_len ) noexcept
 bool
 UserBuf::test_user( const CryptPass &pwd,  const ConfigTree::User &u ) noexcept
 {
-  OpenSsl_ECDH ec;
+  ECDH    ec;
   UserBuf user( u );
 
   if ( ! user.get_ecdh( pwd, ec, DO_PUB ) ) {
@@ -354,36 +347,34 @@ ServiceBuf::gen_key( const char *svc,  size_t slen,
   copy_max( this->service, this->service_len, MAX_SERVICE_LEN, svc, slen );
   this->create_len = timestamp_now( this->create, sizeof( this->create ) );
 
-  OpenSsl_RSA rsa;
-  if ( ! rsa.gen_key() )
-    return false;
-  if ( ! this->put_rsa( pwd, rsa, DO_BOTH ) )
+  DSA dsa;
+  dsa.gen_key();
+  if ( ! this->put_dsa( pwd, dsa, DO_BOTH ) )
     return false;
   return true;
 }
 
 bool
-ServiceBuf::sign_users( OpenSsl_RSA *rsa,  const CryptPass &pwd ) noexcept
+ServiceBuf::sign_users( DSA *dsa,  const CryptPass &pwd ) noexcept
 {
-  OpenSsl_ECDH   ec;
-  OpenSsl_RSA    rsa_buf;
+  ECDH           ec;
+  DSA            dsa_buf;
   PolyHmacDigest hmac;
   uint64_t       ctr;
-  HmacEncrypt< MAX_RSA_CIPHER_SIGN_LEN, MAX_RSA_SIGN_LEN > sig( ctr );
+  HmacEncrypt< DSA_CIPHER_SIGN_LEN, DSA_SIGN_LEN > sig( ctr );
 
-  if ( rsa == NULL ) {
-    if ( ! this->get_rsa( pwd, rsa_buf, DO_BOTH ) ) {
+  if ( dsa == NULL ) {
+    if ( ! this->get_dsa( pwd, dsa_buf, DO_BOTH ) ) {
       fprintf( stderr, "Unable to get keys for svc \"%.*s\"\n",
                (int) this->service_len, this->service );
       print_pkerr( this->pri_len, this->pub_len );
       return false;
     }
-    rsa = &rsa_buf;
+    dsa = &dsa_buf;
   }
   sig.init_kdf( *this, pwd );
-  ctr  = aes_ctr_off( MAX_RSA_DER_PUB_LEN );
-  ctr += aes_ctr_off( MAX_RSA_DER_PRI_LEN );
-
+  ctr  = aes_ctr_off( DSA_KEY_LEN );
+  ctr += aes_ctr_off( DSA_KEY_LEN );
   /* sort them so the order can be recreated */
   this->users.sort<cmp_user_elem>();
   this->revoke.sort<cmp_revoke_elem>();
@@ -394,54 +385,49 @@ ServiceBuf::sign_users( OpenSsl_RSA *rsa,  const CryptPass &pwd ) noexcept
       return false;
 
     sig.plain_len = sizeof( sig.plain );
-    if ( ! rsa->sign_msg( data.user_hmac.digest(), HMAC_SIZE, sig.plain,
-                          sig.plain_len ) ) {
-      fprintf( stderr, "Unable to sign hmac\n" );
-      return false;
-    }
+    dsa->sign( data.user_hmac.digest(), HMAC_SIZE );
+    dsa->sig.copy_to( sig.plain );
+    sig.plain_len = DSA_SIGN_LEN;
     u->sig_len = sizeof( u->sig );
     if ( ! sig.encrypt( u->sig, u->sig_len ) )
       return false;
-    ctr += aes_ctr_off( MAX_RSA_SIGN_LEN );
+    ctr += aes_ctr_off( DSA_SIGN_LEN );
 
     if ( u->revoke != NULL ) {
       RevokeElem * r = u->revoke;
-      sig.plain_len = sizeof( sig.plain );
-      if ( ! rsa->sign_msg( data.revoke_hmac.digest(), HMAC_SIZE, sig.plain,
-                            sig.plain_len ) ) {
-        fprintf( stderr, "Unable to sign hmac\n" );
-        return false;
-      }
+      dsa->sign( data.revoke_hmac.digest(), HMAC_SIZE );
+      dsa->sig.copy_to( sig.plain );
+      sig.plain_len = DSA_SIGN_LEN;
       r->sig_len = sizeof( r->sig );
       if ( ! sig.encrypt( r->sig, r->sig_len ) )
         return false;
-      ctr += aes_ctr_off( MAX_RSA_SIGN_LEN );
+      ctr += aes_ctr_off( DSA_SIGN_LEN );
     }
   }
   return true;
 }
 
 bool
-ServiceBuf::put_rsa( const CryptPass &pwd,  OpenSsl_RSA &rsa,
+ServiceBuf::put_dsa( const CryptPass &pwd,  DSA &dsa,
                      WhichPubPri put_op ) noexcept
 {
   uint64_t ctr = 0;
-  HmacEncrypt< MAX_RSA_CIPHER_PRI_LEN, MAX_RSA_DER_PRI_LEN > der( ctr );
+  HmacEncrypt< DSA_CIPHER_KEY_LEN, DSA_KEY_LEN > cipher( ctr );
 
-  der.init_kdf( *this, pwd );
+  cipher.init_kdf( *this, pwd );
   if ( (put_op & DO_PUB) != 0 ) {
-    if ( ! rsa.i2d_public( der.plain, der.plain_len ) )
-      return false;
+    dsa.pk.copy_to( cipher.plain );
+    cipher.plain_len = DSA_KEY_LEN;
     this->pub_len = sizeof( this->pub );
-    if ( ! der.encrypt( this->pub, this->pub_len ) )
+    if ( ! cipher.encrypt( this->pub, this->pub_len ) )
       return false;
   }
   if ( (put_op & DO_PRI) != 0 ) {
-    if ( ! rsa.i2d_private( der.plain, der.plain_len ) ) /* encode to der */
-      return false;
-    ctr = aes_ctr_off( MAX_RSA_DER_PUB_LEN );
+    dsa.sk.copy_to( cipher.plain );
+    cipher.plain_len = DSA_KEY_LEN;
+    ctr = aes_ctr_off( DSA_KEY_LEN );
     this->pri_len = sizeof( this->pri );
-    if ( ! der.encrypt( this->pri, this->pri_len ) )
+    if ( ! cipher.encrypt( this->pri, this->pri_len ) )
       return false;
   }
   return true;
@@ -485,7 +471,7 @@ ServiceBuf::load_service( const ConfigTree &tree,
                (int) el->user.user_len, el->user.user );
     }
     else {
-      copy_max( el->sig, el->sig_len, MAX_RSA_CIPHER_SIGN_B64_LEN,
+      copy_max( el->sig, el->sig_len, DSA_CIPHER_SIGN_B64_LEN,
                 p->value.val, p->value.len );
       p = p->next;
     }
@@ -503,7 +489,7 @@ ServiceBuf::load_service( const ConfigTree &tree,
                (int) re->user->user.user_len, re->user->user.user );
     }
     else {
-      copy_max( re->sig, re->sig_len, MAX_RSA_CIPHER_SIGN_B64_LEN,
+      copy_max( re->sig, re->sig_len, DSA_CIPHER_SIGN_B64_LEN,
                 p->value.val, p->value.len );
       p = p->next;
     }
@@ -517,21 +503,21 @@ ServiceBuf::load_service( const ConfigTree &tree,
 bool
 ServiceBuf::check_signatures( const CryptPass &pwd ) noexcept
 {
-  OpenSsl_ECDH   ec;
-  OpenSsl_RSA    rsa;
+  ECDH           ec;
+  DSA            dsa;
   PolyHmacDigest hmac;
   uint64_t       ctr;
-  HmacDecrypt< MAX_RSA_CIPHER_SIGN_LEN, MAX_RSA_SIGN_LEN > sig( ctr );
+  HmacDecrypt< DSA_CIPHER_SIGN_LEN, DSA_SIGN_LEN > sig( ctr );
 
-  if ( ! this->get_rsa( pwd, rsa, DO_PUB ) ) {
+  if ( ! this->get_dsa( pwd, dsa, DO_PUB ) ) {
     fprintf( stderr, "Unable to get keys for svc \"%.*s\"\n",
              (int) this->service_len, this->service );
     print_pkerr( this->pri_len, this->pub_len );
     return false;
   }
   sig.init_kdf( *this, pwd );
-  ctr  = aes_ctr_off( MAX_RSA_DER_PUB_LEN );
-  ctr += aes_ctr_off( MAX_RSA_DER_PRI_LEN );
+  ctr  = aes_ctr_off( DSA_KEY_LEN );
+  ctr += aes_ctr_off( DSA_KEY_LEN );
 
   for ( UserElem *u = this->users.hd; u != NULL; u = u->next ) {
     UserHmacData data( u->user );
@@ -541,13 +527,13 @@ ServiceBuf::check_signatures( const CryptPass &pwd ) noexcept
     if ( ! sig.decrypt( u->user, u->sig, u->sig_len ) )
       return false;
 
-    if ( ! rsa.verify_msg( data.user_hmac.digest(), HMAC_SIZE, sig.plain,
-                           sig.plain_len ) ) {
+    dsa.sig = sig.plain;
+    if ( ! dsa.verify( data.user_hmac.digest(), HMAC_SIZE ) ) {
       fprintf( stderr, "Verify user sig \"%.*s\" failed\n",
                (int) u->user.user_len, u->user.user );
       return false;
     }
-    ctr += aes_ctr_off( MAX_RSA_SIGN_LEN );
+    ctr += aes_ctr_off( DSA_SIGN_LEN );
 
     if ( u->revoke != NULL ) {
       RevokeElem *r = u->revoke;
@@ -555,13 +541,13 @@ ServiceBuf::check_signatures( const CryptPass &pwd ) noexcept
       if ( ! sig.decrypt( u->user, r->sig, r->sig_len ) )
         return false;
 
-      if ( ! rsa.verify_msg( data.revoke_hmac.digest(), HMAC_SIZE, sig.plain,
-                             sig.plain_len ) ) {
+      dsa.sig = sig.plain;
+      if ( ! dsa.verify( data.revoke_hmac.digest(), HMAC_SIZE ) ) {
         fprintf( stderr, "Verify revoke user sig \"%.*s\" failed\n",
                  (int) u->user.user_len, u->user.user );
         return false;
       }
-      ctr += aes_ctr_off( MAX_RSA_SIGN_LEN );
+      ctr += aes_ctr_off( DSA_SIGN_LEN );
     }
   }
   return true;
@@ -574,52 +560,44 @@ ServiceBuf::copy( const ConfigTree::Service &s ) noexcept
             s.svc.len );
   copy_max( this->create, this->create_len, MAX_TIME_LEN, s.create.val,
             s.create.len );
-  copy_max( this->pri, this->pri_len, MAX_RSA_CIPHER_PRI_B64_LEN,
+  copy_max( this->pri, this->pri_len, DSA_CIPHER_B64_LEN,
             s.pri.val, s.pri.len );
-  copy_max( this->pub, this->pub_len, MAX_RSA_CIPHER_PUB_B64_LEN,
+  copy_max( this->pub, this->pub_len, DSA_CIPHER_B64_LEN,
             s.pub.val, s.pub.len );
   if ( this->pri_len == 0 )
     this->pri[ 0 ] = '\0';
   if ( this->pub_len == 0 )
     this->pub[ 0 ] = '\0';
   if ( this->pri_len != s.pri.len )
-    fprintf( stderr, "pri len %u > %lu\n", s.pri.len,
-             MAX_RSA_CIPHER_PRI_B64_LEN );
+    fprintf( stderr, "pri len %u > %lu\n", s.pri.len, DSA_CIPHER_B64_LEN );
   if ( this->pub_len != s.pub.len )
-    fprintf( stderr, "pub len %u > %lu\n", s.pub.len,
-             MAX_RSA_CIPHER_PUB_B64_LEN );
+    fprintf( stderr, "pub len %u > %lu\n", s.pub.len, DSA_CIPHER_B64_LEN );
 }
 
 bool
-ServiceBuf::get_rsa( const CryptPass &pwd,  OpenSsl_RSA &rsa,
+ServiceBuf::get_dsa( const CryptPass &pwd,  DSA &dsa,
                      WhichPubPri get_op ) noexcept
 {
   uint64_t ctr = 0;
-  HmacDecrypt< MAX_RSA_CIPHER_PRI_LEN, MAX_RSA_DER_PRI_LEN > der( ctr );
-  der.init_kdf( *this, pwd );
+  HmacDecrypt< DSA_CIPHER_KEY_LEN, DSA_KEY_LEN > cipher( ctr );
+  cipher.init_kdf( *this, pwd );
 
   if ( (get_op & DO_PUB) != 0 ) {
     if ( this->pub_len == 0 )
       return false;
-    if ( ! der.decrypt( *this, this->pub, this->pub_len ) )
+    if ( ! cipher.decrypt( *this, this->pub, this->pub_len ) )
       return false;
-    if ( ! rsa.d2i_public( der.plain, der.plain_len ) ) {
-      fprintf( stderr, "Unable to import public key\n" );
-      return false;
-    }
-    ::memcpy( this->pub_der, der.plain, der.plain_len );
-    this->pub_der_len = der.plain_len;
+    dsa.pk = cipher.plain;
+    ::memcpy( this->pub_key, cipher.plain, cipher.plain_len );
+    this->pub_key_len = cipher.plain_len;
   }
   if ( (get_op & DO_PRI) != 0 ) {
     if ( this->pri_len == 0 )
       return false;
-    ctr += aes_ctr_off( MAX_RSA_DER_PUB_LEN );
-    if ( ! der.decrypt( *this, this->pri, this->pri_len ) )
+    ctr += aes_ctr_off( DSA_KEY_LEN );
+    if ( ! cipher.decrypt( *this, this->pri, this->pri_len ) )
       return false;
-    if ( ! rsa.d2i_private( der.plain, der.plain_len ) ) {
-      fprintf( stderr, "Unable to import private key\n" );
-      return false;
-    }
+    dsa.sk = cipher.plain;
   }
   return true;
 }
@@ -628,7 +606,7 @@ bool
 UserBuf::change_pass( const CryptPass &old_pwd,
                       const CryptPass &new_pwd ) noexcept
 {
-  OpenSsl_ECDH ec;
+  ECDH    ec;
   bool    has_pri = false;
 
   if ( ! this->get_ecdh( old_pwd, ec, DO_PUB ) ) {
@@ -656,13 +634,13 @@ bool
 ServiceBuf::change_pass( const CryptPass &old_pwd,
                          const CryptPass &new_pwd ) noexcept
 {
-  uint64_t    ctr;
-  HmacDecrypt< MAX_RSA_CIPHER_SIGN_LEN, MAX_RSA_SIGN_LEN > old_sig( ctr );
-  HmacEncrypt< MAX_RSA_CIPHER_SIGN_LEN, MAX_RSA_SIGN_LEN > new_sig( ctr );
-  OpenSsl_RSA rsa;
-  bool        has_pri = false;
+  uint64_t ctr;
+  HmacDecrypt< DSA_CIPHER_SIGN_LEN, DSA_SIGN_LEN > old_sig( ctr );
+  HmacEncrypt< DSA_CIPHER_SIGN_LEN, DSA_SIGN_LEN > new_sig( ctr );
+  DSA      dsa;
+  bool     has_pri = false;
 
-  if ( ! this->get_rsa( old_pwd, rsa, DO_PUB ) ) {
+  if ( ! this->get_dsa( old_pwd, dsa, DO_PUB ) ) {
     fprintf( stderr, "Unable to get public key for svc \"%.*s\"\n",
              (int) this->service_len, this->service );
     print_pkerr( this->pri_len, this->pub_len );
@@ -670,7 +648,7 @@ ServiceBuf::change_pass( const CryptPass &old_pwd,
   }
   if ( this->pri_len != 0 ) {
     has_pri = true;
-    if ( ! this->get_rsa( old_pwd, rsa, DO_PRI ) ) {
+    if ( ! this->get_dsa( old_pwd, dsa, DO_PRI ) ) {
       fprintf( stderr, "Unable to get private key for svc \"%.*s\"\n",
                (int) this->service_len, this->service );
       print_pkerr( this->pri_len, this->pub_len );
@@ -680,8 +658,8 @@ ServiceBuf::change_pass( const CryptPass &old_pwd,
   old_sig.init_kdf( *this, old_pwd );
   new_sig.init_kdf( *this, new_pwd );
 
-  ctr  = aes_ctr_off( MAX_RSA_DER_PUB_LEN );
-  ctr += aes_ctr_off( MAX_RSA_DER_PRI_LEN );
+  ctr  = aes_ctr_off( DSA_KEY_LEN );
+  ctr += aes_ctr_off( DSA_KEY_LEN );
 
   for ( UserElem *u = this->users.hd; u != NULL; u = u->next ) {
     if ( ! old_sig.decrypt( u->user, u->sig, u->sig_len ) )
@@ -692,7 +670,7 @@ ServiceBuf::change_pass( const CryptPass &old_pwd,
     u->sig_len = sizeof( u->sig );
     if ( ! new_sig.encrypt( u->sig, u->sig_len ) )
       return false;
-    ctr += aes_ctr_off( MAX_RSA_SIGN_LEN );
+    ctr += aes_ctr_off( DSA_SIGN_LEN );
 
     if ( u->revoke != NULL ) {
       RevokeElem *r = u->revoke;
@@ -704,7 +682,7 @@ ServiceBuf::change_pass( const CryptPass &old_pwd,
       r->sig_len = sizeof( r->sig );
       if ( ! new_sig.encrypt( r->sig, r->sig_len ) )
         return false;
-      ctr += aes_ctr_off( MAX_RSA_SIGN_LEN );
+      ctr += aes_ctr_off( DSA_SIGN_LEN );
     }
 
     if ( ! u->user.change_pass( old_pwd, new_pwd ) ) {
@@ -714,7 +692,7 @@ ServiceBuf::change_pass( const CryptPass &old_pwd,
     }
   }
   WhichPubPri op = ( has_pri ? DO_BOTH : DO_PUB );
-  if ( ! this->put_rsa( new_pwd, rsa, op ) )
+  if ( ! this->put_dsa( new_pwd, dsa, op ) )
     return false;
   return true;
 }

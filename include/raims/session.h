@@ -152,8 +152,24 @@ struct PubPtpData : public PubMcastData {
 struct EvTcpTransport;
 struct StringTab;
 struct TelnetListen;
+struct SessionMgr;
+
+struct ExternalRoute : public kv::EvSocket {
+  SessionMgr & mgr;
+  SubDB      & sub_db;
+  ExternalRoute( kv::EvPoll &p,  SessionMgr &m ) noexcept;
+  /* EvSocket */
+  virtual bool on_msg( kv::EvPublish &pub ) noexcept;
+  bool on_inbox( const MsgFramePublish &pub,  UserBridge &n,
+                 MsgHdrDecoder &dec ) noexcept;
+  virtual void write( void ) noexcept;
+  virtual void read( void ) noexcept;
+  virtual void process( void ) noexcept;
+  virtual void release( void ) noexcept;
+};
 
 struct SessionMgr : public kv::EvSocket {
+  ExternalRoute           ext;
   ConfigTree            & tree;           /* config db */
   ConfigTree::User      & user;           /* my user */
   ConfigTree::Service   & svc;            /* this transport */
@@ -173,8 +189,7 @@ struct SessionMgr : public kv::EvSocket {
   TelnetListen          * telnet;
   ConfigTree::Transport * telnet_tport;
   uint8_t                 tcp_accept_sock_type, /* free list sock types */
-                          tcp_connect_sock_type,
-                          tcp_conn_mgr_sock_type;
+                          tcp_connect_sock_type;
 
   SessionMgr( kv::EvPoll &p,  kv::Logger &l,  ConfigTree &c,
               ConfigTree::User &u,  ConfigTree::Service &s,
@@ -204,20 +219,25 @@ struct SessionMgr : public kv::EvSocket {
     return this->timer_id != 0;
   }
   /* EvSocket */
+  virtual bool on_msg( kv::EvPublish &pub ) noexcept;
+  virtual bool timer_expire( uint64_t tid,  uint64_t eid ) noexcept;
   virtual void write( void ) noexcept;
   virtual void read( void ) noexcept;
   virtual void process( void ) noexcept;
   virtual void release( void ) noexcept;
-  virtual bool timer_expire( uint64_t tid,  uint64_t eid ) noexcept;
-  virtual bool on_msg( kv::EvPublish &pub ) noexcept;
   MsgFrameStatus parse_msg_hdr( MsgFramePublish &fpub ) noexcept;
   void ignore_msg( const MsgFramePublish &fpub ) noexcept;
+  void show_debug_msg( const MsgFramePublish &fpub,
+                       const char *where ) noexcept;
   /* publish data on a subject */
   bool publish( PubMcastData &mc ) noexcept;
   bool publish_any( PubMcastData &mc ) noexcept;
   bool publish_to( PubPtpData &ptp ) noexcept;
   void send_ack( const MsgFramePublish &pub,  UserBridge &,
                  const MsgHdrDecoder &dec,  const char *suf ) noexcept;
+  bool forward_inbox( kv::EvPublish &pub ) noexcept;
+  bool forward_external( TransportRoute &src_rte,
+                         kv::EvPublish &pub ) noexcept;
   bool create_telnet( ConfigTree::Transport &t ) noexcept;
   uint32_t shutdown_telnet( void ) noexcept;
   /* subscribed data recvd */

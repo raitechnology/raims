@@ -44,6 +44,51 @@ struct ConfigTree {
     void print_y( ConfigPrinter &p ) const noexcept;
     const StringPair *print_ylist( ConfigPrinter &p, int i ) const noexcept;
   };
+  struct PairList : public kv::SLinkList<StringPair> {
+    StringPair *get_pair( const char *name,  size_t len ) {
+      for ( StringPair *p = this->hd; p; p = p->next ) {
+        if ( p->name.equals( name, len ) )
+          return p;
+      }
+      return NULL;
+    }
+    bool get_val( const char *name,  size_t len,  const char *&val ) {
+      StringPair *p = this->get_pair( name, len );
+      if ( p != NULL )
+        val = p->value.val;
+      else
+        val = NULL;
+      return p != NULL;
+    }
+    bool get_val( const char *name,  const char *&val ) {
+      return this->get_val( name, ::strlen( name ), val );
+    }
+    bool get_int( const char *name,  size_t len,  int &val ) {
+      const char *s;
+      if ( this->get_val( name, len, s ) ) {
+        if ( s[ 0 ] >= '0' && s[ 0 ] <= '9' ) {
+          val = atoi( s );
+          return true;
+        }
+      }
+      return false;
+    }
+    bool get_int( const char *name,  int &val ) {
+      return this->get_int( name, ::strlen( name ), val );
+    }
+    bool get_bool( const char *name,  size_t len,  bool &val ) {
+      const char *s;
+      if ( this->get_val( name, len, s ) ) {
+        val = ( s[ 0 ] == '1' || s[ 0 ] == 't' || s[ 0 ] == 'T' ||
+                s[ 0 ] == 'y' || s[ 0 ] == 'Y' );
+        return true;
+      }
+      return false;
+    }
+    bool get_bool( const char *name,  bool &val ) {
+      return this->get_bool( name, ::strlen( name ), val );
+    }
+  };
   /* [ array of strings ] */
   struct StringList {
     void * operator new( size_t, void *ptr ) { return ptr; }
@@ -54,7 +99,6 @@ struct ConfigTree {
     void print_y( ConfigPrinter &p ) const noexcept;
   };
   typedef kv::SLinkList<StringList> StrList;
-  typedef kv::SLinkList<StringPair> PairList;
 
   struct User {
     void * operator new( size_t, void *ptr ) { return ptr; }
@@ -112,9 +156,15 @@ struct ConfigTree {
     Transport() : next( 0 ), tport_id( 0 ) {}
     void print_js( ConfigPrinter &p,  int i ) const noexcept;
     void print_y( ConfigPrinter &p,  int i ) const noexcept;
-    bool get_route_str( const char *name,  const char *&value ) noexcept;
-    bool get_route_int( const char *name,  int &value ) noexcept;
-    bool get_route_bool( const char *name,  bool &value ) noexcept;
+    bool get_route_str( const char *name,  const char *&value ) {
+      return this->route.get_val( name, value );
+    }
+    bool get_route_int( const char *name,  int &value ) {
+      return this->route.get_int( name, value );
+    }
+    bool get_route_bool( const char *name,  bool &value ) {
+      return this->route.get_bool( name, value );
+    }
     static int get_host_port( const char *&hostp,  char *host,
                               size_t &len ) noexcept;
     static bool is_wildcard( const char *host ) noexcept;
@@ -173,7 +223,7 @@ struct ConfigTree {
   Service   * find_service( const char *svc,  size_t len ) noexcept;
   User      * find_user( Service &svc,  const char *usr,  size_t len ) noexcept;
   Transport * find_transport( const char *tport,  size_t len,
-                              bool &conn ) noexcept;
+                              bool *conn = NULL ) noexcept;
   bool        find_parameter( const char *name,  const char *&value,
                               const char *def_value = NULL ) noexcept;
 };

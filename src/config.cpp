@@ -491,20 +491,23 @@ ConfigTree::find_service( const char *svc,  size_t len ) noexcept
 
 ConfigTree::Transport *
 ConfigTree::find_transport( const char *tport,  size_t len,
-                            bool &conn ) noexcept
+                            bool *conn ) noexcept
 {
   const char * p;
   size_t t_len = len;
-  conn = true;
+  if ( conn != NULL )
+    *conn = true;
   if ( tport == NULL || len == 0 )
     return NULL;
   /* if tport.conn or tport.listen */
-  if ( (p = ::strchr( tport, '.' )) != NULL ) {
-    t_len = p - tport;
-    if ( p[ 1 ] == 'c' || p[ 1 ] == 'C' )
-      conn = true;
-    else
-      conn = false;
+  if ( conn != NULL ) {
+    if ( (p = ::strchr( tport, '.' )) != NULL ) {
+      t_len = p - tport;
+      if ( p[ 1 ] == 'c' || p[ 1 ] == 'C' )
+        *conn = true;
+      else
+        *conn = false;
+    }
   }
   for ( ConfigTree::Transport * t = this->transports.hd; t != NULL;
         t = t->next ) {
@@ -1763,60 +1766,6 @@ ConfigTree::Parameters::print_y( ConfigPrinter &p,  int i ) const noexcept
       p.printf( "\n" );
     }
   }
-}
-
-bool
-ConfigTree::Transport::get_route_str( const char *name,
-                                      const char *&value ) noexcept
-{
-  for ( StringPair *sp = this->route.hd; sp != NULL; sp = sp->next ) {
-    if ( sp->name.equals( name ) ) {
-      value = sp->value.val;
-      return true;
-    }
-  }
-  value = NULL;
-  return false;
-}
-
-bool
-ConfigTree::Transport::get_route_int( const char *name,  int &value ) noexcept
-{
-  for ( StringPair *sp = this->route.hd; sp != NULL; sp = sp->next ) {
-    if ( sp->name.equals( name ) ) {
-      if ( sp->value.len > 0 &&
-           sp->value.val[ 0 ] >= '0' && sp->value.val[ 0 ] <= '9' ) {
-        value = atoi( sp->value.val );
-        return true;
-      }
-      break;
-    }
-  }
-  value = 0;
-  return false;
-}
-
-bool
-ConfigTree::Transport::get_route_bool( const char *name,  bool &value ) noexcept
-{
-  for ( StringPair *sp = this->route.hd; sp != NULL; sp = sp->next ) {
-    if ( sp->name.equals( name ) ) {
-      if ( sp->value.len > 0 ) {
-        switch ( sp->value.val[ 0 ] ) {
-          case '1': case 't': case 'T': case 'y': case 'Y':
-            value = true;
-            break;
-          default:
-            value = false;
-            break;
-        }
-        return true;
-      }
-      break;
-    }
-  }
-  value = false;
-  return false;
 }
 
 int

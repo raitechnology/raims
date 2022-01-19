@@ -253,25 +253,6 @@ UserDB::decode_peer_msg( UserBridge &from_n,  const MsgHdrDecoder &dec,
            dec.mref[ FID_CREATE ].fptr, dec.mref[ FID_CREATE ].fsize );
   copy_max( user->expires, user->expires_len, MAX_TIME_LEN,
            dec.mref[ FID_EXPIRES ].fptr, dec.mref[ FID_EXPIRES ].fsize );
-#if 0
-  if ( dec.mref[ FID_PUB_KEY ].fsize > MAX_ECDH_DER_PUB_LEN ) {
-    fprintf( stderr, "User pub key too big\n" );
-    return false;
-  }
-  pub_sz = dec.mref[ FID_PUB_KEY ].fsize;
-  ::memcpy( pub_der, dec.mref[ FID_PUB_KEY ].fptr, pub_sz );
-  user->calc_user_hmac( hmac, pub_der, pub_sz );
-  if ( hmac != sync_bridge_id.hmac ) {
-    char buf[ HMAC_B64_LEN + 1 ], buf2[ HMAC_B64_LEN + 1 ];
-    fprintf( stderr, "User hmac invalid [%s] != [%s]\n",
-         hmac.to_base64_str( buf ), sync_bridge_id.hmac.to_base64_str( buf2 ) );
-    user->print_json( 0 );
-    return false;
-  }
-  /* if ( user_n->is_set( ZOMBIE_STATE ) {
-   *    XXX make sure time is > some period 
-   * }  */
-#endif
   return true;
 }
 /* recv a peer key */
@@ -283,10 +264,6 @@ UserDB::make_peer_session( const MsgFramePublish &pub,  UserBridge &from_n,
   UserNonce  sync_bridge_id;
   HashDigest peer_key;
   UserBuf    user;
-#if 0
-  uint8_t    pub_der[ MAX_ECDH_DER_PUB_LEN ];
-  size_t     pub_sz;
-#endif
   uint64_t   start = 0;
   
   if ( this->decode_peer_msg( from_n, dec, sync_bridge_id, peer_key, user_n,
@@ -320,12 +297,6 @@ UserDB::make_peer_session( const MsgFramePublish &pub,  UserBridge &from_n,
     }
     user_n->peer_key = peer_key;
     user_n->start_time = start;
-#if 0
-    if ( dec.test_2( FID_BLOOM, FID_SUB_SEQNO ) )
-      this->sub_db.recv_bloom( pub, *user_n, dec );
-    if ( dec.test_2( FID_ADJACENCY, FID_LINK_STATE ) )
-      this->recv_adjacency_result( pub, *user_n, dec );
-#endif
   }
   peer_key.zero();
   return user_n;
@@ -696,8 +667,9 @@ UserDB::send_peer_add( UserBridge &n ) noexcept
       }
       this->events.send_add_route( n.uid, i, hops );
       this->make_peer_add_msg( n, Z_ADD, Z_ADD_SZ, add_h, m, hops, in_mesh );
-      EvPublish pub( Z_ADD, Z_ADD_SZ, NULL, 0, m.msg, m.len(), this->my_src_fd,
-                     add_h, NULL, 0, (uint8_t) MSG_BUF_TYPE_ID, 'p' );
+      EvPublish pub( Z_ADD, Z_ADD_SZ, NULL, 0, m.msg, m.len(),
+                     rte->sub_route, this->my_src_fd, add_h,
+                     CABA_TYPE_ID, 'p' );
       rte->forward_to_connected_auth( pub );
     }
   }
@@ -724,8 +696,8 @@ UserDB::forward_peer_add( UserBridge &n,
         this->events.send_add_route( n.uid, i, hops );
         this->make_peer_add_msg( n, Z_ADD, Z_ADD_SZ, add_h, m, hops, in_mesh );
         EvPublish pub( Z_ADD, Z_ADD_SZ, NULL, 0, m.msg, m.len(),
-                       this->my_src_fd, add_h, NULL, 0,
-                       (uint8_t) MSG_BUF_TYPE_ID, 'p' );
+                       rte->sub_route, this->my_src_fd, add_h,
+                       CABA_TYPE_ID, 'p' );
         rte->forward_to_connected_auth( pub );
       }
     }
@@ -770,8 +742,9 @@ UserDB::send_peer_del( UserBridge &n ) noexcept
                 rte->transport.tport.val, rte->connect_count );
       this->events.send_peer_delete( n.uid, i );
       this->make_peer_del_msg( n, Z_DEL, Z_DEL_SZ, del_h, m );
-      EvPublish pub( Z_DEL, Z_DEL_SZ, NULL, 0, m.msg, m.len(), this->my_src_fd,
-                     del_h, NULL, 0, (uint8_t) MSG_BUF_TYPE_ID, 'p' );
+      EvPublish pub( Z_DEL, Z_DEL_SZ, NULL, 0, m.msg, m.len(),
+                     rte->sub_route, this->my_src_fd, del_h,
+                     CABA_TYPE_ID, 'p' );
       rte->forward_to_connected_auth( pub );
     }
   }

@@ -76,6 +76,11 @@ struct StringTab {
   }
   bool get_string( uint32_t val,  StringVal &sv ) noexcept;
 
+  template<class Obj>
+  Obj *make( void ) {
+    return new ( this->mem.make( sizeof( Obj ) ) ) Obj();
+  }
+
   StringTab( md::MDMsgMem &m )
       : mem( m ), id( 0 ), uid( 0 ), str_col( 0 ), next_id( 1 ),
         small_left( 0 ), small_str( 0 ) {

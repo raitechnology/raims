@@ -12,49 +12,52 @@ extern "C" {
 namespace rai {
 namespace ms {
 
-enum WildFmt {
-  RV_WILD_FMT   = 0,
-  GLOB_WILD_FMT = 1
-};
-
 struct SubOnMsg;
 struct PatRoute;
 
-struct PatCtx {
-  const char   * pat;
-  size_t         patlen;
-  WildFmt        fmt;
-  bool           is_start;
-  kv::PatternCvt cvt;
-  uint32_t       count,
-                 hash;
-  uint64_t       seqno;
-  kv::RouteLoc   loc;
-  PatRoute     * rt;
-  SubOnMsg     * cb;
+struct PatternArgs {
+  const char           * pat;
+  uint16_t               patlen;
+  bool                   is_start;
+  uint32_t               hash,
+                         flags,
+                         tport_id,
+                         sub_count,
+                         internal_count,
+                         external_count;
+  uint64_t               seqno;
+  const kv::PatternCvt & cvt;
+  kv::RouteLoc           loc;
+  PatRoute             * rt;
+  SubOnMsg             * cb;
 
-  PatCtx(  const char *p,  size_t len,  WildFmt f,  bool start,
-           SubOnMsg *on_msg,  uint64_t n ) : 
-    pat( p ), patlen( len ), fmt( f ), is_start( start ),
-    count( 0 ), hash( 0 ), seqno( n ), rt( 0 ), cb( on_msg ) {}
+  PatternArgs( const char *p,  uint16_t len,  const kv::PatternCvt &c,
+               bool start, SubOnMsg *on_msg,  uint64_t n,  uint32_t fl,
+               uint32_t tp ) : 
+    pat( p ), patlen( len ), is_start( start ), hash( 0 ),
+    flags( fl ), tport_id( tp ), sub_count( 0 ), internal_count( 0 ),
+    external_count( 0 ), seqno( n ), cvt( c ), rt( 0 ), cb( on_msg ) {}
 
-  bool cvt_wild( const uint32_t *seed ) noexcept;
+  bool cvt_wild( const uint32_t *seed,  kv::PatternFmt fmt ) noexcept;
 };
 
 struct PatRoute : public kv::BloomDetail {
-  uint64_t                  start_seqno, /* sequence of the subscription start */
-                            expires;     /* if time limited subscription */
+  uint64_t                  start_seqno; /* sequence of the subscription start */
   SubOnMsg                * on_data;
+  SubRefs                   ref;
   pcre2_real_code_8       * re;    /* pcre match the subject, null if prefix */
   pcre2_real_match_data_8 * md;
-  uint32_t                  ref_index;
-  uint16_t                  prefix_len,
-                            len;
+  uint16_t                  len;
   char                      value[ 2 ]; /* wildcard used in protocol */
 
-  bool start( PatCtx &ctx ) noexcept;
+  bool start( PatternArgs &ctx ) noexcept;
+  bool add( PatternArgs &ctx ) noexcept;
+  bool rem( PatternArgs &ctx ) noexcept;
   bool match( const char *sub,  size_t len ) const noexcept;
   void release( void ) noexcept;
+  bool test( uint32_t flags ) const {
+    return this->ref.test( flags );
+  }
 };
 
 struct PatTab {
@@ -65,10 +68,10 @@ struct PatTab {
 
   PatTab( SubList &l,  const uint32_t *s ) : list( l ), seed( s ) {}
 
-  SubStatus start( PatCtx &ctx ) noexcept;
-  SubStatus stop( PatCtx &ctx ) noexcept;
-  void remove( PatCtx &ctx ) noexcept;
-  void prefix_count( PatCtx &ctx ) noexcept;
+  SubStatus start( PatternArgs &ctx ) noexcept;
+  SubStatus stop( PatternArgs &ctx ) noexcept;
+  void remove( PatternArgs &ctx ) noexcept;
+  /*void prefix_count( PatternArgs &ctx ) noexcept;*/
 
   PatRoute *find_sub( uint32_t hash, uint64_t seqno ) noexcept;
   bool prefix_hash_exists( uint16_t prefix_len,  uint32_t hash ) noexcept;

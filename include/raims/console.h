@@ -325,6 +325,7 @@ struct Console : public md::MDOutput, public SubOnMsg, public ConfigPrinter {
   char            * log_filename;
   int               log_fd;
   uint32_t          next_rotate;
+  int               log_status;
   bool              mute_log;
 
   static const size_t TS_LEN         = 8, /* H:M:S */
@@ -431,10 +432,6 @@ struct Console : public md::MDOutput, public SubOnMsg, public ConfigPrinter {
     }
     rpc->init();
     return (T *) rpc;
-  }
-  template<class Obj>
-  Obj *make( void ) {
-    return new ( this->string_tab.mem.make( sizeof( Obj ) ) ) Obj();
   }
 };
 

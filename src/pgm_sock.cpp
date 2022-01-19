@@ -5,6 +5,7 @@
 #include <sys/socket.h>
 #include <netdb.h>
 #include <raims/pgm_sock.h>
+#include <raims/debug.h>
 #include <raikv/util.h>
 
 using namespace rai;
@@ -16,22 +17,22 @@ PgmSock::PgmSock() noexcept
       timeout_usecs ( 0 ),
       len           ( 0 ),
       skb_count     ( 0 ),
-      txw_sqns      ( 1024 ),
+      txw_sqns      ( 16 * 1024 ),
       pending       ( 0 ),
       lost_tstamp   ( 0 ),
       lost_count    ( 0 ),
       pgm_err       ( 0 ),
       res           ( 0 ),
-      mtu           ( 1500 ),
-      rxw_sqns      ( 128 ),
-      ambient_spm   ( pgm_secs( 10 ) ),
-      peer_expiry   ( pgm_secs( 600 ) ),
-      spmr_expiry   ( pgm_msecs( 250 ) ),
+      mtu           ( 16 * 1024 ),
+      rxw_sqns      ( 16 * 1024 ),
+      ambient_spm   ( pgm_secs( 5 ) ),
+      peer_expiry   ( pgm_secs( 60 ) ),
+      spmr_expiry   ( pgm_msecs( 100 ) ),
       nak_bo_ivl    ( pgm_msecs( 50 ) ),
       nak_rpt_ivl   ( pgm_msecs( 200 ) ),
-      nak_rdata_ivl ( pgm_msecs( 400 ) ),
-      nak_data_retry( 50 ),
-      nak_ncf_retry ( 50 ),
+      nak_rdata_ivl ( pgm_msecs( 500 ) ),
+      nak_data_retry( 10 ),
+      nak_ncf_retry ( 10 ),
       mcast_loop    ( 0 ),
       mcast_hops    ( 16 ),
       status        ( 0 ),
@@ -44,6 +45,8 @@ PgmSock::PgmSock() noexcept
   ::memset( &this->my_addr, 0, sizeof( this->my_addr ) );
   ::memset( &this->lost_tsi, 0, sizeof( this->lost_tsi ) );
   ::memcpy( this->heartbeat_spm, hb_spm, sizeof( hb_spm ) );
+  ::memset( this->src_stats, 0, sizeof( this->src_stats ) );
+  ::memset( this->recv_stats, 0, sizeof( this->recv_stats ) );
   this->gsr_addr[ 0 ] = '\0';
 }
 /* extract the recv ip addr into gsr_addr */
@@ -102,6 +105,8 @@ PgmSock::start_pgm( const char *network,  int svc,  int &fd ) noexcept
     return false;
   }
   bool b;
+  uint32_t rcvbufsz = 16 * 1024 *
+             ( this->rxw_sqns < 64 * 1024 ? this->rxw_sqns : 64 * 1024 );
   b = pgm_setsockopt( this->sock, IPPROTO_PGM, PGM_UDP_ENCAP_UCAST_PORT,
                       &svc, sizeof( svc ) );
   b&= pgm_setsockopt( this->sock, IPPROTO_PGM, PGM_UDP_ENCAP_MCAST_PORT,
@@ -138,7 +143,17 @@ PgmSock::start_pgm( const char *network,  int svc,  int &fd ) noexcept
                       &this->nak_data_retry, sizeof( this->nak_data_retry ) );
   b&= pgm_setsockopt( this->sock, IPPROTO_PGM, PGM_NAK_NCF_RETRIES,
                       &this->nak_ncf_retry, sizeof( this->nak_ncf_retry ) );
-
+  b&= pgm_setsockopt( this->sock, SOL_SOCKET, SO_RCVBUF,
+                      &rcvbufsz, sizeof( rcvbufsz ) );
+#if 0
+  const struct pgm_fecinfo_t fecinfo = { .block_size              = 255,
+                                         .proactive_packets       = 16,
+                                         .group_size              = 64,
+                                         .ondemand_parity_enabled = true,
+                                         .var_pktlen_enabled      = true };
+  b &= pgm_setsockopt( this->sock, IPPROTO_PGM, PGM_USE_FEC,
+                       &fecinfo, sizeof( fecinfo ) );
+#endif
   if ( !b ) {
     this->status = 4;
     return false;
@@ -177,11 +192,13 @@ PgmSock::start_pgm( const char *network,  int svc,  int &fd ) noexcept
   socklen_t addrlen = sizeof( this->my_addr );
   uint32_t  i;
   if ( pgm_getsockname( this->sock, &this->my_addr, &addrlen ) ) {
-    printf( "sockname: [" );
-    for ( i = 0; i < sizeof( this->my_addr.sa_addr.gsi.identifier ); i++ )
-      printf( "%02x", this->my_addr.sa_addr.gsi.identifier[ i ] );
-    printf( "]:%u:%u\n", ntohs( this->my_addr.sa_addr.sport ),
+    if ( debug_pgm ) {
+      printf( "sockname: [" );
+      for ( i = 0; i < sizeof( this->my_addr.sa_addr.gsi.identifier ); i++ )
+        printf( "%02x", this->my_addr.sa_addr.gsi.identifier[ i ] );
+      printf( "]:%u:%u\n", ntohs( this->my_addr.sa_addr.sport ),
                         ntohs( this->my_addr.sa_port ) );
+    }
   }
   /* join IP multicast groups */
   for ( i = 0; i < this->res->ai_recv_addrs_len; i++ ) {
@@ -257,7 +274,7 @@ PgmSock::put_send_window( const void *data,  size_t size,
   skb = this->send_buf.last_skb();
   if ( skb != NULL ) {
     if ( w->extend_skb( this->geom, skb, data, size, data2, size2 ) ) {
-      this->pending += size;
+      this->pending += size + size2;
       return;
     }
     this->send_buf.next_skb();
@@ -291,7 +308,7 @@ PgmSock::put_send_window( const void *data,  size_t size,
     if ( (skb = w->alloc_skb( this->geom, data, size, data2, size2 )) != NULL) {
       this->send_buf.put_last( skb );
       this->skb_count++;
-      this->pending += size;
+      this->pending += size + size2;
       return;
     }
     w = NULL;
@@ -313,6 +330,7 @@ PgmSock::push_send_window( void ) noexcept
   for (;;) {
     if ( skb == NULL ) {
       this->status = 0;
+      this->pending = 0;
       this->send_buf.reset();
       return true;
     }
@@ -353,54 +371,86 @@ PgmSock::recv_msgs( void ) noexcept
   socklen_t      optlen;
   struct timeval tv;
 
-  this->status = pgm_recvmsgv( this->sock, this->msgv, MSG_VEC_SIZE,
-                               MSG_ERRQUEUE, &bytes_read, &this->pgm_err );
-  this->timeout_usecs = 0;
-  this->len = 0;
-  switch ( this->status ) {
-    case PGM_IO_STATUS_NORMAL: {
-      this->len = bytes_read;
-      this->status = 0;
-      return true;
-    }
-    case PGM_IO_STATUS_TIMER_PENDING:
-      optlen = sizeof( tv );
-      pgm_getsockopt( this->sock, IPPROTO_PGM, PGM_TIME_REMAIN, &tv,
-                      &optlen );
-      this->timeout_usecs = tv.tv_sec * 1000000 + tv.tv_usec;
-      return false;
-
-    case PGM_IO_STATUS_RATE_LIMITED:
-      optlen = sizeof( tv );
-      pgm_getsockopt( this->sock, IPPROTO_PGM, PGM_TIME_REMAIN, &tv,
-                      &optlen );
-      this->timeout_usecs = tv.tv_sec * 1000000 + tv.tv_usec;
-      return false;
-
-    case PGM_IO_STATUS_WOULD_BLOCK:
-      this->timeout_usecs = 1000;
-      return false;
-
-    case PGM_IO_STATUS_RESET: {
-      struct pgm_sk_buff_t* skb = msgv[ 0 ].msgv_skb[ 0 ];
-      this->lost_tstamp = skb->tstamp;
-      if ( pgm_tsi_equal( &skb->tsi, &this->lost_tsi ) )
-        this->lost_count += skb->sequence;
-      else {
-        this->lost_count = skb->sequence;
-        memcpy( &this->lost_tsi, &skb->tsi, sizeof( pgm_tsi_t ) );
+  for (;;) {
+    this->status = pgm_recvmsgv( this->sock, this->msgv, MSG_VEC_SIZE,
+                                 MSG_ERRQUEUE, &bytes_read, &this->pgm_err );
+    this->timeout_usecs = 0;
+    this->len = 0;
+    switch ( this->status ) {
+      case PGM_IO_STATUS_NORMAL: {
+        if ( debug_pgm ) {
+          if ( bytes_read > 0 )
+            printf( "pgm normal, bytss %lu\n", bytes_read );
+        }
+        this->len = bytes_read;
+        this->status = 0;
+        return true;
       }
-      pgm_free_skb( skb );
-      return false;
-    }
-    default:
-      if ( this->pgm_err != NULL ) {
-        fprintf( stderr, "%s", this->pgm_err->message );
-        pgm_error_free( this->pgm_err );
-        this->pgm_err = NULL;
+      case PGM_IO_STATUS_TIMER_PENDING:
+        optlen = sizeof( tv );
+        pgm_getsockopt( this->sock, IPPROTO_PGM, PGM_TIME_REMAIN, &tv,
+                        &optlen );
+        this->timeout_usecs = tv.tv_sec * 1000000 + tv.tv_usec;
+        return false;
+
+      case PGM_IO_STATUS_RATE_LIMITED:
+        optlen = sizeof( tv );
+        pgm_getsockopt( this->sock, IPPROTO_PGM, PGM_TIME_REMAIN, &tv,
+                        &optlen );
+        this->timeout_usecs = tv.tv_sec * 1000000 + tv.tv_usec;
+        return false;
+
+      case PGM_IO_STATUS_WOULD_BLOCK:
+        this->timeout_usecs = 1000;
+        return false;
+
+      case PGM_IO_STATUS_RESET: {
+        struct pgm_sk_buff_t* skb = msgv[ 0 ].msgv_skb[ 0 ];
+        if ( ! pgm_tsi_equal( &skb->tsi, &this->lost_tsi ) ) {
+          memcpy( &this->lost_tsi, &skb->tsi, sizeof( pgm_tsi_t ) );
+          this->lost_tstamp = skb->tstamp;
+          this->lost_count  = skb->sequence;
+        }
+        else {
+          this->lost_count += skb->sequence;
+        }
+/*        pgm_tsi_print_r( &this->lost_tsi, tsi_buf, sizeof( tsi_buf ) );
+        fprintf( stderr, "lost %lu seq @ %s\n", this->lost_count, tsi_buf );*/
+        pgm_free_skb( skb );
       }
-      return false;
+      /* fall thru */
+      default:
+        if ( this->pgm_err != NULL ) {
+          fprintf( stderr, "%s", this->pgm_err->message );
+          pgm_error_free( this->pgm_err );
+          this->pgm_err = NULL;
+        }
+        break;
+    }
   }
+}
+
+void
+PgmSock::print_lost( void ) noexcept
+{
+  if ( this->lost_tstamp + (pgm_time_t) 1000000 < pgm_time_update_now() ) {
+    char tsi_buf[ 32 ];
+    char addr_buf[ 128 ];
+    pgm_tsi_print_r( &this->lost_tsi, tsi_buf, sizeof( tsi_buf ) );
+    pgm_tsi_to_address_string( this->sock, &this->lost_tsi, addr_buf,
+                               sizeof( addr_buf ) );
+    fprintf( stderr, "lost %lu seq tsi[%s] @ %s\n", this->lost_count, tsi_buf,
+             addr_buf );
+    this->lost_count = 0;
+    ::memset( &this->lost_tsi, 0, sizeof( this->lost_tsi ) );
+  }
+}
+
+void
+PgmSock::print_stats( void ) noexcept
+{
+  printf( "-+-+-+-\n" );
+  pgm_printstats( this->sock, this->src_stats, this->recv_stats );
 }
 
 void
@@ -410,28 +460,29 @@ PgmSock::close_pgm( void ) noexcept
     pgm_close( this->sock, this->is_connected );
     this->sock = NULL;
     this->is_connected = false;
+    this->pending   = 0;
+    this->skb_count = 0;
+    if ( this->pgm_err != NULL ) {
+      pgm_error_free( this->pgm_err );
+      this->pgm_err = NULL;
+    }
+    if ( this->res != NULL ) {
+      pgm_freeaddrinfo( this->res );
+      this->res = NULL;
+    }
+    this->send_buf.release();
+    while ( ! this->send_list.is_empty() ) {
+      PgmSendWindow * w = this->send_list.pop_hd();
+      delete w;
+    }
+    ::memset( &this->my_addr, 0, sizeof( this->my_addr ) );
+    ::memset( &this->lost_tsi, 0, sizeof( this->lost_tsi ) );
+    this->gsr_addr[ 0 ] = '\0';
+    this->status = 0;
   }
 }
 
 void
 PgmSock::release( void ) noexcept
 {
-  if ( this->pgm_err != NULL ) {
-    pgm_error_free( this->pgm_err );
-    this->pgm_err = NULL;
-  }
-  if ( this->res != NULL ) {
-    pgm_freeaddrinfo( this->res );
-    this->res = NULL;
-  }
-  this->send_buf.release();
-  while ( ! this->send_list.is_empty() ) {
-    PgmSendWindow * w = this->send_list.pop_hd();
-    delete w;
-  }
-  ::memset( &this->my_addr, 0, sizeof( this->my_addr ) );
-  ::memset( &this->lost_tsi, 0, sizeof( this->lost_tsi ) );
-  this->gsr_addr[ 0 ] = '\0';
-  this->status = 0;
 }
-
