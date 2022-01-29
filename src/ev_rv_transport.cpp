@@ -38,7 +38,7 @@ set_route_string( ConfigTree::Transport *t,  StringTab &stab,
 }
 
 static ConfigTree::Transport *
-get_rv_transport( EvRvTransportListen &listen ) noexcept
+get_rv_transport( EvRvTransportListen &listen,  RvHost &host ) noexcept
 {
   ConfigTree::Transport * t;
   ConfigTree & tree = listen.rte.mgr.tree;
@@ -46,13 +46,13 @@ get_rv_transport( EvRvTransportListen &listen ) noexcept
   char rv_svc[ RvHost::MAX_SERVICE_LEN + 8 ];
   int  svc_len;
 
-  if ( listen.service_len == 0 ) {
+  if ( host.service_len == 0 ) {
     ::strcpy( rv_svc, "rv_7500" );
     svc_len = 7;
   }
   else {
     svc_len = ::snprintf( rv_svc, sizeof( rv_svc ), "rv_%.*s",
-                          listen.service_len, listen.service );
+                          host.service_len, host.service );
   }
   t = tree.find_transport( rv_svc, svc_len );
 
@@ -66,19 +66,19 @@ get_rv_transport( EvRvTransportListen &listen ) noexcept
 }
 
 int
-EvRvTransportListen::start_host( void ) noexcept
+EvRvTransportListen::start_host( RvHost &host ) noexcept
 {
   uint32_t delay_secs = 0;
-  if ( this->network_len != 0 ) {
+  if ( host.network_len != 0 ) {
     StringTab & stab = this->rte.mgr.user_db.string_tab;
-    ConfigTree::Transport * t = get_rv_transport( *this );
+    ConfigTree::Transport * t = get_rv_transport( *this, host );
     TransportRoute * rte;
 
     rte = this->rte.mgr.user_db.transport_tab.find_transport( t );
     if ( rte == NULL || rte->is_set( TPORT_IS_SHUTDOWN ) ) {
       stab.reref_string( "pgm", 3, t->type );
-      set_route_string( t, stab, "listen", 6, this->network, this->network_len);
-      set_route_string( t, stab, "port", 4, this->service, this->service_len );
+      set_route_string( t, stab, "listen", 6, host.network, host.network_len);
+      set_route_string( t, stab, "port", 4, host.service, host.service_len );
       set_route_string( t, stab, "mcast_loop", 10, "0", 1 );
       set_route_string( t, stab, "mtu", 3, "16384", 5 );
 
@@ -93,18 +93,18 @@ EvRvTransportListen::start_host( void ) noexcept
     }
   }
   printf( "start_network:        service %.*s, \"%.*s\"\n",
-          (int) this->service_len, this->service, (int) this->network_len,
-          this->network );
-  return this->EvRvListen::start_host2( delay_secs );
+          (int) host.service_len, host.service, (int) host.network_len,
+          host.network );
+  return this->EvRvListen::start_host2( host, delay_secs );
 }
 
 int
-EvRvTransportListen::stop_host( void ) noexcept
+EvRvTransportListen::stop_host( RvHost &host ) noexcept
 {
   printf( "stop_network:         service %.*s, \"%.*s\"\n",
-          (int) this->service_len, this->service, (int) this->network_len,
-          this->network );
-  return this->EvRvListen::stop_host();
+          (int) host.service_len, host.service, (int) host.network_len,
+          host.network );
+  return this->EvRvListen::stop_host( host );
 }
 
 void

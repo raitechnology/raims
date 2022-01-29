@@ -25,8 +25,8 @@ struct EvRvTransport : public kv::RouteNotify/*, public SubOnMsg*/ {
 
 struct EvRvTransportListen : public sassrv::EvRvListen, public EvRvTransport {
   EvRvTransportListen( kv::EvPoll &p,  TransportRoute &r ) noexcept;
-  virtual int start_host( void ) noexcept final;
-  virtual int stop_host( void ) noexcept final;
+  virtual int start_host( sassrv::RvHost &host ) noexcept final;
+  virtual int stop_host( sassrv::RvHost &host ) noexcept final;
 };
 
 }

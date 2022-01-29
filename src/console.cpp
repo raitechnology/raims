@@ -23,6 +23,9 @@ namespace rai {
 namespace kv {
 extern uint32_t kv_debug;
 }
+namespace sassrv {
+extern uint32_t rv_debug;
+}
 }
 
 using namespace rai;
@@ -1415,12 +1418,12 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
         this->printf( "recalculate peer dist\n" );
       }
       else if ( len >= 2 && ::memcmp( arg, "kv", 2 ) == 0 ) {
-        this->printf( "kv debug on\n" );
-        kv_debug = 1;
+        kv_debug = ! kv_debug;
+        this->printf( "kv debug %s\n", kv_debug ? "on" : "off" );
       }
-      else if ( len >= 4 && ::memcmp( arg, "nokv", 4 ) == 0 ) {
-        this->printf( "kv debug off\n" );
-        kv_debug = 0;
+      else if ( len >= 2 && ::memcmp( arg, "rv", 2 ) == 0 ) {
+        sassrv::rv_debug = ! sassrv::rv_debug;
+        this->printf( "rv debug %s\n", sassrv::rv_debug ? "on" : "off" );
       }
       else {
         dbg_flags = string_to_uint64( arg, len );

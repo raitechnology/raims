@@ -971,6 +971,7 @@ SessionMgr::forward_inbox( EvPublish &fwd ) noexcept
     printf( "no match for %.*s\n", (int) fwd.subject_len, fwd.subject );
     return true;
   }
+  n->printf( "forward inbox %.*s\n", (int) fwd.subject_len, fwd.subject );
   InboxBuf  ibx( n->bridge_id );
   CabaFlags fl( CABA_INBOX );
 
