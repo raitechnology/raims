@@ -336,7 +336,9 @@ enum InvalidReason {
   ADJACENCY_UPDATE_INV  = 5, /* recvd an adjacency sync from peer */
   ADD_TRANSPORT_INV     = 6, /* added a new transport */
   ADD_MESH_URL_INV      = 7, /* discovered a new mesh endpoint */
-  MAX_INVALIDATE        = 8
+  ADD_UCAST_URL_INV     = 8, /* discovered a new ucast endpoint */
+  PREFERRED_ROUTE_INV   = 9, /* discovered a new ucast endpoint */
+  MAX_INVALIDATE        = 10
 };
 #ifdef INCLUDE_PEER_CONST
 static const char *peer_sync_reason_str[] = {
@@ -371,7 +373,9 @@ static const char *invalid_reason_str[] = {
   "adj_change",
   "adj_update",
   "add_tport",
-  "add_mesh"
+  "add_mesh",
+  "add_ucast",
+  "pref_route"
 };
 #if __cplusplus >= 201103L
 static_assert( MAX_REASON_SYNC == ( sizeof( peer_sync_reason_str ) / sizeof( peer_sync_reason_str[ 0 ] ) ), "peer_sync_reason" );
@@ -552,8 +556,11 @@ struct AdjDistance : public md::MDMsgMem {
   /*uint32_t fill_to_edge( uint32_t tos,  PeerUidSet &visit ) noexcept;*/
   uint32_t push_peer( uint32_t peer_uid,  uint32_t dist,
                       PeerUidSet &visit ) noexcept;
-  uint32_t find_best_route( void ) noexcept;
+  uint32_t find_best_route( uint32_t dist ) noexcept;
   bool get_primary_tport( uint32_t dest_uid,  uint32_t &dest_tport ) noexcept;
+  bool tport_preferred( uint32_t dist,  PeerUidSet &rec,
+                        PeerUidSet &test ) noexcept;
+  const char * tport_name( uint32_t uid,  uint32_t tport_id ) noexcept;
   void calc_primary( void ) noexcept;
   uint32_t calc_dist_peers( uint32_t src_uid,  uint32_t dist ) noexcept;
   uint32_t find_best_route2( void ) noexcept;

@@ -15,7 +15,7 @@ int rai::ms::dbg_flags; /* TCP_DBG | PGM_DBG | IBX_DBG */
 
 ExternalRoute::ExternalRoute( EvPoll &p,  SessionMgr &m ) noexcept
              : EvSocket( p, p.register_type( "external_route" ) ),
-               mgr( m ), sub_db( m.sub_db ) {
+               mgr( m ), user_db( m.user_db ), sub_db( m.sub_db ) {
   this->sock_opts = OPT_NO_POLL;
 }
 
@@ -458,17 +458,22 @@ ExternalRoute::on_msg( EvPublish &pub ) noexcept
 
   if ( status > SEQNO_UID_NEXT ) {
     fpub.status = FRAME_STATUS_DUP_SEQNO;
-    n.printf( "%s %.*s seqno %lu (%s)\n",
-              seqno_status_string( status ),
-              (int) fpub.subject_len, fpub.subject, dec.seqno,
-              fpub.rte.name );
+    if ( debug_sess )
+      n.printf( "%s %.*s seqno %lu (%s)\n",
+                seqno_status_string( status ),
+                (int) fpub.subject_len, fpub.subject, dec.seqno,
+                fpub.rte.name );
+    if ( status == SEQNO_UID_REPEAT )
+      n.seqno_repeat++;
+    else if ( status == SEQNO_NOT_SUBSCR )
+      n.seqno_not_subscr++;
     return true;
   }
   bool b = true;
-  size_t i, count = this->mgr.user_db.transport_tab.count;
+  size_t i, count = this->user_db.transport_tab.count;
   if ( seq.tport_mask == SubRefs::ALL_MASK ) {
     for ( i = 0; i < count; i++ ) {
-      TransportRoute *rte = this->mgr.user_db.transport_tab.ptr[ i ];
+      TransportRoute *rte = this->user_db.transport_tab.ptr[ i ];
       if ( &fpub.rte != rte ) {
         if ( rte->is_set( TPORT_IS_EXTERNAL ) ) {
           EvPublish pub( fpub.subject, fpub.subject_len, reply, replylen,
@@ -485,7 +490,7 @@ ExternalRoute::on_msg( EvPublish &pub ) noexcept
       bool is_set = ( mask & 1 ) != 0;
       mask >>= 1;
       if ( is_set ) {
-        TransportRoute *rte = this->mgr.user_db.transport_tab.ptr[ i ];
+        TransportRoute *rte = this->user_db.transport_tab.ptr[ i ];
         if ( &fpub.rte != rte ) {
           if ( rte->is_set( TPORT_IS_EXTERNAL ) ) {
             EvPublish pub( fpub.subject, fpub.subject_len, reply, replylen,
@@ -541,9 +546,9 @@ ExternalRoute::on_inbox( const MsgFramePublish &fpub,  UserBridge &,
 
   d_sess( "on_inbox(%.*s)\n", (int) subjlen, subject );
   bool b = true;
-  size_t i, count = this->mgr.user_db.transport_tab.count;
+  size_t i, count = this->user_db.transport_tab.count;
   for ( i = 0; i < count; i++ ) {
-    TransportRoute *rte = this->mgr.user_db.transport_tab.ptr[ i ];
+    TransportRoute *rte = this->user_db.transport_tab.ptr[ i ];
     if ( &fpub.rte != rte ) {
       if ( rte->is_set( TPORT_IS_EXTERNAL ) ) {
         EvPublish pub( subject, subjlen, reply, replylen,
@@ -842,10 +847,15 @@ SessionMgr::on_msg( EvPublish &pub ) noexcept
 
         if ( status > SEQNO_UID_NEXT ) {
           fpub.status = FRAME_STATUS_DUP_SEQNO;
-          n.printf( "%s %.*s seqno %lu (%s)\n",
-                    seqno_status_string( status ),
-                    (int) fpub.subject_len, fpub.subject, dec.seqno,
-                    fpub.rte.name );
+          if ( debug_sess )
+            n.printf( "%s %.*s seqno %lu (%s)\n",
+                      seqno_status_string( status ),
+                      (int) fpub.subject_len, fpub.subject, dec.seqno,
+                      fpub.rte.name );
+          if ( status == SEQNO_UID_REPEAT )
+            n.seqno_repeat++;
+          else if ( status == SEQNO_NOT_SUBSCR )
+            n.seqno_not_subscr++;
           return true;
         }
         val.last_seqno = seq.last_seqno;
@@ -971,7 +981,6 @@ SessionMgr::forward_inbox( EvPublish &fwd ) noexcept
     printf( "no match for %.*s\n", (int) fwd.subject_len, fwd.subject );
     return true;
   }
-  n->printf( "forward inbox %.*s\n", (int) fwd.subject_len, fwd.subject );
   InboxBuf  ibx( n->bridge_id );
   CabaFlags fl( CABA_INBOX );
 

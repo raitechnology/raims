@@ -21,14 +21,14 @@ EvPgmTransport::EvPgmTransport( EvPoll &p,  TransportRoute &r ) noexcept
   static uint64_t pgm_timer_id;
   this->timer_id = ( (uint64_t) this->sock_type << 56 ) |
     __sync_fetch_and_add( &pgm_timer_id, 1 );
-  /*this->tport_count = &r.mgr.user_db.transport_tab.count;
-  this->not_fd2 = r.fd;*/
 }
 
 bool
 EvPgmTransport::connect( EvPgmTransportParameters &p,
                          EvConnectionNotify *n ) noexcept
 {
+  const char * net  = ";239.192.0.1";
+  uint16_t     port = 7239;
   this->notify         = n;
   this->pgm.mtu        = p.mtu;
   this->pgm.txw_sqns   = p.txw_sqns;
@@ -36,8 +36,11 @@ EvPgmTransport::connect( EvPgmTransportParameters &p,
   this->pgm.mcast_loop = p.mcast_loop;
   if ( this->pgm.mcast_loop )
     this->pgm.mcast_loop = 2;
-
-  if ( ! this->pgm.start_pgm( p.network, p.port, this->fd ) )
+  if ( p.port != 0 )
+    port = p.port;
+  if ( p.network != NULL )
+    net = p.network;
+  if ( ! this->pgm.start_pgm( net, port, this->fd ) )
     return false;
   this->PeerData::init_peer( this->fd, NULL, "pgm" );
   char peer[ 256 ];

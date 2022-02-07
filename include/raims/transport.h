@@ -13,6 +13,7 @@ namespace rai {
 namespace ms {
 
 struct SessionMgr;
+struct UserDB;
 struct TransportRoute;
 struct TcpConnectionMgr;
 struct PeerUidSet;
@@ -64,15 +65,16 @@ struct ConnectionMgr : public kv::EvConnectionNotify,
 };
 
 enum TransportRouteState {
-  TPORT_IS_SVC      = 1,
-  TPORT_IS_LISTEN   = 2,
-  TPORT_IS_MCAST    = 4,
-  TPORT_IS_MESH     = 8,
-  TPORT_IS_CONNECT  = 16,
-  TPORT_IS_TCP      = 32,
-  TPORT_IS_EDGE     = 64,
-  TPORT_IS_EXTERNAL = 128,
-  TPORT_IS_SHUTDOWN = 256
+  TPORT_IS_SVC       = 1,
+  TPORT_IS_LISTEN    = 2,
+  TPORT_IS_MCAST     = 4,
+  TPORT_IS_MESH      = 8,
+  TPORT_IS_CONNECT   = 16,
+  TPORT_IS_TCP       = 32,
+  TPORT_IS_EDGE      = 64,
+  TPORT_IS_EXTERNAL  = 128,
+  TPORT_IS_SHUTDOWN  = 256,
+  TPORT_IS_PREFERRED = 512
 };
 
 struct TransportRoute : public kv::EvSocket, public kv::EvConnectionNotify,
@@ -80,6 +82,7 @@ struct TransportRoute : public kv::EvSocket, public kv::EvConnectionNotify,
   /*TransportRoute        * next;*/
   kv::EvPoll            & poll;           /* event poller */
   SessionMgr            & mgr;            /* session of transport */
+  UserDB                & user_db;        /* session of transport */
   kv::RoutePublish      & sub_route;      /* bus for transport */
   kv::BloomRoute        * switch_rt,      /* local and system subs */
                         * eswitch_rt,     /* external subs attached to local */

@@ -217,23 +217,25 @@ UserDB::on_heartbeat( const MsgFramePublish &pub,  UserBridge &n,
     n.user_route->rte.hb_count++;
 
   if ( dec.test( FID_MESH_URL ) ) {
+    this->set_mesh_url( *n.user_route, dec );
+#if 0
     if ( ! n.user_route->is_set( MESH_URL_STATE ) ) {
       this->set_mesh_url( *n.user_route, dec );
       this->peer_dist.invalidate( ADD_MESH_URL_INV );
     }
+#endif
   }
   if ( dec.test( FID_UCAST_URL ) ) {
+    this->set_ucast_url( *n.user_route, dec );
+#if 0
     if ( ! n.user_route->is_set( UCAST_URL_STATE ) ) {
       if ( debug_hb )
         n.printf( "hb set ucast_url\n" );
       n.user_route->set_ucast( (const char *) dec.mref[ FID_UCAST_URL ].fptr,
                                dec.mref[ FID_UCAST_URL ].fsize, NULL );
     }
+#endif
   }
-  /*else {
-    n.printf( "peer from %s, seqno %lu -> %lu, uptime %lu\n",
-              pub.rte.name, n.hb_seqno, seqno, uptime );
-  }*/
   /* these change unauthenticated, watches for hb replay */
   if ( n.primary_route != pub.rte.tport_id )
     return true;

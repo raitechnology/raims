@@ -2820,7 +2820,7 @@ Console::show_urls( void ) noexcept
 void
 Console::show_counters( void ) noexcept
 {
-  static const uint32_t ncols = 12;
+  static const uint32_t ncols = 14;
   uint32_t     i = 0;
   TabPrint   * tab;
 
@@ -2854,11 +2854,13 @@ Console::show_counters( void ) noexcept
     tab[ i++ ].set_time( n->pong_recv_time );   /* pong_rtime */
     tab[ i++ ].set_long( n->ping_recv_count );  /* pircv */
     tab[ i++ ].set_time( n->ping_recv_time );   /* ping_rtime */
+    tab[ i++ ].set_int( n->seqno_repeat );
+    tab[ i++ ].set_int( n->seqno_not_subscr );
   }
   static const char *hdr[ ncols ] =
     { "user", "start", "hb", "hb_time", "isnd", "ircv",
       "pisnd", "ping_stime", "porcv", "pong_rtime",
-      "pircv", "ping_rtime" };
+      "pircv", "ping_rtime", "repeat", "not_subscr" };
   this->print_table( hdr, ncols );
 }
 

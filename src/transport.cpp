@@ -51,7 +51,7 @@ TransportRoute::TransportRoute( kv::EvPoll &p,  SessionMgr &m,
                                 const char *svc_name,  uint32_t svc_id,
                                 uint32_t id,  uint32_t f ) noexcept
     : EvSocket( p, p.register_type( "transport_route" ) ),
-      poll( p ), mgr( m ),
+      poll( p ), mgr( m ), user_db( m.user_db ),
       sub_route( p.sub_route.get_service( svc_name, svc_id ) ),
       switch_rt( NULL ), eswitch_rt( NULL ), router_rt( NULL ),
       uid_in_mesh( &this->mesh_connected ),
@@ -150,6 +150,16 @@ SessionMgr::add_transport( ConfigTree::Service &s,
                            ConfigTree::Transport &t,
                            bool is_service ) noexcept
 {
+  TransportRoute * rte;
+  return this->add_transport2( s, t, is_service, rte );
+}
+
+bool
+SessionMgr::add_transport2( ConfigTree::Service &s,
+                            ConfigTree::Transport &t,
+                            bool is_service,
+                            TransportRoute *&rte ) noexcept
+{
   if ( ! this->in_list( IN_ACTIVE_LIST ) ) {
     if ( this->init_sock() != 0 )
       return false;
@@ -158,7 +168,6 @@ SessionMgr::add_transport( ConfigTree::Service &s,
     return this->create_telnet( t );
 
   uint32_t f = ( is_service ? TPORT_IS_SVC : 0 );
-  TransportRoute * rte;
   void * p = aligned_malloc( sizeof( TransportRoute ) );
   char svc_name[ 256 ];
   ::snprintf( svc_name, sizeof( svc_name ), "%s.%s", s.svc.val, t.tport.val );
@@ -378,6 +387,8 @@ parse_tcp_param( EvTcpTransportParameters &parm,  const char *name,
     parm.timeout = 15;
   if ( ! tport.get_route_bool( "edge", parm.edge ) )
     parm.edge = false;
+  if ( ! tport.get_route_bool( "preferred", parm.preferred ) )
+    parm.preferred = false;
   if ( tport.is_wildcard( tmp ) ) {
     parm.host = NULL;
     parm.buf[ 0 ] = '\0';
@@ -554,7 +565,6 @@ SessionMgr::add_mesh_connect( TransportRoute &mesh_rte,
 bool
 TransportRoute::on_msg( EvPublish &pub ) noexcept
 {
-  UserDB & user_db = this->mgr.user_db;
   if ( pub.src_route == (uint32_t) this->mgr.fd ) {
     d_tran( "xxx discard %s transport_route: on_msg (%.*s)\n",
             ( pub.src_route == (uint32_t) this->fd ? "from tport" : "from mgr" ),
@@ -563,7 +573,7 @@ TransportRoute::on_msg( EvPublish &pub ) noexcept
   }
   if ( pub.pub_type != 'X' ) {
     uint32_t id = pub.sub_route.route_id;
-    TransportRoute * rte = user_db.transport_tab.ptr[ id ];
+    TransportRoute * rte = this->user_db.transport_tab.ptr[ id ];
     if ( rte->is_set( TPORT_IS_EXTERNAL ) ) {
       d_tran( "rte(%s) forward external: on_msg (%.*s)\n",
               rte->name, (int) pub.subject_len, pub.subject );
@@ -582,7 +592,7 @@ TransportRoute::on_msg( EvPublish &pub ) noexcept
   }
   fpub.flags |= MSG_FRAME_TPORT_CONTROL;
   if ( fpub.n == NULL ) {
-    if ( (fpub.n = user_db.lookup_bridge( fpub, dec )) == NULL ) {
+    if ( (fpub.n = this->user_db.lookup_bridge( fpub, dec )) == NULL ) {
       d_tran( "ignore_msg status %d transport_route: on_msg (%.*s)\n",
               fpub.status, (int) pub.subject_len, pub.subject );
       return true;
@@ -602,13 +612,13 @@ TransportRoute::on_msg( EvPublish &pub ) noexcept
   CabaTypeFlag tflag = dec.msg->caba.type_flag();
   bool         b     = true;
   if ( tflag == CABA_INBOX ) {
-    if ( (ptp_bridge = user_db.is_inbox_sub( pub.subject,
-                                             pub.subject_len )) != NULL ) {
-      TransportRoute &rte = ptp_bridge->primary( user_db )->rte;
+    if ( (ptp_bridge = this->user_db.is_inbox_sub( pub.subject,
+                                                  pub.subject_len )) != NULL ) {
+      TransportRoute &rte = ptp_bridge->primary( this->user_db )->rte;
       if ( &rte != this ) {
         d_tran( "transport_route: inbox (%.*s) -> %s\n",
                 (int) pub.subject_len, pub.subject, rte.name );
-        b = user_db.forward_to_inbox( *ptp_bridge, pub.subject,
+        b = this->user_db.forward_to_inbox( *ptp_bridge, pub.subject,
                                       pub.subject_len, pub.subj_hash,
                                       pub.msg, pub.msg_len );
       }
@@ -617,14 +627,14 @@ TransportRoute::on_msg( EvPublish &pub ) noexcept
   }
   /* cache of the multicast tree for messages originating at n */
   ReversePathForward & forward  = n.reverse_path_cache;
-  uint32_t             i, count = user_db.transport_tab.count;
+  uint32_t             i, count = this->user_db.transport_tab.count;
   TransportRoute     * rte;
-  AdjDistance        & peer_dist = user_db.peer_dist;
+  AdjDistance        & peer_dist = this->user_db.peer_dist;
   /* if forward is valid, send to the ports calculated below */
   if ( peer_dist.is_valid( forward.adjacency_cache_seqno ) ) {
     if ( forward.first( i, count ) ) {
       do {
-        rte = user_db.transport_tab.ptr[ i ];
+        rte = this->user_db.transport_tab.ptr[ i ];
         b  &= rte->sub_route.forward_except( pub, this->mgr.router_set );
       } while ( forward.next( i, count ) );
     }
@@ -640,7 +650,7 @@ TransportRoute::on_msg( EvPublish &pub ) noexcept
   bool             matched_min = false;
   /* check that this route is the min distance to avoid loops */
   for ( i = 0; i < count; i++ ) {
-    rte = user_db.transport_tab.ptr[ i ];
+    rte = this->user_db.transport_tab.ptr[ i ];
     uint32_t d = peer_dist.calc_transport_cache2( n.uid, i, *rte );
     if ( d < min_dist ) {
       min_dist    = d;
@@ -669,7 +679,7 @@ TransportRoute::on_msg( EvPublish &pub ) noexcept
     for ( i = 0; i < count; i++ ) {
       PeerUidSet * rec = peer_dist.uid_next.ptr[ i ];
       if ( rec->src_uid == UserDB::MY_UID )
-        rte = user_db.transport_tab.ptr[ rec->tport_id ];
+        rte = this->user_db.transport_tab.ptr[ rec->tport_id ];
       else
         rte = NULL;
 
@@ -677,7 +687,7 @@ TransportRoute::on_msg( EvPublish &pub ) noexcept
         char buf[ 120 ];
         printf( "next(%s.%u,port=%s.%u,cnt=%u): %s\n",
            ( rec->src_uid==0 ? "me" :
-             this->mgr.user_db.bridge_tab[ rec->src_uid ]->peer.user.val ),
+             this->user_db.bridge_tab[ rec->src_uid ]->peer.user.val ),
            rec->src_uid, ( rte ? rte->transport.tport.val : "" ),
            rec->tport_id, rec->dest_count,
            peer_dist.uid_set_names( *rec, buf, sizeof( buf ) ) );
@@ -699,15 +709,15 @@ TransportRoute::on_msg( EvPublish &pub ) noexcept
 const char *
 TransportRoute::connected_names( char *buf,  size_t buflen ) noexcept
 {
-  return this->mgr.user_db.uid_names( this->uid_connected, buf, buflen );
+  return this->user_db.uid_names( this->uid_connected, buf, buflen );
 }
 
 const char *
 TransportRoute::reachable_names( char *buf,  size_t buflen ) noexcept
 {
-  if ( this->reachable_seqno != this->mgr.user_db.peer_dist.update_seqno )
-    this->mgr.user_db.peer_dist.calc_reachable( *this );
-  return this->mgr.user_db.uid_names( this->reachable, buf, buflen );
+  if ( this->reachable_seqno != this->user_db.peer_dist.update_seqno )
+    this->user_db.peer_dist.calc_reachable( *this );
+  return this->user_db.uid_names( this->reachable, buf, buflen );
 }
 
 const char *
@@ -799,7 +809,7 @@ TransportRoute::on_shutdown( EvSocket &conn,  const char *err,
             this->connect_count );
   this->mgr.events.on_shutdown( this->tport_id, conn.fd >= 0 );
   if ( conn.fd >= 0 ) {
-    this->mgr.user_db.retire_source( conn.fd );
+    this->user_db.retire_source( conn.fd );
     if ( this->connected.test_clear( conn.fd ) ) {
       if ( --this->connect_count == 0 )
         if ( ! this->is_set( TPORT_IS_LISTEN ) )
@@ -939,13 +949,12 @@ TransportRoute::shutdown( void ) noexcept
         }
       }
       else {
-        UserDB & user_db = this->mgr.user_db;
-        uint32_t i, tport_count = user_db.transport_tab.count;
+        uint32_t i, tport_count = this->user_db.transport_tab.count;
         for ( bool ok = this->uid_in_mesh->first( uid ); ok;
               ok = this->uid_in_mesh->next( uid ) ) {
-          UserBridge &n = *this->mgr.user_db.bridge_tab.ptr[ uid ];
+          UserBridge &n = *this->user_db.bridge_tab.ptr[ uid ];
           for ( i = 0; i < tport_count; i++ ) {
-            UserRoute * u_ptr = n.user_route_ptr( user_db, i );
+            UserRoute * u_ptr = n.user_route_ptr( this->user_db, i );
             if ( u_ptr->is_valid() && u_ptr->rte.mesh_id == this->mesh_id ) {
               fd = u_ptr->mcast_fd;
               if ( fd < this->poll.maxfd ) {
@@ -1132,6 +1141,8 @@ parse_pgm_param( EvPgmTransportParameters &parm,  const char *name,
     parm.rxw_sqns = ival;
   if ( tport.get_route_int( "mcast_loop", ival ) )
     parm.mcast_loop = ival;
+  if ( ! tport.get_route_bool( "preferred", parm.preferred ) )
+    parm.preferred = false;
 }
 
 bool
@@ -1153,6 +1164,10 @@ TransportRoute::create_pgm( int kind ) noexcept
     return false;
   this->pgm_tport = l;
   this->state    |= kind;
+  if ( parm.preferred )
+    this->state |= TPORT_IS_PREFERRED;
+  else
+    this->state &= ~TPORT_IS_PREFERRED;
 
   EvInboxTransport * s;
   if ( this->ibx_tport != NULL )

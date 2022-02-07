@@ -100,8 +100,6 @@ TelnetListen::accept( void ) noexcept
     ::close( sock );
     return false;
   }
-  /*c->tport_count = &this->rte.mgr.user_db.transport_tab.count;
-  c->not_fd2 = this->rte.fd;*/
   EvTcpListen::set_sock_opts( this->poll, sock, this->sock_opts );
   ::fcntl( sock, F_SETFL, O_NONBLOCK | ::fcntl( sock, F_GETFL ) );
 

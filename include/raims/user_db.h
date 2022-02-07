@@ -80,6 +80,7 @@ struct UserStateTest : public StateTest<T> {
 };
 
 struct UserBridge;
+struct UserDB;
 struct UserRoute : public UserStateTest<UserRoute> {
   static const uint32_t NO_RTE  = -1;
   static const uint16_t NO_HOPS = -1;
@@ -90,7 +91,7 @@ struct UserRoute : public UserStateTest<UserRoute> {
   uint16_t          hops,          /* number of links away */
                     state,         /* whether in route list */
                     ucast_url_len, /* if has ucast */
-                    mesh_url_len;  /* if hash mesh */
+                    mesh_url_len;  /* if has mesh */
   uint32_t          url_hash,      /* hash of ucast_url, mesh_url */
                     hb_seqno;      /* hb sequence on this transport */
   uint64_t          bytes_sent,    /* bytes sent ptp */
@@ -132,10 +133,12 @@ struct UserRoute : public UserStateTest<UserRoute> {
       this->mesh_url = NULL;
     }
   }
-  void set_ucast( const void *p,  size_t len,  const UserRoute *src ) noexcept;
-  void set_mesh( const void *p,  size_t len ) noexcept;
+  void set_ucast( UserDB &user_db,  const void *p,  size_t len,
+                  const UserRoute *src ) noexcept;
+  void set_mesh( UserDB &user_db,  const void *p,  size_t len ) noexcept;
+
+  char * inbox_route_str( char *buf,  size_t buflen ) noexcept;
 };
-struct UserDB;
 /* peer sessions */
 struct UserBridge : public UserStateTest<UserBridge> {
   HashDigest         peer_key;            /* peer session key */
@@ -178,7 +181,9 @@ struct UserBridge : public UserStateTest<UserBridge> {
                      ping_send_count,
                      ping_recv_count,
                      pong_recv_count,
-                     ping_fail_count;     /* ping counters */
+                     ping_fail_count,     /* ping counters */
+                     seqno_repeat,
+                     seqno_not_subscr;
   StageAuth          auth[ 2 ];           /* auth handshake state */
   UserRoute        * u_buf[ 16 ];         /* indexes user_route */
   void * operator new( size_t, void *ptr ) { return ptr; }

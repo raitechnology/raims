@@ -59,8 +59,6 @@ EvTcpTransportListen::accept( void ) noexcept
     return false;
   }
   c->rte = &this->rte;
-  /*c->tport_count = &this->rte.mgr.user_db.transport_tab.count;
-  c->not_fd2 = this->rte.fd;*/
   EvTcpListen::set_sock_opts( this->poll, sock, this->sock_opts );
   ::fcntl( sock, F_SETFL, O_NONBLOCK | ::fcntl( sock, F_GETFL ) );
 
@@ -93,8 +91,6 @@ EvTcpTransportClient::connect( EvTcpTransportParameters &p,
   this->is_connect = true;
   if ( EvTcpConnection::connect( *this, p.host, p.port, p.opts ) != 0 )
     return false;
-  /*this->tport_count = &this->rte->mgr.user_db.transport_tab.count;
-  this->not_fd2 = this->rte->fd;*/
   this->notify = n;
   this->start();
   return true;

@@ -407,7 +407,7 @@ UserDB::recv_peer_db( const MsgFramePublish &pub,  UserBridge &n,
           if ( debug_peer )
             user_n->printf( "peer_add mesh_url: %.*s\n", (int) rec.mesh_url_len,
                             rec.mesh_url );
-          u_ptr->set_mesh( rec.mesh_url, rec.mesh_url_len );
+          u_ptr->set_mesh( *this, rec.mesh_url, rec.mesh_url_len );
           updated_mesh = true;
         }
       }
@@ -862,7 +862,7 @@ UserDB::recv_mesh_db( const MsgFramePublish &pub,  UserBridge &n,
       if ( rec.mesh_url_len != 0 ) {
         UserRoute * u_ptr   = user_n->user_route_ptr( *this, pub.rte.tport_id );
         if ( u_ptr->is_valid() ) {
-          u_ptr->set_mesh( rec.mesh_url, rec.mesh_url_len );
+          u_ptr->set_mesh( *this, rec.mesh_url, rec.mesh_url_len );
           this->direct_pending.update( u_ptr );
           updated_mesh = true;
         }

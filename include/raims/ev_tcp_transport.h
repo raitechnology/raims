@@ -46,15 +46,16 @@ struct EvTcpTransportParameters {
   int          port,    /* connect port */
                opts,    /* tcp opts */
                timeout; /* connect timeout seconds */
-  bool         edge;    /* if listen edge true, don't create transport*/
+  bool         edge,    /* if listen edge true, don't create transport*/
+               preferred;
   char         buf[ MAX_TCP_HOST_LEN ];
   void * operator new( size_t, void *ptr ) { return ptr; }
   EvTcpTransportParameters( const char *h = NULL,  int p = 0,
                             int o = ( kv::DEFAULT_TCP_CONNECT_OPTS &
                                      ~kv::OPT_REUSEPORT &
                                      ~kv::OPT_VERBOSE ) | kv::OPT_CONNECT_NB,
-                            int t = 15, bool e = false )
-    : host( h ), port( p ), opts( o ), timeout( t ), edge( e ) {
+                            int t = 15, bool e = false,  bool x = false )
+    : host( h ), port( p ), opts( o ), timeout( t ), edge( e ), preferred( x ) {
     this->buf[ 0 ] = '\0';
   }
 
@@ -62,7 +63,7 @@ struct EvTcpTransportParameters {
     void *m = ::malloc( sizeof( EvTcpTransportParameters ) );
     EvTcpTransportParameters *p = new ( m )
       EvTcpTransportParameters( NULL, this->port, this->opts, this->timeout,
-                                this->edge );
+                                this->edge, this->preferred );
     if ( this->host != NULL ) {
       ::strcpy( p->buf, this->buf );
       p->host = p->buf;

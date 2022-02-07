@@ -156,6 +156,7 @@ struct SessionMgr;
 
 struct ExternalRoute : public kv::EvSocket {
   SessionMgr & mgr;
+  UserDB     & user_db;
   SubDB      & sub_db;
   ExternalRoute( kv::EvPoll &p,  SessionMgr &m ) noexcept;
   /* EvSocket */
@@ -197,6 +198,8 @@ struct SessionMgr : public kv::EvSocket {
   int init_sock( void ) noexcept;
   bool add_transport( ConfigTree::Service &s,  ConfigTree::Transport &t,
                       bool is_service ) noexcept;
+  bool add_transport2( ConfigTree::Service &s,  ConfigTree::Transport &t,
+                       bool is_service,  TransportRoute *&rte ) noexcept;
   bool start_transport( TransportRoute &rte,  bool is_service ) noexcept;
   bool add_startup_transports( ConfigTree::Service &s ) noexcept;
   uint32_t shutdown_transport( ConfigTree::Service &s,

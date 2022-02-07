@@ -1473,7 +1473,7 @@ AdjDistance::push_peer( uint32_t peer_uid,  uint32_t dist,
 }
 
 uint32_t
-AdjDistance::find_best_route( void ) noexcept
+AdjDistance::find_best_route( uint32_t dist ) noexcept
 {
   PeerUidSet * rec = NULL,
              * tmp = NULL;
@@ -1523,9 +1523,19 @@ AdjDistance::find_best_route( void ) noexcept
               tmp->or_bits( *test );
               tmp->not_bits( *rec );
               if ( tmp->count() == 0 ) { /* equivalent route */
-                if ( rec->dest_count > test->dest_count || /* more dests */
-                     this->adjacency_start( rec->src_uid ) < /* or older */
-                     this->adjacency_start( test->src_uid ) ) {
+#if 0
+                char src_buf[ 80 ], peer_buf[ 1024 ];
+                printf(
+"dist %u pre %s tpid %s/%s %s dest count %u[%u->%u], %s test dest count %u[%u->%u]\n",
+dist, this->tport_preferred( dist, *rec, *test ) ? "y" : "n",
+this->tport_name( rec->first_uid, rec->tport_id ),
+this->tport_name( test->first_uid, test->tport_id ),
+this->uid_name( rec->src_uid, src_buf, sizeof( src_buf ) ),
+rec->dest_count, rec->first_uid, rec->last_uid,
+this->uid_name( test->src_uid, peer_buf, sizeof( peer_buf ) ),
+test->dest_count, test->first_uid, test->last_uid  );
+#endif
+                if ( this->tport_preferred( dist, *rec, *test ) ) {
                   this->uid_next.ptr[ j ] = rec; /* replace better route */
                   rec = test;
                   goto break_loop;
@@ -1551,6 +1561,41 @@ AdjDistance::find_best_route( void ) noexcept
     }
   }
   return rcount;
+}
+
+bool
+AdjDistance::tport_preferred( uint32_t dist,  PeerUidSet &rec,
+                              PeerUidSet &test ) noexcept
+{
+  if ( dist == 0 ) {
+    bool rec_pref  = this->user_db.transport_tab.ptr[ rec.tport_id ]->
+                       is_set( TPORT_IS_PREFERRED ),
+         test_pref = this->user_db.transport_tab.ptr[ test.tport_id ]->
+                       is_set( TPORT_IS_PREFERRED );
+    if ( rec_pref && ! test_pref )
+      return true;
+    if ( test_pref && ! rec_pref )
+      return false;
+    /* both are false or both are true */
+  }
+  return ( rec.dest_count > test.dest_count || /* more dests */
+           this->adjacency_start( rec.src_uid ) < /* or older */
+           this->adjacency_start( test.src_uid ) );
+}
+
+const char *
+AdjDistance::tport_name( uint32_t uid,  uint32_t tport_id ) noexcept
+{
+  const char * name = NULL;
+  if ( uid == UserDB::MY_UID )
+    name = this->user_db.transport_tab.ptr[ tport_id ]->transport.tport.val;
+  else {
+    UserBridge     * n   = this->user_db.bridge_tab.ptr[ uid ];
+    AdjacencySpace * set = n->adjacency[ tport_id ];
+    if ( set != NULL && ! set->tport.is_null() )
+      name = set->tport.val;
+  }
+  return name != NULL ? name : "none";
 }
 
 bool
@@ -1619,7 +1664,7 @@ AdjDistance::calc_dist_peers( uint32_t src_uid,  uint32_t dist ) noexcept
     pcount = this->fill_to_dist( tos, dist, this->uid_visit, this->uid_peers );
   }
   if ( pcount > 0 )
-    rcount = this->find_best_route();
+    rcount = this->find_best_route( dist );
 
   return rcount;
 }

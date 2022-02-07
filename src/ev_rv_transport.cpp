@@ -12,12 +12,9 @@ using namespace ms;
 using namespace kv;
 using namespace md;
 
-EvRvTransport::EvRvTransport( TransportRoute &r ) noexcept
-             : RouteNotify( r.sub_route ), rte( r ) {}
-
 EvRvTransportListen::EvRvTransportListen( kv::EvPoll &p,
                                           TransportRoute &r ) noexcept
-    : EvRvListen( p, r.sub_route ), EvRvTransport( r )
+    : EvRvListen( p, r.sub_route ), RouteNotify( r.sub_route ), rte( r )
 {
   this->notify = &r;
   r.sub_route.add_route_notify( *this );
@@ -42,7 +39,7 @@ get_rv_transport( EvRvTransportListen &listen,  RvHost &host ) noexcept
 {
   ConfigTree::Transport * t;
   ConfigTree & tree = listen.rte.mgr.tree;
-  StringTab  & stab = listen.rte.mgr.user_db.string_tab;
+  StringTab  & stab = listen.rte.user_db.string_tab;
   char rv_svc[ RvHost::MAX_SERVICE_LEN + 8 ];
   int  svc_len;
 
@@ -68,16 +65,27 @@ get_rv_transport( EvRvTransportListen &listen,  RvHost &host ) noexcept
 int
 EvRvTransportListen::start_host( RvHost &host ) noexcept
 {
-  uint32_t delay_secs = 0;
-  if ( host.network_len != 0 ) {
-    StringTab & stab = this->rte.mgr.user_db.string_tab;
-    ConfigTree::Transport * t = get_rv_transport( *this, host );
-    TransportRoute * rte;
+  RvHostRoute           * hr  = this->tab.find( &host );
+  TransportRoute        * rte = NULL;
+  ConfigTree::Transport * t   = NULL;
+  uint32_t                delay_secs = 0;
 
-    rte = this->rte.mgr.user_db.transport_tab.find_transport( t );
+  if ( hr != NULL ) {
+    rte = hr->rte;
+    t   = hr->cfg;
+  }
+  if ( ( rte == NULL || rte->is_set( TPORT_IS_SHUTDOWN ) ) &&
+       host.network_len != 0 ) {
+    StringTab & stab = this->rte.user_db.string_tab;
+
+    if ( t == NULL )
+      t = get_rv_transport( *this, host );
+    if ( rte == NULL )
+      rte = this->rte.user_db.transport_tab.find_transport( t );
+
     if ( rte == NULL || rte->is_set( TPORT_IS_SHUTDOWN ) ) {
       stab.reref_string( "pgm", 3, t->type );
-      set_route_string( t, stab, "listen", 6, host.network, host.network_len);
+      set_route_string( t, stab, "listen", 6, host.network, host.network_len );
       set_route_string( t, stab, "port", 4, host.service, host.service_len );
       set_route_string( t, stab, "mcast_loop", 10, "0", 1 );
       set_route_string( t, stab, "mtu", 3, "16384", 5 );
@@ -86,11 +94,19 @@ EvRvTransportListen::start_host( RvHost &host ) noexcept
       if ( rte != NULL )
         b = this->rte.mgr.start_transport( *rte, true );
       else
-        b = this->rte.mgr.add_transport( this->rte.svc, *t, true );
+        b = this->rte.mgr.add_transport2( this->rte.svc, *t, true, rte );
       if ( ! b )
         return -1;
       delay_secs = 1;
     }
+  }
+  if ( hr == NULL ) {
+    if ( rte != NULL )
+      this->tab.add( &host, rte, t );
+  }
+  else {
+    hr->rte = rte;
+    hr->cfg = t;
   }
   printf( "start_network:        service %.*s, \"%.*s\"\n",
           (int) host.service_len, host.service, (int) host.network_len,
@@ -104,20 +120,37 @@ EvRvTransportListen::stop_host( RvHost &host ) noexcept
   printf( "stop_network:         service %.*s, \"%.*s\"\n",
           (int) host.service_len, host.service, (int) host.network_len,
           host.network );
+#if 0
+  RvHostRoute * hr = this->tab.find( &host );
+  if ( hr != NULL && hr->rte != NULL ) {
+    if ( hr->rte->test_clear( TPORT_IS_PREFERRED ) )
+      this->rte.user_db.peer_dist.invalidate( PREFERRED_ROUTE_INV );
+  }
+#endif
   return this->EvRvListen::stop_host( host );
 }
 
 void
-EvRvTransport::on_sub( NotifySub &sub ) noexcept
+EvRvTransportListen::on_sub( NotifySub &sub ) noexcept
 {
-  if ( sub.is_start() )
+  if ( sub.is_start() ) {
+#if 0
+    if ( sub.subject_len > 6 && ::memcmp( sub.subject, "_RVFT.", 6 ) == 0 ) {
+      RvHostRoute * hr = this->tab.find( (RvHost *) sub.src );
+      if ( hr != NULL && hr->rte != NULL ) {
+        if ( ! hr->rte->test_set( TPORT_IS_PREFERRED ) )
+          this->rte.user_db.peer_dist.invalidate( PREFERRED_ROUTE_INV );
+      }
+    }
+#endif
     this->rte.mgr.sub_db.external_sub_start( sub, this->rte.tport_id );
+  }
   d_rv( "on_sub(%.*s) rcnt=%u src_type=%c\n", (int) sub.subject_len,
          sub.subject, sub.sub_count, sub.src_type );
 }
 
 void
-EvRvTransport::on_unsub( NotifySub &sub ) noexcept
+EvRvTransportListen::on_unsub( NotifySub &sub ) noexcept
 {
   if ( sub.is_stop() )
     this->rte.mgr.sub_db.external_sub_stop( sub, this->rte.tport_id );
@@ -126,7 +159,7 @@ EvRvTransport::on_unsub( NotifySub &sub ) noexcept
 }
 
 void
-EvRvTransport::on_psub( NotifyPattern &pat ) noexcept
+EvRvTransportListen::on_psub( NotifyPattern &pat ) noexcept
 {
   if ( pat.sub_count == 1 ) {
     this->rte.mgr.sub_db.external_psub_start( pat, this->rte.tport_id );
@@ -136,7 +169,7 @@ EvRvTransport::on_psub( NotifyPattern &pat ) noexcept
 }
 
 void
-EvRvTransport::on_punsub( NotifyPattern &pat ) noexcept
+EvRvTransportListen::on_punsub( NotifyPattern &pat ) noexcept
 {
   if ( pat.sub_count == 0 )
     this->rte.mgr.sub_db.external_psub_stop( pat, this->rte.tport_id );
@@ -145,8 +178,9 @@ EvRvTransport::on_punsub( NotifyPattern &pat ) noexcept
 }
 
 void
-EvRvTransport::on_reassert( uint32_t ,  kv::RouteVec<kv::RouteSub> &,
-                            kv::RouteVec<kv::RouteSub> & ) noexcept
+EvRvTransportListen::on_reassert( uint32_t ,
+                                  kv::RouteVec<kv::RouteSub> &,
+                                  kv::RouteVec<kv::RouteSub> & ) noexcept
 {
   d_rv( "on_reassert()\n" );
 }

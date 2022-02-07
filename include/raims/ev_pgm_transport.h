@@ -17,11 +17,13 @@ struct EvPgmTransportParameters {
                txw_sqns,   /* size in sequences of the send window */
                rxw_sqns,   /* size in sequences of the recv window */
                mcast_loop; /* if send loops back to the recv port permitted */
+  bool         preferred;
 
   void * operator new( size_t, void *ptr ) { return ptr; }
   EvPgmTransportParameters( const char *n = NULL,  int p = 9000 )
     : network( n ), port( p ),
-      mtu( 16384 ), txw_sqns( 16 * 1024 ), rxw_sqns( 16 * 1024 ), mcast_loop( 0 ) {}
+      mtu( 16384 ), txw_sqns( 16 * 1024 ), rxw_sqns( 16 * 1024 ), mcast_loop( 0 ),
+      preferred( false ) {}
 };
 
 struct EvPgmTransport : public kv::EvSocket {
