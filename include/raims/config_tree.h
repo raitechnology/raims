@@ -71,6 +71,7 @@ struct ConfigTree {
           return true;
         }
       }
+      val = 0;
       return false;
     }
     bool get_int( const char *name,  int &val ) {
@@ -83,6 +84,7 @@ struct ConfigTree {
                 s[ 0 ] == 'y' || s[ 0 ] == 'Y' );
         return true;
       }
+      val = false;
       return false;
     }
     bool get_bool( const char *name,  bool &val ) {

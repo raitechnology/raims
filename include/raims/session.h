@@ -189,6 +189,7 @@ struct SessionMgr : public kv::EvSocket {
   kv::Logger            & log;
   TelnetListen          * telnet;
   ConfigTree::Transport * telnet_tport;
+  TransportRoute        * external_tport;
   uint8_t                 tcp_accept_sock_type, /* free list sock types */
                           tcp_connect_sock_type;
 

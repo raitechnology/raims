@@ -71,6 +71,7 @@ have_h3_submodule     := $(shell if [ -f ./raids/h3/GNUmakefile ]; then echo yes
 have_rdb_submodule    := $(shell if [ -f ./raids/rdbparser/GNUmakefile ]; then echo yes; else echo no; fi )
 have_pgm_submodule    := $(shell if [ -f ./openpgm/GNUmakefile ]; then echo yes; else echo no; fi )
 have_sassrv_submodule := $(shell if [ -f ./sassrv/GNUmakefile ]; then echo yes; else echo no; fi )
+have_natsmd_submodule := $(shell if [ -f ./natsmd/GNUmakefile ]; then echo yes; else echo no; fi )
 
 lnk_lib     := $(libd)/libraims.a
 dlnk_lib    :=
@@ -188,7 +189,7 @@ sassrv_dll  := sassrv/$(libd)/libsassrv.so
 lnk_lib     += $(sassrv_lib)
 lnk_dep     += $(sassrv_lib)
 dlnk_lib    += -Lsassrv/$(libd) -lsassrv
-dlnk_dep    += $(pgm_dll)
+dlnk_dep    += $(sassrv_dll)
 rpath9       = ,-rpath,$(pwd)/sassrv/$(libd)
 includes    += -Isassrv/include
 else
@@ -196,12 +197,26 @@ lnk_lib     += -lsassrv
 dlnk_lib    += -lsassrv
 endif
 
+ifeq (yes,$(have_natsmd_submodule))
+natsmd_lib  := natsmd/$(libd)/libnatsmd.a
+natsmd_dll  := natsmd/$(libd)/libnatsmd.so
+lnk_lib     += $(natsmd_lib)
+lnk_dep     += $(natsmd_lib)
+dlnk_lib    += -Lnatsmd/$(libd) -lnatsmd
+dlnk_dep    += $(natsmd_dll)
+rpath10      = ,-rpath,$(pwd)/natsmd/$(libd)
+includes    += -Inatsmd/include
+else
+lnk_lib     += -lnatsmd
+dlnk_lib    += -lnatsmd
+endif
+
 lnk_lib     += -lpcre2-32 -lpcre2-8 -lcrypto -llzf
 dlnk_lib    += -lpcre2-32 -lpcre2-8 -lcrypto -llzf
-rpath       := -Wl,-rpath,$(pwd)/$(libd)$(rpath1)$(rpath2)$(rpath3)$(rpath4)$(rpath5)$(rpath6)$(rpath7)$(rpath8)$(rpath9)
+rpath       := -Wl,-rpath,$(pwd)/$(libd)$(rpath1)$(rpath2)$(rpath3)$(rpath4)$(rpath5)$(rpath6)$(rpath7)$(rpath8)$(rpath9)$(rpath10)
 
 .PHONY: everything
-everything: $(kv_lib) $(dec_lib) $(md_lib) $(lc_lib) $(h3_lib) $(rdb_lib) $(ds_lib) $(pgm_lib) $(sassrv_lib) all
+everything: $(kv_lib) $(dec_lib) $(md_lib) $(lc_lib) $(h3_lib) $(rdb_lib) $(ds_lib) $(pgm_lib) $(sassrv_lib) $(natsmd_lib) all
 
 clean_subs :=
 dlnk_dll_depend :=
@@ -290,8 +305,9 @@ gen_files   :=
 
 libraims_files := config user transport ev_tcp_transport ev_pgm_transport \
                  pgm_sock ev_inbox_transport ev_telnet ev_rv_transport \
-		 msg session heartbeat user_db auth peer link_state sub \
-		 pat crypt poly1305 ec25519 ed25519 gen_config console
+		 ev_nats_transport msg session heartbeat user_db auth peer \
+		 link_state sub pat crypt poly1305 ec25519 ed25519 gen_config \
+		 console
 libraims_objs  := $(addprefix $(objd)/, $(addsuffix .o, $(libraims_files)))
 libraims_dbjs  := $(addprefix $(objd)/, $(addsuffix .fpic.o, $(libraims_files)))
 libraims_deps  := $(addprefix $(dependd)/, $(addsuffix .d, $(libraims_files))) \

@@ -21,6 +21,7 @@ struct EvPgmTransport;
 struct EvInboxTransport;
 struct EvTcpTransportListen;
 struct EvRvTransportListen;
+struct EvNatsTransportListen;
 
 struct ConnectionMgr : public kv::EvConnectionNotify,
                        public kv::EvTimerCallback {
@@ -77,6 +78,36 @@ enum TransportRouteState {
   TPORT_IS_PREFERRED = 512
 };
 
+struct ExtRte {
+  ExtRte                * next,
+                        * back;
+  ConfigTree::Transport & transport;
+  kv::EvTcpListen       * listener;       /* the listener if svc */
+
+  void * operator new( size_t, void *ptr ) { return ptr; }
+  void operator delete( void *ptr ) { ::free( ptr ); }
+
+  ExtRte( ConfigTree::Transport &t,  kv::EvTcpListen *l )
+    : next( 0 ), back( 0 ), transport( t ), listener( l ) {}
+};
+
+struct ExtRteList : public kv::RouteNotify {
+  TransportRoute      & rte;
+  kv::DLinkList<ExtRte> list;
+
+  void * operator new( size_t, void *ptr ) { return ptr; }
+  void operator delete( void *ptr ) { ::free( ptr ); }
+  ExtRteList( TransportRoute &rte ) noexcept;
+
+  /* sub notify */
+  virtual void on_sub( kv::NotifySub &sub ) noexcept;
+  virtual void on_unsub( kv::NotifySub &sub ) noexcept;
+  virtual void on_psub( kv::NotifyPattern &pat ) noexcept;
+  virtual void on_punsub( kv::NotifyPattern &pat ) noexcept;
+  virtual void on_reassert( uint32_t fd,  kv::RouteVec<kv::RouteSub> &sub_db,
+                            kv::RouteVec<kv::RouteSub> &pat_db ) noexcept;
+};
+
 struct TransportRoute : public kv::EvSocket, public kv::EvConnectionNotify,
                         public StateTest<TransportRoute> {
   /*TransportRoute        * next;*/
@@ -121,6 +152,7 @@ struct TransportRoute : public kv::EvSocket, public kv::EvConnectionNotify,
                           mesh_conn_hash, /* hash of mesh url */
                           oldest_uid,     /* which uid is oldest connect */
                           primary_count;
+  ExtRteList            * ext;      
   ConfigTree::Service   & svc;            /* service definition */
   ConfigTree::Transport & transport;      /* transport definition */
 
@@ -148,16 +180,27 @@ struct TransportRoute : public kv::EvSocket, public kv::EvConnectionNotify,
   virtual bool on_msg( kv::EvPublish &pub ) noexcept;
 
   void create_listener_mesh_url( void ) noexcept;
-  bool create_transport( void ) noexcept;
+  bool create_transport( ConfigTree::Transport &tport ) noexcept;
+
   bool add_mesh_connect( const char *mesh_url,  uint32_t mesh_hash ) noexcept;
-  EvTcpTransportListen *create_tcp_listener( bool rand_port ) noexcept;
-  bool create_tcp_connect( void ) noexcept;
-  EvRvTransportListen *create_rv_listener( void ) noexcept;
-  bool create_rv_connect( void ) noexcept;
-  EvTcpTransportListen *create_mesh_listener( void ) noexcept;
+
+  EvTcpTransportListen *create_tcp_listener( bool rand_port,
+                                        ConfigTree::Transport &tport ) noexcept;
+  bool create_tcp_connect( ConfigTree::Transport &tport ) noexcept;
+
+  bool create_rv_listener( ConfigTree::Transport &tport ) noexcept;
+  bool create_rv_connect( ConfigTree::Transport &tport ) noexcept;
+
+  bool create_nats_listener( ConfigTree::Transport &tport ) noexcept;
+  bool create_nats_connect( ConfigTree::Transport &tport ) noexcept;
+
+  EvTcpTransportListen *create_mesh_listener(
+                                        ConfigTree::Transport &tport ) noexcept;
   /*TcpConnectionMgr *create_mesh_connect( void ) noexcept;*/
-  EvTcpTransportListen *create_mesh_rendezvous( void ) noexcept;
-  bool create_pgm( int kind ) noexcept;
+  EvTcpTransportListen *create_mesh_rendezvous( 
+                                        ConfigTree::Transport &tport ) noexcept;
+  bool create_pgm( int kind,  ConfigTree::Transport &tport ) noexcept;
+
   bool forward_to_connected( kv::EvPublish &pub ) {
     return this->sub_route.forward_set( pub, this->connected );
   }
@@ -167,8 +210,9 @@ struct TransportRoute : public kv::EvSocket, public kv::EvConnectionNotify,
   bool forward_to_connected_auth_not_fd( kv::EvPublish &pub,  uint32_t fd ) {
     return this->sub_route.forward_set_not_fd( pub, this->connected_auth, fd );
   }
-  uint32_t shutdown( void ) noexcept;
-  bool start_listener( kv::EvTcpListen *l,  bool rand_port ) noexcept;
+  uint32_t shutdown( ConfigTree::Transport &tport ) noexcept;
+  bool start_listener( kv::EvTcpListen *l,  bool rand_port,
+                       ConfigTree::Transport &tport ) noexcept;
   /* a new connection */
   virtual void on_connect( kv::EvSocket &conn ) noexcept;
   /* a disconnect */

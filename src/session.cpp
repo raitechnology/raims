@@ -27,7 +27,8 @@ SessionMgr::SessionMgr( EvPoll &p,  Logger &l,  ConfigTree &c,
              user_db( p, u, s, this->sub_db, st, this->events ),
              sub_db( p, this->user_db, *this ),
              sys_bloom( 0, "sys" ), router_bloom( 0, "rtr" ),
-             console( *this ), log( l ), telnet( 0 ), telnet_tport( 0 )
+             console( *this ), log( l ), telnet( 0 ), telnet_tport( 0 ),
+             external_tport( 0 )
 {
   this->sock_opts = OPT_NO_POLL;
   this->tcp_accept_sock_type = p.register_type( "ev_tcp_tport" );

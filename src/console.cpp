@@ -2079,16 +2079,55 @@ PortOutput::PortOutput( Console &c,  uint32_t t,  uint32_t nc ) noexcept :
     console( c ), mgr( c.mgr ), user_db( c.user_db ),
     tport_id( t ), ncols( nc ) {}
 
+void
+PortOutput::init( TransportRoute *rte,  int fl,  int fd,
+                  UserBridge *user ) noexcept
+{
+  this->stats.zero(); 
+  this->rte   = rte;
+  this->type  = &rte->transport.type;
+  this->tport = &rte->transport.tport;
+  this->state = rte->state;
+  this->n     = user;
+  this->fd    = fd;
+  this->flags = fl;
+  this->local.zero();
+  this->remote.zero();
+}
+
+void
+PortOutput::init( TransportRoute *rte,  ExtRte *ext ) noexcept
+{
+  this->stats.zero(); 
+  this->rte   = rte;
+  this->type  = &ext->transport.type;
+  this->tport = &ext->transport.tport;
+  this->state = rte->state;
+  this->n     = NULL;
+  this->fd    = ext->listener->fd;
+  this->flags = P_IS_LOCAL;
+  this->local.zero();
+  this->remote.zero();
+}
+
 uint32_t
 PortOutput::output( void ( PortOutput::*put )( void ) ) noexcept
 {
-  uint32_t     mcast_fd, ucast_fd;
-  EvPoll     & poll = this->mgr.poll;
+  uint32_t mcast_fd, ucast_fd;
+  EvPoll & poll = this->mgr.poll;
 
   TransportRoute *rte = this->user_db.transport_tab.ptr[ this->tport_id ];
   if ( rte->is_set( TPORT_IS_SHUTDOWN ) ) {
     this->init( rte, P_IS_DOWN, -1 );
     (this->*put)();
+  }
+  else if ( rte->is_set( TPORT_IS_EXTERNAL ) ) {
+    for ( ExtRte * ext = rte->ext->list.hd; ext != NULL; ext = ext->next ) {
+      this->init( rte, ext );
+      ext->listener->client_stats( this->stats );
+      this->local_addr( ext->listener->peer_address.buf );
+      (this->*put)();
+    }
   }
   else if ( rte->listener != NULL ) {
     this->init( rte, P_IS_LOCAL, rte->listener->fd );
@@ -2156,11 +2195,11 @@ PortOutput::put_show_ports( void ) noexcept
   TabPrint *tab =
     this->console.table.make( this->console.table.count + this->ncols );
   uint32_t i = this->console.table.count;
-  const char * type = this->rte->transport.type.val;
+  const char * type = this->type->val;
   if ( ( this->flags & P_IS_INBOX ) != 0 )
     type = "inbox";
   this->console.table.count += this->ncols;
-  tab[ i++ ].set( this->rte->transport.tport, this->tport_id, PRINT_ID );
+  tab[ i++ ].set( *this->tport, this->tport_id, PRINT_ID );
   tab[ i++ ].set( type ); /* type */
   if ( ( this->flags & P_IS_DOWN ) == 0 )
     tab[ i++ ].set_int( this->fd ); /* fd */
@@ -2187,7 +2226,7 @@ PortOutput::put_show_ports( void ) noexcept
   else
     tab[ i++ ].set_null();
 
-  tab[ i++ ].set_int( this->rte->state, PRINT_TSTATE );
+  tab[ i++ ].set_int( this->state, PRINT_TSTATE );
 
   if ( ( this->flags & P_IS_DOWN ) != 0 ) {
     tab[ i++ ].set_null();
@@ -2239,18 +2278,18 @@ PortOutput::put_status( void ) noexcept
   TabPrint *tab =
     this->console.table.make( this->console.table.count + this->ncols );
   uint32_t i = this->console.table.count;
-  const char * type = this->rte->transport.type.val;
+  const char * type = this->type->val;
   if ( ( this->flags & P_IS_INBOX ) != 0 )
     type = "inbox";
   this->console.table.count += this->ncols;
-  tab[ i++ ].set( this->rte->transport.tport, this->tport_id, PRINT_ID );
+  tab[ i++ ].set( *this->tport, this->tport_id, PRINT_ID );
   tab[ i++ ].set( type ); /* type */
   if ( ( this->flags & P_IS_DOWN ) == 0 )
     tab[ i++ ].set_int( this->fd ); /* fd */
   else
     tab[ i++ ].set_null();
 
-  tab[ i++ ].set_int( this->rte->state, PRINT_TSTATE );
+  tab[ i++ ].set_int( this->state, PRINT_TSTATE );
 
   if ( ( this->flags & P_IS_DOWN ) != 0 ) {
     char status_buf[ 256 ];
@@ -2338,26 +2377,40 @@ Console::show_tports( const char *name,  size_t len ) noexcept
     tport->get_route_str( "listen", listen );
     tport->get_route_str( "connect", connect );
 
-    char buf[ 80 ];
+    char   buf[ 80 ];
     size_t len = sizeof( buf );
+    bool   is_accepting = false;
 
     tab = this->table.make( this->table.count + ncols );
     this->table.count += ncols;
     tab[ i++ ].set( tport->tport ); /* tport */
     tab[ i++ ].set( tport->type );  /* type */
+
+    if ( rte != NULL ) {
+      is_accepting = ( rte->listener != NULL );
+    }
+    else if ( this->mgr.external_tport != NULL ) {
+      for ( ExtRte *ext = this->mgr.external_tport->ext->list.hd; ext != NULL;
+            ext = ext->next ) {
+        if ( tport == &ext->transport ) {
+          rte = this->mgr.external_tport;
+          is_accepting = true;
+          break;
+        }
+      }
+    }
     if ( rte == NULL )
       tab[ i++ ].set( "-" ); /* state */
     else if ( rte->is_set( TPORT_IS_SHUTDOWN ) )
       tab[ i++ ].set( "shutdown" );
-    else if ( rte->listener != NULL ) {
+    else if ( is_accepting )
       tab[ i++ ].set( "accepting" );
-    }
-    else if ( rte->is_mcast() ) {
+    else if ( rte->is_set( TPORT_IS_EXTERNAL ) )
+      tab[ i++ ].set( "external" );
+    else if ( rte->is_mcast() )
       tab[ i++ ].set( "joined" );
-    }
-    else {
+    else
       tab[ i++ ].set( "connected" );
-    }
 
     if ( listen != NULL ) {
       size_t off = ::snprintf( buf, len, "%s://%s", tport->type.val, listen );

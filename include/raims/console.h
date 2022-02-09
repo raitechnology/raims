@@ -36,6 +36,7 @@ struct UserDB;
 struct SubDB;
 struct UserRoute;
 struct TransportRoute;
+struct ExtRte;
 struct Nonce;
 struct Console;
 
@@ -51,10 +52,13 @@ struct PortOutput {
   UserDB         & user_db;
   uint32_t         tport_id,
                    ncols;
-  TransportRoute * rte;
   UserBridge     * n;
   StringVal        local,
-                   remote;
+                   remote,
+                 * tport,
+                 * type;
+  TransportRoute * rte;
+  uint32_t         state;
   int              fd,
                    flags;
   kv::PeerStats    stats;
@@ -62,15 +66,9 @@ struct PortOutput {
   PortOutput( Console &c,  uint32_t t,  uint32_t nc ) noexcept;
 
   void init( TransportRoute *rte,  int fl,  int fd,
-             UserBridge *user = NULL ) {
-    this->stats.zero();
-    this->rte   = rte;
-    this->n     = user;
-    this->fd    = fd;
-    this->flags = fl;
-    this->local.zero();
-    this->remote.zero();
-  }
+             UserBridge *user = NULL ) noexcept;
+  void init( TransportRoute *rte,  ExtRte *ext ) noexcept;
+
   void local_addr( const char *buf,  uint32_t len = 0 ) {
     this->local.val = buf;
     if ( len == 0 )

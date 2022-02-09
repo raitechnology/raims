@@ -14,10 +14,10 @@ using namespace md;
 
 EvRvTransportListen::EvRvTransportListen( kv::EvPoll &p,
                                           TransportRoute &r ) noexcept
-    : EvRvListen( p, r.sub_route ), RouteNotify( r.sub_route ), rte( r )
+    : EvRvListen( p, r.sub_route ), /*RouteNotify( r.sub_route ), */rte( r )
 {
   this->notify = &r;
-  r.sub_route.add_route_notify( *this );
+  /*r.sub_route.add_route_notify( *this );*/
 }
 
 static void
@@ -129,12 +129,12 @@ EvRvTransportListen::stop_host( RvHost &host ) noexcept
 #endif
   return this->EvRvListen::stop_host( host );
 }
-
+#if 0
 void
 EvRvTransportListen::on_sub( NotifySub &sub ) noexcept
 {
   if ( sub.is_start() ) {
-#if 0
+#if TEST
     if ( sub.subject_len > 6 && ::memcmp( sub.subject, "_RVFT.", 6 ) == 0 ) {
       RvHostRoute * hr = this->tab.find( (RvHost *) sub.src );
       if ( hr != NULL && hr->rte != NULL ) {
@@ -184,3 +184,4 @@ EvRvTransportListen::on_reassert( uint32_t ,
 {
   d_rv( "on_reassert()\n" );
 }
+#endif

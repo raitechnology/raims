@@ -49,7 +49,7 @@ struct RvHostTab {
   }
 };
 
-struct EvRvTransportListen : public sassrv::EvRvListen, public kv::RouteNotify {
+struct EvRvTransportListen : public sassrv::EvRvListen/*, public kv::RouteNotify*/ {
   TransportRoute & rte;
   RvHostTab        tab;
   EvRvTransportListen( kv::EvPoll &p,  TransportRoute &r ) noexcept;
@@ -57,7 +57,7 @@ struct EvRvTransportListen : public sassrv::EvRvListen, public kv::RouteNotify {
   /* sassrv rv listen */
   virtual int start_host( sassrv::RvHost &host ) noexcept final;
   virtual int stop_host( sassrv::RvHost &host ) noexcept final;
-
+#if 0
   /* sub notify */
   virtual void on_sub( kv::NotifySub &sub ) noexcept;
   virtual void on_unsub( kv::NotifySub &sub ) noexcept;
@@ -65,6 +65,7 @@ struct EvRvTransportListen : public sassrv::EvRvListen, public kv::RouteNotify {
   virtual void on_punsub( kv::NotifyPattern &pat ) noexcept;
   virtual void on_reassert( uint32_t fd,  kv::RouteVec<kv::RouteSub> &sub_db,
                             kv::RouteVec<kv::RouteSub> &pat_db ) noexcept;
+#endif
 };
 
 }
