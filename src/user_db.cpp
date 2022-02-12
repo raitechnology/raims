@@ -552,14 +552,12 @@ void
 UserRoute::set_ucast( UserDB &user_db,  const void *p,  size_t len,
                       const UserRoute *src ) noexcept
 {
-  if ( debug_usr )
-    this->n.printf( "set_ucast( %.*s, src=%s, tport=%s )\n",
-                    (int) len, (char *) p,
-                    src ? src->n.peer.user.val : "null", this->rte.name );
   if ( len == 0 && this->ucast_url_len == 0 && this->ucast_src == src )
     return;
 
   if ( len == 0 ) {
+    /*if ( debug_usr )*/
+      this->n.printf( "clear_ucast( t=%s )\n", this->rte.name );
     this->ucast_url_len = 0;
     this->url_hash      = 0;
     this->ucast_src     = src;
@@ -579,6 +577,11 @@ UserRoute::set_ucast( UserDB &user_db,  const void *p,  size_t len,
          ! this->is_set( UCAST_URL_SRC_STATE ) )
       return;
 
+    /*if ( debug_usr )*/
+      this->n.printf( "set_ucast( %.*s, t=%s, src=%s )\n",
+                      (int) len, (char *) p,
+                      this->rte.name,
+                      src ? src->n.peer.user.val : "null" );
     this->ucast_url = (char *) ::realloc( this->ucast_url, len + 1 );
     ::memcpy( this->ucast_url, p, len );
     this->ucast_url[ len ] = '\0';

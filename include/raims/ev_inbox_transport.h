@@ -8,42 +8,46 @@
 namespace rai {
 namespace ms {
 
-static const uint16_t IBX_MAGIC = 0x5849; /* 'X' 'I' */
+static const uint8_t  IBX_MAGIC = 0x33;
 static const uint8_t  IBX_DATA = 0, /* data packet */
                       IBX_RACK = 1, /* recv ack */
                       IBX_SACK = 2; /* send ack */
 static const uint32_t IBX_IDENT_MAX = ( 1 << 10 );
 
 struct InboxCode {
-  uint32_t magic       : 16,
+  uint32_t magic       : 6,
            type        : 3, /* data or ack type */
            is_repair   : 1, /* data repair, retransmit */
            is_fragment : 1, /* data fragment */
            is_rollup   : 1, /* data rollup, last fragment */
-           ident       : 10;
+           ident       : 10,
+           dest_id     : 10;
 
   void zero( void ) {
     ::memset( this, 0, sizeof( *this ) );
   }
   bool is_valid( void ) const { return this->magic == IBX_MAGIC; }
   bool is_data( void ) const  { return this->type  == IBX_DATA;  }
-  void set_message( uint32_t id ) {
+  void set_message( uint32_t id,  uint32_t did ) {
     this->zero();
-    this->magic = IBX_MAGIC;
-    this->type  = IBX_DATA;
-    this->ident = id;
+    this->magic   = IBX_MAGIC;
+    this->type    = IBX_DATA;
+    this->ident   = id;
+    this->dest_id = did;
   }
-  void set_rack( uint32_t id ) {
+  void set_rack( uint32_t id,  uint32_t did ) {
     this->zero();
-    this->magic = IBX_MAGIC;
-    this->type  = IBX_RACK;
-    this->ident = id;
+    this->magic   = IBX_MAGIC;
+    this->type    = IBX_RACK;
+    this->ident   = id;
+    this->dest_id = did;
   }
-  void set_sack( uint32_t id ) {
+  void set_sack( uint32_t id,  uint32_t did ) {
     this->zero();
-    this->magic = IBX_MAGIC;
-    this->type  = IBX_SACK;
-    this->ident = id;
+    this->magic   = IBX_MAGIC;
+    this->type    = IBX_SACK;
+    this->ident   = id;
+    this->dest_id = did;
   }
   void set_fragment( void ) { this->is_fragment = 1; }
   void set_rollup( void )   { this->is_fragment = 1; this->is_rollup = 1; }
@@ -238,7 +242,8 @@ struct InboxPeerArray : public kv::ArraySpace<InboxPeer *,8> {
 struct InboxSrcArray : public InboxPeerArray {
   InboxSrcArray( uint32_t st ) : InboxPeerArray( st ) {}
 
-  InboxPeer *match( uint32_t uid,  uint32_t dest_peer_id ) const {
+  InboxPeer *match( uint32_t uid,  uint32_t my_peer_id,
+                    uint32_t dest_peer_id ) const {
     if ( uid >= this->size || this->ptr[ uid ] == NULL )
       return NULL;
     InboxPeer *p = this->ptr[ uid ];
@@ -247,6 +252,10 @@ struct InboxSrcArray : public InboxPeerArray {
         if ( p->dest_peer_id == 0 )
           p->dest_peer_id = dest_peer_id;
         else if ( p->dest_peer_id != dest_peer_id )
+          return NULL;
+      }
+      if ( my_peer_id != 0 ) {
+        if ( p->peer_id != my_peer_id )
           return NULL;
       }
       return p;
@@ -333,8 +342,9 @@ struct EvInboxTransport : public kv::EvUdp {
                                uint32_t url_hash ) noexcept;
   struct addrinfo *url_to_addrinfo( const char *url,
                                     struct addrinfo *&a ) noexcept;
-  InboxPeer *resolve_src_uid( uint32_t dest_uid,  uint32_t dest_peer_id,
-                             struct sockaddr *addr, uint32_t addrlen ) noexcept;
+  InboxPeer *resolve_src_uid( uint32_t dest_uid,  uint32_t my_peer_id,
+                              uint32_t dest_peer_id,  struct sockaddr *addr,
+                              uint32_t addrlen ) noexcept;
   void shutdown_peer( uint32_t peer_uid,  uint32_t url_hash ) noexcept;
   /* EvUdp */
   virtual void write( void ) noexcept final;

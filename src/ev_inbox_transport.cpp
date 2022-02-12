@@ -36,16 +36,15 @@ print_peer( const char *s,  InboxPeer &p ) noexcept
 {
   char host[NI_MAXHOST], service[NI_MAXSERV];
 
-  if ( s != NULL ) {
-    d_ibx( "%s src=%x dest=%x out=%u in=%u out_ack=%u, in_ack=%u ", s,
-            p.src_uid, p.dest_uid, p.out_seqno, p.in_seqno, p.out_ack_seqno,
-            p.in_ack_seqno );
-  }
+  printf( "%s %d.%d src=%x dest=%x out=%u in=%u out_ack=%u, in_ack=%u ",
+          s != NULL ? s : ">", p.peer_id, p.dest_peer_id,
+          p.src_uid, p.dest_uid, p.out_seqno, p.in_seqno, p.out_ack_seqno,
+          p.in_ack_seqno );
   if ( getnameinfo( p.addr, p.addrlen, host, NI_MAXHOST,
                     service, NI_MAXSERV, NI_NUMERICHOST | NI_NUMERICSERV) == 0 )
-    d_ibx( "%s:%s\n", host, service );
+    printf( "%s:%s\n", host, service );
   else
-    d_ibx( "no name info\n" );
+    printf( "no name info\n" );
 }
 
 static inline int32_t
@@ -69,20 +68,23 @@ EvInboxTransport::process( void ) noexcept
     if ( pkt->is_valid( len ) ) {
       uint32_t src_uid      = pkt->dest_uid, /* switch uid endpoints */
                dest_uid     = pkt->src_uid,
-               dest_peer_id = pkt->code.ident;
+               dest_peer_id = pkt->code.ident,
+               my_peer_id   = pkt->code.dest_id;
       InboxPeer * p;
-      p = this->src.match( src_uid, dest_peer_id );
+      p = this->src.match( src_uid, my_peer_id, dest_peer_id );
       if ( p == NULL ) {
         struct sockaddr * addr    = (struct sockaddr *)
                                     this->in_mhdr[ i ].msg_hdr.msg_name;
         socklen_t         addrlen = this->in_mhdr[ i ].msg_hdr.msg_namelen;
-        p = this->resolve_src_uid( dest_uid, dest_peer_id, addr, addrlen );
+        p = this->resolve_src_uid( dest_uid, my_peer_id, dest_peer_id, addr,
+                                   addrlen );
       }
       if ( p != NULL ) {
-        d_ibx( "%u.%u recv[%s] "
-            "d_no %u s_no %u in_no %u src %u dest %u p.src %u p.dest %u r %u\n",
+        d_ibx( "%d.%d recv[%s] "
+            "d_no %u s_no %u in_no %u src %u dest %u(%d)(%d) p.src %u p.dest %u r %u\n",
             p->peer_id, dest_peer_id, pkt->code.to_str(),
-            pkt->dest_seqno, pkt->src_seqno, p->in_seqno, src_uid, dest_uid,
+            pkt->dest_seqno, p->out_window_seqno, p->out_ack_seqno,
+            pkt->src_seqno, p->in_seqno, src_uid, dest_uid,
             p->src_uid, p->dest_uid, p->resolved()?1:0 );
         /*d_ibx( "recv[%.4s] rcv seqno %u (snd %u)\n",
             (char *) &pkt->code, pkt->src_seqno, pkt->dest_seqno );*/
@@ -140,7 +142,8 @@ InboxPeer::adjust_send_window( void ) noexcept
 {
   while ( ! this->out.is_empty() ) {
     InboxPktElem * el = this->out.hd;
-    if ( seqno_cmp( el->pkt.src_seqno, this->out_window_seqno ) > 0 )
+    int32_t diff = seqno_cmp( el->pkt.src_seqno, this->out_window_seqno );
+    if ( diff > 0 )
       break;
     this->out.pop_hd();
     el->window.deref_delete();
@@ -156,19 +159,30 @@ EvInboxTransport::repair_window( InboxPeer &p ) noexcept
   size_t         cnt = 0;
   if ( el == NULL )
     return false;
-  while ( seqno_cmp( el->pkt.src_seqno, p.out_window_seqno ) > 0 ) {
+  uint32_t seqno = el->pkt.src_seqno;
+  while ( seqno_cmp( seqno, p.out_window_seqno ) > 0 ) {
     p.out.pop_tl();
     el->pkt.code.set_repair();
     /*el->pkt.src_seqno  = p.out_seqno;*/
     el->pkt.dest_seqno = p.in_seqno;
-    d_ibx( "%u.%u rexmit s_no %u d_no %u\n",
+    d_ibx( "%d.%d rexmit s_no %u d_no %u win %u cnt %ld\n",
             el->window.peer.peer_id, el->window.peer.dest_peer_id,
-            el->pkt.src_seqno, p.in_seqno );
+            seqno, p.in_seqno, p.out_window_seqno, cnt );
     rexmit.push_hd( el );
     cnt++;
-    if ( p.out.is_empty() )
+    if ( p.out.is_empty() ) {
+      for (;;) {
+        seqno -= 1;
+        if ( seqno_cmp( seqno, p.out_window_seqno ) <= 0 )
+          break;
+        printf( "%d.%d lost s_no %u win %u\n",
+                el->window.peer.peer_id, el->window.peer.dest_peer_id,
+                seqno, p.out_window_seqno );
+      }
       break;
+    }
     el = p.out.tl;
+    seqno = el->pkt.src_seqno;
   }
   if ( ! rexmit.is_empty() ) {
     el = rexmit.hd;
@@ -224,7 +238,8 @@ EvInboxTransport::dispatch_msg( InboxPeer &p,  InboxPkt &pkt ) noexcept
     for ( el = p.in.hd; el != NULL; el = el->next ) {
       if ( seqno_cmp( el->pkt.src_seqno, pkt.src_seqno ) >= 0 ) {
         if ( seqno_cmp( el->pkt.src_seqno, pkt.src_seqno ) == 0 ) {
-          d_ibx( "repeated in pkt %u, before edge\n", pkt.src_seqno );
+          d_ibx( "%d.%d repeated in pkt %u, before edge\n",
+                 p.peer_id, p.dest_peer_id, pkt.src_seqno );
           p.state |= DUP_RECV;
           this->duplicate_count++;
           return;
@@ -237,7 +252,8 @@ EvInboxTransport::dispatch_msg( InboxPeer &p,  InboxPkt &pkt ) noexcept
     p.in.insert_before( x, el ); /* out of order, save to recv window */
   }
   else {
-    d_ibx( "repeated in pkt %u, consumed %u\n", pkt.src_seqno, p.in_seqno );
+    d_ibx( "%d.%d repeated in pkt %u, consumed %u\n",
+           p.peer_id, p.dest_peer_id, pkt.src_seqno, p.in_seqno );
     p.state |= DUP_RECV;
     this->duplicate_count++;
     return;
@@ -359,7 +375,7 @@ EvInboxTransport::write( void ) noexcept
     oh.msg_hdr.msg_controllen = 0;
     oh.msg_hdr.msg_flags      = 0;
     oh.msg_len                = 0;
-    d_ibx( "%u.%u send[%s] s_no %u r_no %u src %d dest %d\n",
+    d_ibx( "%d.%d send[%s] s_no %u r_no %u src %d dest %d\n",
            p.peer_id, p.dest_peer_id, el->pkt.code.to_str(), el->pkt.src_seqno,
            el->pkt.dest_seqno, p.src_uid, p.dest_uid );
     if ( el->pkt.code.is_data() ) {
@@ -460,9 +476,9 @@ EvInboxTransport::timer_expire( uint64_t tid, uint64_t ) noexcept
     if ( is_rack || is_sack ) {
       InboxPktElem * el = p->alloc_window( 0 );
       if ( is_rack )
-        el->pkt.code.set_rack( p->peer_id );
+        el->pkt.code.set_rack( p->peer_id, p->dest_peer_id );
       else
-        el->pkt.code.set_sack( p->peer_id );
+        el->pkt.code.set_sack( p->peer_id, p->dest_peer_id );
       el->pkt.src_uid    = p->src_uid;
       el->pkt.dest_uid   = p->dest_uid;
       el->pkt.src_seqno  = p->out_seqno;
@@ -493,7 +509,7 @@ EvInboxTransport::on_msg( kv::EvPublish &pub ) noexcept
     d_ibx( "on_msg( %.*s ) -> %u (%s)\n", (int) ipub.subject_len, ipub.subject,
             ipub.peer_uid, ipub.peer_url );
     this->msgs_sent++;
-    if ( (p = this->src.match( ipub.peer_uid, 0 )) != NULL ) {
+    if ( (p = this->src.match( ipub.peer_uid, 0, 0 )) != NULL ) {
       if ( p->url_hash != ipub.url_hash ) {
         d_ibx( "resolve url_hash %x (!= %x)\n", ipub.url_hash, p->url_hash );
         if ( p->url_hash == 0 )
@@ -529,7 +545,7 @@ EvInboxTransport::shutdown_peer( uint32_t peer_uid, uint32_t url_hash ) noexcept
 {
   InboxPeer *p;
   d_ibx( "shutdown_peer( %u, %x )\n", peer_uid, url_hash );
-  if ( (p = this->src.match( peer_uid, 0 )) != NULL &&
+  if ( (p = this->src.match( peer_uid, 0, 0 )) != NULL &&
        p->url_hash == url_hash ) {
     this->reset_peer( *p );
   }
@@ -545,7 +561,7 @@ EvInboxTransport::post_msg( InboxPeer &p,  const void *msg,
 
   if ( msg_len <= max_payload ) {
     el = p.alloc_window( msg_len );
-    el->pkt.code.set_message( p.peer_id );
+    el->pkt.code.set_message( p.peer_id, p.dest_peer_id );
     el->pkt.src_uid    = p.src_uid;
     el->pkt.dest_uid   = p.dest_uid;
     el->pkt.src_seqno  = ++p.out_seqno;
@@ -568,7 +584,7 @@ EvInboxTransport::post_msg( InboxPeer &p,  const void *msg,
       is_last = true;
     }
     el = p.alloc_window( frag_size );
-    el->pkt.code.set_message( p.peer_id );
+    el->pkt.code.set_message( p.peer_id, p.dest_peer_id );
     el->pkt.src_uid    = p.src_uid;
     el->pkt.dest_uid   = p.dest_uid;
     el->pkt.src_seqno  = ++p.out_seqno;
@@ -627,12 +643,14 @@ InboxPeer::copy_pkt_to_window( const InboxPkt &pkt ) noexcept
 bool
 InboxPeerArray::insert( InboxPeer &p,  uint32_t idx,  uint32_t uid ) noexcept
 {
+  bool b = true;
   if ( idx >= this->size )
     this->make( idx + 1, true );
 
   if ( this->ptr[ idx ] != NULL ) {
     if ( this->ptr[ idx ] != &p ) {
       print_peer( "recylce", *this->ptr[ idx ] );
+      b = false;
     }
   }
   this->ptr[ idx ] = &p;
@@ -642,7 +660,7 @@ InboxPeerArray::insert( InboxPeer &p,  uint32_t idx,  uint32_t uid ) noexcept
   else /* state == RESOLVE_DEST */
     p.dest_uid = uid;
   /*print_peer( "insert", p );*/
-  return true;
+  return b;
 }
 /* find peer by address */
 InboxPeer *
@@ -663,7 +681,7 @@ InboxPeer *
 InboxSrcArray::resolve2( const struct sockaddr *addr,
                          uint32_t addrlen,  uint32_t uid ) noexcept
 {
-  InboxPeer *p = this->match( uid, 0 );
+  InboxPeer *p = this->match( uid, 0, 0 );
   if ( p != NULL && p->match_addr( addr, addrlen ) )
     return p;
   return NULL;
@@ -723,8 +741,8 @@ EvInboxTransport::alloc_peer( struct sockaddr *addr, uint32_t addrlen,
 
 /* find peer by source uid, which uniquely identifies peer */
 InboxPeer *
-EvInboxTransport::resolve_src_uid( uint32_t dest_uid,  uint32_t dest_peer_id,
-                                   struct sockaddr *addr,
+EvInboxTransport::resolve_src_uid( uint32_t dest_uid,  uint32_t my_peer_id,
+                                   uint32_t dest_peer_id, struct sockaddr *addr,
                                    uint32_t addrlen ) noexcept
 {
   InboxPeer * p = this->src.resolve( addr, addrlen );
@@ -734,10 +752,12 @@ EvInboxTransport::resolve_src_uid( uint32_t dest_uid,  uint32_t dest_peer_id,
   if ( p == NULL ) {
     p = this->alloc_peer( addr, addrlen, 0 );
     p->dest_peer_id = dest_peer_id;
-    d_ibx( "%u.%u New SRC dest_uid=%u ", p->peer_id, dest_peer_id, dest_uid );
+    printf( "%d.%d New SRC dest_uid=%u ", p->peer_id, dest_peer_id, dest_uid );
     print_peer( NULL, *p );
   }
   if ( p->dest_uid != dest_uid )
+    reset = true;
+  else if ( my_peer_id != 0 && my_peer_id != p->peer_id )
     reset = true;
   if ( ! reset ) {
     if ( p->dest_peer_id == 0 )
@@ -746,8 +766,11 @@ EvInboxTransport::resolve_src_uid( uint32_t dest_uid,  uint32_t dest_peer_id,
       reset = true;
   }
   if ( reset ) {
-    if ( p->dest_uid != NO_UID )
+    if ( p->dest_uid != NO_UID ) {
+      printf( "%u.x Reset SRC dest_uid=%u dest_peer_id=%u != %u ", p->peer_id,
+              p->dest_uid, p->dest_peer_id, dest_peer_id );
       this->reset_peer( *p );
+    }
     p->dest_peer_id = dest_peer_id;
     this->dest.insert( *p, dest_uid );
   }
@@ -764,12 +787,15 @@ EvInboxTransport::resolve_dest_uid( uint32_t src_uid,  struct sockaddr *addr,
     p = this->src.resolve2( addr, addrlen, src_uid );
   if ( p == NULL ) {
     p = this->alloc_peer( addr, addrlen, url_hash );
-    d_ibx( "%u.x New DEST src_uid=%u ", p->peer_id, src_uid );
+    printf( "%u.x New DEST src_uid=%u ", p->peer_id, src_uid );
     print_peer( NULL, *p );
   }
   if ( p->src_uid != src_uid ) {
-    if ( p->src_uid != NO_UID )
+    if ( p->src_uid != NO_UID ) {
+      printf( "%u.x Reset DEST src_uid=%u != %u ", p->peer_id, p->src_uid,
+              src_uid );
       this->reset_peer( *p );
+    }
     this->src.insert( *p, src_uid, src_uid );
   }
   if ( p->url_hash == 0 )
@@ -794,7 +820,7 @@ EvInboxTransport::reassign_peer( InboxPeer &p,  uint32_t src_uid,
   ::memcpy( (void *) p.addr, a->ai_addr, a->ai_addrlen );
   p.url_hash = url_hash;
   ::freeaddrinfo( ai );
-  d_ibx( "%u.x Reassign DEST src_uid=%u ", p.peer_id, src_uid );
+  printf( "%u.x Reassign DEST src_uid=%u ", p.peer_id, src_uid );
   print_peer( NULL, p );
   return true;
 }
