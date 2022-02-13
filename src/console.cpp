@@ -442,8 +442,7 @@ make_valid( ValidCmds &valid,
   for ( j = 0; j < valid.nvalid; j++ ) {
     for ( k = 0; k < ncmds; k++ ) {
       if ( cmd[ k ].cmd == valid.valid[ j ] ) {
-        x[ xcnt++ ] = cmd[ k ];
-        break;
+        x[ xcnt++ ] = cmd[ k ]; /* quit/exit have two enties */
       }
     }
     for ( k = 0; k < nhelps; k++ ) {
@@ -770,7 +769,7 @@ Console::output_help( int c ) noexcept
   this->get_valid_help_cmds( help, nhelp );
   for ( ; i < nhelp && c != help[ i ].cmd; i++ )
     ;
-  if ( i < num_help_cmds ) {
+  if ( i < nhelp ) {
     const char * s = help[ i ].str;
     for (;;) {
       const char * e = (const char *) ::memchr( s, '\n', ::strlen( s ) );
