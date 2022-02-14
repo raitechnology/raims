@@ -130,7 +130,7 @@ retransmitted.  Transaction semantics are left to the endpoints.
     peer and a node may be reachable via multiple transports.  The unique
     feature identifying this link is the bridge id, tport id pair.  A peer may
     have the same name with a different bridge id, and a tport may have the
-    same name with a different tport id (this makes human reading database
+    same name with a different tport id (this makes human reading the database
     a little harder).
 
       ```
@@ -145,7 +145,7 @@ retransmitted.  Transaction semantics are left to the endpoints.
     since the LSDB is the same in every one.  The primary means of watching the
     seqno changes is with a transport heartbeat sent on a 10 second (default)
     interval between directly connected peers.  In addition, each peer randomly
-    chooses another peer to ping at random interval based on the heartbeat
+    chooses another peer to ping at a random interval based on the heartbeat
     interval.
 
     The behavior of a transport which becomes too congested is that the
@@ -175,7 +175,7 @@ retransmitted.  Transaction semantics are left to the endpoints.
     messaging, then there is only one path for the message, the shortest path.
     With multicast, there are multiple paths that a message may take, each is
     the shortest path to a subscriber.  Reverse path forwarding uses the source
-    of the message to route it.  The algorithm incrments the distance from the
+    of the message to route it.  The algorithm increments the distance from the
     source to compute a set of nodes that are possible for a message at each
     hop, then chooses the best traversal of the network graph so that the
     entire network is covered with a minimal set of transmissions.  Once this

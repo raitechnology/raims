@@ -1,14 +1,15 @@
 # Rai MS Key Configuration
 
-The key configuration files are necessary to join the network.  They authenticate
-peers and the message traffic that flows between peers.  It does not authenticate
-the local bridging protocols RV, NATS, or Redis.
+The key configuration files are necessary to join the network.  They
+authenticate peers and the message traffic that flows between peers.  It does
+not authenticate the local bridging protocols RV, NATS, or Redis.
 
-Generating a master config is done with the `ms_gen_key` program.  The default location
-for the config directory is `./config`, other locations are specified with the `-d`
-option.
+Generating a master config is done with the `ms_gen_key` program.  The default
+location for the config directory is `./config`, other locations are specified
+with the `-d` option.
 
-Initially, the config directory is empty.  Intialize with some users and a service name.
+Initially, the config directory is empty.  Intialize with some users and a
+service name.
 
   ```
   $ ms_gen_key -u A B C -s test
@@ -25,10 +26,10 @@ Initially, the config directory is empty.  Intialize with some users and a servi
   done
   ```
 
-Exporting the keys for each of the nodes causes the `.pass` file the change and the
-unnecessary private keys to be removed.  The only private key that remains, is for the
-peer.  This trimmed configuration allows the peer to run, but not generate new peers
-because the private key of the service is not present.
+Exporting the keys for each of the nodes causes the `.pass` file the change and
+the unnecessary private keys to be removed.  The only private key that remains,
+is for the peer.  This trimmed configuration allows the peer to run, but not
+generate new peers because the private key of the service is not present.
 
   ```
   $ ms_gen_key -x A B C -s test
@@ -71,10 +72,9 @@ removed after running the server, rendering the configured keys unreadable
 until the `.pass` file is restored or the peer's config is regenerated from the
 master config.
 
-The copy of the master config includes a copy of the `param.yaml`, as that
-can contain global configuration, but doesn't copy any local configuration
-such as startup and network configuration.
+The copy of the master config includes a copy of the `param.yaml`, as that can
+contain global configuration, but doesn't copy any local configuration such as
+startup and network configuration.
 
 The master config will also work, so just copying it to the peers will allow
 them to run if this type of security is unnecessary.
-
