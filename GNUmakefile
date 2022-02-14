@@ -333,16 +333,16 @@ all_depends += $(libraims_deps)
 #all_exes    += $(bind)/gen_user
 #all_depends += $(gen_user_deps)
 
-gen_cfg_files := gen_cfg
-gen_cfg_objs  := $(addprefix $(objd)/, $(addsuffix .o, $(gen_cfg_files)))
-gen_cfg_deps  := $(addprefix $(dependd)/, $(addsuffix .d, $(gen_cfg_files)))
-gen_cfg_libs  :=
-gen_cfg_lnk   := $(lnk_lib)
+ms_gen_key_files := gen_key
+ms_gen_key_objs  := $(addprefix $(objd)/, $(addsuffix .o, $(ms_gen_key_files)))
+ms_gen_key_deps  := $(addprefix $(dependd)/, $(addsuffix .d, $(ms_gen_key_files)))
+ms_gen_key_libs  :=
+ms_gen_key_lnk   := $(lnk_lib)
 
-$(bind)/gen_cfg: $(gen_cfg_objs) $(gen_cfg_libs) $(lnk_dep)
+$(bind)/ms_gen_key: $(ms_gen_key_objs) $(ms_gen_key_libs) $(lnk_dep)
 
-all_exes    += $(bind)/gen_cfg
-all_depends += $(gen_cfg_deps)
+all_exes    += $(bind)/ms_gen_key
+all_depends += $(ms_gen_key_deps)
 
 kdftest_files := kdftest
 kdftest_objs  := $(addprefix $(objd)/, $(addsuffix .o, $(kdftest_files)))
@@ -432,16 +432,16 @@ $(bind)/parse_config: $(parse_config_objs) $(parse_config_libs) $(lnk_dep)
 all_exes    += $(bind)/parse_config
 all_depends += $(parse_config_deps)
 
-test_client_files := client
-test_client_objs  := $(addprefix $(objd)/, $(addsuffix .o, $(test_client_files)))
-test_client_deps  := $(addprefix $(dependd)/, $(addsuffix .d, $(test_client_files)))
-test_client_libs  :=
-test_client_lnk   := $(lnk_lib)
+ms_server_files := server
+ms_server_objs  := $(addprefix $(objd)/, $(addsuffix .o, $(ms_server_files)))
+ms_server_deps  := $(addprefix $(dependd)/, $(addsuffix .d, $(ms_server_files)))
+ms_server_libs  :=
+ms_server_lnk   := $(lnk_lib)
 
-$(bind)/test_client: $(test_client_objs) $(test_client_libs) $(lnk_dep)
+$(bind)/ms_server: $(ms_server_objs) $(ms_server_libs) $(lnk_dep)
 
-all_exes    += $(bind)/test_client
-all_depends += $(test_client_deps)
+all_exes    += $(bind)/ms_server
+all_depends += $(ms_server_deps)
 
 all_dirs := $(bind) $(libd) $(objd) $(dependd)
 

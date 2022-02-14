@@ -348,12 +348,20 @@ int
 ConfigTree::save_parameters( const TransportArray &listen,
                              const TransportArray &connect ) const noexcept
 {
-  FilePrinter out( this->dir_name );
-  StringVal   mt;
-  if ( out.open( "run", mt ) != 0 )
+  FilePrinter    out( this->dir_name ),
+                 out2( this->dir_name );
+  StringVal      mt;
+  TransportArray mta;
+  int            which;
+  if ( out.open( "param", mt ) != 0 )
     return -1;
-  int which = PRINT_PARAMETERS | PRINT_HDR;
-  this->print_parameters( out, which, NULL, 0, listen, connect );
+  which = PRINT_PARAMETERS | PRINT_HDR;
+  this->print_parameters( out, which, NULL, 0, mta, mta );
+
+  if ( out2.open( "startup", mt ) != 0 )
+    return -1;
+  which = PRINT_STARTUP | PRINT_HDR;
+  this->print_parameters( out2, which, NULL, 0, listen, connect );
   return 0;
 }
 
@@ -365,7 +373,7 @@ ConfigTree::print_parameters( ConfigPrinter &p, int which,
 {
   size_t n;
   int i = ( ( which & PRINT_HDR ) != 0 ? 2 : 0 );
-  this->print_y( p, which | PRINT_EXCLUDE_RUN, name, namelen );
+  this->print_y( p, which | PRINT_EXCLUDE_STARTUP, name, namelen );
   if ( listen.count > 0 ) {
     if ( namelen == 0 ||
          ( namelen == 6 && ::memcmp( name, "listen", 6 ) == 0 ) ) {
@@ -413,14 +421,19 @@ ConfigTree::save_new( void ) const noexcept
     return false;
   }
   for ( i = 0; i < g.gl_pathc; i++ ) {
-    static const char run_file[] = "run.yaml.new";
+    static const char run_file[] = "startup.yaml.new";
+    static const char param_file[] = "param.yaml.new";
     static size_t run_file_size = sizeof( run_file ) - 1;
+    static size_t param_file_size = sizeof( param_file ) - 1;
     const char * descr;
     GenFileTrans * t = GenFileTrans::create_file_path( GEN_CREATE_FILE,
                                                        g.gl_pathv[ i ] );
     if ( t->len >= run_file_size &&
          ::strcmp( &t->path[ t->len - run_file_size ], run_file ) == 0 )
       descr = "startup config";
+    else if ( t->len >= param_file_size &&
+         ::strcmp( &t->path[ t->len - param_file_size ], param_file ) == 0 )
+      descr = "parameter config";
     else
       descr = "transport";
     GenFileTrans::trans_if_neq( t, descr, ops );
@@ -1348,7 +1361,7 @@ void
 ConfigTree::print_y( ConfigPrinter &p,  int which,
                      const char *name,  size_t namelen ) const noexcept
 {
-  if ( which & PRINT_USERS ) {
+  if ( ( which & PRINT_USERS ) != 0 ) {
     const User *u = this->users.hd;
     if ( u != NULL || ( which & PRINT_HDR ) ) {
       p.printf( "users:\n" );
@@ -1357,7 +1370,7 @@ ConfigTree::print_y( ConfigPrinter &p,  int which,
           u->print_y( p, 4 );
     }
   }
-  if ( which & PRINT_SERVICES ) {
+  if ( ( which & PRINT_SERVICES ) != 0 ) {
     const Service *s = this->services.hd;
     if ( s != NULL || ( which & PRINT_HDR ) ) {
       p.printf( "services:\n" );
@@ -1366,7 +1379,7 @@ ConfigTree::print_y( ConfigPrinter &p,  int which,
           s->print_y( p, 4 );
     }
   }
-  if ( which & PRINT_TRANSPORTS ) {
+  if ( ( which & PRINT_TRANSPORTS ) != 0 ) {
     const Transport *t = this->transports.hd;
     if ( t != NULL || ( which & PRINT_HDR ) ) {
       p.printf( "transports:\n" );
@@ -1375,7 +1388,7 @@ ConfigTree::print_y( ConfigPrinter &p,  int which,
           t->print_y( p, 4 );
     }
   }
-  if ( which & PRINT_GROUPS ) {
+  if ( ( which & PRINT_GROUPS ) != 0 ) {
     const Group *g = this->groups.hd;
     if ( g != NULL || ( which & PRINT_HDR ) ) {
       p.printf( "groups:\n" );
@@ -1384,26 +1397,32 @@ ConfigTree::print_y( ConfigPrinter &p,  int which,
           g->print_y( p, 4 );
     }
   }
-  if ( which & PRINT_PARAMETERS ) {
+  if ( ( which & ( PRINT_PARAMETERS | PRINT_STARTUP ) ) != 0 ) {
     const Parameters *pa = this->parameters.hd;
     if ( pa != NULL || ( which & PRINT_HDR ) ) {
       p.printf( "parameters:\n" );
       for ( ; pa != NULL; pa = pa->next ) {
         const StringPair *sp = pa->parms.hd;
-        if ( sp != NULL ) {
-          for ( ; sp != NULL; ) {
-            if ( ( namelen == 0 || sp->name.equals( name, namelen ) ) &&
-                 ( ( which & PRINT_EXCLUDE_RUN ) == 0 ||
-                    ( ! sp->name.equals( "listen" ) &&
-                      ! sp->name.equals( "connect" ) ) ) ) {
-              sp = sp->print_ylist( p, 2 );
+        for ( ; sp != NULL; ) {
+          bool matched = false;
+          if ( namelen == 0 || sp->name.equals( name, namelen ) ) {
+            if ( ( which & PRINT_STARTUP ) != 0 ) {
+              if ( sp->name.equals( "listen" ) ||
+                   sp->name.equals( "connect" ) ) {
+                sp = sp->print_ylist( p, 2 );
+                matched = true;
+              }
             }
-            else {
-              sp = sp->next;
+            else if ( ( which & PRINT_EXCLUDE_STARTUP ) == 0 ||
+                      ( ! sp->name.equals( "listen" ) &&
+                        ! sp->name.equals( "connect" ) ) ) {
+              sp = sp->print_ylist( p, 2 );
+              matched = true;
             }
           }
+          if ( ! matched )
+            sp = sp->next;
         }
-        /*pa->print_y( p, 2 );*/
       }
     }
   }

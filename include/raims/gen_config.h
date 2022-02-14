@@ -78,11 +78,13 @@ struct GenCfg {
                        const char *pass_file,  const char *salt_file,
                        bool create_it ) noexcept;
   bool copy_salt( const char *dir_name ) noexcept;
+  bool copy_param( const char *orig_dir,  const char *dir_name ) noexcept;
   void add_user( const char *user,  size_t user_len,
                  const char *expire,  size_t expire_len,
                  CryptPass &pass ) noexcept;
   bool populate_directory( const char *dir_name,
-                           bool want_transports ) noexcept;
+                           bool want_transports,
+                           bool want_param ) noexcept;
   bool populate_example_transports( const char *dir_name ) noexcept;
   bool populate_service2( const char *dir_name,  ServiceBuf &svc2,
                           bool include_pri ) noexcept;
@@ -90,10 +92,11 @@ struct GenCfg {
   bool populate_user( const char *dir_name,  UserElem *&u,
                       bool include_pri ) noexcept;
   bool populate_user_set( const char *dir_name ) noexcept;
-  bool export_users( const char *dir_name,  ServiceBuf &svc2,
-                     UserElem *for_u ) noexcept;
-  bool export_user_svc( CryptPass &pass,  const char *user,
-                        size_t user_len,  bool want_transports ) noexcept;
+  bool export_users( const char *dir_name,
+                     ServiceBuf &svc2,  UserElem *for_u ) noexcept;
+  bool export_user_svc( const char *orig_dir,  CryptPass &pass,
+                        const char *user,  size_t user_len,
+                        bool want_transports ) noexcept;
   bool revoke_user( const char *user, size_t user_len ) noexcept;
   bool remove_user( const char *di,  const char *user,
                     size_t user_len ) noexcept;

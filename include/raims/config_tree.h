@@ -19,14 +19,15 @@ struct ConfigErrPrinter : public ConfigPrinter {
 };
 
 enum WhichYaml {
-  PRINT_USERS       = 1,
-  PRINT_SERVICES    = 2,
-  PRINT_TRANSPORTS  = 4,
-  PRINT_GROUPS      = 8,
-  PRINT_PARAMETERS  = 16,
-  PRINT_NORMAL      = 31,
-  PRINT_HDR         = 32,
-  PRINT_EXCLUDE_RUN = 64
+  PRINT_USERS           = 1,
+  PRINT_SERVICES        = 2,
+  PRINT_TRANSPORTS      = 4,
+  PRINT_GROUPS          = 8,
+  PRINT_PARAMETERS      = 16,
+  PRINT_NORMAL          = 31,
+  PRINT_HDR             = 32,
+  PRINT_STARTUP         = 64,
+  PRINT_EXCLUDE_STARTUP = 128
 };
 
 struct ConfigTree {

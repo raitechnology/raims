@@ -2,6 +2,9 @@
 
 1. [Description of Rai MS](#description-of-rai-ms)
 2. [Architecture of Rai MS](#architecture-of-rai-ms)
+2. [Why use Rai MS](#why-use-rai-ms)
+3. [Building Rai MS](#building-rai-ms)
+3. [Running the Rai MS server](#running-the-ms-server)
 
 ## Description of Rai MS
 
@@ -221,3 +224,117 @@ retransmitted.  Transaction semantics are left to the endpoints.
     subjects X.Y and X.Z is split between A and B based on the hash of X.Y and
     the hash of X.Z.  This is a variation of suffix matching where the hash
     of the subject is used to descriminate the route of the message.
+
+## Why use Rai MS
+
+Distributed systems are more often crossing network boundaries.  Traditional
+broker based systems or multicast based systems have difficulty expanding
+beyond a these boundaries.  To remedy this, network designs may deploy
+application specific routers, or they shard the messaging system, or they use
+other protocols like mesh or gossip based systems.  All of these solutions have
+advantages and drawbacks.
+
+The aim of this system is to:
+
+1. Flexible transports and networking.
+2. Fast message authentication.
+3. Fast network convergence.
+4. Distribute messages only when interest is present.
+5. Utilize redundant links.
+6. Flexible message distribution:  inbox, multicast, anycast, shardcast.
+7. Flexible wildcarding mechanism.
+8. Ability to recover subscription interest at the endpoints.
+
+## Building Rai MS
+
+There are a lot of submodules and dependencies, so at present, building using
+the [build](https://github.com/raitechnology/build) Makefile is the easiest way
+to compile everything.  Clone it, install the dependencies, clone all of the
+modules, build everything.  The rpm dependencies will probably need the [EPEL
+repo](https://docs.fedoraproject.org/en-US/epel/) installed when using an
+enterprise RedHat, CentOS, or derivative for the liblzf-devel package (and
+maybe others).
+
+  ```
+  $ git clone https://github.com/raitechnology/build
+  $ cd build
+  $ make install_rpm_deps
+  $ make clone
+  $ make
+
+  ```
+
+If this completes, there will be a static binary at `raims/OS/bin/ms_server`
+where OS is something like `RH8_x86_64`.
+
+If you set the env var for debugging, then the `RH8_x86_64-g` directory will be
+populated without optimization and with the -g flag.
+
+  ```
+  $ export port_extra=-g
+  $ make
+  ```
+
+## Running the Rai MS server
+
+The first task is to create the authentication keys for a service "test".  The
+`gen_key` program creates and updates the configuration.  The user keys are
+what stored in the `user_X_svc_test.yaml` files and contain ECDH key pairs.
+The service is a ECDSA key pair and signs each user and stores the signatures
+in the `svc_test.yaml` file.  The `run.yaml` contains the startup config.
+The `config.yaml` file includes all of the files in the config directory.
+
+  ```
+  $ cd build/raims
+  $ ms_gen_key -u A B C -s test
+  create dir  config                          -- the configure directory
+  create file config/.salt                    -- generate new salt
+  create file config/.pass                    -- generated a new password
+  create file config/config.yaml              -- base include file
+  create file config/param.yaml               -- parameters file
+  create file config/svc_test.yaml            -- defines the service and signs u
+  create file config/user_A_svc_test.yaml     -- defines the user
+  create file config/user_B_svc_test.yaml     -- defines the user
+  create file config/user_C_svc_test.yaml     -- defines the user
+  OK? y
+  done
+  ```
+
+This creates the keys for users A, B, and C.  These keys are encrypted with the
+`.pass` and `.salt` files.
+
+More about this in the [key config guide](keys.md).
+
+Run the `ms_server` program and configure it.  The `-u` option specifies the
+user and service.  The `-c` option starts the command line interface, where the
+networks can be defined and connected.  This following defines a mesh endpoint
+and saves it to the startup config.
+
+  ```
+  $ ms_server -u B.test -c
+  05:54:26.267  session A.test[RthXjJscfuvnG2+J1/PJ1w] started, start time 1644818066.265990830
+  A.test[RthXjJscfuvnG2+J1/PJ1w]@tracy[249]> configure transport mytran
+  A.test[RthXjJscfuvnG2+J1/PJ1w]@tracy[250](mytran)> type mesh
+  A.test[RthXjJscfuvnG2+J1/PJ1w]@tracy[251](mytran)> listen *
+  A.test[RthXjJscfuvnG2+J1/PJ1w]@tracy[252](mytran)> port 5000
+  A.test[RthXjJscfuvnG2+J1/PJ1w]@tracy[253](mytran)> show
+  tport: mytran
+  type: mesh
+  route:
+    listen: "*"
+    port: 5000
+  A.test[RthXjJscfuvnG2+J1/PJ1w]@tracy[254](mytran)> exit
+  A.test[RthXjJscfuvnG2+J1/PJ1w]@tracy[255]> listen mytran
+  transport "mytran" started listening
+  05:55:09.934  listening on [::]:5000
+  05:55:09.937  network converges 0.003 secs, 0 uids authenticated, add_tport
+  A.test[RthXjJscfuvnG2+J1/PJ1w]@tracy[256]> save
+  config saved
+  05:55:12.790  update file A/param.yaml            -- parameter config
+  05:55:12.790  create file A/startup.yaml          -- startup config
+  05:55:12.790  create file A/tport_mytran.yaml     -- transport
+  ```
+
+More networking in the [networking config guide](networking.md).  They
+authentication keys need to be distributed to all the nodes, but the networking
+config will be somewhat unique to each node.

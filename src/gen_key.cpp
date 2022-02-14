@@ -67,7 +67,7 @@ main( int argc, char *argv[] )
              * help     = get_arg( argc, argv, 0, "-h", NULL );
   if ( help != NULL ) {
     printf( "%s [-d dir] [-u|-r|-x user1 [user2 ...]] [-s svc] [-e expires] "
-               "[-t] [-m]\n"
+               "[-t] [-y] [-f] [-p]\n"
             "   -d dir     : config dir name (default: config)\n"
             "   -u user    : add user name(s)\n"
             "   -k user    : revoke user name(s)\n"
@@ -121,7 +121,7 @@ main( int argc, char *argv[] )
   if ( populate_dir ) {
     if ( ! cfg.init_pass_salt( dir_name, pass, NULL, NULL, true ) )
       return 1;
-    if ( ! cfg.populate_directory( dir_name, want_transports ) )
+    if ( ! cfg.populate_directory( dir_name, want_transports, true ) )
       return 1;
   }
   else {
@@ -217,7 +217,7 @@ main( int argc, char *argv[] )
 
   if ( ok && has_export_users ) {
     for ( i = 2; ; i++ ) {
-      ok = cfg.export_user_svc( pass, exp_user, ::strlen( exp_user ),
+      ok = cfg.export_user_svc( dir_name, pass, exp_user, ::strlen( exp_user ),
                                 want_transports );
       if ( ! ok )
         break;

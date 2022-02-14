@@ -458,6 +458,39 @@ GenCfg::copy_salt( const char *dir_name ) noexcept
   return b;
 }
 
+bool
+GenCfg::copy_param( const char *orig_dir,  const char *dir_name ) noexcept
+{
+  char         path[ GEN_PATH_MAX ];
+  size_t       pfile_len;
+
+  if ( ! make_path( path, sizeof( path ), "%s/%s", orig_dir, "param.yaml" ) )
+    return false;
+  const void * pfile = map_file( path, pfile_len );
+
+  bool b = true;
+  GenFileTrans *t = GenFileTrans::create_file_fmt( GEN_CREATE_FILE,
+                                                "%s/param.yaml.new", dir_name );
+  if ( t == NULL || cat_file( pfile, pfile_len, t->path, true, 0666 ) < 0 )
+    b = false;
+
+  ::munmap( (void *) pfile, pfile_len );
+
+  if ( b ) {
+    int n;
+    if ( (n = t->remove_if_equal()) < 0 )
+      b = false;
+    else if ( n != 0 ) {
+      t->descr = "a copy of param";
+      this->list.push_tl( t );
+      t = NULL;
+    }
+  }
+  if ( t != NULL )
+    delete t;
+  return b;
+}
+
 void
 GenCfg::add_user( const char *user,  size_t user_len,
                   const char *expire,  size_t expire_len,
@@ -541,7 +574,8 @@ GenCfg::populate_example_transports( const char *dir_name ) noexcept
 
 bool
 GenCfg::populate_directory( const char *dir_name,
-                            bool want_transports ) noexcept
+                            bool want_transports,
+                            bool want_param ) noexcept
 {
 #if 0
   const char base[] =
@@ -561,15 +595,18 @@ GenCfg::populate_directory( const char *dir_name,
   if ( ! GenFileTrans::cat_trans( t, base, sizeof( base ) - 1,
                                  "base include file", this->list ) )
     return false;
-  const char run[] =
-    "parameters:\n"
-    "  pass: \".pass\"\n"
-    "  salt: \".salt\"\n";
-  t = GenFileTrans::create_file_fmt( GEN_CREATE_FILE, "%s/run.yaml.new",
-                                     dir_name );
-  if ( ! GenFileTrans::cat_trans( t, run, sizeof( run ) - 1, "startup run file",
-                                  this->list ) )
-    return false;
+  if ( want_param ) {
+    const char run[] =
+      "parameters:\n"
+      "  pass: .pass\n"
+      "  salt: .salt\n";
+    t = GenFileTrans::create_file_fmt( GEN_CREATE_FILE, "%s/param.yaml.new",
+                                       dir_name );
+    if ( ! GenFileTrans::cat_trans( t, run, sizeof( run ) - 1,
+                                    "parameters file",
+                                    this->list ) )
+      return false;
+  }
   if ( want_transports )
     if ( ! this->populate_example_transports( dir_name ) )
       return 1;
@@ -666,8 +703,9 @@ GenCfg::export_users( const char *dir_name,  ServiceBuf &svc2,
 }
 
 bool
-GenCfg::export_user_svc( CryptPass &pass,  const char *user,
-                         size_t user_len,  bool want_transports ) noexcept
+GenCfg::export_user_svc( const char *orig_dir,  CryptPass &pass,
+                         const char *user,  size_t user_len,
+                         bool want_transports ) noexcept
 {
   UserElem * v;
   CryptPass  pass2;
@@ -697,7 +735,8 @@ GenCfg::export_user_svc( CryptPass &pass,  const char *user,
       if ( populate_dir ) {
         if ( ! this->init_pass( path, pass2, NULL, true ) )
           return false;
-        if ( ! this->populate_directory( path, want_transports ) )
+        bool want_param = ! this->copy_param( orig_dir, path );
+        if ( ! this->populate_directory( path, want_transports, want_param ) )
           return false;
       }
       else {
