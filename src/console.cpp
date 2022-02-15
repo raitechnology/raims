@@ -1560,19 +1560,21 @@ Console::find_tport( const char *name,  uint32_t len,
 {
   if ( len > 0 ) {
     ConfigTree::Transport * tport = this->tree.find_transport( name, len );
-    TransportRoute * rte = this->user_db.transport_tab.find_transport( tport );
-    if ( rte != NULL ) {
+    if ( tport != NULL ) {
+      TransportRoute * rte = this->user_db.transport_tab.find_transport( tport );
+      if ( rte != NULL ) {
+        tree_idx = tport;
+        tport_id = rte->tport_id;
+        if ( rte->is_set( TPORT_IS_SHUTDOWN ) )
+          return T_IS_DOWN;
+        this->printf( "transport \"%.*s\" is running tport %u\n",
+                      (int) len, name, tport_id );
+        return T_IS_RUNNING;
+      }
       tree_idx = tport;
-      tport_id = rte->tport_id;
-      if ( rte->is_set( TPORT_IS_SHUTDOWN ) )
-        return T_IS_DOWN;
-      this->printf( "transport \"%.*s\" is running tport %u\n",
-                    (int) len, name, tport_id );
-      return T_IS_RUNNING;
+      tport_id = this->user_db.transport_tab.count;
+      return T_CFG_EXISTS;
     }
-    tree_idx = tport;
-    tport_id = this->user_db.transport_tab.count;
-    return T_CFG_EXISTS;
   }
   this->printf( "transport \"%.*s\" not found\n", (int) len, name );
   return T_NO_EXIST;
