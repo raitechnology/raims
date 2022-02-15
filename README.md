@@ -2,9 +2,12 @@
 
 1. [Description of Rai MS](#description-of-rai-ms)
 2. [Architecture of Rai MS](#architecture-of-rai-ms)
-2. [Why use Rai MS](#why-use-rai-ms)
-3. [Building Rai MS](#building-rai-ms)
-3. [Running the Rai MS server](#running-the-ms-server)
+3. [Why use Rai MS](#why-use-rai-ms)
+4. [Building Rai MS](#building-rai-ms)
+5. [Running the Rai MS server](#running-the-ms-server)
+6. [Configuring Authentication Keys](keys.md)
+7. [Configuring Networking](networking.md)
+8. [Subject Schema](subjects.md)
 
 ## Description of Rai MS
 
