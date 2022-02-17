@@ -194,6 +194,9 @@ struct TransportRoute : public kv::EvSocket, public kv::EvConnectionNotify,
   bool create_nats_listener( ConfigTree::Transport &tport ) noexcept;
   bool create_nats_connect( ConfigTree::Transport &tport ) noexcept;
 
+  bool create_redis_listener( ConfigTree::Transport &tport ) noexcept;
+  bool create_redis_connect( ConfigTree::Transport &tport ) noexcept;
+
   EvTcpTransportListen *create_mesh_listener(
                                         ConfigTree::Transport &tport ) noexcept;
   /*TcpConnectionMgr *create_mesh_connect( void ) noexcept;*/

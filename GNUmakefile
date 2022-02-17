@@ -305,9 +305,9 @@ gen_files   :=
 
 libraims_files := config user transport ev_tcp_transport ev_pgm_transport \
                  pgm_sock ev_inbox_transport ev_telnet ev_rv_transport \
-		 ev_nats_transport msg session heartbeat user_db auth peer \
-		 link_state sub pat crypt poly1305 ec25519 ed25519 gen_config \
-		 console
+		 ev_nats_transport ev_redis_transport msg session heartbeat \
+		 user_db auth peer link_state sub pat crypt poly1305 ec25519 \
+		 ed25519 gen_config console
 libraims_objs  := $(addprefix $(objd)/, $(addsuffix .o, $(libraims_files)))
 libraims_dbjs  := $(addprefix $(objd)/, $(addsuffix .fpic.o, $(libraims_files)))
 libraims_deps  := $(addprefix $(dependd)/, $(addsuffix .d, $(libraims_files))) \

@@ -14,10 +14,9 @@ using namespace md;
 
 EvRvTransportListen::EvRvTransportListen( kv::EvPoll &p,
                                           TransportRoute &r ) noexcept
-    : EvRvListen( p, r.sub_route ), /*RouteNotify( r.sub_route ), */rte( r )
+    : EvRvListen( p, r.sub_route ), rte( r )
 {
   this->notify = &r;
-  /*r.sub_route.add_route_notify( *this );*/
 }
 
 static void
@@ -120,68 +119,5 @@ EvRvTransportListen::stop_host( RvHost &host ) noexcept
   printf( "stop_network:         service %.*s, \"%.*s\"\n",
           (int) host.service_len, host.service, (int) host.network_len,
           host.network );
-#if 0
-  RvHostRoute * hr = this->tab.find( &host );
-  if ( hr != NULL && hr->rte != NULL ) {
-    if ( hr->rte->test_clear( TPORT_IS_PREFERRED ) )
-      this->rte.user_db.peer_dist.invalidate( PREFERRED_ROUTE_INV );
-  }
-#endif
   return this->EvRvListen::stop_host( host );
 }
-#if 0
-void
-EvRvTransportListen::on_sub( NotifySub &sub ) noexcept
-{
-  if ( sub.is_start() ) {
-#if TEST
-    if ( sub.subject_len > 6 && ::memcmp( sub.subject, "_RVFT.", 6 ) == 0 ) {
-      RvHostRoute * hr = this->tab.find( (RvHost *) sub.src );
-      if ( hr != NULL && hr->rte != NULL ) {
-        if ( ! hr->rte->test_set( TPORT_IS_PREFERRED ) )
-          this->rte.user_db.peer_dist.invalidate( PREFERRED_ROUTE_INV );
-      }
-    }
-#endif
-    this->rte.mgr.sub_db.external_sub_start( sub, this->rte.tport_id );
-  }
-  d_rv( "on_sub(%.*s) rcnt=%u src_type=%c\n", (int) sub.subject_len,
-         sub.subject, sub.sub_count, sub.src_type );
-}
-
-void
-EvRvTransportListen::on_unsub( NotifySub &sub ) noexcept
-{
-  if ( sub.is_stop() )
-    this->rte.mgr.sub_db.external_sub_stop( sub, this->rte.tport_id );
-  d_rv( "on_unsub(%.*s) rcnt=%u src_type=%c\n", (int) sub.subject_len,
-        sub.subject, sub.sub_count, sub.src_type );
-}
-
-void
-EvRvTransportListen::on_psub( NotifyPattern &pat ) noexcept
-{
-  if ( pat.sub_count == 1 ) {
-    this->rte.mgr.sub_db.external_psub_start( pat, this->rte.tport_id );
-  }
-  d_rv( "on_psub(%.*s) rcnt=%u src_type=%c\n", (int) pat.pattern_len,
-        pat.pattern, pat.sub_count, pat.src_type );
-}
-
-void
-EvRvTransportListen::on_punsub( NotifyPattern &pat ) noexcept
-{
-  if ( pat.sub_count == 0 )
-    this->rte.mgr.sub_db.external_psub_stop( pat, this->rte.tport_id );
-  d_rv( "on_punsub(%.*s) rcnt=%u src_type=%c\n", (int) pat.pattern_len,
-        pat.pattern, pat.sub_count, pat.src_type );
-}
-
-void
-EvRvTransportListen::on_reassert( uint32_t ,
-                                  kv::RouteVec<kv::RouteSub> &,
-                                  kv::RouteVec<kv::RouteSub> & ) noexcept
-{
-  d_rv( "on_reassert()\n" );
-}
-#endif

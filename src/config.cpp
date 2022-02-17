@@ -373,7 +373,7 @@ ConfigTree::print_parameters( ConfigPrinter &p, int which,
 {
   size_t n;
   int i = ( ( which & PRINT_HDR ) != 0 ? 2 : 0 );
-  this->print_y( p, which | PRINT_EXCLUDE_STARTUP, name, namelen );
+  this->print_y( p, which & ~PRINT_STARTUP, name, namelen );
   if ( listen.count > 0 ) {
     if ( namelen == 0 ||
          ( namelen == 6 && ::memcmp( name, "listen", 6 ) == 0 ) ) {
@@ -1406,21 +1406,16 @@ ConfigTree::print_y( ConfigPrinter &p,  int which,
         for ( ; sp != NULL; ) {
           bool matched = false;
           if ( namelen == 0 || sp->name.equals( name, namelen ) ) {
-            if ( ( which & PRINT_STARTUP ) != 0 ) {
-              if ( sp->name.equals( "listen" ) ||
-                   sp->name.equals( "connect" ) ) {
-                sp = sp->print_ylist( p, 2 );
-                matched = true;
-              }
-            }
-            else if ( ( which & PRINT_EXCLUDE_STARTUP ) == 0 ||
-                      ( ! sp->name.equals( "listen" ) &&
-                        ! sp->name.equals( "connect" ) ) ) {
-              sp = sp->print_ylist( p, 2 );
-              matched = true;
-            }
+            bool is_startup = ( sp->name.equals( "listen" ) ||
+                                sp->name.equals( "connect" ) );
+            if ( which & PRINT_STARTUP )
+              matched = is_startup;
+            else
+              matched = ! is_startup;
           }
-          if ( ! matched )
+          if ( matched )
+            sp = sp->print_ylist( p, 2 );
+          else
             sp = sp->next;
         }
       }

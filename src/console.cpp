@@ -1661,10 +1661,18 @@ Console::get_active_tports( ConfigTree::TransportArray &listen,
       TransportRoute *rte = this->user_db.transport_tab.ptr[ t ];
       if ( &rte->transport == tport ) {
         if ( ! rte->is_set( TPORT_IS_SHUTDOWN ) ) {
-          if ( rte->is_set( TPORT_IS_LISTEN ) )
-            listen.push( tport );
-          else
-            connect.push( tport );
+          if ( rte->is_set( TPORT_IS_EXTERNAL ) ) {
+            for ( ExtRte *ext = rte->ext->list.hd; ext != NULL;
+                  ext = ext->next ) {
+              listen.push_unique( &ext->transport );
+            }
+          }
+          else {
+            if ( rte->is_set( TPORT_IS_LISTEN ) )
+              listen.push_unique( tport );
+            else
+              connect.push_unique( tport );
+          }
         }
         break;
       }

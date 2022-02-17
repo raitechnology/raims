@@ -196,11 +196,24 @@ main( int argc, char *argv[] )
     return 1;
 
   EvPoll poll;
+  EvShm  shm;
   SignalHandler sighndl;
   Logger & log = *Logger::create();
+  HashTabGeom geom;
   /*TelnetListen tel( poll );*/
   sighndl.install();
   poll.init( 50, false );
+  geom.map_size         = sizeof( HashTab ) + 1024;
+  geom.max_value_size   = 0;
+  geom.hash_entry_size  = 64;
+  geom.hash_value_ratio = 1;
+  geom.cuckoo_buckets   = 0;
+  geom.cuckoo_arity     = 0;
+  shm.map    = HashTab::alloc_map( geom );
+  shm.map->hdr.ht_read_only = 1;
+  shm.ctx_id = 0;
+  shm.dbx_id = 0;
+  poll.init_shm( shm );
 
   TermCallback cb;
   MySessionMgr sess( poll, log, *tree, *usr, *svc, st );

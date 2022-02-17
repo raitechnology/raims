@@ -11,6 +11,7 @@
 #include <raims/ev_telnet.h>
 #include <raims/ev_rv_transport.h>
 #include <raims/ev_nats_transport.h>
+#include <raims/ev_redis_transport.h>
 
 using namespace rai;
 using namespace ms;
@@ -171,7 +172,8 @@ SessionMgr::add_transport2( ConfigTree::Service &s,
   ConfigTree::Transport * tptr = &t;
   uint32_t f = ( is_service ? TPORT_IS_SVC : 0 );
   char svc_name[ 256 ];
-  if ( t.type.equals( "rv" ) || t.type.equals( "nats" ) ) {
+  if ( t.type.equals( "rv" ) || t.type.equals( "nats" ) ||
+       t.type.equals( "redis" ) ) {
     StringTab & stab = this->user_db.string_tab;
     f |= TPORT_IS_EXTERNAL;
     size_t svc_len =
@@ -891,6 +893,11 @@ TransportRoute::create_transport( ConfigTree::Transport &tport ) noexcept
       return this->create_nats_listener( tport );
     return false;
   }
+  if ( tport.type.equals( "redis" ) ) {
+    if ( this->is_svc() )
+      return this->create_redis_listener( tport );
+    return false;
+  }
   if ( tport.type.equals( "tcp" ) ) {
     if ( this->is_svc() ) {
       this->listener = this->create_tcp_listener( false, tport );
@@ -1090,6 +1097,20 @@ TransportRoute::create_nats_listener( ConfigTree::Transport &tport ) noexcept
 }
 
 bool
+TransportRoute::create_redis_listener( ConfigTree::Transport &tport ) noexcept
+{
+  EvRedisTransportListen * l =
+    new ( aligned_malloc( sizeof( EvRedisTransportListen ) ) )
+    EvRedisTransportListen( this->poll, *this );
+  this->start_listener( l, false, tport );
+  if ( l == NULL )
+    return false;
+  this->ext->list.push_tl(
+    new ( ::malloc( sizeof( ExtRte ) ) ) ExtRte( tport, l ) );
+  return true;
+}
+
+bool
 TransportRoute::create_tcp_connect( ConfigTree::Transport &tport ) noexcept
 {
   EvTcpTransportParameters parm;
@@ -1113,6 +1134,12 @@ TransportRoute::create_rv_connect( ConfigTree::Transport & ) noexcept
 
 bool
 TransportRoute::create_nats_connect( ConfigTree::Transport & ) noexcept
+{
+  return /*this->create_tcp_connect();*/ false;
+}
+
+bool
+TransportRoute::create_redis_connect( ConfigTree::Transport & ) noexcept
 {
   return /*this->create_tcp_connect();*/ false;
 }
@@ -1319,7 +1346,8 @@ ConnectionMgr::setup_reconnect( void ) noexcept
 bool
 ConnectionMgr::do_connect( void ) noexcept
 {
-  if ( this->rte.transport.type.equals( "tcp" ) ) {
+  if ( this->rte.transport.type.equals( "tcp" ) ||
+       this->rte.transport.type.equals( "mesh" ) ) {
     EvTcpTransportClient     & client = *(EvTcpTransportClient *) this->conn;
     EvTcpTransportParameters & parm   = *(EvTcpTransportParameters *)
                                         this->parameters;

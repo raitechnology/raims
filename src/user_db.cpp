@@ -597,13 +597,12 @@ UserRoute::set_ucast( UserDB &user_db,  const void *p,  size_t len,
 void
 UserRoute::set_mesh( UserDB &user_db,  const void *p,  size_t len ) noexcept
 {
-  if ( debug_usr )
-    this->n.printf( "set_mesh( %.*s, tport=%s )\n", (int) len, (char *) p,
-                    this->rte.name );
   if ( len == 0 && this->mesh_url_len == 0 )
     return;
 
   if ( len == 0 ) {
+    /*if ( debug_usr )*/
+      this->n.printf( "clear_mesh( t=%s )\n", this->rte.name );
     this->mesh_url_len = 0;
     this->url_hash     = 0;
     if ( this->mesh_url != NULL ) {
@@ -616,6 +615,9 @@ UserRoute::set_mesh( UserDB &user_db,  const void *p,  size_t len ) noexcept
     if ( len == this->mesh_url_len && ::memcmp( this->mesh_url, p, len ) == 0 )
       return;
 
+    /*if ( debug_usr )*/
+      this->n.printf( "set_mesh( %.*s, tport=%s )\n", (int) len, (char *) p,
+                      this->rte.name );
     this->mesh_url = (char *) ::realloc( this->mesh_url, len + 1 );
     ::memcpy( this->mesh_url, p, len );
     this->mesh_url[ len ] = '\0';

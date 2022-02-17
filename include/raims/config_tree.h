@@ -194,6 +194,12 @@ struct ConfigTree {
     void push( Transport *tport ) {
       (*this)[ this->count ] = tport;
     }
+    void push_unique( Transport *tport ) {
+      for ( size_t i = 0; i < this->count; i++ )
+        if ( tport == this->ptr[ i ] )
+          return;
+      this->push( tport );
+    }
   };
 
   void * operator new( size_t, void *ptr ) { return ptr; }
