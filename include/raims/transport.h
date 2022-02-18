@@ -184,7 +184,7 @@ struct TransportRoute : public kv::EvSocket, public kv::EvConnectionNotify,
 
   bool add_mesh_connect( const char *mesh_url,  uint32_t mesh_hash ) noexcept;
 
-  EvTcpTransportListen *create_tcp_listener( bool rand_port,
+  EvTcpTransportListen *create_tcp_listener(
                                         ConfigTree::Transport &tport ) noexcept;
   bool create_tcp_connect( ConfigTree::Transport &tport ) noexcept;
 
@@ -214,7 +214,7 @@ struct TransportRoute : public kv::EvSocket, public kv::EvConnectionNotify,
     return this->sub_route.forward_set_not_fd( pub, this->connected_auth, fd );
   }
   uint32_t shutdown( ConfigTree::Transport &tport ) noexcept;
-  bool start_listener( kv::EvTcpListen *l,  bool rand_port,
+  bool start_listener( kv::EvTcpListen *l,
                        ConfigTree::Transport &tport ) noexcept;
   /* a new connection */
   virtual void on_connect( kv::EvSocket &conn ) noexcept;

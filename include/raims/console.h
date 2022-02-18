@@ -718,9 +718,21 @@ static const ConsoleCmd valid_pgm[] =
     CMD_TPORT_MTU, CMD_TPORT_TXW_SQNS, CMD_TPORT_RXW_SQNS, CMD_TPORT_MCAST_LOOP,
     CMD_TPORT_SHOW, CMD_TPORT_QUIT };
 
+static const ConsoleCmd valid_rv[] =
+  { CMD_TPORT_NAME, CMD_TPORT_TYPE, CMD_TPORT_LISTEN, CMD_TPORT_PORT,
+    CMD_TPORT_SHOW, CMD_TPORT_QUIT };
+
+static const ConsoleCmd valid_nats[] =
+  { CMD_TPORT_NAME, CMD_TPORT_TYPE, CMD_TPORT_LISTEN, CMD_TPORT_PORT,
+    CMD_TPORT_SHOW, CMD_TPORT_QUIT };
+
+static const ConsoleCmd valid_redis[] =
+  { CMD_TPORT_NAME, CMD_TPORT_TYPE, CMD_TPORT_LISTEN, CMD_TPORT_PORT,
+    CMD_TPORT_SHOW, CMD_TPORT_QUIT };
+
 static const ConsoleCmdString tport_help_cmd[] = {
   { CMD_TPORT_NAME       , "tport N      Name of transport" },
-  { CMD_TPORT_TYPE       , "type T       Type of transport (tcp,pgm,mesh)" },
+  { CMD_TPORT_TYPE       , "type T       Type of transport (tcp,pgm,mesh,rv,nats,redis)" },
   { CMD_TPORT_LISTEN     , "listen A     Listen address for passive transport" },
   { CMD_TPORT_CONNECT    , "connect A    Connect address for active transport" },
   { CMD_TPORT_PORT       , "port N       Port for address" },
@@ -746,7 +758,10 @@ struct ValidCmds {
 } valid_cmd[] = {
   { "tcp",  valid_tcp,  ASZ( valid_tcp ),  NULL, 0, NULL, 0 },
   { "mesh", valid_mesh, ASZ( valid_mesh ), NULL, 0, NULL, 0 },
-  { "pgm",  valid_pgm,  ASZ( valid_pgm ),  NULL, 0, NULL, 0 }
+  { "pgm",  valid_pgm,  ASZ( valid_pgm ),  NULL, 0, NULL, 0 },
+  { "rv",   valid_rv,   ASZ( valid_rv ),   NULL, 0, NULL, 0 },
+  { "nats", valid_nats, ASZ( valid_nats ), NULL, 0, NULL, 0 },
+  { "redis",valid_redis,ASZ( valid_redis ),NULL, 0, NULL, 0 }
 };
 static const size_t num_valid_cmds = ASZ( valid_cmd );
 #undef ASZ

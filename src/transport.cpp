@@ -3,6 +3,7 @@
 #include <string.h>
 #include <stdint.h>
 #include <ctype.h>
+#include <unistd.h>
 #include <raims/transport.h>
 #include <raims/session.h>
 #include <raims/ev_tcp_transport.h>
@@ -246,7 +247,7 @@ SessionMgr::start_transport( TransportRoute &rte,
   if ( rte.transport.type.equals( "tcp" ) ) {
     if ( is_service ) {
       if ( rte.listener != NULL )
-        return rte.start_listener( rte.listener, false, rte.transport );
+        return rte.start_listener( rte.listener, rte.transport );
     }
     else {
       if ( rte.connect_mgr.conn != NULL ) {
@@ -261,7 +262,7 @@ SessionMgr::start_transport( TransportRoute &rte,
   else if ( rte.transport.type.equals( "mesh" ) ) {
     if ( rte.listener != NULL ) {
       if ( rte.is_set( TPORT_IS_SHUTDOWN ) ) {
-        if ( ! rte.start_listener( rte.listener, ! is_service, rte.transport ) )
+        if ( ! rte.start_listener( rte.listener, rte.transport ) )
           return false;
         rte.create_listener_mesh_url();
       }
@@ -289,13 +290,34 @@ SessionMgr::start_transport( TransportRoute &rte,
 }
 
 static size_t
-make_mesh_url( char buf[ MAX_TCP_HOST_LEN ],  EvSocket &sock ) noexcept
+make_mesh_url_from_sock( char buf[ MAX_TCP_HOST_LEN ],
+                         EvSocket &sock ) noexcept
 {
   ::memcpy( buf, "tcp://", 6 );
   size_t len = get_strlen64( sock.peer_address.buf );
-  ::memcpy( &buf[ 6 ], sock.peer_address.buf, len );
-  len += 6;
+  bool is_ip4_wildcard, is_ip6_wildcard;
+  is_ip4_wildcard = ( ::strncmp( sock.peer_address.buf, "0.0.0.0:", 8 ) == 0 );
+  is_ip6_wildcard = ( ! is_ip4_wildcard &&
+                      ::strncmp( sock.peer_address.buf, "[::]:", 5 ) == 0 );
+  if ( is_ip4_wildcard || is_ip6_wildcard ) {
+    size_t i = 0, j = 6;
+    if ( ::gethostname( &buf[ 6 ], MAX_TCP_HOST_LEN - 6 ) == 0 ) {
+      j += ::strlen( &buf[ 6 ] );
+      if ( is_ip4_wildcard )
+        i = 7;
+      else
+        i = 4;
+    }
+    while ( j < MAX_TCP_HOST_LEN - 1 && i < len )
+      buf[ j++ ] = sock.peer_address.buf[ i++ ];
+    len = j;
+  }
+  else {
+    ::memcpy( &buf[ 6 ], sock.peer_address.buf, len );
+    len += 6;
+  }
   buf[ len ] = '\0';
+  d_tran( "mesh_url_from_sock( \"%s\" )\n", buf );
   return len;
 }
 
@@ -340,7 +362,7 @@ SessionMgr::add_mesh_accept( TransportRoute &listen_rte,
   rte->set( TPORT_IS_MESH );
 
   char buf[ MAX_TCP_HOST_LEN ];
-  make_mesh_url( buf, conn );
+  make_mesh_url_from_sock( buf, conn );
   rte->mesh_conn_hash = kv_crc_c( buf, ::strlen( buf ), 0 );
   conn.rte    = rte;
   conn.notify = rte;
@@ -436,13 +458,17 @@ parse_tcp_param( EvTcpTransportParameters &parm,  const char *name,
 }
 
 static size_t
-make_mesh_url( char buf[ MAX_TCP_HOST_LEN ],
-               ConfigTree::Transport &tport ) noexcept
+make_mesh_url_from_tport( char buf[ MAX_TCP_HOST_LEN ],
+                          ConfigTree::Transport &tport,
+                          bool is_connect ) noexcept
 {
   EvTcpTransportParameters parm;
   size_t i = 6, j = 0;
   ::memcpy( buf, "tcp://", 6 );
-  parse_tcp_param( parm, "connect", tport );
+  if ( is_connect )
+    parse_tcp_param( parm, "connect", tport );
+  else
+    parse_tcp_param( parm, "listen", tport );
   if ( parm.host == NULL ) {
     ::memcpy( &buf[ 6 ], "127.0.0.1", 9 );
     i = 15;
@@ -467,6 +493,7 @@ make_mesh_url( char buf[ MAX_TCP_HOST_LEN ],
       buf[ i++ ] = pbuf[ j ];
   }
   buf[ i ] = '\0';
+  d_tran( "mesh_url_from_tport( \"%s\" )\n", buf );
   return i;
 }
 
@@ -489,7 +516,7 @@ SessionMgr::add_mesh_connect( TransportRoute &mesh_rte,
     return true;
 
   if ( mesh_url == NULL ) {
-    size_t sz = make_mesh_url( url_buf, mesh_rte.transport );
+    size_t sz = make_mesh_url_from_tport( url_buf, mesh_rte.transport, true );
     mesh_url  = url_buf;
     mesh_hash = kv_crc_c( url_buf, sz, 0 );
   }
@@ -869,7 +896,7 @@ void
 TransportRoute::create_listener_mesh_url( void ) noexcept
 {
   char   tmp[ MAX_TCP_HOST_LEN ];
-  size_t len = make_mesh_url( tmp, *this->listener );
+  size_t len = make_mesh_url_from_sock( tmp, *this->listener );
   char * url = this->mesh_url_addr;
   if ( url == NULL )
     url = (char *) ::malloc( MAX_TCP_HOST_LEN );
@@ -900,7 +927,7 @@ TransportRoute::create_transport( ConfigTree::Transport &tport ) noexcept
   }
   if ( tport.type.equals( "tcp" ) ) {
     if ( this->is_svc() ) {
-      this->listener = this->create_tcp_listener( false, tport );
+      this->listener = this->create_tcp_listener( tport );
       goto out_listen;
     }
     b = this->create_tcp_connect( tport );
@@ -1027,15 +1054,13 @@ TransportRoute::shutdown( ConfigTree::Transport &tport ) noexcept
 }
 
 bool
-TransportRoute::start_listener( EvTcpListen *l,  bool rand_port,
+TransportRoute::start_listener( EvTcpListen *l,
                                 ConfigTree::Transport &tport ) noexcept
 {
   EvTcpTransportParameters parm;
   parse_tcp_param( parm, "listen", tport );
 
-  if ( rand_port )
-    parm.port = 0;
-  int status = l->listen( parm.host, parm.port, DEFAULT_TCP_LISTEN_OPTS );
+  int status = l->listen( parm.host, parm.port, parm.opts );
   if ( status != 0 ) {
     printf( "listen %s:%u failed\n",
             ConfigTree::Transport::is_wildcard( parm.host ) ? "*" : parm.host,
@@ -1058,13 +1083,12 @@ TransportRoute::start_listener( EvTcpListen *l,  bool rand_port,
 }
 
 EvTcpTransportListen *
-TransportRoute::create_tcp_listener( bool rand_port,
-                                     ConfigTree::Transport &tport ) noexcept
+TransportRoute::create_tcp_listener( ConfigTree::Transport &tport ) noexcept
 {
   EvTcpTransportListen * l =
     new ( aligned_malloc( sizeof( EvTcpTransportListen ) ) )
     EvTcpTransportListen( this->poll, *this );
-  this->start_listener( l, rand_port, tport );
+  this->start_listener( l, tport );
   return l;
 }
 
@@ -1074,7 +1098,7 @@ TransportRoute::create_rv_listener( ConfigTree::Transport &tport ) noexcept
   EvRvTransportListen * l =
     new ( aligned_malloc( sizeof( EvRvTransportListen ) ) )
     EvRvTransportListen( this->poll, *this );
-  this->start_listener( l, false, tport );
+  this->start_listener( l, tport );
   if ( l == NULL )
     return false;
   this->ext->list.push_tl(
@@ -1088,7 +1112,7 @@ TransportRoute::create_nats_listener( ConfigTree::Transport &tport ) noexcept
   EvNatsTransportListen * l =
     new ( aligned_malloc( sizeof( EvNatsTransportListen ) ) )
     EvNatsTransportListen( this->poll, *this );
-  this->start_listener( l, false, tport );
+  this->start_listener( l, tport );
   if ( l == NULL )
     return false;
   this->ext->list.push_tl(
@@ -1102,7 +1126,7 @@ TransportRoute::create_redis_listener( ConfigTree::Transport &tport ) noexcept
   EvRedisTransportListen * l =
     new ( aligned_malloc( sizeof( EvRedisTransportListen ) ) )
     EvRedisTransportListen( this->poll, *this );
-  this->start_listener( l, false, tport );
+  this->start_listener( l, tport );
   if ( l == NULL )
     return false;
   this->ext->list.push_tl(
@@ -1147,13 +1171,13 @@ TransportRoute::create_redis_connect( ConfigTree::Transport & ) noexcept
 EvTcpTransportListen *
 TransportRoute::create_mesh_listener( ConfigTree::Transport &tport ) noexcept
 {
-  return this->create_tcp_listener( false, tport );
+  return this->create_tcp_listener( tport );
 }
 
 EvTcpTransportListen *
 TransportRoute::create_mesh_rendezvous( ConfigTree::Transport &tport ) noexcept
 {
-  return this->create_tcp_listener( true, tport );
+  return this->create_tcp_listener( tport );
 }
 
 bool
@@ -1169,7 +1193,7 @@ SessionMgr::create_telnet( ConfigTree::Transport &tport ) noexcept
   this->telnet_tport = &tport;
 
   if ( ! l->in_list( IN_ACTIVE_LIST ) ) {
-    if ( l->listen( parm.host, parm.port, DEFAULT_TCP_LISTEN_OPTS,
+    if ( l->listen( parm.host, parm.port, parm.opts,
                    "telnet_listen" ) != 0 )
       return false;
     l->console = &this->console;

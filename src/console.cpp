@@ -1668,7 +1668,15 @@ Console::get_active_tports( ConfigTree::TransportArray &listen,
             }
           }
           else {
-            if ( rte->is_set( TPORT_IS_LISTEN ) )
+            if ( rte->is_set( TPORT_IS_MESH ) ) {
+              if ( rte->is_set( TPORT_IS_LISTEN ) ) {
+                if ( rte->is_set( TPORT_IS_SVC ) )
+                  listen.push_unique( tport );
+                else
+                  connect.push_unique( tport );
+              }
+            }
+            else if ( rte->is_set( TPORT_IS_LISTEN ) )
               listen.push_unique( tport );
             else
               connect.push_unique( tport );
