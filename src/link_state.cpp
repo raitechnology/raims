@@ -292,7 +292,7 @@ UserDB::push_user_route( UserBridge &n,  UserRoute &u_rte ) noexcept
         if ( ! rte.uid_in_mesh->test_set( n.uid ) ) {
           char buf[ NONCE_B64_LEN + 1 ];
           *rte.mesh_csum ^= n.bridge_id.nonce;
-          if ( debug_lnk )
+          /*if ( debug_lnk )*/
             n.printf( "add to mesh %s [%s]\n", rte.transport.tport.val,
                       rte.mesh_csum->to_base64_str( buf ) );
         }
@@ -354,8 +354,12 @@ UserDB::pop_user_route( UserBridge &n,  UserRoute &u_rte ) noexcept
     list.pop( &u_rte );
     if ( u_rte.hops == 0 ) {
       if ( rte.mesh_id != NULL ) {
-        if ( rte.uid_in_mesh->test_clear( n.uid ) )
+        if ( rte.uid_in_mesh->test_clear( n.uid ) ) {
+          char buf[ NONCE_B64_LEN + 1 ];
           *rte.mesh_csum ^= n.bridge_id.nonce;
+          n.printf( "rm from mesh %s [%s]\n", rte.transport.tport.val,
+                    rte.mesh_csum->to_base64_str( buf ) );
+        }
       }
       if ( rte.is_mcast() && rte.ibx_tport != NULL ) {
         if ( u_rte.is_set( UCAST_URL_STATE ) ) {

@@ -33,7 +33,7 @@ rai::ms::make_path( char *path,  size_t path_len,
   return false;
 }
 
-const void *
+static const void *
 map_file( const char *fn,  size_t &sz ) noexcept
 {
   int    fd  = ::open( fn, O_RDONLY );
@@ -45,8 +45,15 @@ map_file( const char *fn,  size_t &sz ) noexcept
     ::perror( fn );
     return NULL;
   }
-  if ( ::fstat( fd, &st ) == 0 )
-    map = ::mmap( 0, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0 );
+  if ( ::fstat( fd, &st ) == 0 ) {
+    if ( st.st_size > 0 )
+      map = ::mmap( 0, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0 );
+    else
+      map = NULL;
+  }
+  else {
+    ::perror( fn );
+  }
   if ( map == MAP_FAILED ) {
     ::perror( fn );
     ::close( fd );
@@ -55,6 +62,14 @@ map_file( const char *fn,  size_t &sz ) noexcept
   ::close( fd );
   sz = st.st_size;
   return map;
+}
+
+
+static void
+unmap_file( const void *m,  size_t len ) noexcept
+{
+  if ( m != NULL && m != MAP_FAILED && len > 0 )
+    ::munmap( (void *) m, len );
 }
 
 static int
@@ -136,10 +151,8 @@ GenFileTrans::check_if_changed( void ) noexcept
     const void * p1 = map_file( this->path, from_size ),
                * p2 = map_file( path_tmp, to_size );
     int          n  = cmp_bytes( p1, from_size, p2, to_size );
-    if ( p1 != NULL )
-      ::munmap( (void *) p1, from_size );
-    if ( p2 != NULL )
-      ::munmap( (void *) p2, to_size );
+    unmap_file( p1, from_size );
+    unmap_file( p2, to_size );
     if ( p1 == NULL || p2 == NULL )
       return -1;
     if ( n == 0 )
@@ -440,8 +453,7 @@ GenCfg::copy_salt( const char *dir_name ) noexcept
                                                    "%s/.salt.new", dir_name );
   if ( t == NULL || cat_file( salt, salt_len, t->path, false, 0400 ) < 0 )
     b = false;
-
-  ::munmap( (void *) salt, salt_len );
+  unmap_file( salt, salt_len );
 
   if ( b ) {
     int n;
@@ -461,12 +473,16 @@ GenCfg::copy_salt( const char *dir_name ) noexcept
 bool
 GenCfg::copy_param( const char *orig_dir,  const char *dir_name ) noexcept
 {
-  char         path[ GEN_PATH_MAX ];
-  size_t       pfile_len;
+  char   path[ GEN_PATH_MAX ];
+  size_t pfile_len;
 
   if ( ! make_path( path, sizeof( path ), "%s/%s", orig_dir, "param.yaml" ) )
     return false;
   const void * pfile = map_file( path, pfile_len );
+  if ( pfile == NULL ) {
+    ::perror( path );
+    return false;
+  }
 
   bool b = true;
   GenFileTrans *t = GenFileTrans::create_file_fmt( GEN_CREATE_FILE,
@@ -474,7 +490,7 @@ GenCfg::copy_param( const char *orig_dir,  const char *dir_name ) noexcept
   if ( t == NULL || cat_file( pfile, pfile_len, t->path, true, 0666 ) < 0 )
     b = false;
 
-  ::munmap( (void *) pfile, pfile_len );
+  unmap_file( pfile, pfile_len );
 
   if ( b ) {
     int n;

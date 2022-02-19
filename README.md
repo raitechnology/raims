@@ -34,9 +34,10 @@ retransmitted.  Transaction semantics are left to the endpoints.
 
 ## Architecture of Rai MS
 
-1.  Authentication -- Each node has a ECDH key pair and the ECDH public key is
-    signed by the ECDSA private key of the service.  Before a ECDH key exchange
-    is initiated by a node, the node's ECDH public key is verified by the
+1.  Authentication -- Each node has a ECDH (Elliptic Curve Diffie Hellman) key
+    pair and the ECDH public key is signed by the ECDSA (Elliptic Curve Digital
+    Signature Algo) private key of the service.  Before a ECDH key exchange is
+    initiated by a node, the node's ECDH public key is verified by the
     service's ECDSA public key.  The ECDSA private key is not used by the
     network, it is only used by the administrator to authenticate new nodes.
     The ECDH key exchange between nodes constructs a 512 bit ephemeral key
@@ -281,10 +282,10 @@ populated without optimization and with the -g flag.
 ## Running the Rai MS server
 
 The first task is to create the authentication keys for a service "test".  The
-`gen_key` program creates and updates the configuration.  The user keys are
+`ms_gen_key` program creates and updates the configuration.  The user keys are
 what stored in the `user_X_svc_test.yaml` files and contain ECDH key pairs.
 The service is a ECDSA key pair and signs each user and stores the signatures
-in the `svc_test.yaml` file.  The `run.yaml` contains the startup config.
+in the `svc_test.yaml` file.  The `startup.yaml` contains the startup config.
 The `config.yaml` file includes all of the files in the config directory.
 
   ```

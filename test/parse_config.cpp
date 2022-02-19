@@ -39,8 +39,10 @@ main( int argc, char *argv[] )
   ConfigPrinter    p;
 
   if ( tree != NULL ) {
-    if ( y != NULL )
-      tree->print_y( p );
+    if ( y != NULL ) {
+      int did_which;
+      tree->print_y( p, did_which );
+    }
     else
       tree->print_js( p );
   }

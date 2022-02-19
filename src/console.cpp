@@ -1347,6 +1347,10 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
     case CMD_TPORT_EDGE:
       if ( argc < 1 )
         goto help;
+      if ( argc < 2 ) {
+        args[ 1 ] = NULL;
+        arglen[ 1 ] = 0;
+      }
       this->config_tport_route( args[ 0 ], arglen[ 0 ],
                                 args[ 1 ], arglen[ 1 ] );
       break;
@@ -1776,14 +1780,27 @@ void
 Console::config_tport_route( const char *param, size_t plen,
                              const char *value, size_t vlen ) noexcept
 {
-  ConfigTree::StringPair *sp = this->cfg_tport->route.get_pair( param, plen );
-  if ( sp == NULL ) {
+  ConfigTree::PairList & route = this->cfg_tport->route;
+  ConfigTree::StringPair *sp = route.get_pair( param, plen );
+  if ( sp != NULL ) {
+    if ( vlen > 0 )
+      this->string_tab.reref_string( value, vlen, sp->value );
+    else {
+      route.unlink( sp );
+      this->free_pairs.push_tl( sp );
+    }
+    return;
+  }
+  if ( vlen == 0 ) {
+    this->printf( "notfound: %.*s\n", (int) plen, param );
+  }
+  else {
     if ( this->free_pairs.is_empty() )
       sp = this->string_tab.make<ConfigTree::StringPair>();
     else
       sp = this->free_pairs.pop_hd();
     this->string_tab.ref_string( param, plen, sp->name );
-    this->cfg_tport->route.push_tl( sp );
+    route.push_tl( sp );
   }
   this->string_tab.reref_string( value, vlen, sp->value );
 }
@@ -3203,7 +3220,8 @@ Console::show_running( int which,  const char *name,  size_t namelen ) noexcept
     this->tree.print_parameters( *this, which, name, namelen, listen, connect );
   }
   else {
-    this->tree.print_y( *this, which, name, namelen );
+    int did_which;
+    this->tree.print_y( *this, did_which, which, name, namelen );
   }
 }
 

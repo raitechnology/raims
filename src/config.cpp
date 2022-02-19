@@ -192,24 +192,26 @@ ConfigDB::parse_fd( const char *fn, int fd ) noexcept
   struct stat st;
   void * map = NULL;
   size_t input_off;
+  int    status = 0;
 
   if ( ::fstat( fd, &st ) != 0 ) {
-    ::perror( "fstat" );
+    ::perror( fn );
     return -1;
   }
   /* recursion check */
-  if ( ! this->ino_stk->push( st.st_ino ) )
-    return 0;
-  input_off = st.st_size;
-  map = ::mmap( 0, input_off, PROT_READ, MAP_SHARED, fd, 0 );
-  if ( map == MAP_FAILED ) {
-    ::perror( "mmap" );
+  if ( (input_off = st.st_size) > 0 ) {
+    if ( ! this->ino_stk->push( st.st_ino ) )
+      return 0;
+    map = ::mmap( 0, input_off, PROT_READ, MAP_SHARED, fd, 0 );
+    if ( map == MAP_FAILED ) {
+      ::perror( fn );
+      this->ino_stk->pop();
+      return -1;
+    }
+    status = this->parse_jsconfig( (char *) map, input_off, fn );
+    ::munmap( map, input_off );
     this->ino_stk->pop();
-    return -1;
   }
-  int status = this->parse_jsconfig( (char *) map, input_off, fn );
-  ::munmap( map, input_off );
-  this->ino_stk->pop();
   return status;
 }
 
@@ -373,7 +375,12 @@ ConfigTree::print_parameters( ConfigPrinter &p, int which,
 {
   size_t n;
   int i = ( ( which & PRINT_HDR ) != 0 ? 2 : 0 );
-  this->print_y( p, which & ~PRINT_STARTUP, name, namelen );
+  int did_which;
+  this->print_y( p, did_which, which & ~PRINT_STARTUP, name, namelen );
+  if ( ( did_which & PRINT_PARAMETERS ) == 0 ) {
+    if ( listen.count > 0 || connect.count > 0 )
+      p.printf( "parameters:\n" );
+  }
   if ( listen.count > 0 ) {
     if ( namelen == 0 ||
          ( namelen == 6 && ::memcmp( name, "listen", 6 ) == 0 ) ) {
@@ -1358,13 +1365,15 @@ ConfigTree::print_js( ConfigPrinter &p ) const noexcept
 }
 
 void
-ConfigTree::print_y( ConfigPrinter &p,  int which,
+ConfigTree::print_y( ConfigPrinter &p,  int &did_which,  int which,
                      const char *name,  size_t namelen ) const noexcept
 {
+  int x = 0;
   if ( ( which & PRINT_USERS ) != 0 ) {
     const User *u = this->users.hd;
     if ( u != NULL || ( which & PRINT_HDR ) ) {
       p.printf( "users:\n" );
+      x |= PRINT_USERS;
       for ( ; u != NULL; u = u->next )
         if ( namelen == 0 || u->user.equals( name, namelen ) )
           u->print_y( p, 4 );
@@ -1374,6 +1383,7 @@ ConfigTree::print_y( ConfigPrinter &p,  int which,
     const Service *s = this->services.hd;
     if ( s != NULL || ( which & PRINT_HDR ) ) {
       p.printf( "services:\n" );
+      x |= PRINT_SERVICES;
       for ( ; s != NULL; s = s->next )
         if ( namelen == 0 || s->svc.equals( name, namelen ) )
           s->print_y( p, 4 );
@@ -1383,6 +1393,7 @@ ConfigTree::print_y( ConfigPrinter &p,  int which,
     const Transport *t = this->transports.hd;
     if ( t != NULL || ( which & PRINT_HDR ) ) {
       p.printf( "transports:\n" );
+      x |= PRINT_TRANSPORTS;
       for ( ; t != NULL; t = t->next )
         if ( namelen == 0 || t->tport.equals( name, namelen ) )
           t->print_y( p, 4 );
@@ -1392,6 +1403,7 @@ ConfigTree::print_y( ConfigPrinter &p,  int which,
     const Group *g = this->groups.hd;
     if ( g != NULL || ( which & PRINT_HDR ) ) {
       p.printf( "groups:\n" );
+      x |= PRINT_GROUPS;
       for ( ; g != NULL; g = g->next )
         if ( namelen == 0 || g->group.equals( name, namelen ) )
           g->print_y( p, 4 );
@@ -1401,6 +1413,7 @@ ConfigTree::print_y( ConfigPrinter &p,  int which,
     const Parameters *pa = this->parameters.hd;
     if ( pa != NULL || ( which & PRINT_HDR ) ) {
       p.printf( "parameters:\n" );
+      x |= PRINT_PARAMETERS;
       for ( ; pa != NULL; pa = pa->next ) {
         const StringPair *sp = pa->parms.hd;
         for ( ; sp != NULL; ) {
@@ -1421,6 +1434,7 @@ ConfigTree::print_y( ConfigPrinter &p,  int which,
       }
     }
   }
+  did_which = x;
 }
 
 static const char *
