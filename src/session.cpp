@@ -379,6 +379,8 @@ SessionMgr::parse_msg_hdr( MsgFramePublish &fpub ) noexcept
 bool
 ExternalRoute::on_msg( EvPublish &pub ) noexcept
 {
+  this->msgs_recv++;
+  this->bytes_recv += pub.msg_len;
   if ( pub.src_route == (uint32_t) this->fd )
     return true;
   if ( pub.pub_type != 'X' ) {
@@ -564,6 +566,8 @@ ExternalRoute::on_inbox( const MsgFramePublish &fpub,  UserBridge &,
 bool
 SessionMgr::on_msg( EvPublish &pub ) noexcept
 {
+  this->msgs_recv++;
+  this->bytes_recv += pub.msg_len;
   if ( pub.src_route == (uint32_t) this->fd )
     return true;
   if ( pub.pub_type != 'X' ) {

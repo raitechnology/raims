@@ -115,11 +115,12 @@ EvTcpTransport::process( void ) noexcept
   do {
     buflen = this->len - this->off;
     if ( buflen > 0 ) {
-      status = this->msg_in.unpack( &this->recv[ this->off ], buflen );
+      const char * buf = &this->recv[ off ];
+      status = this->msg_in.unpack( buf, buflen );
       if ( status != 0 ) {
         MDOutput mout;
-        printf( "msg_in status %d\n", status );
-        mout.print_hex( &this->recv[ this->off ], this->len - this->off );
+        printf( "tcp msg_in status %d buflen %lu\n", status, buflen );
+        mout.print_hex( buf, buflen > 256 ? 256 : buflen );
       }
       this->off += buflen;
       if ( buflen > 0 && this->msg_in.msg != NULL ) {

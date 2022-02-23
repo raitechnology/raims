@@ -303,7 +303,7 @@ UserDB::push_user_route( UserBridge &n,  UserRoute &u_rte ) noexcept
                                        this->link_state_seqno + 1, true );
       }
       if ( list.sys_route_refs++ == 0 ) {
-        d_lnk( "push sys_route %u\n", fd );
+        printf( "push sys_route %u\n", fd );
         rte.connected_auth.add( fd );
         rte.sub_route.create_bloom_route( fd, &this->auth_bloom );
       }
@@ -330,7 +330,7 @@ UserDB::push_user_route( UserBridge &n,  UserRoute &u_rte ) noexcept
 void
 UserDB::pop_source_route( UserBridge &n ) noexcept
 {
-  if ( debug_lnk )
+  /*if ( debug_lnk )*/
     n.printf( "pop_source_route\n" );
   if ( n.test_clear( IN_ROUTE_LIST_STATE ) ) {
     uint32_t count = this->transport_tab.count;
@@ -373,7 +373,7 @@ UserDB::pop_user_route( UserBridge &n,  UserRoute &u_rte ) noexcept
                                        this->link_state_seqno + 1, false );
       }
       if ( --list.sys_route_refs == 0 ) {
-        d_lnk( "pop sys_route %u\n", fd );
+        printf( "pop sys_route %u\n", fd );
         rte.connected_auth.remove( fd );
         BloomRoute *b = this->auth_bloom.get_bloom_by_fd( fd );
         b->del_bloom_ref( &this->auth_bloom );

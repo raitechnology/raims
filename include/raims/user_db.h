@@ -160,6 +160,7 @@ struct UserBridge : public UserStateTest<UserBridge> {
                      recv_inbox_seqno,    /* recv side inbox seqno */
                      recv_mcast_seqno,    /* recv side mcast seqno */
                      start_mono_time,     /* uptime from hb */
+                     auth_mono_time,      /* when auth happens */
                      challenge_mono_time, /* time challenge sent */
                      hb_mono_time,        /* time hb recvd */
                      subs_mono_time,      /* time subs reqeust sent */
@@ -183,7 +184,8 @@ struct UserBridge : public UserStateTest<UserBridge> {
                      pong_recv_count,
                      ping_fail_count,     /* ping counters */
                      seqno_repeat,
-                     seqno_not_subscr;
+                     seqno_not_subscr,
+                     auth_count;
   StageAuth          auth[ 2 ];           /* auth handshake state */
   UserRoute        * u_buf[ 16 ];         /* indexes user_route */
   void * operator new( size_t, void *ptr ) { return ptr; }
@@ -519,7 +521,7 @@ struct UserDB {
                                    uint32_t &dist ) noexcept;
   uint32_t new_uid( void ) noexcept;
   uint32_t random_uid_walk( void ) noexcept;
-  void retire_source( uint32_t fd ) noexcept;
+  void retire_source( TransportRoute &rte,  uint32_t fd ) noexcept;
   void add_transport( TransportRoute &rte ) noexcept;
   void add_inbox_route( UserBridge &n,  UserRoute *primary ) noexcept;
   void remove_inbox_route( UserBridge &n ) noexcept;

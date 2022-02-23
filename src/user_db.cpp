@@ -937,8 +937,11 @@ UserDB::process_direct_pending( uint64_t curr_mono ) noexcept
     if ( this->node_ht->find( m->b_nonce, n_pos, uid ) ) {
       UserBridge * n = this->bridge_tab[ uid ];
       if ( n != NULL ) {
-        if ( this->start_time > n->start_time )
-          m->rte.add_mesh_connect( m->mesh_url, m->url_hash );
+        if ( this->start_time > n->start_time ) {
+          if ( m->rte.add_mesh_connect( m->mesh_url, m->url_hash ) ) {
+            n->printf( "add_mesh ok %s\n", m->mesh_url );
+          }
+        }
         this->direct_pending.pop( m );
         delete m;
       }
@@ -1034,7 +1037,7 @@ UserDB::new_uid( void ) noexcept
 }
 
 void
-UserDB::retire_source( uint32_t fd ) noexcept
+UserDB::retire_source( TransportRoute &rte,  uint32_t fd ) noexcept
 {
   for (;;) {
     UserBridge *n = this->close_source_route( fd );
@@ -1044,6 +1047,21 @@ UserDB::retire_source( uint32_t fd ) noexcept
   }
   if ( ! this->adjacency_change.is_empty() )
     this->send_adjacency_change();
+
+  if ( fd < this->route_list.count ) {
+    UserRouteList  & list = this->route_list[ fd ];
+    if ( list.sys_route_refs == 0 ) {
+      BloomRoute *b = this->auth_bloom.get_bloom_by_fd( fd );
+      if ( b != NULL ) {
+        printf( "retire auth_bloom fd %u\n", fd );
+        b->del_bloom_ref( &this->auth_bloom );
+        if ( b->nblooms == 0 ) {
+          rte.sub_route.bloom_list.pop( b );
+          delete b;
+        }
+      }
+    }
+  }
 }
 
 const char *
@@ -1068,11 +1086,20 @@ UserDB::add_authenticated( UserBridge &n,
                            AuthStage stage,
                            UserBridge *src ) noexcept
 {
-  const char * from = auth_stage_string( stage );
-  bool send_add = false;
-  n.printn( "add authentication from %s via %s @ %s, state %s\n", from,
-    ( src == &n ? "challenge" : src->peer.user.val ), src->user_route->rte.name,
-    ( n.is_set( ZOMBIE_STATE ) != 0 ? "reanimated" : "new" ) );
+  uint64_t     cur_time = current_monotonic_time_ns();
+  const char * from     = auth_stage_string( stage );
+  bool         send_add = false;
+
+  n.auth_count++;
+  if ( cur_time - n.auth_mono_time > SEC_TO_NS ) {
+    n.printn( "add authentication from %s via %s @ %s, state %s, count=%u\n",
+      from, ( src == &n ? "challenge" : src->peer.user.val ),
+      src->user_route->rte.name,
+      ( n.is_set( ZOMBIE_STATE ) != 0 ? "reanimated" : "new" ),
+      n.auth_count );
+    n.auth_mono_time = cur_time;
+  }
+
   /*printf( "ha1: " ); n.ha1.print(); printf( "\n" );*/
   if ( n.test_clear( ZOMBIE_STATE ) ) {
     size_t pos;
@@ -1082,10 +1109,9 @@ UserDB::add_authenticated( UserBridge &n,
   }
   if ( ! n.test_set( AUTHENTICATED_STATE ) ) {
     this->events.auth_add( n.uid, src ? src->uid : 0, stage );
-    if ( dec.test( FID_UPTIME ) ) {
-      uint64_t uptime   = 0,
-               cur_time = current_monotonic_time_ns();
 
+    if ( dec.test( FID_UPTIME ) ) {
+      uint64_t uptime = 0;
       cvt_number<uint64_t>( dec.mref[ FID_UPTIME ], uptime );
       n.start_mono_time = cur_time - uptime;
 

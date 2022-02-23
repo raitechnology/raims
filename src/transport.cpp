@@ -531,7 +531,15 @@ SessionMgr::add_mesh_connect( TransportRoute &mesh_rte,
     if ( rte->mesh_id == mesh_rte.mesh_id ) {
       if ( rte->mesh_conn_hash == mesh_hash ) {
         if ( ! rte->is_set( TPORT_IS_SHUTDOWN ) ) {
-          printf( "already connected (%s)\n", mesh_url );
+          EvTcpTransportClient *conn =
+            (EvTcpTransportClient *) rte->connect_mgr.conn;
+          uint32_t cnt = rte->connect_count;
+          if ( conn != NULL && conn->fd >= 0 ) {
+            if ( ! rte->connected.test_set( conn->fd ) )
+              rte->connect_count++;
+          }
+          printf( "already connected (%s) count %u -> %u\n", mesh_url,
+                  cnt, rte->connect_count );
           return true;
         }
         rte->clear( TPORT_IS_SHUTDOWN );
@@ -627,6 +635,8 @@ SessionMgr::add_mesh_connect( TransportRoute &mesh_rte,
 bool
 TransportRoute::on_msg( EvPublish &pub ) noexcept
 {
+  this->msgs_recv++;
+  this->bytes_recv += pub.msg_len;
   if ( pub.src_route == (uint32_t) this->mgr.fd ) {
     d_tran( "xxx discard %s transport_route: on_msg (%.*s)\n",
             ( pub.src_route == (uint32_t) this->fd ? "from tport" : "from mgr" ),
@@ -680,6 +690,8 @@ TransportRoute::on_msg( EvPublish &pub ) noexcept
       if ( &rte != this ) {
         d_tran( "transport_route: inbox (%.*s) -> %s\n",
                 (int) pub.subject_len, pub.subject, rte.name );
+        this->msgs_sent++;
+        this->bytes_sent += pub.msg_len;
         b = this->user_db.forward_to_inbox( *ptp_bridge, pub.subject,
                                       pub.subject_len, pub.subj_hash,
                                       pub.msg, pub.msg_len );
@@ -697,6 +709,8 @@ TransportRoute::on_msg( EvPublish &pub ) noexcept
     if ( forward.first( i, count ) ) {
       do {
         rte = this->user_db.transport_tab.ptr[ i ];
+        this->msgs_sent++;
+        this->bytes_sent += pub.msg_len;
         b  &= rte->sub_route.forward_except( pub, this->mgr.router_set );
       } while ( forward.next( i, count ) );
     }
@@ -758,6 +772,8 @@ TransportRoute::on_msg( EvPublish &pub ) noexcept
         forward.add( rec->tport_id );
         d_tran( "forward to %s.%u\n",
                 rte->transport.tport.val, rec->tport_id );
+        this->msgs_sent++;
+        this->bytes_sent += pub.msg_len;
         b &= rte->sub_route.forward_except( pub, this->mgr.router_set );
       }
     }
@@ -871,7 +887,7 @@ TransportRoute::on_shutdown( EvSocket &conn,  const char *err,
             this->connect_count );
   this->mgr.events.on_shutdown( this->tport_id, conn.fd >= 0 );
   if ( conn.fd >= 0 ) {
-    this->user_db.retire_source( conn.fd );
+    this->user_db.retire_source( *this, conn.fd );
     if ( this->connected.test_clear( conn.fd ) ) {
       if ( --this->connect_count == 0 )
         if ( ! this->is_set( TPORT_IS_LISTEN ) )

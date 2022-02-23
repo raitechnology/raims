@@ -204,11 +204,15 @@ EvPgmTransport::dispatch_data( const uint8_t *data,  size_t off,
                                size_t len ) noexcept
 {
   while ( off < len ) {
-    size_t buflen = len - off;
-    int    status = this->msg_in.unpack( &data[ off ], buflen );
+    size_t          buflen = len - off;
+    const uint8_t * buf = &data[ off ];
+    int             status = this->msg_in.unpack( buf, buflen );
     off += buflen;
-    if ( status != 0 )
-      return;
+    if ( status != 0 ) {
+      MDOutput mout;
+      printf( "pgm msg_in status %d buflen %lu\n", status, buflen );
+      mout.print_hex( buf, buflen > 256 ? 256 : buflen );
+    }
     if ( buflen == 0 )
       return;
     this->msgs_recv++;

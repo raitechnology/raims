@@ -3079,7 +3079,7 @@ Console::show_primary( void ) noexcept
 void
 Console::show_fds( void ) noexcept
 {
-  static const uint32_t ncols = 5;
+  static const uint32_t ncols = 13;
   EvPoll     & poll = this->mgr.poll;
   TabPrint   * tab;
   const char * address;
@@ -3089,13 +3089,64 @@ Console::show_fds( void ) noexcept
   this->tmp.count = 0;
   for ( size_t fd = 0; fd < poll.maxfd; fd++ ) {
     if ( fd < poll.maxfd && poll.sock[ fd ] != NULL ) {
+      EvSocket *s = poll.sock[ fd ];
+      bool is_connection = ( s->sock_base == EV_CONNECTION_BASE );
+      uint64_t sumb = s->bytes_sent + s->bytes_recv,
+               summ = s->msgs_sent  + s->msgs_recv;
       tab = this->table.make( this->table.count + ncols );
       this->table.count += ncols;
       tab[ i++ ].set_int( fd );
-      tab[ i++ ].set( poll.sock[ fd ]->type_string() );
-      tab[ i++ ].set( poll.sock[ fd ]->kind );
-      tab[ i++ ].set( poll.sock[ fd ]->name );
-      address  = poll.sock[ fd ]->peer_address.buf;
+      if ( sumb != 0 || is_connection )
+        tab[ i++ ].set_long( s->bytes_sent );
+      else
+        tab[ i++ ].set_null();
+      if ( sumb != 0 || is_connection )
+        tab[ i++ ].set_long( s->bytes_recv );
+      else
+        tab[ i++ ].set_null();
+      if ( summ != 0 || is_connection )
+        tab[ i++ ].set_long( s->msgs_sent );
+      else
+        tab[ i++ ].set_null();
+      if ( summ != 0 || is_connection )
+        tab[ i++ ].set_long( s->msgs_recv );
+      else
+        tab[ i++ ].set_null();
+      if ( s->sock_base == EV_LISTEN_BASE )
+        tab[ i++ ].set_long( ((EvListen *) s)->accept_cnt );
+      else
+        tab[ i++ ].set_null();
+      if ( s->sock_base == EV_CONNECTION_BASE ) {
+        tab[ i++ ].set_long( ((EvConnection *) s)->len -
+                             ((EvConnection *) s)->off );
+        tab[ i++ ].set_long( ((EvConnection *) s)->pending() );
+      }
+      else {
+        tab[ i++ ].set_null();
+        tab[ i++ ].set_null();
+      }
+      char buf[ 12 ]; size_t j = 0;
+      if ( s->test( EV_READ_HI    ) ) buf[ j++ ] = 'R';
+      if ( s->test( EV_CLOSE      ) ) buf[ j++ ] = 'C';
+      if ( s->test( EV_WRITE_POLL ) ) buf[ j++ ] = '>';
+      if ( s->test( EV_WRITE_HI   ) ) buf[ j++ ] = 'W';
+      if ( s->test( EV_READ       ) ) buf[ j++ ] = 'r';
+      if ( s->test( EV_PROCESS    ) ) buf[ j++ ] = '+';
+      if ( s->test( EV_PREFETCH   ) ) buf[ j++ ] = 'f';
+      if ( s->test( EV_WRITE      ) ) buf[ j++ ] = 'w';
+      if ( s->test( EV_SHUTDOWN   ) ) buf[ j++ ] = 'x';
+      if ( s->test( EV_READ_LO    ) ) buf[ j++ ] = '<';
+      if ( s->test( EV_BUSY_POLL  ) ) buf[ j++ ] = 'z';
+      if ( j > 0 ) {
+        tab[ i++ ].set( buf, j );
+        buf[ j ] = '\0';
+      }
+      else
+        tab[ i++ ].set_null();
+      tab[ i++ ].set( s->type_string() );
+      tab[ i++ ].set( s->kind );
+      tab[ i++ ].set( s->name );
+      address  = s->peer_address.buf;
       addr_len = get_strlen64( address );
 
       bool has_ptp_link = false;
@@ -3113,7 +3164,8 @@ Console::show_fds( void ) noexcept
   }
 
   static const char *hdr[ ncols ] =
-    { "fd", "type", "kind", "name", "address" };
+    { "fd", "bs", "br", "ms", "mr", "ac", "rq", "wq", "fl",
+      "type", "kind", "name", "address" };
   this->print_table( hdr, ncols );
 }
 

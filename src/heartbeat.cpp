@@ -148,6 +148,9 @@ UserDB::interval_hb( uint64_t cur_mono,  uint64_t cur_time ) noexcept
            do_hb = true;
       }
       if ( do_hb ) {
+        if ( debug_hb ) {
+          printf( "send hb %s\n", rte->name );
+        }
         MsgCat m;
         this->push_hb_time( *rte, cur_time, cur_mono );
         this->make_hb( *rte, X_HB, X_HB_SZ, hb_h, m );
