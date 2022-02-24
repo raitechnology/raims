@@ -89,6 +89,7 @@ EvTcpTransportClient::connect( EvTcpTransportParameters &p,
   if ( this->fd != -1 )
     return false;
   this->is_connect = true;
+  this->EvConnection::release_buffers();
   if ( EvTcpConnection::connect( *this, p.host, p.port, p.opts ) != 0 )
     return false;
   this->notify = n;
@@ -168,6 +169,7 @@ EvTcpTransport::release( void ) noexcept
     this->rte->sub_route.del_pattern_route( h, this->fd, 0 );
   }
   this->msg_in.release();
+  this->EvConnection::release_buffers();
   if ( this->notify != NULL )
     this->notify->on_shutdown( *this, NULL, 0 );
 }

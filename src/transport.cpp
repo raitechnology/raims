@@ -431,7 +431,8 @@ SessionMgr::add_tcp_accept( TransportRoute &listen_rte,
 
 static void
 parse_tcp_param( EvTcpTransportParameters &parm,  const char *name,
-                 ConfigTree::Transport &tport ) noexcept
+                 ConfigTree::Transport &tport,  bool reuseport,
+                 bool nb_connect ) noexcept
 {
   char tmp[ MAX_TCP_HOST_LEN ];
   size_t len = sizeof( tmp );
@@ -455,6 +456,14 @@ parse_tcp_param( EvTcpTransportParameters &parm,  const char *name,
     parm.buf[ len ] = '\0';
     parm.host = parm.buf;
   }
+  if ( reuseport )
+    parm.opts |= kv::OPT_REUSEPORT;
+  else
+    parm.opts &= ~kv::OPT_REUSEPORT;
+  if ( nb_connect )
+    parm.opts |= kv::OPT_CONNECT_NB;
+  else
+    parm.opts &= ~kv::OPT_CONNECT_NB;
 }
 
 static size_t
@@ -466,9 +475,9 @@ make_mesh_url_from_tport( char buf[ MAX_TCP_HOST_LEN ],
   size_t i = 6, j = 0;
   ::memcpy( buf, "tcp://", 6 );
   if ( is_connect )
-    parse_tcp_param( parm, "connect", tport );
+    parse_tcp_param( parm, "connect", tport, false, true );
   else
-    parse_tcp_param( parm, "listen", tport );
+    parse_tcp_param( parm, "listen", tport, true, false );
   if ( parm.host == NULL ) {
     ::memcpy( &buf[ 6 ], "127.0.0.1", 9 );
     i = 15;
@@ -1074,7 +1083,7 @@ TransportRoute::start_listener( EvTcpListen *l,
                                 ConfigTree::Transport &tport ) noexcept
 {
   EvTcpTransportParameters parm;
-  parse_tcp_param( parm, "listen", tport );
+  parse_tcp_param( parm, "listen", tport, true, false );
 
   int status = l->listen( parm.host, parm.port, parm.opts );
   if ( status != 0 ) {
@@ -1154,7 +1163,7 @@ bool
 TransportRoute::create_tcp_connect( ConfigTree::Transport &tport ) noexcept
 {
   EvTcpTransportParameters parm;
-  parse_tcp_param( parm, "connect", tport );
+  parse_tcp_param( parm, "connect", tport, false, true );
 
   EvTcpTransportClient *conn;
   uint8_t sock_type = this->mgr.tcp_connect_sock_type;
@@ -1205,7 +1214,7 @@ SessionMgr::create_telnet( ConfigTree::Transport &tport ) noexcept
   }
   TelnetListen * l = this->telnet;
   EvTcpTransportParameters parm;
-  parse_tcp_param( parm, "listen", tport );
+  parse_tcp_param( parm, "listen", tport, true, false );
   this->telnet_tport = &tport;
 
   if ( ! l->in_list( IN_ACTIVE_LIST ) ) {

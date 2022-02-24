@@ -977,7 +977,8 @@ TabPrint::width( UserDB &user_db,  char *buf ) noexcept
       if ( this->ival == 0 )
         return 0;
       return Console::TS_LEN + Console::TSFRACTION_LEN + 1;
-    case PRINT_TSTATE:
+    case PRINT_TPORT_STATE:
+    case PRINT_SOCK_STATE:
       return __builtin_popcount( this->len );
     default:
       return 0;
@@ -1017,7 +1018,7 @@ TabPrint::string( char *buf ) noexcept
     case PRINT_STRING:
       if ( this->len == 0 )
         return "";
-      if ( this->len > 79 ) {
+      if ( this->len > 79 || ! this->null_term() ) {
         sz = cat80( buf, 0, this->val, this->len );
         buf[ sz ] = '\0';
         return buf;
@@ -1154,14 +1155,34 @@ TabPrint::string( char *buf ) noexcept
       buf[ Console::TS_LEN+4 ] = '\0';
       return buf;
     }
-    case PRINT_TSTATE: {
+    case PRINT_TPORT_STATE: {
       uint32_t j = 0;
-      if ( this->len & TPORT_IS_SVC      ) buf[ j++ ] = 'S';
-      if ( this->len & TPORT_IS_LISTEN   ) buf[ j++ ] = 'L';
-      if ( this->len & TPORT_IS_MCAST    ) buf[ j++ ] = 'M';
-      if ( this->len & TPORT_IS_MESH     ) buf[ j++ ] = 'X';
-      if ( this->len & TPORT_IS_CONNECT  ) buf[ j++ ] = 'C';
-      if ( this->len & TPORT_IS_SHUTDOWN ) buf[ j++ ] = '-';
+      if ( this->len & TPORT_IS_SVC       ) buf[ j++ ] = 'S';
+      if ( this->len & TPORT_IS_LISTEN    ) buf[ j++ ] = 'L';
+      if ( this->len & TPORT_IS_MCAST     ) buf[ j++ ] = 'M';
+      if ( this->len & TPORT_IS_MESH      ) buf[ j++ ] = 'X';
+      if ( this->len & TPORT_IS_CONNECT   ) buf[ j++ ] = 'C';
+      if ( this->len & TPORT_IS_TCP       ) buf[ j++ ] = 'T';
+      if ( this->len & TPORT_IS_EDGE      ) buf[ j++ ] = 'E';
+      if ( this->len & TPORT_IS_EXTERNAL  ) buf[ j++ ] = 'B';
+      if ( this->len & TPORT_IS_SHUTDOWN  ) buf[ j++ ] = '-';
+      if ( this->len & TPORT_IS_PREFERRED ) buf[ j++ ] = '%';
+      buf[ j ] = '\0';
+      return buf;
+    }
+    case PRINT_SOCK_STATE: {
+      uint32_t j = 0;
+      if ( this->len & ( 1 << EV_READ_HI    ) ) buf[ j++ ] = 'R';
+      if ( this->len & ( 1 << EV_CLOSE      ) ) buf[ j++ ] = 'C';
+      if ( this->len & ( 1 << EV_WRITE_POLL ) ) buf[ j++ ] = '>';
+      if ( this->len & ( 1 << EV_WRITE_HI   ) ) buf[ j++ ] = 'W';
+      if ( this->len & ( 1 << EV_READ       ) ) buf[ j++ ] = 'r';
+      if ( this->len & ( 1 << EV_PROCESS    ) ) buf[ j++ ] = '+';
+      if ( this->len & ( 1 << EV_PREFETCH   ) ) buf[ j++ ] = 'f';
+      if ( this->len & ( 1 << EV_WRITE      ) ) buf[ j++ ] = 'w';
+      if ( this->len & ( 1 << EV_SHUTDOWN   ) ) buf[ j++ ] = 'x';
+      if ( this->len & ( 1 << EV_READ_LO    ) ) buf[ j++ ] = '<';
+      if ( this->len & ( 1 << EV_BUSY_POLL  ) ) buf[ j++ ] = 'z';
       buf[ j ] = '\0';
       return buf;
     }
@@ -2260,7 +2281,7 @@ PortOutput::put_show_ports( void ) noexcept
   else
     tab[ i++ ].set_null();
 
-  tab[ i++ ].set_int( this->state, PRINT_TSTATE );
+  tab[ i++ ].set_int( this->state, PRINT_TPORT_STATE );
 
   if ( ( this->flags & P_IS_DOWN ) != 0 ) {
     tab[ i++ ].set_null();
@@ -2323,7 +2344,7 @@ PortOutput::put_status( void ) noexcept
   else
     tab[ i++ ].set_null();
 
-  tab[ i++ ].set_int( this->state, PRINT_TSTATE );
+  tab[ i++ ].set_int( this->state, PRINT_TPORT_STATE );
 
   if ( ( this->flags & P_IS_DOWN ) != 0 ) {
     char status_buf[ 256 ];
@@ -3125,24 +3146,7 @@ Console::show_fds( void ) noexcept
         tab[ i++ ].set_null();
         tab[ i++ ].set_null();
       }
-      char buf[ 12 ]; size_t j = 0;
-      if ( s->test( EV_READ_HI    ) ) buf[ j++ ] = 'R';
-      if ( s->test( EV_CLOSE      ) ) buf[ j++ ] = 'C';
-      if ( s->test( EV_WRITE_POLL ) ) buf[ j++ ] = '>';
-      if ( s->test( EV_WRITE_HI   ) ) buf[ j++ ] = 'W';
-      if ( s->test( EV_READ       ) ) buf[ j++ ] = 'r';
-      if ( s->test( EV_PROCESS    ) ) buf[ j++ ] = '+';
-      if ( s->test( EV_PREFETCH   ) ) buf[ j++ ] = 'f';
-      if ( s->test( EV_WRITE      ) ) buf[ j++ ] = 'w';
-      if ( s->test( EV_SHUTDOWN   ) ) buf[ j++ ] = 'x';
-      if ( s->test( EV_READ_LO    ) ) buf[ j++ ] = '<';
-      if ( s->test( EV_BUSY_POLL  ) ) buf[ j++ ] = 'z';
-      if ( j > 0 ) {
-        tab[ i++ ].set( buf, j );
-        buf[ j ] = '\0';
-      }
-      else
-        tab[ i++ ].set_null();
+      tab[ i++ ].set_int( s->sock_state, PRINT_SOCK_STATE );
       tab[ i++ ].set( s->type_string() );
       tab[ i++ ].set( s->kind );
       tab[ i++ ].set( s->name );

@@ -375,12 +375,12 @@ UserDB::pop_user_route( UserBridge &n,  UserRoute &u_rte ) noexcept
       if ( --list.sys_route_refs == 0 ) {
         printf( "pop sys_route %u\n", fd );
         rte.connected_auth.remove( fd );
-        BloomRoute *b = this->auth_bloom.get_bloom_by_fd( fd );
+        /*BloomRoute *b = this->auth_bloom.get_bloom_by_fd( fd );
         b->del_bloom_ref( &this->auth_bloom );
         if ( b->nblooms == 0 ) {
           rte.sub_route.bloom_list.pop( b );
           delete b;
-        }
+        }*/
       }
       if ( rte.oldest_uid == n.uid ) {
         uint64_t t = this->start_time;

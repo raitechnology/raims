@@ -91,26 +91,29 @@ struct PortOutput {
 };
 
 enum PrintType {
-  PRINT_NULL      = 0,
-  PRINT_STRING    = 1,
-  PRINT_SELF      = 2,
-  PRINT_ID        = 3,
-  PRINT_USER      = 4,
-  PRINT_ADDR      = 5,
-  PRINT_TPORT     = 6,
-  PRINT_UADDR     = 7,
-  PRINT_NONCE     = 8,
-  PRINT_DIST      = 9,
-  PRINT_LATENCY   = 10,
-  PRINT_INT       = 11,
-  PRINT_SHORT_HEX = 12,
-  PRINT_LONG_HEX  = 13,
-  PRINT_STATE     = 14,
-  PRINT_LONG      = 15,
-  PRINT_STAMP     = 16,
-  PRINT_TSTATE    = 17,
-  PRINT_LEFT      = 0x40, /* left justify */
-  PRINT_SEP       = 0x80  /* separator after row */
+  PRINT_NULL        = 0,
+  PRINT_STRING      = 1,
+  PRINT_SELF        = 2,
+  PRINT_ID          = 3,
+  PRINT_USER        = 4,
+  PRINT_ADDR        = 5,
+  PRINT_TPORT       = 6,
+  PRINT_UADDR       = 7,
+  PRINT_NONCE       = 8,
+  PRINT_DIST        = 9,
+  PRINT_LATENCY     = 10,
+  PRINT_INT         = 11,
+  PRINT_SHORT_HEX   = 12,
+  PRINT_LONG_HEX    = 13,
+  PRINT_STATE       = 14,
+  PRINT_LONG        = 15,
+  PRINT_STAMP       = 16,
+  PRINT_TPORT_STATE = 17,
+  PRINT_SOCK_STATE  = 18,
+  PRINT_LEFT        = 0x40, /* left justify */
+  PRINT_SEP         = 0x80, /* separator after row */
+  PRINT_NULL_TERM   = 0x100,/* string null terminated */
+  PRINT_STRING_NT   = PRINT_STRING | PRINT_NULL_TERM
 };
 
 struct TabPrint {
@@ -118,10 +121,10 @@ struct TabPrint {
   UserBridge * n;
   uint64_t     ival;
   uint32_t     len;
-  uint8_t      typ;
+  uint16_t     typ;
 
   PrintType type( void ) const {
-    return (PrintType) ( this->typ & ~(PRINT_LEFT|PRINT_SEP) );
+    return (PrintType) ( this->typ & 0x3f );
   }
   bool separator( void ) const {
     return ( this->typ & PRINT_SEP ) != 0;
@@ -129,10 +132,13 @@ struct TabPrint {
   bool left( void ) const {
     return ( this->typ & PRINT_LEFT ) != 0;
   }
+  bool null_term( void ) const {
+    return ( this->typ & PRINT_NULL_TERM ) != 0;
+  }
   void set_null( void ) {
     this->typ = PRINT_NULL;
   }
-  void set( const StringVal &s,  PrintType t = PRINT_STRING ) {
+  void set( const StringVal &s,  PrintType t = PRINT_STRING_NT ) {
     this->val = s.val;
     this->len = s.len;
     this->typ = t;
@@ -177,7 +183,7 @@ struct TabPrint {
   void set( const char *s ) {
     this->val = s;
     this->len = ( s != NULL ? ::strlen( s ) : 0 );
-    this->typ = PRINT_STRING;
+    this->typ = PRINT_STRING_NT;
   }
   void set( UserBridge *bridge,  PrintType t ) {
     this->n   = bridge;
