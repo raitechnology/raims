@@ -43,6 +43,18 @@ struct ConnectionMgr : public kv::EvConnectionNotify,
       connect_time( 0 ), connect_timeout_secs( 0 ), reconnect_timeout_secs( 1 ),
       is_reconnecting( false ), is_shutdown( true ) {}
 
+  template<class T>
+  T *alloc_conn( kv::EvPoll &poll,  const uint8_t sock_type ) {
+    void * p = kv::aligned_malloc( sizeof( T ) );
+    T *c = new ( p ) T( poll, sock_type );
+    this->conn = c;
+    return c;
+  }
+  void release_conn( void ) {
+    kv::aligned_free( this->conn );
+    this->conn = NULL;
+  }
+
   void set_parm( void *parm ) {
     if ( this->parameters != NULL )
       ::free( this->parameters );

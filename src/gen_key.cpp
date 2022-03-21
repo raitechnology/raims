@@ -26,7 +26,7 @@ print_users( ServiceBuf &svc ) noexcept
   UserElem * el;
   size_t     len = 0;
   for ( el = svc.users.hd; el != NULL; el = el->next )
-    len = max<size_t>( el->user.user_len, len );
+    len = max_int<size_t>( el->user.user_len, len );
   if ( len > 0 ) {
     if ( len < 5 )
       len = 5;

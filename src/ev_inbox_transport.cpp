@@ -18,8 +18,8 @@ using namespace md;
 bool
 EvInboxTransport::listen( const char *ip,  int port ) noexcept
 {
-  if ( this->EvUdp::listen( ip, port, DEFAULT_UDP_CONNECT_OPTS,
-                            "inbox_listen" ) == 0 ) {
+  if ( this->EvUdp::listen2( ip, port, DEFAULT_UDP_CONNECT_OPTS,
+                             "inbox_listen" ) == 0 ) {
     static uint64_t inbox_timer_id;
     this->timer_id = ( (uint64_t) this->sock_type << 56 ) |
       __sync_fetch_and_add( &inbox_timer_id, 1 );

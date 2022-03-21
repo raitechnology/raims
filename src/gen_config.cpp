@@ -807,7 +807,7 @@ GenFileList::print_files( void ) noexcept
   GenFileTrans *t;
   size_t len = 3;
   for ( t = this->hd; t != NULL; t = t->next ) {
-    len = max<size_t>( len, t->len + 3 );
+    len = max_int<size_t>( len, t->len + 3 );
   }
   for ( t = this->hd; t != NULL; t = t->next ) {
     char path_tmp[ GEN_PATH_MAX ];

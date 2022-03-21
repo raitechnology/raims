@@ -350,10 +350,8 @@ SessionMgr::add_mesh_accept( TransportRoute &listen_rte,
     if ( rte->init() != 0 )
       return false;
   }
-  if ( rte->connect_mgr.conn != NULL ) {
-    this->poll.push_free_list( rte->connect_mgr.conn );
-    rte->connect_mgr.conn = NULL;
-  }
+  if ( rte->connect_mgr.conn != NULL )
+    rte->connect_mgr.release_conn();
   rte->mesh_url_addr = listen_rte.mesh_url_addr;
   rte->mesh_url_len  = listen_rte.mesh_url_len;
   rte->mesh_id       = listen_rte.mesh_id;
@@ -408,10 +406,8 @@ SessionMgr::add_tcp_accept( TransportRoute &listen_rte,
     if ( rte->init() != 0 )
       return false;
   }
-  if ( rte->connect_mgr.conn != NULL ) {
-    this->poll.push_free_list( rte->connect_mgr.conn );
-    rte->connect_mgr.conn = NULL;
-  }
+  if ( rte->connect_mgr.conn != NULL )
+    rte->connect_mgr.release_conn();
   rte->set( TPORT_IS_TCP );
 
   conn.rte    = rte;
@@ -625,13 +621,13 @@ SessionMgr::add_mesh_connect( TransportRoute &mesh_rte,
   if ( ! mesh_rte.transport.get_route_int( "timeout", parm.timeout ) )
     parm.timeout = 15;
 
-  EvTcpTransportClient *conn = (EvTcpTransportClient *) rte->connect_mgr.conn;
-  if ( conn == NULL ) {
+  if ( rte->connect_mgr.conn == NULL ) {
     uint8_t sock_type = this->tcp_connect_sock_type;
-    conn = this->poll.get_free_list<EvTcpTransportClient>( sock_type );
-    rte->connect_mgr.conn = conn;
+    EvTcpTransportClient *c =
+      rte->connect_mgr.alloc_conn<EvTcpTransportClient>( this->poll,
+                                                         sock_type );
+    c->rte = rte;
   }
-  conn->rte = rte;
   rte->connect_mgr.connect_timeout_secs = parm.timeout;
   rte->connect_mgr.set_parm( parm.copy() );
   if ( ! rte->connect_mgr.do_connect() ) {
@@ -909,12 +905,6 @@ TransportRoute::on_shutdown( EvSocket &conn,  const char *err,
     this->set( TPORT_IS_SHUTDOWN );
   }
   d_tran( "%s connect_count %u\n", this->name, this->connect_count );
-  /* mesh accept, tcp accept, mesh connect, but not tcp_connect_mgr */
-  if ( conn.sock_type == this->mgr.tcp_accept_sock_type /*||
-       conn.sock_type == this->mgr.tcp_connect_sock_type*/ ) {
-    printf( "push free list %s\n", conn.type_string() );
-    this->poll.push_free_list( &conn );
-  }
 }
 
 void
@@ -1165,12 +1155,14 @@ TransportRoute::create_tcp_connect( ConfigTree::Transport &tport ) noexcept
   EvTcpTransportParameters parm;
   parse_tcp_param( parm, "connect", tport, false, true );
 
-  EvTcpTransportClient *conn;
-  uint8_t sock_type = this->mgr.tcp_connect_sock_type;
-  conn = this->poll.get_free_list<EvTcpTransportClient>( sock_type );
-  this->connect_mgr.conn = conn;
+  if ( this->connect_mgr.conn == NULL ) {
+    uint8_t sock_type = this->mgr.tcp_connect_sock_type;
+    EvTcpTransportClient *c =
+      this->connect_mgr.alloc_conn<EvTcpTransportClient>( this->poll,
+                                                          sock_type );
+    c->rte = this;
+  }
   this->connect_mgr.connect_timeout_secs = parm.timeout;
-  conn->rte = this;
   this->connect_mgr.set_parm( parm.copy() );
   return this->connect_mgr.do_connect();
 }
@@ -1218,8 +1210,8 @@ SessionMgr::create_telnet( ConfigTree::Transport &tport ) noexcept
   this->telnet_tport = &tport;
 
   if ( ! l->in_list( IN_ACTIVE_LIST ) ) {
-    if ( l->listen( parm.host, parm.port, parm.opts,
-                   "telnet_listen" ) != 0 )
+    if ( l->listen2( parm.host, parm.port, parm.opts,
+                     "telnet_listen" ) != 0 )
       return false;
     l->console = &this->console;
     printf( "%s listening on %s\n", tport.tport.val, l->peer_address.buf );
@@ -1378,7 +1370,7 @@ ConnectionMgr::setup_reconnect( void ) noexcept
   }
   else {
     this->reconnect_timeout_secs =
-      min<uint16_t>( this->reconnect_timeout_secs + 2, 10 );
+      min_int<uint16_t>( this->reconnect_timeout_secs + 2, 10 );
   }
   if ( this->connect_timeout_secs > 0 ) {
     if ( now - this->reconnect_time > (double) this->connect_timeout_secs ) {

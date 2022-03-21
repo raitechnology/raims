@@ -82,36 +82,15 @@ state_bits_to_str( uint8_t bits,  char *buf ) noexcept
 bool
 TelnetListen::accept( void ) noexcept
 {
-  struct sockaddr_storage addr;
-  socklen_t addrlen = sizeof( addr );
-  int sock = ::accept( this->fd, (struct sockaddr *) &addr, &addrlen );
-  if ( sock < 0 ) {
-    if ( errno != EINTR ) {
-      if ( errno != EAGAIN )
-        perror( "accept" );
-      this->pop3( EV_READ, EV_READ_LO, EV_READ_HI );
-    }
-    return false;
-  }
   TelnetService *c =
     this->poll.get_free_list<TelnetService>( this->accept_sock_type );
-  if ( c == NULL ) {
-    perror( "accept: no memory" );
-    ::close( sock );
+  if ( c == NULL )
     return false;
-  }
-  EvTcpListen::set_sock_opts( this->poll, sock, this->sock_opts );
-  ::fcntl( sock, F_SETFL, O_NONBLOCK | ::fcntl( sock, F_GETFL ) );
-
-  c->PeerData::init_peer( sock, (struct sockaddr *) &addr, "telnet" );
+  if ( ! this->accept2( *c, "telnet" ) )
+    return false;
   c->init_state();
   c->console = this->console;
   this->console->term_list.push_tl( c );
-  if ( this->poll.add_sock( c ) < 0 ) {
-    ::close( sock );
-    this->poll.push_free_list( c );
-    return false;
-  }
   c->start();
   return true;
 }
@@ -346,6 +325,7 @@ void
 TelnetService::process_shutdown( void ) noexcept
 {
   ::shutdown( this->fd, SHUT_WR );
+  this->pushpop( EV_CLOSE, EV_SHUTDOWN );
 }
 
 void
@@ -715,7 +695,11 @@ TelnetService::release( void ) noexcept
     this->line_buflen = 0;
   }
   this->EvConnection::release_buffers();
-  this->poll.push_free_list( this );
+}
+
+void
+TelnetService::process_close( void ) noexcept
+{
 }
 
 #if 0

@@ -47,7 +47,7 @@ static inline void copy_max( char *out,  size_t &out_len,   size_t max_len,
 static inline int cmp_bytes( const void *s, size_t s_len, const void *t,
                              size_t t_len )
 {
-  int n = ::memcmp( s, t, kv::min<size_t>( s_len, t_len ) );
+  int n = ::memcmp( s, t, kv::min_int<size_t>( s_len, t_len ) );
   if ( n < 0 )
     return -1;
   if ( n == 0 && s_len <= t_len )

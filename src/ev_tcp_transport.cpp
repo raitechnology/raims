@@ -33,42 +33,20 @@ EvTcpTransportListen::EvTcpTransportListen( EvPoll &p,
 int
 EvTcpTransportListen::listen( const char *ip,  int port,  int opts ) noexcept
 {
-  return this->kv::EvTcpListen::listen( ip, port, opts,
-                                        "tcp_listen" );
+  return this->kv::EvTcpListen::listen2( ip, port, opts, "tcp_listen" );
 }
 
 bool
 EvTcpTransportListen::accept( void ) noexcept
 {
-  struct sockaddr_storage addr;
-  socklen_t addrlen = sizeof( addr );
-  int sock = ::accept( this->fd, (struct sockaddr *) &addr, &addrlen );
-  if ( sock < 0 ) {
-    if ( errno != EINTR ) {
-      if ( errno != EAGAIN )
-        perror( "accept" );
-      this->pop3( EV_READ, EV_READ_LO, EV_READ_HI );
-    }
-    return false;
-  }
   EvTcpTransportService *c =
     this->poll.get_free_list<EvTcpTransportService>( this->accept_sock_type );
-  if ( c == NULL ) {
-    perror( "accept: no memory" );
-    ::close( sock );
+  if ( c == NULL )
     return false;
-  }
   c->rte = &this->rte;
-  EvTcpListen::set_sock_opts( this->poll, sock, this->sock_opts );
-  ::fcntl( sock, F_SETFL, O_NONBLOCK | ::fcntl( sock, F_GETFL ) );
-
-  c->PeerData::init_peer( sock, (struct sockaddr *) &addr, "tcp_accept" );
-  if ( this->poll.add_sock( c ) < 0 ) {
-    ::close( sock );
-    this->poll.push_free_list( c );
-    return false;
-  }
   c->notify = this->notify;
+  if ( ! this->accept2( *c, "tcp_accept" ) )
+    return false;
   c->start();
   return true;
 }
@@ -77,7 +55,11 @@ EvTcpTransportListen::accept( void ) noexcept
 void
 EvTcpTransportListen::release( void ) noexcept
 {
-  printf( "listen release\n" );
+}
+
+void
+EvTcpTransportListen::process_close( void ) noexcept
+{
   if ( this->notify != NULL )
     this->notify->on_shutdown( *this, NULL, 0 );
 }
@@ -170,6 +152,11 @@ EvTcpTransport::release( void ) noexcept
   }
   this->msg_in.release();
   this->EvConnection::release_buffers();
+}
+
+void
+EvTcpTransport::process_close( void ) noexcept
+{
   if ( this->notify != NULL )
     this->notify->on_shutdown( *this, NULL, 0 );
 }

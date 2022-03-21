@@ -384,7 +384,7 @@ Console::on_log( Logger &log ) noexcept
 void
 Console::flush_log( Logger &log ) noexcept
 {
-  log.flush();
+  /*log.flush();*/
   usleep( 50 );
   while ( this->on_log( log ) )
     usleep( 10 );
@@ -897,17 +897,17 @@ TabPrint::width( UserDB &user_db,  char *buf ) noexcept
   size_t sz = 0;
   switch ( this->type() ) {
     case PRINT_STRING:
-      return min<uint32_t>( this->len, 79 );
+      return min_int<uint32_t>( this->len, 79 );
 
     case PRINT_SELF:
-      return min<uint32_t>( this->len + 2, 79 );
+      return min_int<uint32_t>( this->len + 2, 79 );
 
     case PRINT_ID:
-      return min<uint32_t>( ::strlen( this->val ) + 1 +
+      return min_int<uint32_t>( ::strlen( this->val ) + 1 +
                             uint32_digits( this->len ), 79 );
 
     case PRINT_USER:
-      return min<uint32_t>( this->n->peer.user.len + 1 +
+      return min_int<uint32_t>( this->n->peer.user.len + 1 +
                             uint32_digits( this->n->uid ), 79 );
     case PRINT_ADDR:
     case PRINT_UADDR:
@@ -919,14 +919,14 @@ TabPrint::width( UserDB &user_db,  char *buf ) noexcept
       if ( this->pre != NULL )
         sz += ::strlen( this->pre ) + 3;
       sz += this->len;
-      return min<uint32_t>( sz, 79 );
+      return min_int<uint32_t>( sz, 79 );
     case PRINT_TPORT:
       if ( this->len == 0 )
         return 0;
       sz += this->len;
       if ( this->pre != NULL )
         sz += ::strlen( this->pre ) + 1;
-      return min<uint32_t>( sz, 79 );
+      return min_int<uint32_t>( sz, 79 );
     case PRINT_LATENCY: {
       if ( this->ival == 0 )
         return 0;
@@ -988,7 +988,7 @@ TabPrint::width( UserDB &user_db,  char *buf ) noexcept
 static inline size_t
 cat80( char *buf,  size_t off,  const char *s,  size_t len )
 {
-  len = min<uint32_t>( off + len, 79 );
+  len = min_int<uint32_t>( off + len, 79 );
   const char * end = &buf[ len ];
   buf = &buf[ off ];
   while ( buf < end )
@@ -1226,7 +1226,7 @@ Console::print_table( const char **hdr,  uint32_t ncols ) noexcept
   for ( i = 0; i < tabsz; i += ncols ) {
     for ( j = 0; j < ncols; j++ ) {
       uint32_t w = tab[ i + j ].width( u, buf );
-      width[ j ] = max( width[ j ], w );
+      width[ j ] = max_int( width[ j ], w );
     }
   }
   for ( j = 0; j < ncols; j++ ) {

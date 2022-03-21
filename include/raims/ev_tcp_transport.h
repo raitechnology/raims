@@ -19,6 +19,7 @@ struct EvTcpTransportListen : public kv::EvTcpListen {
   virtual bool accept( void ) noexcept;
   virtual int listen( const char *ip,  int port,  int opts ) noexcept;
   virtual void release( void ) noexcept final;
+  virtual void process_close( void ) noexcept final;
 };
 
 struct EvTcpTransport : public kv::EvConnection {
@@ -37,6 +38,7 @@ struct EvTcpTransport : public kv::EvConnection {
 
   virtual void process( void ) noexcept final; /* decode read buffer */
   virtual void release( void ) noexcept final; /* after shutdown release mem */
+  virtual void process_close( void ) noexcept final;
   virtual bool on_msg( kv::EvPublish &pub ) noexcept; /* fwd to NATS network */
 };
 

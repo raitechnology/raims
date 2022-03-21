@@ -64,6 +64,7 @@ struct TelnetService : public kv::EvConnection, public ConsoleOutput {
   virtual void process( void ) noexcept final; /* decode read buffer */
   virtual void release( void ) noexcept final; /* after shutdown release mem */
   virtual void process_shutdown( void ) noexcept final;
+  virtual void process_close( void ) noexcept final;
 };
 
 #if 0
