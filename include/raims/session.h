@@ -116,10 +116,10 @@ struct SubMsgData {
 /* a publish sent to all subscribers */
 struct PubMcastData {
   const char * sub;       /* subject to publish */
-  size_t       sublen;    /* subject length */
+  uint16_t     sublen,    /* subject length */
+               option;    /* message options for the opt field */
   uint64_t     seqno,     /* seqno filled in by the publish */
                time,      /* optional time of publish */
-               option,    /* message options for the opt field */
                token;     /* token rpc val */
   const void * data;      /* data to publish */
   size_t       datalen;   /* data length */
@@ -128,12 +128,12 @@ struct PubMcastData {
 
   PubMcastData( const char *s,  size_t sl,  const void *d,  size_t dl,
                 uint32_t f,  uint32_t rep = 0 )
-    : sub( s ), sublen( sl ), seqno( 0 ), time( 0 ), option( 0 ), token( 0 ),
-      data( d ), datalen( dl ), fmt( f ), reply( rep ) {}
+    : sub( s ), sublen( (uint16_t) sl ), option( 0 ), seqno( 0 ), time( 0 ),
+      token( 0 ), data( d ), datalen( dl ), fmt( f ), reply( rep ) {}
   PubMcastData( const PubMcastData &mc ) :
-    sub( mc.sub ), sublen( mc.sublen ), seqno( mc.seqno ), time( mc.time ),
-    option( mc.option ), token( mc.token ), data( mc.data ),
-    datalen( mc.datalen ), fmt( mc.fmt ), reply( mc.reply ) {}
+    sub( mc.sub ), sublen( mc.sublen ), option( mc.option ), seqno( mc.seqno ),
+    time( mc.time ), token( mc.token ), data( mc.data ), datalen( mc.datalen ),
+    fmt( mc.fmt ), reply( mc.reply ) {}
 };
 /* a publish sent point to point to an inbox */
 struct PubPtpData : public PubMcastData {

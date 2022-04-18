@@ -3,7 +3,7 @@
 #include <string.h>
 #include <stdint.h>
 #include <stdarg.h>
-#include <unistd.h>
+#include <raikv/os_file.h>
 #include <raikv/logger.h>
 #include <raims/parse_config.h>
 #include <raims/session.h>
@@ -155,7 +155,12 @@ SubNotify::on_reassert( uint32_t fd,  RouteVec<RouteSub> &,
 int
 main( int argc, char *argv[] )
 {
-  const char * di = get_arg( argc, argv, 1, "-d", "config" ),
+#ifndef _MSC_VER
+  static const char cfg_dir[] = "config";
+#else
+  static const char cfg_dir[] = "/Users/gchri/rai/build/raims/config";
+#endif
+  const char * di = get_arg( argc, argv, 1, "-d", cfg_dir ),
              * us = get_arg( argc, argv, 1, "-u", "A.test" ),
              * ti = get_arg( argc, argv, 1, "-t", NULL ),
              * lo = get_arg( argc, argv, 1, "-l", NULL ),
@@ -175,7 +180,7 @@ main( int argc, char *argv[] )
   }
 
   if ( fl != NULL )
-    dbg_flags = string_to_uint64( fl, ::strlen( fl ) );
+    dbg_flags = (int) string_to_uint64( fl, ::strlen( fl ) );
   MDMsgMem         mem;
   StringTab        st( mem );
   ConfigErrPrinter err;
@@ -202,7 +207,7 @@ main( int argc, char *argv[] )
   HashTabGeom geom;
   /*TelnetListen tel( poll );*/
   sighndl.install();
-  poll.init( 50, false );
+  poll.init( 1024, false );
   geom.map_size         = sizeof( HashTab ) + 1024;
   geom.max_value_size   = 0;
   geom.hash_entry_size  = 64;
@@ -229,10 +234,11 @@ main( int argc, char *argv[] )
     cb.console = &sess.console;
     sess.term  = &term;
     term.stdin_fd  = 0;
-    term.stdout_fd = ::dup( 1 );
+    term.stdout_fd = os_dup( STDOUT_FILENO );
     log.start_ev( poll );
     term.start();
-    term.term.lc->complete_cb = console_complete;
+    term.term.lc->complete_cb  = console_complete;
+    term.term.lc->complete_arg = &sess.console;
     term.term.help_cb = console_help;
     term.term.closure = &sess.console;
     static char iec[] = "-iec", question[] = "?", show_help[] = "&show-help";

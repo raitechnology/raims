@@ -2,8 +2,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
-#include <ctype.h>
+#ifndef _MSC_VER
 #include <unistd.h>
+#else
+#include <raikv/win.h>
+#endif
 #include <raims/transport.h>
 #include <raims/session.h>
 #include <raims/ev_tcp_transport.h>
@@ -191,7 +194,7 @@ SessionMgr::add_transport2( ConfigTree::Service &s,
   else {
     ::snprintf( svc_name, sizeof( svc_name ), "%s.%s", s.svc.val, t.tport.val );
   }
-  uint32_t id     = this->user_db.transport_tab.count;
+  uint32_t id     = (uint32_t) this->user_db.transport_tab.count;
   bool     is_new = false;
   d_tran( "add transport %s tport_id %u\n", svc_name, id );
 
@@ -230,7 +233,9 @@ SessionMgr::shutdown_transport( ConfigTree::Service &s,
   if ( t.type.equals( "telnet" ) )
     return this->shutdown_telnet();
 
-  uint32_t id, count = this->user_db.transport_tab.count, match = 0;
+  uint32_t id,
+           count = (uint32_t) this->user_db.transport_tab.count,
+           match = 0;
   for ( id = 0; id < count; id++ ) {
     TransportRoute *rte = this->user_db.transport_tab.ptr[ id ];
     if ( &rte->transport == &t && &rte->svc == &s ) {
@@ -332,7 +337,8 @@ SessionMgr::add_mesh_accept( TransportRoute &listen_rte,
 
   d_tran( "add transport %s\n", svc_name );
   //uint32_t id = this->user_db.transport_list.tport_count++;
-  uint32_t id = 0, count = this->user_db.transport_tab.count;
+  uint32_t id,
+           count = (uint32_t) this->user_db.transport_tab.count;
   for ( id = 0; id < count; id++ ) {
     rte = this->user_db.transport_tab.ptr[ id ];
     if ( rte->all_set( TPORT_IS_SHUTDOWN | TPORT_IS_MESH ) &&
@@ -390,7 +396,8 @@ SessionMgr::add_tcp_accept( TransportRoute &listen_rte,
 
   d_tran( "add transport %s\n", svc_name );
   //uint32_t id = this->user_db.transport_list.tport_count++;
-  uint32_t id = 0, count = this->user_db.transport_tab.count;
+  uint32_t id,
+           count = (uint32_t) this->user_db.transport_tab.count;
   for ( id = 0; id < count; id++ ) {
     rte = this->user_db.transport_tab.ptr[ id ];
     if ( rte->all_set( TPORT_IS_SHUTDOWN | TPORT_IS_TCP ) ) {
@@ -526,8 +533,8 @@ SessionMgr::add_mesh_connect( TransportRoute &mesh_rte,
     mesh_hash = kv_crc_c( url_buf, sz, 0 );
   }
 
-  uint32_t id    = 0,
-           count = this->user_db.transport_tab.count;
+  uint32_t id,
+           count = (uint32_t) this->user_db.transport_tab.count;
 
   printf( "%s.%u add_mesh_connect %s: %x\n",
         mesh_rte.transport.tport.val, mesh_rte.tport_id, mesh_url, mesh_hash );
@@ -706,7 +713,8 @@ TransportRoute::on_msg( EvPublish &pub ) noexcept
   }
   /* cache of the multicast tree for messages originating at n */
   ReversePathForward & forward  = n.reverse_path_cache;
-  uint32_t             i, count = this->user_db.transport_tab.count;
+  uint32_t             i,
+                       count = (uint32_t) this->user_db.transport_tab.count;
   TransportRoute     * rte;
   AdjDistance        & peer_dist = this->user_db.peer_dist;
   /* if forward is valid, send to the ports calculated below */
@@ -917,7 +925,7 @@ TransportRoute::create_listener_mesh_url( void ) noexcept
     url = (char *) ::malloc( MAX_TCP_HOST_LEN );
   ::memcpy( url, tmp, len + 1 );
   this->mesh_url_addr = url;
-  this->mesh_url_len  = len;
+  this->mesh_url_len  = (uint32_t) len;
   d_tran( "%s: %s\n", this->name, url );
 }
 
@@ -1018,7 +1026,8 @@ TransportRoute::shutdown( ConfigTree::Transport &tport ) noexcept
         }
       }
       else {
-        uint32_t i, tport_count = this->user_db.transport_tab.count;
+        uint32_t i,
+                 tport_count = (uint32_t) this->user_db.transport_tab.count;
         for ( bool ok = this->uid_in_mesh->first( uid ); ok;
               ok = this->uid_in_mesh->next( uid ) ) {
           UserBridge &n = *this->user_db.bridge_tab.ptr[ uid ];
@@ -1310,7 +1319,7 @@ TransportRoute::create_pgm( int kind,  ConfigTree::Transport &tport ) noexcept
     url = (char *) ::malloc( 256 );
   len = ::snprintf( url, len, "inbox://%s:%u", l->pgm.gsr_addr, port );
   this->ucast_url_addr = url;
-  this->ucast_url_len  = len;
+  this->ucast_url_len  = (uint32_t) len;
   this->inbox_fd       = s->fd;
   this->mcast_fd       = l->fd;
   d_tran( "set mcast_fd=%u inbox_route=%u\n", l->fd, s->fd );

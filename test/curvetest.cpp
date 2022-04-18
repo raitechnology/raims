@@ -2,6 +2,8 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdint.h>
+#define __STDC_FORMAT_MACROS
+#include <inttypes.h>
 
 #include <raims/ec25519.h>
 
@@ -111,7 +113,7 @@ test_main( void )
     EC25519::donna( pk[ 1 ], pk[ 0 ], max_key );
   }
   t = current_monotonic_time_ns() - t;
-  printf( "%lu ticks/curve25519 scalarmult\n", t / 2048 );
+  printf( "%" PRIu64 " ticks/curve25519 scalarmult\n", t / 2048 );
 
   EC25519 bob, alice, shared1, shared2;
   bob.gen_key();

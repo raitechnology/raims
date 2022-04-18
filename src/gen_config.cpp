@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <stdarg.h>
+#if 0
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
@@ -10,6 +11,8 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
+#endif
+#include <raikv/os_file.h>
 #include <raikv/util.h>
 #include <raikv/key_hash.h>
 #include <raims/gen_config.h>
@@ -33,58 +36,19 @@ rai::ms::make_path( char *path,  size_t path_len,
   return false;
 }
 
-static const void *
-map_file( const char *fn,  size_t &sz ) noexcept
-{
-  int    fd  = ::open( fn, O_RDONLY );
-  void * map = MAP_FAILED;
-  struct stat st;
-
-  sz = 0;
-  if ( fd < 0 ) {
-    ::perror( fn );
-    return NULL;
-  }
-  if ( ::fstat( fd, &st ) == 0 ) {
-    if ( st.st_size > 0 )
-      map = ::mmap( 0, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0 );
-    else
-      map = NULL;
-  }
-  else {
-    ::perror( fn );
-  }
-  if ( map == MAP_FAILED ) {
-    ::perror( fn );
-    ::close( fd );
-    return NULL;
-  }
-  ::close( fd );
-  sz = st.st_size;
-  return map;
-}
-
-
-static void
-unmap_file( const void *m,  size_t len ) noexcept
-{
-  if ( m != NULL && m != MAP_FAILED && len > 0 )
-    ::munmap( (void *) m, len );
-}
-
 static int
 cat_file( const void *text,  size_t len,  const char *path,
           bool add_nl = false,  int mode = 0666 ) noexcept
 {
-  int  fd = ::open( path, O_WRONLY | O_CREAT | O_EXCL, mode ),
+  int  fd = os_open( path, O_WRONLY | O_CREAT | O_EXCL, mode ),
        n  = 0;
   bool b  = false;
 
   if ( fd >= 0 ) {
-    b = ( (size_t) ::write( fd, text, len ) == len );
+    b = ( (size_t) os_write( fd, text, len ) == len );
     if ( b && add_nl )
-      b &= ( ::write( fd, "\n", 1 ) == 1 );
-    ::close( fd );
+      b &= ( os_write( fd, "\n", 1 ) == 1 );
+    os_close( fd );
   }
   if ( ! b ) {
     ::perror( path );
@@ -146,15 +110,12 @@ int
 GenFileTrans::check_if_changed( void ) noexcept
 {
   char path_tmp[ GEN_PATH_MAX ];
-  if ( ::access( this->orig_path( path_tmp ), F_OK ) == 0 ) {
-    size_t       from_size, to_size;
-    const void * p1 = map_file( this->path, from_size ),
-               * p2 = map_file( path_tmp, to_size );
-    int          n  = cmp_bytes( p1, from_size, p2, to_size );
-    unmap_file( p1, from_size );
-    unmap_file( p2, to_size );
-    if ( p1 == NULL || p2 == NULL )
+  if ( os_access( this->orig_path( path_tmp ), F_OK ) == 0 ) {
+    MapFile m1( this->path ),
+            m2( path_tmp );
+    if ( ! m1.open() || ! m2.open() )
       return -1;
+    size_t n = cmp_bytes( m1.map, m1.map_size, m2.map, m2.map_size );
     if ( n == 0 )
       return 0;
     this->op = GEN_OVERWRITE_FILE;
@@ -168,7 +129,7 @@ GenFileTrans::remove_if_equal( void ) noexcept
 {
   int n = this->check_if_changed();
   if ( n == 0 )
-    return ::unlink( this->path );
+    return os_unlink( this->path );
   return n;
 }
 
@@ -211,7 +172,7 @@ GenFileTrans::commit_phase1( void ) noexcept
     char path_tmp[ GEN_PATH_MAX ];
     /* mv config.js.new config.js */
     if ( this->orig_path( path_tmp ) != this->path ) {
-      if ( ::rename( this->path, path_tmp ) != 0 ) {
+      if ( os_rename( this->path, path_tmp ) != 0 ) {
         ::perror( this->path );
         return -1;
       }
@@ -224,12 +185,12 @@ GenFileTrans::commit_phase1( void ) noexcept
     char path_tmp1[ GEN_PATH_MAX ],
          path_tmp2[ GEN_TEMP_MAX ];
     if ( this->orig_path( path_tmp1 ) != this->path ) {
-      if ( ::rename( path_tmp1, this->tmp_path( path_tmp2 ) ) != 0 ) {
+      if ( os_rename( path_tmp1, this->tmp_path( path_tmp2 ) ) != 0 ) {
         ::perror( path_tmp1 );
         return -1;
       }
       this->phase = 1;
-      if ( ::rename( this->path, path_tmp1 ) != 0 ) {
+      if ( os_rename( this->path, path_tmp1 ) != 0 ) {
         ::perror( this->path );
         return -1;
       }
@@ -238,7 +199,7 @@ GenFileTrans::commit_phase1( void ) noexcept
   /* mv config.js config.js.old */
   else if ( this->op == GEN_REMOVE_FILE ) {
     char path_tmp2[ GEN_TEMP_MAX ];
-    if ( ::rename( this->path, this->tmp_path( path_tmp2 ) ) != 0 ) {
+    if ( os_rename( this->path, this->tmp_path( path_tmp2 ) ) != 0 ) {
       ::perror( path_tmp2 );
       return -1;
     }
@@ -253,7 +214,7 @@ GenFileTrans::commit_phase2( void ) noexcept
   /* rm config.js.old */
   if ( this->op == GEN_OVERWRITE_FILE || this->op == GEN_REMOVE_FILE ) {
     char path_tmp2[ GEN_TEMP_MAX ];
-    if ( ::unlink( this->tmp_path( path_tmp2 ) ) != 0 ) {
+    if ( os_unlink( this->tmp_path( path_tmp2 ) ) != 0 ) {
       status = -1;
       ::perror( path_tmp2 );
     }
@@ -268,11 +229,11 @@ GenFileTrans::abort( void ) noexcept
     char path_tmp[ GEN_PATH_MAX ];
     /* rm config.js.new */
     if ( this->phase == 0 ) {
-      if ( ::unlink( this->path ) != 0 )
+      if ( os_unlink( this->path ) != 0 )
         ::perror( this->path );
     }
     else { /* rm config.js */
-      if ( ::unlink( this->orig_path( path_tmp ) ) != 0 )
+      if ( os_unlink( this->orig_path( path_tmp ) ) != 0 )
         ::perror( path_tmp );
     }
   }
@@ -282,7 +243,7 @@ GenFileTrans::abort( void ) noexcept
     /* rm config.js.new */
     if ( this->phase == 0 ) {
       if ( this->orig_path( path_tmp1 ) != this->path ) {
-        if ( ::unlink( this->path ) != 0 )
+        if ( os_unlink( this->path ) != 0 )
           ::perror( this->path );
       }
     }
@@ -291,18 +252,18 @@ GenFileTrans::abort( void ) noexcept
     else {
       if ( this->orig_path( path_tmp1 ) != this->path ) {
         this->tmp_path( path_tmp2 );
-        if ( ::unlink( this->path ) != 0 )
+        if ( os_unlink( this->path ) != 0 )
           ::perror( this->path );
-        if ( ::rename( path_tmp2, this->path ) != 0 )
+        if ( os_rename( path_tmp2, this->path ) != 0 )
           ::perror( path_tmp2 );
-        if ( ::unlink( path_tmp1 ) != 0 )
+        if ( os_unlink( path_tmp1 ) != 0 )
           ::perror( path_tmp1 );
       }
     }
   }
   /* rmdir config */
   else if ( this->op == GEN_MK_DIR ) {
-    if ( ::rmdir( this->path ) != 0 )
+    if ( os_rmdir( this->path ) != 0 )
       ::perror( this->path );
   }
 }
@@ -325,12 +286,12 @@ int
 GenCfg::check_dir( const char *dir_name,  bool create,
                    const char *descr ) noexcept
 {
-  if ( ::access( dir_name, W_OK ) != 0 ) {
+  if ( os_access( dir_name, W_OK ) != 0 ) {
     if ( ! create ) {
       fprintf( stderr, "Directory \"%s\" does not exist\n", dir_name );
       return -1;
     }
-    if ( ::mkdir( dir_name, 0700 ) != 0 ) {
+    if ( os_mkdir( dir_name, 0700 ) != 0 ) {
       perror( dir_name );
       fprintf( stderr, "Unable to create directory\n" );
       return -1;
@@ -357,7 +318,7 @@ GenCfg::init_pass( const char *dir_name,  CryptPass &pass,
     pass_file = ".pass";
   if ( ! make_path( path, sizeof( path ), "%s/%s", dir_name, pass_file ) )
     return false;
-  if ( ::access( path, R_OK ) == 0 ) {
+  if ( os_access( path, R_OK ) == 0 ) {
     if ( ! load_secure_file( path, mem, mem_sz ) ) {
       fprintf( stderr, "Unable to load passwd: \"%s\"\n", path );
       return false;
@@ -402,7 +363,7 @@ GenCfg::init_pass_salt( const char *dir_name,  CryptPass &pass,
     salt_file = ".salt";
   if ( ! make_path( path, sizeof( path ), "%s/%s", dir_name, salt_file ) )
     return false;
-  if ( ::access( path, R_OK ) == 0 ) {
+  if ( os_access( path, R_OK ) == 0 ) {
     if ( ! load_secure_file( path, mem, mem_sz ) ) {
       fprintf( stderr, "Unable to load passwd: \"%s\"\n", path );
       return false;
@@ -441,23 +402,19 @@ GenCfg::init_pass_salt( const char *dir_name,  CryptPass &pass,
 bool
 GenCfg::copy_salt( const char *dir_name ) noexcept
 {
-  size_t       salt_len;
-  const void * salt = map_file( this->salt_path, salt_len );
-
-  if ( salt == NULL ) {
-    ::perror( this->salt_path );
+  MapFile salt( this->salt_path );
+  if ( ! salt.open() )
     return false;
-  }
   bool b = true;
   GenFileTrans *t = GenFileTrans::create_file_fmt( GEN_CREATE_FILE,
                                                    "%s/.salt.new", dir_name );
-  if ( t == NULL || cat_file( salt, salt_len, t->path, false, 0400 ) < 0 )
+  if ( t == NULL ||
+       cat_file( salt.map, salt.map_size, t->path, false, 0400 ) < 0 )
     b = false;
-  unmap_file( salt, salt_len );
 
   if ( b ) {
-    int n;
-    if ( (n = t->remove_if_equal()) < 0 )
+    int n = t->remove_if_equal();
+    if ( n < 0 )
       b = false;
     else if ( n != 0 ) {
       t->descr = "a copy of salt";
@@ -473,28 +430,24 @@ GenCfg::copy_salt( const char *dir_name ) noexcept
 bool
 GenCfg::copy_param( const char *orig_dir,  const char *dir_name ) noexcept
 {
-  char   path[ GEN_PATH_MAX ];
-  size_t pfile_len;
+  char path[ GEN_PATH_MAX ];
 
   if ( ! make_path( path, sizeof( path ), "%s/%s", orig_dir, "param.yaml" ) )
     return false;
-  const void * pfile = map_file( path, pfile_len );
-  if ( pfile == NULL ) {
-    ::perror( path );
+  MapFile pfile( path );
+  if ( ! pfile.open() )
     return false;
-  }
 
   bool b = true;
   GenFileTrans *t = GenFileTrans::create_file_fmt( GEN_CREATE_FILE,
                                                 "%s/param.yaml.new", dir_name );
-  if ( t == NULL || cat_file( pfile, pfile_len, t->path, true, 0666 ) < 0 )
+  if ( t == NULL ||
+       cat_file( pfile.map, pfile.map_size, t->path, true, 0666 ) < 0 )
     b = false;
 
-  unmap_file( pfile, pfile_len );
-
   if ( b ) {
-    int n;
-    if ( (n = t->remove_if_equal()) < 0 )
+    int n = t->remove_if_equal();
+    if ( n < 0 )
       b = false;
     else if ( n != 0 ) {
       t->descr = "a copy of param";

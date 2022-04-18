@@ -211,8 +211,8 @@ lnk_lib     += -lnatsmd
 dlnk_lib    += -lnatsmd
 endif
 
-lnk_lib     += -lpcre2-32 -lpcre2-8 -lcrypto -llzf
-dlnk_lib    += -lpcre2-32 -lpcre2-8 -lcrypto -llzf
+lnk_lib     += -lpcre2-32 -lpcre2-8 -llzf
+dlnk_lib    += -lpcre2-32 -lpcre2-8 -llzf
 rpath       := -Wl,-rpath,$(pwd)/$(libd)$(rpath1)$(rpath2)$(rpath3)$(rpath4)$(rpath5)$(rpath6)$(rpath7)$(rpath8)$(rpath9)$(rpath10)
 
 .PHONY: everything
@@ -307,7 +307,9 @@ libraims_files := config user transport ev_tcp_transport ev_pgm_transport \
                  pgm_sock ev_inbox_transport ev_telnet ev_rv_transport \
 		 ev_nats_transport ev_redis_transport msg session heartbeat \
 		 user_db auth peer link_state sub pat crypt poly1305 ec25519 \
-		 ed25519 gen_config console
+		 ed25519 sha512 aes gen_config console
+libraims_files := $(libraims_files)
+libraims_cfile := $(addprefix src/, $(addsuffix .cpp, $(libraims_files)))
 libraims_objs  := $(addprefix $(objd)/, $(addsuffix .o, $(libraims_files)))
 libraims_dbjs  := $(addprefix $(objd)/, $(addsuffix .fpic.o, $(libraims_files)))
 libraims_deps  := $(addprefix $(dependd)/, $(addsuffix .d, $(libraims_files))) \
@@ -334,6 +336,7 @@ all_depends += $(libraims_deps)
 #all_depends += $(gen_user_deps)
 
 ms_gen_key_files := gen_key
+ms_gen_key_cfile := src/gen_key.cpp
 ms_gen_key_objs  := $(addprefix $(objd)/, $(addsuffix .o, $(ms_gen_key_files)))
 ms_gen_key_deps  := $(addprefix $(dependd)/, $(addsuffix .d, $(ms_gen_key_files)))
 ms_gen_key_libs  :=
@@ -345,6 +348,7 @@ all_exes    += $(bind)/ms_gen_key
 all_depends += $(ms_gen_key_deps)
 
 kdftest_files := kdftest
+kdftest_cfile := test/kdftest.cpp
 kdftest_objs  := $(addprefix $(objd)/, $(addsuffix .o, $(kdftest_files)))
 kdftest_deps  := $(addprefix $(dependd)/, $(addsuffix .d, $(kdftest_files)))
 kdftest_libs  :=
@@ -356,6 +360,7 @@ all_exes    += $(bind)/kdftest
 all_depends += $(kdftest_deps)
 
 mactest_files := mactest
+mactest_cfile := test/mactest.cpp
 mactest_objs  := $(addprefix $(objd)/, $(addsuffix .o, $(mactest_files)))
 mactest_deps  := $(addprefix $(dependd)/, $(addsuffix .d, $(mactest_files)))
 mactest_libs  :=
@@ -367,6 +372,7 @@ all_exes    += $(bind)/mactest
 all_depends += $(mactest_deps)
 
 polytest_files := polytest
+polytest_cfile := test/polytest.cpp
 polytest_objs  := $(addprefix $(objd)/, $(addsuffix .o, $(polytest_files)))
 polytest_deps  := $(addprefix $(dependd)/, $(addsuffix .d, $(polytest_files)))
 polytest_libs  :=
@@ -389,6 +395,7 @@ all_depends += $(polytest_deps)
 #all_depends += $(ecdhtest_deps)
 
 curvetest_files := curvetest
+curvetest_cfile := test/curvetest.cpp
 curvetest_objs  := $(addprefix $(objd)/, $(addsuffix .o, $(curvetest_files)))
 curvetest_deps  := $(addprefix $(dependd)/, $(addsuffix .d, $(curvetest_files)))
 curvetest_libs  :=
@@ -400,6 +407,7 @@ all_exes    += $(bind)/curvetest
 all_depends += $(curvetest_deps)
 
 dsatest_files := dsatest
+dsatest_cfile := test/dsatest.cpp
 dsatest_objs  := $(addprefix $(objd)/, $(addsuffix .o, $(dsatest_files)))
 dsatest_deps  := $(addprefix $(dependd)/, $(addsuffix .d, $(dsatest_files)))
 dsatest_libs  :=
@@ -409,6 +417,30 @@ $(bind)/dsatest: $(dsatest_objs) $(dsatest_libs) $(lnk_dep)
 
 all_exes    += $(bind)/dsatest
 all_depends += $(dsatest_deps)
+
+shatest_files := shatest
+shatest_cfile := test/shatest.cpp
+shatest_objs  := $(addprefix $(objd)/, $(addsuffix .o, $(shatest_files)))
+shatest_deps  := $(addprefix $(dependd)/, $(addsuffix .d, $(shatest_files)))
+shatest_libs  :=
+shatest_lnk   := $(lnk_lib)
+
+$(bind)/shatest: $(shatest_objs) $(shatest_libs) $(lnk_dep)
+
+all_exes    += $(bind)/shatest
+all_depends += $(shatest_deps)
+
+aestest_files := aestest
+aestest_cfile := test/aestest.cpp
+aestest_objs  := $(addprefix $(objd)/, $(addsuffix .o, $(aestest_files)))
+aestest_deps  := $(addprefix $(dependd)/, $(addsuffix .d, $(aestest_files)))
+aestest_libs  :=
+aestest_lnk   := $(lnk_lib)
+
+$(bind)/aestest: $(aestest_objs) $(aestest_libs) $(lnk_dep)
+
+all_exes    += $(bind)/aestest
+all_depends += $(aestest_deps)
 
 #rsatest_files := rsatest
 #rsatest_objs  := $(addprefix $(objd)/, $(addsuffix .o, $(rsatest_files)))
@@ -422,6 +454,7 @@ all_depends += $(dsatest_deps)
 #all_depends += $(rsatest_deps)
 
 parse_config_files := parse_config
+parse_config_cfile := test/parse_config.cpp
 parse_config_objs  := $(addprefix $(objd)/, $(addsuffix .o, $(parse_config_files)))
 parse_config_deps  := $(addprefix $(dependd)/, $(addsuffix .d, $(parse_config_files)))
 parse_config_libs  :=
@@ -433,6 +466,7 @@ all_exes    += $(bind)/parse_config
 all_depends += $(parse_config_deps)
 
 ms_server_files := server
+ms_server_cfile := src/server.cpp
 ms_server_objs  := $(addprefix $(objd)/, $(addsuffix .o, $(ms_server_files)))
 ms_server_deps  := $(addprefix $(dependd)/, $(addsuffix .d, $(ms_server_files)))
 ms_server_libs  :=
@@ -447,7 +481,182 @@ all_dirs := $(bind) $(libd) $(objd) $(dependd)
 
 # the default targets
 .PHONY: all
-all: $(all_libs) $(all_dlls) $(all_exes)
+all: $(all_libs) $(all_dlls) $(all_exes) cmake
+
+.PHONY: cmake
+cmake: CMakeLists.txt
+
+.ONESHELL: CMakeLists.txt
+CMakeLists.txt: .copr/Makefile
+	@cat <<'EOF' > $@
+	cmake_minimum_required (VERSION 3.9.0)
+	if (POLICY CMP0111)
+	  cmake_policy(SET CMP0111 OLD)
+	endif ()
+	project (raims)
+	include_directories (
+	  include
+	  $${CMAKE_SOURCE_DIR}/raimd/include
+	  $${CMAKE_SOURCE_DIR}/raikv/include
+	  $${CMAKE_SOURCE_DIR}/raids/include
+	  $${CMAKE_SOURCE_DIR}/sassrv/include
+	  $${CMAKE_SOURCE_DIR}/natsmd/include
+	  $${CMAKE_SOURCE_DIR}/libdecnumber/include
+	  $${CMAKE_SOURCE_DIR}/raimd/libdecnumber/include
+	  $${CMAKE_SOURCE_DIR}/linecook/include
+	  $${CMAKE_SOURCE_DIR}/pcre2
+	  $${CMAKE_SOURCE_DIR}/openpgm/openpgm/pgm/include
+	)
+	if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+	  add_definitions(/DPCRE2_STATIC)
+	  if ($$<CONFIG:Release>)
+	    add_compile_options (/arch:AVX2 /GL /std:c11 /wd5105)
+	  else ()
+	    add_compile_options (/arch:AVX2 /std:c11 /wd5105)
+	  endif ()
+	  if (NOT TARGET pcre2-8-static)
+	    add_library (pcre2-8-static STATIC IMPORTED)
+	    set_property (TARGET pcre2-8-static PROPERTY IMPORTED_LOCATION_DEBUG ../pcre2/build/Debug/pcre2-8-staticd.lib)
+	    set_property (TARGET pcre2-8-static PROPERTY IMPORTED_LOCATION_RELEASE ../pcre2/build/Release/pcre2-8-static.lib)
+	    add_library (pcre2-32-static STATIC IMPORTED)
+	    set_property (TARGET pcre2-32-static PROPERTY IMPORTED_LOCATION_DEBUG ../pcre2/build/Debug/pcre2-32-staticd.lib)
+	    set_property (TARGET pcre2-32-static PROPERTY IMPORTED_LOCATION_RELEASE ../pcre2/build/Release/pcre2-32-static.lib)
+	    include_directories (../pcre2/build)
+	  else ()
+	    include_directories ($${CMAKE_BINARY_DIR}/pcre2)
+	  endif ()
+	  set (pcre2lib pcre2-8-static pcre2-32-static)
+	  if (NOT TARGET raids)
+	    add_library (raids STATIC IMPORTED)
+	    set_property (TARGET raids PROPERTY IMPORTED_LOCATION_DEBUG ../raids/build/Debug/raids.lib)
+	    set_property (TARGET raids PROPERTY IMPORTED_LOCATION_RELEASE ../raids/build/Release/raids.lib)
+	  endif ()
+	  if (NOT TARGET raikv)
+	    add_library (raikv STATIC IMPORTED)
+	    set_property (TARGET raikv PROPERTY IMPORTED_LOCATION_DEBUG ../raikv/build/Debug/raikv.lib)
+	    set_property (TARGET raikv PROPERTY IMPORTED_LOCATION_RELEASE ../raikv/build/Release/raikv.lib)
+	  endif ()
+	  if (NOT TARGET raimd)
+	    add_library (raimd STATIC IMPORTED)
+	    set_property (TARGET raimd PROPERTY IMPORTED_LOCATION_DEBUG ../raimd/build/Debug/raimd.lib)
+	    set_property (TARGET raimd PROPERTY IMPORTED_LOCATION_RELEASE ../raimd/build/Release/raimd.lib)
+	  endif ()
+	  if (NOT TARGET decnumber)
+	    add_library (decnumber STATIC IMPORTED)
+	    set_property (TARGET decnumber PROPERTY IMPORTED_LOCATION_DEBUG ../raimd/libdecnumber/build/Debug/decnumber.lib)
+	    set_property (TARGET decnumber PROPERTY IMPORTED_LOCATION_RELEASE ../raimd/libdecnumber/build/Release/decnumber.lib)
+	  endif ()
+	  if (NOT TARGET rdbparser)
+	    add_library (rdbparser STATIC IMPORTED)
+	    set_property (TARGET rdbparser PROPERTY IMPORTED_LOCATION_DEBUG ../raids/rdbparser/build/Debug/rdbparser.lib)
+	    set_property (TARGET rdbparser PROPERTY IMPORTED_LOCATION_RELEASE ../raids/rdbparser/build/Release/rdbparser.lib)
+	  endif ()
+	  if (NOT TARGET linecook)
+	    add_library (linecook STATIC IMPORTED)
+	    set_property (TARGET linecook PROPERTY IMPORTED_LOCATION_DEBUG ../linecook/build/Debug/linecook.lib)
+	    set_property (TARGET linecook PROPERTY IMPORTED_LOCATION_RELEASE ../linecook/build/Release/linecook.lib)
+	  endif ()
+	  if (NOT TARGET h3)
+	    add_library (h3 STATIC IMPORTED)
+	    set_property (TARGET h3 PROPERTY IMPORTED_LOCATION_DEBUG ../raids/h3/build/bin/Debug/h3.lib)
+	    set_property (TARGET h3 PROPERTY IMPORTED_LOCATION_RELEASE ../raids/h3/build/bin/Release/h3.lib)
+	  else ()
+	    include_directories ($${CMAKE_BINARY_DIR}/src/h3lib/include)
+	  endif ()
+	  if (NOT TARGET lzf)
+	    add_library (lzf STATIC IMPORTED)
+	    set_property (TARGET lzf PROPERTY IMPORTED_LOCATION_DEBUG ../raids/rdbparser/lzf/build/Debug/lzf.lib)
+	    set_property (TARGET lzf PROPERTY IMPORTED_LOCATION_RELEASE ../raids/rdbparser/lzf/build/Release/lzf.lib)
+	  endif ()
+	  if (NOT TARGET openpgm_st)
+	    add_library (openpgm_st STATIC IMPORTED)
+	    set_property (TARGET openpgm_st PROPERTY IMPORTED_LOCATION_DEBUG ../openpgm/build/Debug/openpgm_st.lib)
+	    set_property (TARGET openpgm_st PROPERTY IMPORTED_LOCATION_RELEASE ../openpgm/build/Release/openpgm_st.lib)
+	  endif ()
+	  if (NOT TARGET sassrv)
+	    add_library (sassrv STATIC IMPORTED)
+	    set_property (TARGET sassrv PROPERTY IMPORTED_LOCATION_DEBUG ../sassrv/build/Debug/sassrv.lib)
+	    set_property (TARGET sassrv PROPERTY IMPORTED_LOCATION_RELEASE ../sassrv/build/Release/sassrv.lib)
+	  endif ()
+	  if (NOT TARGET natsmd)
+	    add_library (natsmd STATIC IMPORTED)
+	    set_property (TARGET natsmd PROPERTY IMPORTED_LOCATION_DEBUG ../natsmd/build/Debug/natsmd.lib)
+	    set_property (TARGET natsmd PROPERTY IMPORTED_LOCATION_RELEASE ../natsmd/build/Release/natsmd.lib)
+	  endif ()
+	else ()
+	  add_compile_options ($(cflags))
+	  if (TARGET pcre2-8-static)
+	    include_directories ($${CMAKE_BINARY_DIR}/pcre2)
+	    set (pcre2lib pcre2-8-static pcre2-32-static)
+	  else ()
+	    set (pcre2lib -lpcre2-32 -lpcre2-8)
+	  endif ()
+	  if (NOT TARGET raids)
+	    add_library (raids STATIC IMPORTED)
+	    set_property (TARGET raids PROPERTY IMPORTED_LOCATION ../raids/build/libraids.a)
+	  endif ()
+	  if (NOT TARGET raikv)
+	    add_library (raikv STATIC IMPORTED)
+	    set_property (TARGET raikv PROPERTY IMPORTED_LOCATION ../raikv/build/libraikv.a)
+	  endif ()
+	  if (NOT TARGET raimd)
+	    add_library (raimd STATIC IMPORTED)
+	    set_property (TARGET raimd PROPERTY IMPORTED_LOCATION ../raimd/build/libraimd.a)
+	  endif ()
+	  if (NOT TARGET decnumber)
+	    add_library (decnumber STATIC IMPORTED)
+	    set_property (TARGET decnumber PROPERTY IMPORTED_LOCATION ../raimd/libdecnumber/build/libdecnumber.a)
+	  endif ()
+	  if (NOT TARGET rdbparser)
+	    add_library (rdbparser STATIC IMPORTED)
+	    set_property (TARGET rdbparser PROPERTY IMPORTED_LOCATION ../raids/rdbparser/build/librdbparser.a)
+	  endif ()
+	  if (NOT TARGET linecook)
+	    add_library (linecook STATIC IMPORTED)
+	    set_property (TARGET linecook PROPERTY IMPORTED_LOCATION ../linecook/build/liblinecook.a)
+	  endif ()
+	  if (NOT TARGET h3)
+	    add_library (h3 STATIC IMPORTED)
+	    set_property (TARGET h3 PROPERTY IMPORTED_LOCATION ../raids/h3/build/lib/libh3.a)
+	  else ()
+	    include_directories ($${CMAKE_BINARY_DIR}/src/h3lib/include)
+	  endif ()
+	  if (NOT TARGET lzf)
+	    add_library (lzf STATIC IMPORTED)
+	    set_property (TARGET lzf PROPERTY IMPORTED_LOCATION ../raids/rdbparser/lzf/build/liblzf.a)
+	  endif ()
+	  if (NOT TARGET openpgm_st)
+	    add_library (openpgm_st STATIC IMPORTED)
+	    set_property (TARGET openpgm_st PROPERTY IMPORTED_LOCATION ../openpgm/build/libopenpgm_st.a)
+	  endif ()
+	  if (NOT TARGET sassrv)
+	    add_library (sassrv STATIC IMPORTED)
+	    set_property (TARGET sassrv PROPERTY IMPORTED_LOCATION ../sassrv/build/libsassrv.a)
+	  endif ()
+	  if (NOT TARGET natsmd)
+	    add_library (natsmd STATIC IMPORTED)
+	    set_property (TARGET natsmd PROPERTY IMPORTED_LOCATION ../natsmd/build/libnatsmd.a)
+	  endif ()
+	endif ()
+	if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+	  set (ex_lib ws2_32)
+	else ()
+	  set (ex_lib -lpthread -lrt)
+	endif ()
+	add_library (raims STATIC $(libraims_cfile))
+	link_libraries (raims raids raikv raimd natsmd sassrv decnumber rdbparser linecook h3 lzf openpgm_st $${pcre2lib} $${ex_lib})
+	add_executable (ms_server $(ms_server_cfile))
+	add_executable (ms_gen_key $(ms_gen_key_cfile))
+	add_executable (kdftest $(kdftest_cfile))
+	add_executable (mactest $(mactest_cfile))
+	add_executable (polytest $(polytest_cfile))
+	add_executable (curvetest $(curvetest_cfile))
+	add_executable (dsatest $(dsatest_cfile))
+	add_executable (shatest $(shatest_cfile))
+	add_executable (aestest $(aestest_cfile))
+	add_executable (parse_config $(parse_config_cfile))
+	EOF
+
 
 .PHONY: dnf_depend
 dnf_depend:

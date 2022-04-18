@@ -47,13 +47,14 @@ struct PgmSendWindow : public SendWindow {
                                   this->alloc( truesize );
       ::memset( skb, 0, sizeof( struct pgm_sk_buff_t ) );
       pgm_atomic_write32( &skb->users, 2 );
-      skb->truesize = truesize;
+      skb->truesize = (uint32_t) truesize;
       skb->head     = &skb[ 1 ];
       skb->data     = skb->head;
       skb->tail     = skb->head;
       skb->end      = skb_end( skb, truesize );
-      pgm_skb_reserve( skb, geom.header_size );
-      uint8_t * pkt = (uint8_t *) pgm_skb_put( skb, size + size2 );
+      pgm_skb_reserve( skb, (uint16_t) geom.header_size );
+      uint8_t * pkt = (uint8_t *)
+        pgm_skb_put( skb, (uint16_t) ( size + size2 ) );
       ::memcpy( pkt, data, size );
       if ( size2 > 0 )
         ::memcpy( &pkt[ size ], data2, size2 );
@@ -89,9 +90,9 @@ struct PgmSendWindow : public SendWindow {
     if ( new_end <= start || new_end > this->end_ptr() )
       return false;
     this->set_end( new_end );
-    skb->truesize = new_truesize;
+    skb->truesize = (uint32_t) new_truesize;
     skb->end      = new_end;
-    uint8_t * pkt = (uint8_t *) pgm_skb_put( skb, size + size2 );
+    uint8_t * pkt = (uint8_t *) pgm_skb_put( skb, (uint16_t) ( size + size2 ) );
     ::memcpy( pkt, data, size );
     if ( size2 > 0 )
       ::memcpy( &pkt[ size ], data2, size2 );

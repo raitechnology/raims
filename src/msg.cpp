@@ -2,6 +2,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#define __STDC_FORMAT_MACROS
+#include <inttypes.h>
 #include <raimd/md_dict.h>
 #include <raimd/cfile.h>
 #define INCLUDE_MSG_CONST
@@ -20,7 +22,9 @@ rai::ms::publish_type_to_string( PublishType t ) noexcept
   return publish_type_str[ t>=U_NORMAL&&t<=UNKNOWN_SUBJECT?t:UNKNOWN_SUBJECT ];
 }
 static const uint16_t bridge_cls = CLS_OPAQUE_16 | FID_BRIDGE;
-static MDMatch cabamsg_match = {
+static MDMatch cabamsg_match;
+#if 0
+{
   .off         = 8,
   .len         = 2, /* cnt of buf[] */
   .hint_size   = 1, /* cnt of hint[] */
@@ -30,7 +34,7 @@ static MDMatch cabamsg_match = {
   .is_msg_type = CabaMsg::is_cabamsg,
   .unpack      = (md_msg_unpack_f) CabaMsg::unpack
 };
-
+#endif
 const char *
 CabaMsg::get_proto_string( void ) noexcept
 {
@@ -46,6 +50,15 @@ CabaMsg::get_type_id( void ) noexcept
 void
 CabaMsg::init_auto_unpack( void ) noexcept
 {
+  cabamsg_match.off         = 8;
+  cabamsg_match.len         = 2; /* cnt of buf[] */
+  cabamsg_match.hint_size   = 1; /* cnt of hint[] */
+  cabamsg_match.ftype       = (uint8_t) CABA_TYPE_ID;
+  cabamsg_match.buf[ 0 ]    = (uint8_t) ( ( bridge_cls >> 8 ) & 0xff );
+  cabamsg_match.buf[ 1 ]    = (uint8_t) ( bridge_cls & 0xff );
+  cabamsg_match.hint[ 0 ]   = CABA_TYPE_ID;
+  cabamsg_match.is_msg_type = CabaMsg::is_cabamsg;
+  cabamsg_match.unpack      = (md_msg_unpack_f) CabaMsg::unpack;
   MDMsg::add_match( cabamsg_match );
 }
 
@@ -197,7 +210,8 @@ MsgCat::print( void ) noexcept
 void
 MsgCat::reserve_error( size_t rsz ) noexcept
 {
-  fprintf( stderr, "reserve size %lu is less then message len %lu\n",
+  fprintf( stderr, "reserve size %" PRIu64
+                   "is less then message len %" PRIu64 "\n",
            rsz, this->len() );
   MDOutput mout;
   mout.print_hex( this->msg, this->len() );

@@ -13,6 +13,10 @@
 #include <raims/chachapoly_aead.h>
 #endif
 #include <raims/poly1305.h>
+
+using namespace rai;
+using namespace ms;
+
 #if 0
 struct chacha20_testvector {
     uint8_t key[32];

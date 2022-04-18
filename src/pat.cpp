@@ -2,6 +2,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#define __STDC_FORMAT_MACROS
+#include <inttypes.h>
 #define PCRE2_CODE_UNIT_WIDTH 8
 #include <pcre2.h>
 #include <raims/session.h>
@@ -49,11 +51,13 @@ SubDB::add_bloom( PatternArgs &ctx,  BloomRef &b ) noexcept
 {
   bool rsz = false;
   if ( ctx.rt->detail_type == NO_DETAIL )
-    rsz = b.add_route( ctx.cvt.prefixlen, ctx.hash );
+    rsz = b.add_route( (uint16_t) ctx.cvt.prefixlen, ctx.hash );
   else if ( ctx.rt->detail_type == SUFFIX_MATCH )
-    rsz = b.add_suffix_route( ctx.cvt.prefixlen, ctx.hash, ctx.rt->u.suffix );
+    rsz = b.add_suffix_route( (uint16_t) ctx.cvt.prefixlen, ctx.hash,
+                              ctx.rt->u.suffix );
   else if ( ctx.rt->detail_type == SHARD_MATCH )
-    rsz = b.add_shard_route( ctx.cvt.prefixlen, ctx.hash, ctx.rt->u.shard );
+    rsz = b.add_shard_route( (uint16_t) ctx.cvt.prefixlen, ctx.hash,
+                             ctx.rt->u.shard );
   else
     fprintf( stderr, "bad detail\n" );
   return rsz;
@@ -63,11 +67,13 @@ void
 SubDB::del_bloom( PatternArgs &ctx,  BloomRef &b ) noexcept
 {
   if ( ctx.rt->detail_type == NO_DETAIL )
-    b.del_route( ctx.cvt.prefixlen, ctx.hash );
+    b.del_route( (uint16_t) ctx.cvt.prefixlen, ctx.hash );
   else if ( ctx.rt->detail_type == SUFFIX_MATCH )
-    b.del_suffix_route( ctx.cvt.prefixlen, ctx.hash, ctx.rt->u.suffix );
+    b.del_suffix_route( (uint16_t) ctx.cvt.prefixlen, ctx.hash,
+                        ctx.rt->u.suffix );
   else if ( ctx.rt->detail_type == SHARD_MATCH )
-    b.del_shard_route( ctx.cvt.prefixlen, ctx.hash, ctx.rt->u.shard );
+    b.del_shard_route( (uint16_t) ctx.cvt.prefixlen, ctx.hash,
+                       ctx.rt->u.shard );
   else
     fprintf( stderr, "bad detail\n" );
 }
@@ -187,7 +193,7 @@ SubDB::fwd_psub( PatternArgs &ctx ) noexcept
   m.close( e.sz, h, CABA_RTR_ALERT );
   m.sign( s.msg, s.len(), *this->user_db.session_key );
 
-  d_sub( "psub(%.*s) %lu\n", (int) ctx.patlen, ctx.pat, ctx.cvt.prefixlen );
+  d_sub( "psub(%.*s) %" PRIu64 "\n", (int) ctx.patlen, ctx.pat, ctx.cvt.prefixlen );
   size_t count = this->user_db.transport_tab.count;
   for ( size_t i = 0; i < count; i++ ) {
     TransportRoute *rte = this->user_db.transport_tab.ptr[ i ];
@@ -327,7 +333,7 @@ PatRoute::start( PatternArgs &ctx ) noexcept
     }
   }
   if ( pattern_success && this->from_pattern( ctx.cvt ) ) {
-    this->prefix_len  = ctx.cvt.prefixlen;
+    this->prefix_len  = (uint16_t) ctx.cvt.prefixlen;
     this->start_seqno = ctx.seqno;
     this->on_data     = ctx.cb;
     this->ref.init( ctx.flags, ctx.tport_id );
@@ -378,7 +384,7 @@ bool
 PatRoute::match( const char *sub,  size_t sublen ) const noexcept
 {
   if ( this->re == NULL ) {
-    return sublen >= this->prefix_len && /* len has > or * suffix */
+    return sublen >= (size_t) this->prefix_len && /* len has > or * suffix */
            ::memcmp( this->value, sub, this->prefix_len ) == 0;
   }
   return pcre2_match( this->re, (const uint8_t *) sub, sublen,
@@ -415,20 +421,22 @@ SubDB::recv_psub_start( const MsgFramePublish &pub,  UserBridge &n,
     dec.get_ival<uint32_t>( FID_FMT, fmt );
 
     PatternArgs ctx( (const char *) dec.mref[ FID_PATTERN ].fptr,
-                     dec.mref[ FID_PATTERN ].fsize, cvt,
+                     (uint16_t) dec.mref[ FID_PATTERN ].fsize, cvt,
                      true, NULL, 0, 0, 0 );
     if ( ! cvt_wild( cvt, ctx.pat, ctx.patlen, this->pat_tab.seed,
                      (PatternFmt) fmt, ctx.hash ) )
       return true;
     if ( d.from_pattern( ctx.cvt ) ) {
       if ( d.detail_type == NO_DETAIL ) {
-        n.bloom.add_route( ctx.cvt.prefixlen, ctx.hash );
+        n.bloom.add_route( (uint16_t) ctx.cvt.prefixlen, ctx.hash );
       }
       else if ( d.detail_type == SUFFIX_MATCH ) {
-        n.bloom.add_suffix_route( ctx.cvt.prefixlen, ctx.hash, d.u.suffix );
+        n.bloom.add_suffix_route( (uint16_t) ctx.cvt.prefixlen, ctx.hash,
+                                  d.u.suffix );
       }
       else if ( d.detail_type == SHARD_MATCH ) {
-        n.bloom.add_shard_route( ctx.cvt.prefixlen, ctx.hash, d.u.shard );
+        n.bloom.add_shard_route( (uint16_t) ctx.cvt.prefixlen, ctx.hash,
+                                 d.u.shard );
       }
     }
     NotifyPattern npat( ctx.cvt, ctx.pat, ctx.patlen, ctx.hash,
@@ -455,18 +463,20 @@ SubDB::recv_psub_stop( const MsgFramePublish &pub,  UserBridge &n,
     dec.get_ival<uint32_t>( FID_FMT, fmt );
 
     PatternArgs ctx( (const char *) dec.mref[ FID_PATTERN ].fptr,
-                     dec.mref[ FID_PATTERN ].fsize, cvt,
+                     (uint16_t) dec.mref[ FID_PATTERN ].fsize, cvt,
                      false, NULL, 0, 0, 0 );
     if ( ! cvt_wild( cvt, ctx.pat, ctx.patlen, this->pat_tab.seed,
                      (PatternFmt) fmt, ctx.hash ) )
       return true;
     if ( d.from_pattern( cvt ) ) {
       if ( d.detail_type == NO_DETAIL )
-        n.bloom.del_route( cvt.prefixlen, ctx.hash );
+        n.bloom.del_route( (uint16_t) cvt.prefixlen, ctx.hash );
       else if ( d.detail_type == SUFFIX_MATCH )
-        n.bloom.del_suffix_route( cvt.prefixlen, ctx.hash, d.u.suffix );
+        n.bloom.del_suffix_route( (uint16_t) cvt.prefixlen, ctx.hash,
+                                  d.u.suffix );
       else if ( d.detail_type == SHARD_MATCH )
-        n.bloom.del_shard_route( cvt.prefixlen, ctx.hash, d.u.shard );
+        n.bloom.del_shard_route( (uint16_t) cvt.prefixlen, ctx.hash,
+                                 d.u.shard );
     }
     NotifyPattern npat( cvt, ctx.pat, ctx.patlen, ctx.hash,
                         u_rte.mcast_fd, false, 'M' );

@@ -18,8 +18,8 @@ struct SendWindow {
   void * operator new( size_t, void *ptr ) { return ptr; }
   void operator delete( void *ptr ) { ::free( ptr ); }
   SendWindow( void *p,  size_t avail )
-    : bufp( p ), offw( 0 ), sizew( avail / 8 ),
-      availw( avail / 8 ), refs( ACTIVE_REFS ) {}
+    : bufp( p ), offw( 0 ), sizew( (uint32_t) ( avail / 8 ) ),
+      availw( (uint32_t) ( avail / 8 ) ), refs( ACTIVE_REFS ) {}
 
   void reset( void ) {
     this->offw   = 0;
@@ -41,7 +41,8 @@ struct SendWindow {
     return this->buf_ptr( this->size() );
   }
   void set_end( void * new_end ) {
-    this->availw = ( (char *) this->end_ptr() - (char *) new_end ) / 8;
+    this->availw = (uint32_t)
+      ( ( (char *) this->end_ptr() - (char *) new_end ) / 8 );
     this->offw   = this->sizew - this->availw;
   }
   void *off_ptr( void ) {
@@ -50,8 +51,8 @@ struct SendWindow {
   void *alloc( size_t len ) {
     size_t idxw = this->offw,
            used = ( len + 7 ) / 8;
-    this->offw   += used;
-    this->availw -= used;
+    this->offw   += (uint32_t) used;
+    this->availw -= (uint32_t) used;
     this->refs++;
     return this->buf_ptr( idxw * 8 );
   }
@@ -160,8 +161,8 @@ struct Fragment {
     if ( ! this->matches( trl ) )
       return false;
     ::memcpy( this->msg_ptr() + trl.off, data, len );
-    this->off   = trl.off + len;
-    this->left -= len;
+    this->off   = (uint32_t) ( trl.off + len );
+    this->left -= (uint32_t) len;
     return true;
   }
 };

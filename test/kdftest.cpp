@@ -2,8 +2,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
-#include <openssl/sha.h>
-#include <openssl/aes.h>
+#define __STDC_FORMAT_MACROS
+#include <inttypes.h>
 #include <raims/crypt.h>
 #include <raimd/md_types.h>
 #include <raikv/util.h>
@@ -32,7 +32,7 @@ main( void )
     d.kdf_bytes( aa, sizeof( aa ) );
     ::memcpy( aa, d.dig, sizeof( d.dig ) );
   }
-  printf( "%lu ns / kdf\n",
+  printf( "%" PRIu64 " ns / kdf\n",
           ( current_monotonic_time_ns() - t ) / 100000 );
   /*df.mix( digest, sizeof( digest ), 1 );*/
   return 0;

@@ -457,7 +457,7 @@ struct PeerUidFree : public kv::ArraySpace<PeerUidSet *, 4> {
       PeerUidSet ** puid = this->make( end + rec.idx, true );
       for ( size_t i = 0; i < rec.idx; i++ ) {
         if ( (puid[ end + i ] = rec.ptr[ i ]) != NULL )
-          puid[ end + i ]->rec_idx = end + i;
+          puid[ end + i ]->rec_idx = (uint32_t) ( end + i );
       }
       rec.reset();
     }
@@ -543,7 +543,7 @@ struct AdjDistance : public md::MDMsgMem {
   uint32_t calc_transport_cache2( uint32_t dest_uid,  uint32_t tport_id,
                                   TransportRoute &rte ) {
     size_t   off = tport_id * this->max_uid + dest_uid;
-    uint32_t d   = this->cache.get( off );
+    uint32_t d   = (uint32_t) this->cache.get( off );
     if ( d != 0 )
       return d - 1;
     return this->calc_transport_cache3( dest_uid, tport_id, rte );

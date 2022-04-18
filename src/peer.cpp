@@ -2,6 +2,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#define __STDC_FORMAT_MACROS
+#include <inttypes.h>
 #include <stdarg.h>
 #include <raims/user_db.h>
 
@@ -138,7 +140,7 @@ UserDB::recv_sync_request( const MsgFramePublish &pub,  UserBridge &n,
   StringVal user_sv;
   if ( dec.test( FID_USER ) ) {
     const char * user     = (const char *) dec.mref[ FID_USER ].fptr;
-    uint32_t     user_len = dec.mref[ FID_USER ].fsize;
+    uint32_t     user_len = (uint32_t) dec.mref[ FID_USER ].fsize;
     this->string_tab.ref_string( user, user_len, user_sv );
   }
   this->events.recv_sync_fail( n.uid, pub.rte.tport_id, user_sv.id );
@@ -275,7 +277,7 @@ UserDB::make_peer_session( const MsgFramePublish &pub,  UserBridge &from_n,
       uint32_t    pid;
       if ( ! this->peer_ht->find( sync_bridge_id.hmac, p_pos, pid ) ) {
         /* new peer */
-        pid  = this->peer_db.count;
+        pid  = (uint32_t) this->peer_db.count;
         StringVal user_sv, svc_sv, create_sv, expires_sv;
         this->string_tab.ref_string( user.user, user.user_len, user_sv );
         this->string_tab.ref_string( user.service, user.service_len, svc_sv );
@@ -327,7 +329,7 @@ struct PeerDBRec : public MsgFldSet {
         break;
       case FID_USER:
         this->user     = (const char *) mref.fptr;
-        this->user_len = mref.fsize;
+        this->user_len = (uint32_t) mref.fsize;
         break;
       case FID_HOPS:
         cvt_number<uint32_t>( mref, this->hops );
@@ -340,11 +342,11 @@ struct PeerDBRec : public MsgFldSet {
         break;
       case FID_UCAST_URL:
         this->ucast_url     = (const char *) mref.fptr;
-        this->ucast_url_len = mref.fsize;
+        this->ucast_url_len = (uint32_t) mref.fsize;
         break;
       case FID_MESH_URL:
         this->mesh_url     = (const char *) mref.fptr;
-        this->mesh_url_len = mref.fsize;
+        this->mesh_url_len = (uint32_t) mref.fsize;
         break;
       default:
         break;
@@ -352,7 +354,7 @@ struct PeerDBRec : public MsgFldSet {
   }
   void print( void ) const {
     char buf[ NONCE_B64_LEN + 1 ];
-    printf( "  nonce[%s] user[%.*s] hops[%u] sub[%lu] link[%lu] ucast[%.*s] mesh[%.*s]\n",
+    printf( "  nonce[%s] user[%.*s] hops[%u] sub[%" PRIu64 "] link[%" PRIu64 "] ucast[%.*s] mesh[%.*s]\n",
             this->nonce.to_base64_str( buf ),
             this->user_len, this->user,
             this->hops, this->sub_seqno, this->link_state,
@@ -533,7 +535,7 @@ UserDB::recv_peer_add( const MsgFramePublish &pub,  UserBridge &n,
     user_n = this->make_peer_session( pub, n, dec, user_n );
   if ( dec.test( FID_USER ) ) {
     const char * user     = (const char *) dec.mref[ FID_USER ].fptr;
-    uint32_t     user_len = dec.mref[ FID_USER ].fsize;
+    uint32_t     user_len = (uint32_t) dec.mref[ FID_USER ].fsize;
     this->string_tab.ref_string( user, user_len, user_sv );
   }
   this->events.recv_peer_add( n.uid, pub.rte.tport_id,
@@ -665,7 +667,7 @@ UserDB::send_peer_add( UserBridge &n ) noexcept
         hops = 1;
         in_mesh = false;
       }
-      this->events.send_add_route( n.uid, i, hops );
+      this->events.send_add_route( n.uid, (uint32_t) i, hops );
       this->make_peer_add_msg( n, Z_ADD, Z_ADD_SZ, add_h, m, hops, in_mesh );
       EvPublish pub( Z_ADD, Z_ADD_SZ, NULL, 0, m.msg, m.len(),
                      rte->sub_route, this->my_src_fd, add_h,
@@ -693,7 +695,7 @@ UserDB::forward_peer_add( UserBridge &n,
           hops = 1;
           in_mesh = false;
         }
-        this->events.send_add_route( n.uid, i, hops );
+        this->events.send_add_route( n.uid, (uint32_t) i, hops );
         this->make_peer_add_msg( n, Z_ADD, Z_ADD_SZ, add_h, m, hops, in_mesh );
         EvPublish pub( Z_ADD, Z_ADD_SZ, NULL, 0, m.msg, m.len(),
                        rte->sub_route, this->my_src_fd, add_h,
@@ -731,16 +733,16 @@ UserDB::make_peer_del_msg( UserBridge &n,  const char *sub,  size_t sublen,
 void
 UserDB::send_peer_del( UserBridge &n ) noexcept
 {
-  uint32_t count = this->transport_tab.count;
-  for ( uint32_t i = 0; i < count; i++ ) {
+  size_t count = this->transport_tab.count;
+  for ( size_t i = 0; i < count; i++ ) {
     TransportRoute * rte = this->transport_tab.ptr[ i ];
     if ( rte->connect_count > 0 ) {
       MsgCat m;
       if ( debug_peer )
-        printf( "send Z_DEL(%lu) for %s via %s, connect=%u\n",
+        printf( "send Z_DEL(%" PRIu64 ") for %s via %s, connect=%u\n",
                 this->send_peer_seqno, n.peer.user.val,
                 rte->transport.tport.val, rte->connect_count );
-      this->events.send_peer_delete( n.uid, i );
+      this->events.send_peer_delete( n.uid, (uint32_t) i );
       this->make_peer_del_msg( n, Z_DEL, Z_DEL_SZ, del_h, m );
       EvPublish pub( Z_DEL, Z_DEL_SZ, NULL, 0, m.msg, m.len(),
                      rte->sub_route, this->my_src_fd, del_h,
@@ -765,7 +767,7 @@ UserDB::recv_peer_del( const MsgFramePublish &pub,  UserBridge &n,
     user_n = this->bridge_tab[ uid ];
     if ( user_n != NULL ) {
       if ( debug_peer )
-        printf( "recv Z_DEL(%lu) for %s from %s via %s\n",
+        printf( "recv Z_DEL(%" PRIu64 ") for %s from %s via %s\n",
                 dec.seqno, user_n->peer.user.val, n.peer.user.val,
                 pub.rte.transport.tport.val );
       uint32_t refs = this->peer_dist.inbound_refs( user_n->uid );
@@ -780,7 +782,7 @@ UserDB::recv_peer_del( const MsgFramePublish &pub,  UserBridge &n,
     }
   }
   if ( debug_peer && user_n == NULL )
-    printf( "recv Z_DEL(%lu) from %s via %s, already gone\n",
+    printf( "recv Z_DEL(%" PRIu64 ") from %s via %s, already gone\n",
                 dec.seqno, n.peer.user.val, pub.rte.transport.tport.val );
   return true;
 }
@@ -804,11 +806,11 @@ struct MeshDBRec : public MsgFldSet {
         break;
       case FID_USER:
         this->user     = (const char *) mref.fptr;
-        this->user_len = mref.fsize;
+        this->user_len = (uint32_t) mref.fsize;
         break;
       case FID_MESH_URL:
         this->mesh_url     = (const char *) mref.fptr;
-        this->mesh_url_len = mref.fsize;
+        this->mesh_url_len = (uint32_t) mref.fsize;
         break;
       default:
         break;
@@ -882,17 +884,15 @@ UserDB::mesh_db_size( TransportRoute &rte,  uint32_t except_uid,
 {
   TransportRoute * rte2;
   uint8_t        * filter = NULL;
-  uint32_t         filter_size = 0,
-                   uid,
-                   count = 0,
-                   i = 0;
+  size_t           filter_size = 0, i = 0;
+  uint32_t         uid, count = 0;
 
   if ( dec.test( FID_MESH_FILTER ) ) {
     filter      = dec.mref[ FID_MESH_FILTER ].fptr;
     filter_size = dec.mref[ FID_MESH_FILTER ].fsize / 4;
   }
   MsgEst e;
-  for ( uint32_t tid = 0; tid < this->transport_tab.count; tid++ ) {
+  for ( size_t tid = 0; tid < this->transport_tab.count; tid++ ) {
     rte2 = this->transport_tab.ptr[ tid ];
     if ( rte2->mesh_id == rte.mesh_id ) {
       for ( bool ok = rte2->uid_connected.first( uid ); ok;
@@ -929,9 +929,8 @@ UserDB::mesh_db_submsg( TransportRoute &rte,  uint32_t except_uid,
 {
   TransportRoute * rte2;
   uint8_t        * filter = NULL;
-  uint32_t         filter_size = 0,
-                   uid,
-                   i = 0;
+  size_t           filter_size = 0, i = 0;
+  uint32_t         uid;
 
   if ( dec.test( FID_MESH_FILTER ) ) {
     filter      = dec.mref[ FID_MESH_FILTER ].fptr;
@@ -940,7 +939,7 @@ UserDB::mesh_db_submsg( TransportRoute &rte,  uint32_t except_uid,
   SubMsgBuf s( m );
   s.open_submsg();
 
-  for ( uint32_t tid = 0; tid < this->transport_tab.count; tid++ ) {
+  for ( size_t tid = 0; tid < this->transport_tab.count; tid++ ) {
     rte2 = this->transport_tab.ptr[ tid ];
     if ( rte2->mesh_id == rte.mesh_id ) {
       for ( bool ok = rte2->uid_connected.first( uid ); ok;
@@ -1273,7 +1272,7 @@ UserDB::remove_pending_peer( const Nonce *b_nonce,  uint64_t pseqno ) noexcept
 {
   UserPendingRoute *p;
   char buf[ NONCE_B64_LEN + 1 ];
-  d_peer( "remove_pending_peer [%s] seqno %lu\n",
+  d_peer( "remove_pending_peer [%s] seqno %" PRIu64 "\n",
           b_nonce == NULL ? "" : b_nonce->to_base64_str( buf ), pseqno );
   for ( size_t i = 0; i < this->pending_queue.num_elems; i++ ) {
     p = this->pending_queue.heap[ i ];

@@ -1,27 +1,100 @@
 /*
  * from Andrew Moon, https://github.com/floodyberry/ed25519-donna
  */
+#include <stdio.h>
 #include <string.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <raims/ed25519.h>
-#include <openssl/sha.h>
+#include <raims/sha512.h>
 
 using namespace rai;
 using namespace ms;
 using namespace kv;
 
 typedef uint64_t bignum25519[5];
-typedef __uint128_t uint128_t;
 typedef uint64_t bignum256modm_element_t;
 typedef bignum256modm_element_t bignum256modm[5];
 
-#define mul64x64_128(out,a,b) out = (uint128_t)a * b;
-#define shr128(out,in,shift) out = (uint64_t)(in >> (shift));
-#define shl128(out,in,shift) out = (uint64_t)((in << shift) >> 64);
-#define add128(a,b) a += b;
-#define add128_64(a,b) a += (uint64_t)b;
-#define lo128(a) ((uint64_t)a)
+#ifndef _MSC_VER
+
+typedef __uint128_t uint128_t;
+
+static inline void shr128( uint64_t &out, uint128_t in, int shift ) {
+  out = (uint64_t)( in >> shift );
+}
+static inline void add128_64( uint128_t &a, uint64_t b ) {
+  a += b;
+}
+static inline void add128( uint128_t &a, uint128_t b ) {
+  a += b;
+}
+static inline uint64_t lo128( uint128_t a ) {
+  return (uint64_t) a;
+}
+static inline void shl128( uint64_t &out,  uint128_t in,  int shift ) {
+  out = (uint64_t) ( ( in << shift ) >> 64 );
+}
+static inline void mul64x64_128( uint128_t &out, uint64_t a, uint64_t b ) {
+  out = (uint128_t) a * b;
+}
+
+#else
+
+#include <intrin.h>
+
+typedef struct uint128_s {
+  uint64_t lo, hi;
+  uint128_s() {}
+  uint128_s( uint64_t l,  uint64_t h = 0 ) : lo( l ), hi( h ) {}
+  uint128_s( const uint128_s &b ) : lo( b.lo ), hi( b.hi ) {}
+
+  uint64_t operator >>( int shift ) const {
+    return __shiftright128( this->lo, this->hi, shift );
+  }
+  uint128_s operator *( uint64_t m ) const {
+    uint128_s x;
+    x.lo = _umul128( this->lo, m, &x.hi );
+    return x;
+  }
+  uint128_s operator +( const uint128_s &b ) const {
+    uint128_s a = *this;;
+    return a += b;
+  }
+  uint128_s &operator +=( const uint128_s &b ) {
+    uint64_t p = this->lo;
+    this->lo += b.lo;
+    this->hi += b.hi + ( this->lo < p );
+    return *this;
+  }
+  explicit operator uint64_t() const {
+    return this->lo;
+  }
+} uint128_t;
+
+static inline void shr128( uint64_t &out, uint128_t in, int shift ) {
+  out = __shiftright128( in.lo, in.hi, shift );
+}
+static inline void add128_64( uint128_t &a, uint64_t b ) {
+  uint64_t p = a.lo;
+  a.lo += b;
+  a.hi += (a.lo < p);
+}
+static inline void add128( uint128_t &a, uint128_t b ) {
+  a += b;
+}
+static inline uint64_t lo128( uint128_t a ) {
+  return a.lo;
+}
+static inline void shl128( uint64_t &out,  uint128_t in,  int shift ) {
+  out = __shiftleft128( in.lo, in.hi, shift );
+}
+static inline void mul64x64_128( uint128_t &out, uint64_t a, uint64_t b ) {
+  uint128_s a128( a );
+  out = a128 * b;
+}
+
+#endif
 
 struct ge25519 {
   bignum25519 x, y, z, t;
@@ -63,11 +136,77 @@ struct hash_512bits : public KeyT<hash_512bits, 64> {
   hash_512bits & operator=( const uint8_t *x ) { return this->copy_from( x ); }
 };
 
+#if 0
+namespace {
+static const char hex_chars[] = "0123456789abcdef";
+struct HexDump {
+  char line[ 80 ];
+  uint32_t boff, hex, ascii;
+  size_t stream_off;
+
+  HexDump( uint64_t off ) : boff( 0 ), stream_off( off ) {
+    this->flush_line();
+  }
+  void reset( void ) {
+    this->boff = 0;
+    this->stream_off = 0;
+    this->flush_line();
+  }
+  void flush_line( void ) {
+    this->stream_off += this->boff;
+    this->boff  = 0;
+    this->hex   = 9;
+    this->ascii = 61;
+    this->init_line();
+  }
+  void init_line( void ) {
+    size_t j, k = this->stream_off;
+    ::memset( this->line, ' ', 79 );
+    this->line[ 79 ] = '\0';
+    this->line[ 5 ] = hex_chars[ k & 0xf ];
+    k >>= 4; j = 4;
+    while ( k > 0 ) {
+      this->line[ j ] = hex_chars[ k & 0xf ];
+      if ( j-- == 0 )
+        break;
+      k >>= 4;
+    }
+  }
+  size_t fill_line( const void *ptr,  size_t off,  size_t len ) {
+    while ( off < len && this->boff < 16 ) {
+      uint8_t b = ((uint8_t *) ptr)[ off++ ];
+      this->line[ this->hex ]   = hex_chars[ b >> 4 ];
+      this->line[ this->hex+1 ] = hex_chars[ b & 0xf ];
+      this->hex += 3;
+      if ( b >= ' ' && b <= 127 )
+        line[ this->ascii ] = b;
+      this->ascii++;
+      if ( ( ++this->boff & 0x3 ) == 0 )
+        this->hex++;
+    }
+    return off;
+  }
+};
+}
+
+static void
+hex_dump( const char *nm,  const void *data,  size_t datalen )
+{
+  HexDump hex( 0 );
+  size_t off = 0;
+  printf( "%s:\n", nm );
+  while ( off < datalen ) {
+    off = hex.fill_line( data, off, datalen );
+    printf( "%s\n", hex.line );
+    hex.flush_line();
+  }
+}
+#endif
 /* Generates a (extsk[0..31]) and aExt (extsk[32..63]) */
 static void
 ed25519_extsk( hash_512bits &extsk, const ed25519_secret_key &sk ) noexcept
 {
-  SHA512( sk, 32, extsk );
+  Sha512_hash( sk, 32, extsk );
   extsk[ 0 ]  &= 0xf8;
   extsk[ 31 ] &= 0x7f;
   extsk[ 31 ] |= 0x40;
@@ -78,12 +217,12 @@ ed25519_hram( hash_512bits &hram, const ed25519_signature &RS,
               const ed25519_public_key &pk, const void *m,
               size_t mlen ) noexcept
 {
-  SHA512_CTX ctx;
-  SHA512_Init( &ctx );
-  SHA512_Update( &ctx, RS, 32 );
-  SHA512_Update( &ctx, pk, 32 );
-  SHA512_Update( &ctx, m, mlen );
-  SHA512_Final( hram, &ctx );
+  Sha512Context ctx;
+  ctx.initialize();
+  ctx.update( RS, 32 );
+  ctx.update( pk, 32 );
+  ctx.update( m, mlen );
+  ctx.finalize( hram );
 }
 
 void
@@ -92,7 +231,6 @@ ED25519::gen_key( void ) noexcept
   rand::fill_urandom_bytes( this->sk, 32 );
   this->publickey();
 }
-
 
 void
 ED25519::publickey( void ) noexcept
@@ -110,7 +248,7 @@ ED25519::publickey( void ) noexcept
 void
 ED25519::sign( const void *m, size_t mlen ) noexcept
 {
-  SHA512_CTX    ctx;
+  Sha512Context ctx;
   bignum256modm r, S, a;
   ge25519       R;
   hash_512bits  extsk, hashr, hram;
@@ -118,10 +256,10 @@ ED25519::sign( const void *m, size_t mlen ) noexcept
   ed25519_extsk( extsk, this->sk );
 
   /* r = H(aExt[32..64], m) */
-  SHA512_Init( &ctx );
-  SHA512_Update( &ctx, extsk + 32, 32 );
-  SHA512_Update( &ctx, m, mlen );
-  SHA512_Final( hashr, &ctx );
+  ctx.initialize();
+  ctx.update( extsk + 32, 32 );
+  ctx.update( m, mlen );
+  ctx.finalize( hashr );
   expand256_modm( r, hashr, 64 );
 
   /* R = rB */
@@ -358,13 +496,13 @@ curve25519_mul( bignum25519 out, const bignum25519 in2, const bignum25519 in ) n
 
   r0 = lo128( t[ 0 ] ) & reduce_mask_51;
   shr128( c, t[ 0 ], 51 );
-  add128_64( t[ 1 ], c ) r1 = lo128( t[ 1 ] ) & reduce_mask_51;
+  add128_64( t[ 1 ], c ); r1 = lo128( t[ 1 ] ) & reduce_mask_51;
   shr128( c, t[ 1 ], 51 );
-  add128_64( t[ 2 ], c ) r2 = lo128( t[ 2 ] ) & reduce_mask_51;
+  add128_64( t[ 2 ], c ); r2 = lo128( t[ 2 ] ) & reduce_mask_51;
   shr128( c, t[ 2 ], 51 );
-  add128_64( t[ 3 ], c ) r3 = lo128( t[ 3 ] ) & reduce_mask_51;
+  add128_64( t[ 3 ], c ); r3 = lo128( t[ 3 ] ) & reduce_mask_51;
   shr128( c, t[ 3 ], 51 );
-  add128_64( t[ 4 ], c ) r4 = lo128( t[ 4 ] ) & reduce_mask_51;
+  add128_64( t[ 4 ], c ); r4 = lo128( t[ 4 ] ) & reduce_mask_51;
   shr128( c, t[ 4 ], 51 );
   r0 += c * 19;
   c  = r0 >> 51;
@@ -488,13 +626,13 @@ curve25519_square( bignum25519 out, const bignum25519 in ) noexcept
 
   r0 = lo128( t[ 0 ] ) & reduce_mask_51;
   shr128( c, t[ 0 ], 51 );
-  add128_64( t[ 1 ], c ) r1 = lo128( t[ 1 ] ) & reduce_mask_51;
+  add128_64( t[ 1 ], c ); r1 = lo128( t[ 1 ] ) & reduce_mask_51;
   shr128( c, t[ 1 ], 51 );
-  add128_64( t[ 2 ], c ) r2 = lo128( t[ 2 ] ) & reduce_mask_51;
+  add128_64( t[ 2 ], c ); r2 = lo128( t[ 2 ] ) & reduce_mask_51;
   shr128( c, t[ 2 ], 51 );
-  add128_64( t[ 3 ], c ) r3 = lo128( t[ 3 ] ) & reduce_mask_51;
+  add128_64( t[ 3 ], c ); r3 = lo128( t[ 3 ] ) & reduce_mask_51;
   shr128( c, t[ 3 ], 51 );
-  add128_64( t[ 4 ], c ) r4 = lo128( t[ 4 ] ) & reduce_mask_51;
+  add128_64( t[ 4 ], c ); r4 = lo128( t[ 4 ] ) & reduce_mask_51;
   shr128( c, t[ 4 ], 51 );
   r0 += c * 19;
   c  = r0 >> 51;
@@ -729,69 +867,103 @@ barrett_reduce256_modm( bignum256modm r, const bignum256modm q1,
   /* q1 = x >> 248 = 264 bits = 5 56 bit elements
      q2 = mu * q1
      q3 = (q2 / 256(32+1)) = q2 / (2^8)^(32+1) = q2 >> 264 */
-  mul64x64_128( c, modm_mu[ 0 ], q1[ 3 ] )
-    mul64x64_128( mul, modm_mu[ 3 ], q1[ 0 ] ) add128( c, mul )
-      mul64x64_128( mul, modm_mu[ 1 ], q1[ 2 ] ) add128( c, mul )
-        mul64x64_128( mul, modm_mu[ 2 ], q1[ 1 ] ) add128( c, mul )
-          shr128( f, c, 56 );
-  mul64x64_128( c, modm_mu[ 0 ], q1[ 4 ] ) add128_64( c, f )
-    mul64x64_128( mul, modm_mu[ 4 ], q1[ 0 ] ) add128( c, mul )
-      mul64x64_128( mul, modm_mu[ 3 ], q1[ 1 ] ) add128( c, mul )
-        mul64x64_128( mul, modm_mu[ 1 ], q1[ 3 ] ) add128( c, mul )
-          mul64x64_128( mul, modm_mu[ 2 ], q1[ 2 ] ) add128( c, mul ) f =
-            lo128( c );
+  mul64x64_128( c, modm_mu[ 0 ], q1[ 3 ] );
+  mul64x64_128( mul, modm_mu[ 3 ], q1[ 0 ] );
+  add128( c, mul );
+  mul64x64_128( mul, modm_mu[ 1 ], q1[ 2 ] );
+  add128( c, mul );
+  mul64x64_128( mul, modm_mu[ 2 ], q1[ 1 ] );
+  add128( c, mul );
+  shr128( f, c, 56 );
+  mul64x64_128( c, modm_mu[ 0 ], q1[ 4 ] );
+  add128_64( c, f );
+  mul64x64_128( mul, modm_mu[ 4 ], q1[ 0 ] );
+  add128( c, mul );
+  mul64x64_128( mul, modm_mu[ 3 ], q1[ 1 ] );
+  add128( c, mul );
+  mul64x64_128( mul, modm_mu[ 1 ], q1[ 3 ] );
+  add128( c, mul );
+  mul64x64_128( mul, modm_mu[ 2 ], q1[ 2 ] );
+  add128( c, mul );
+  f       = lo128( c );
   q3[ 0 ] = ( f >> 40 ) & 0xffff;
   shr128( f, c, 56 );
-  mul64x64_128( c, modm_mu[ 4 ], q1[ 1 ] ) add128_64( c, f )
-    mul64x64_128( mul, modm_mu[ 1 ], q1[ 4 ] ) add128( c, mul )
-      mul64x64_128( mul, modm_mu[ 2 ], q1[ 3 ] ) add128( c, mul )
-        mul64x64_128( mul, modm_mu[ 3 ], q1[ 2 ] ) add128( c, mul ) f =
-          lo128( c );
+  mul64x64_128( c, modm_mu[ 4 ], q1[ 1 ] );
+  add128_64( c, f );
+  mul64x64_128( mul, modm_mu[ 1 ], q1[ 4 ] );
+  add128( c, mul );
+  mul64x64_128( mul, modm_mu[ 2 ], q1[ 3 ] );
+  add128( c, mul );
+  mul64x64_128( mul, modm_mu[ 3 ], q1[ 2 ] );
+  add128( c, mul );
+  f = lo128( c );
   q3[ 0 ] |= ( f << 16 ) & 0xffffffffffffff;
   q3[ 1 ] = ( f >> 40 ) & 0xffff;
   shr128( f, c, 56 );
-  mul64x64_128( c, modm_mu[ 4 ], q1[ 2 ] ) add128_64( c, f )
-    mul64x64_128( mul, modm_mu[ 2 ], q1[ 4 ] ) add128( c, mul )
-      mul64x64_128( mul, modm_mu[ 3 ], q1[ 3 ] ) add128( c, mul ) f =
-        lo128( c );
+  mul64x64_128( c, modm_mu[ 4 ], q1[ 2 ] );
+  add128_64( c, f );
+  mul64x64_128( mul, modm_mu[ 2 ], q1[ 4 ] );
+  add128( c, mul );
+  mul64x64_128( mul, modm_mu[ 3 ], q1[ 3 ] );
+  add128( c, mul );
+  f = lo128( c );
   q3[ 1 ] |= ( f << 16 ) & 0xffffffffffffff;
   q3[ 2 ] = ( f >> 40 ) & 0xffff;
   shr128( f, c, 56 );
-  mul64x64_128( c, modm_mu[ 4 ], q1[ 3 ] ) add128_64( c, f )
-    mul64x64_128( mul, modm_mu[ 3 ], q1[ 4 ] ) add128( c, mul ) f = lo128( c );
+  mul64x64_128( c, modm_mu[ 4 ], q1[ 3 ] );
+  add128_64( c, f );
+  mul64x64_128( mul, modm_mu[ 3 ], q1[ 4 ] );
+  add128( c, mul );
+  f = lo128( c );
   q3[ 2 ] |= ( f << 16 ) & 0xffffffffffffff;
   q3[ 3 ] = ( f >> 40 ) & 0xffff;
   shr128( f, c, 56 );
-  mul64x64_128( c, modm_mu[ 4 ], q1[ 4 ] ) add128_64( c, f ) f = lo128( c );
+  mul64x64_128( c, modm_mu[ 4 ], q1[ 4 ] );
+  add128_64( c, f );
+  f = lo128( c );
   q3[ 3 ] |= ( f << 16 ) & 0xffffffffffffff;
   q3[ 4 ] = ( f >> 40 ) & 0xffff;
   shr128( f, c, 56 );
   q3[ 4 ] |= ( f << 16 );
 
-  mul64x64_128( c, modm_m[ 0 ], q3[ 0 ] ) r2[ 0 ] =
+  mul64x64_128( c, modm_m[ 0 ], q3[ 0 ] ); r2[ 0 ] =
     lo128( c ) & 0xffffffffffffff;
   shr128( f, c, 56 );
-  mul64x64_128( c, modm_m[ 0 ], q3[ 1 ] ) add128_64( c, f )
-    mul64x64_128( mul, modm_m[ 1 ], q3[ 0 ] ) add128( c, mul ) r2[ 1 ] =
-      lo128( c ) & 0xffffffffffffff;
+  mul64x64_128( c, modm_m[ 0 ], q3[ 1 ] );
+  add128_64( c, f );
+  mul64x64_128( mul, modm_m[ 1 ], q3[ 0 ] );
+  add128( c, mul );
+  r2[ 1 ] = lo128( c ) & 0xffffffffffffff;
   shr128( f, c, 56 );
-  mul64x64_128( c, modm_m[ 0 ], q3[ 2 ] ) add128_64( c, f )
-    mul64x64_128( mul, modm_m[ 2 ], q3[ 0 ] ) add128( c, mul )
-      mul64x64_128( mul, modm_m[ 1 ], q3[ 1 ] ) add128( c, mul ) r2[ 2 ] =
-        lo128( c ) & 0xffffffffffffff;
+  mul64x64_128( c, modm_m[ 0 ], q3[ 2 ] );
+  add128_64( c, f );
+  mul64x64_128( mul, modm_m[ 2 ], q3[ 0 ] );
+  add128( c, mul );
+  mul64x64_128( mul, modm_m[ 1 ], q3[ 1 ] );
+  add128( c, mul );
+  r2[ 2 ] = lo128( c ) & 0xffffffffffffff;
   shr128( f, c, 56 );
-  mul64x64_128( c, modm_m[ 0 ], q3[ 3 ] ) add128_64( c, f )
-    mul64x64_128( mul, modm_m[ 3 ], q3[ 0 ] ) add128( c, mul )
-      mul64x64_128( mul, modm_m[ 1 ], q3[ 2 ] ) add128( c, mul )
-        mul64x64_128( mul, modm_m[ 2 ], q3[ 1 ] ) add128( c, mul ) r2[ 3 ] =
-          lo128( c ) & 0xffffffffffffff;
+  mul64x64_128( c, modm_m[ 0 ], q3[ 3 ] );
+  add128_64( c, f );
+  mul64x64_128( mul, modm_m[ 3 ], q3[ 0 ] );
+  add128( c, mul );
+  mul64x64_128( mul, modm_m[ 1 ], q3[ 2 ] );
+  add128( c, mul );
+  mul64x64_128( mul, modm_m[ 2 ], q3[ 1 ] );
+  add128( c, mul );
+  r2[ 3 ] = lo128( c ) & 0xffffffffffffff;
   shr128( f, c, 56 );
-  mul64x64_128( c, modm_m[ 0 ], q3[ 4 ] ) add128_64( c, f )
-    mul64x64_128( mul, modm_m[ 4 ], q3[ 0 ] ) add128( c, mul )
-      mul64x64_128( mul, modm_m[ 3 ], q3[ 1 ] ) add128( c, mul )
-        mul64x64_128( mul, modm_m[ 1 ], q3[ 3 ] ) add128( c, mul )
-          mul64x64_128( mul, modm_m[ 2 ], q3[ 2 ] ) add128( c, mul ) r2[ 4 ] =
-            lo128( c ) & 0x0000ffffffffff;
+  mul64x64_128( c, modm_m[ 0 ], q3[ 4 ] );
+  add128_64( c, f );
+  mul64x64_128( mul, modm_m[ 4 ], q3[ 0 ] );
+  add128( c, mul );
+  mul64x64_128( mul, modm_m[ 3 ], q3[ 1 ] );
+  add128( c, mul );
+  mul64x64_128( mul, modm_m[ 1 ], q3[ 3 ] );
+  add128( c, mul );
+  mul64x64_128( mul, modm_m[ 2 ], q3[ 2 ] );
+  add128( c, mul );
+  r2[ 4 ] = lo128( c ) & 0x0000ffffffffff;
 
   pb = 0;
   pb += r2[ 0 ];
@@ -848,51 +1020,84 @@ mul256_modm( bignum256modm r, const bignum256modm x, const bignum256modm y ) noe
   uint128_t               c, mul;
   bignum256modm_element_t f;
 
-  mul64x64_128( c, x[ 0 ], y[ 0 ] ) f = lo128( c );
-  r1[ 0 ]                             = f & 0xffffffffffffff;
+  mul64x64_128( c, x[ 0 ], y[ 0 ] );
+  f       = lo128( c );
+  r1[ 0 ] = f & 0xffffffffffffff;
   shr128( f, c, 56 );
-  mul64x64_128( c, x[ 0 ], y[ 1 ] ) add128_64( c, f )
-    mul64x64_128( mul, x[ 1 ], y[ 0 ] ) add128( c, mul ) f = lo128( c );
+  mul64x64_128( c, x[ 0 ], y[ 1 ] );
+  add128_64( c, f );
+  mul64x64_128( mul, x[ 1 ], y[ 0 ] );
+  add128( c, mul );
+  f       = lo128( c );
   r1[ 1 ] = f & 0xffffffffffffff;
   shr128( f, c, 56 );
-  mul64x64_128( c, x[ 0 ], y[ 2 ] ) add128_64( c, f )
-    mul64x64_128( mul, x[ 2 ], y[ 0 ] ) add128( c, mul )
-      mul64x64_128( mul, x[ 1 ], y[ 1 ] ) add128( c, mul ) f = lo128( c );
+  mul64x64_128( c, x[ 0 ], y[ 2 ] );
+  add128_64( c, f );
+  mul64x64_128( mul, x[ 2 ], y[ 0 ] );
+  add128( c, mul );
+  mul64x64_128( mul, x[ 1 ], y[ 1 ] );
+  add128( c, mul );
+  f       = lo128( c );
   r1[ 2 ] = f & 0xffffffffffffff;
   shr128( f, c, 56 );
-  mul64x64_128( c, x[ 0 ], y[ 3 ] ) add128_64( c, f )
-    mul64x64_128( mul, x[ 3 ], y[ 0 ] ) add128( c, mul )
-      mul64x64_128( mul, x[ 1 ], y[ 2 ] ) add128( c, mul )
-        mul64x64_128( mul, x[ 2 ], y[ 1 ] ) add128( c, mul ) f = lo128( c );
+  mul64x64_128( c, x[ 0 ], y[ 3 ] );
+  add128_64( c, f );
+  mul64x64_128( mul, x[ 3 ], y[ 0 ] );
+  add128( c, mul );
+  mul64x64_128( mul, x[ 1 ], y[ 2 ] );
+  add128( c, mul );
+  mul64x64_128( mul, x[ 2 ], y[ 1 ] );
+  add128( c, mul );
+  f       = lo128( c );
   r1[ 3 ] = f & 0xffffffffffffff;
   shr128( f, c, 56 );
-  mul64x64_128( c, x[ 0 ], y[ 4 ] ) add128_64( c, f )
-    mul64x64_128( mul, x[ 4 ], y[ 0 ] ) add128( c, mul )
-      mul64x64_128( mul, x[ 3 ], y[ 1 ] ) add128( c, mul )
-        mul64x64_128( mul, x[ 1 ], y[ 3 ] ) add128( c, mul )
-          mul64x64_128( mul, x[ 2 ], y[ 2 ] ) add128( c, mul ) f = lo128( c );
+  mul64x64_128( c, x[ 0 ], y[ 4 ] );
+  add128_64( c, f );
+  mul64x64_128( mul, x[ 4 ], y[ 0 ] );
+  add128( c, mul );
+  mul64x64_128( mul, x[ 3 ], y[ 1 ] );
+  add128( c, mul );
+  mul64x64_128( mul, x[ 1 ], y[ 3 ] );
+  add128( c, mul );
+  mul64x64_128( mul, x[ 2 ], y[ 2 ] );
+  add128( c, mul );
+  f       = lo128( c );
   r1[ 4 ] = f & 0x0000ffffffffff;
   q1[ 0 ] = ( f >> 24 ) & 0xffffffff;
   shr128( f, c, 56 );
-  mul64x64_128( c, x[ 4 ], y[ 1 ] ) add128_64( c, f )
-    mul64x64_128( mul, x[ 1 ], y[ 4 ] ) add128( c, mul )
-      mul64x64_128( mul, x[ 2 ], y[ 3 ] ) add128( c, mul )
-        mul64x64_128( mul, x[ 3 ], y[ 2 ] ) add128( c, mul ) f = lo128( c );
+  mul64x64_128( c, x[ 4 ], y[ 1 ] );
+  add128_64( c, f );
+  mul64x64_128( mul, x[ 1 ], y[ 4 ] );
+  add128( c, mul );
+  mul64x64_128( mul, x[ 2 ], y[ 3 ] );
+  add128( c, mul );
+  mul64x64_128( mul, x[ 3 ], y[ 2 ] );
+  add128( c, mul );
+  f = lo128( c );
   q1[ 0 ] |= ( f << 32 ) & 0xffffffffffffff;
   q1[ 1 ] = ( f >> 24 ) & 0xffffffff;
   shr128( f, c, 56 );
-  mul64x64_128( c, x[ 4 ], y[ 2 ] ) add128_64( c, f )
-    mul64x64_128( mul, x[ 2 ], y[ 4 ] ) add128( c, mul )
-      mul64x64_128( mul, x[ 3 ], y[ 3 ] ) add128( c, mul ) f = lo128( c );
+  mul64x64_128( c, x[ 4 ], y[ 2 ] );
+  add128_64( c, f );
+  mul64x64_128( mul, x[ 2 ], y[ 4 ] );
+  add128( c, mul );
+  mul64x64_128( mul, x[ 3 ], y[ 3 ] );
+  add128( c, mul );
+  f = lo128( c );
   q1[ 1 ] |= ( f << 32 ) & 0xffffffffffffff;
   q1[ 2 ] = ( f >> 24 ) & 0xffffffff;
   shr128( f, c, 56 );
-  mul64x64_128( c, x[ 4 ], y[ 3 ] ) add128_64( c, f )
-    mul64x64_128( mul, x[ 3 ], y[ 4 ] ) add128( c, mul ) f = lo128( c );
+  mul64x64_128( c, x[ 4 ], y[ 3 ] );
+  add128_64( c, f );
+  mul64x64_128( mul, x[ 3 ], y[ 4 ] );
+  add128( c, mul );
+  f = lo128( c );
   q1[ 2 ] |= ( f << 32 ) & 0xffffffffffffff;
   q1[ 3 ] = ( f >> 24 ) & 0xffffffff;
   shr128( f, c, 56 );
-  mul64x64_128( c, x[ 4 ], y[ 4 ] ) add128_64( c, f ) f = lo128( c );
+  mul64x64_128( c, x[ 4 ], y[ 4 ] );
+  add128_64( c, f );
+  f = lo128( c );
   q1[ 3 ] |= ( f << 32 ) & 0xffffffffffffff;
   q1[ 4 ] = ( f >> 24 ) & 0xffffffff;
   shr128( f, c, 56 );
@@ -1003,7 +1208,6 @@ contract256_window4_modm( signed char r[ 64 ], const bignum256modm in ) noexcept
       v >>= 4;
     }
   }
-
   /* making it signed */
   carry = 0;
   for ( i = 0; i < 63; i++ ) {
@@ -1024,7 +1228,6 @@ contract256_slidingwindow_modm( signed char r[ 256 ], const bignum256modm s,
   int                     m = ( 1 << ( windowsize - 1 ) ) - 1, soplen = 256;
   signed char *           bits = r;
   bignum256modm_element_t v;
-
   /* first put the binary expansion into r  */
   for ( i = 0; i < 4; i++ ) {
     v = s[ i ];
@@ -1034,7 +1237,6 @@ contract256_slidingwindow_modm( signed char r[ 256 ], const bignum256modm s,
   v = s[ 4 ];
   for ( j = 0; j < 32; j++, v >>= 1 )
     *bits++ = ( v & 1 );
-
   /* Making it sliding window */
   for ( j = 0; j < soplen; j++ ) {
     if ( !r[ j ] )
@@ -1651,7 +1853,11 @@ ge25519_scalarmult_base_choose_niels( ge25519_niels *t,
 }
 
 /* multiples of the base point in packed {ysubx, xaddy, t2d} form */
+#ifndef _MSC_VER
 static const uint8_t __attribute__((__aligned__(16))) basepoint_table /*ge25519_niels_base_multiples*/ [256][96] = {
+#else
+static const uint8_t __declspec(align(64)) basepoint_table /*ge25519_niels_base_multiples*/ [256][96] = {
+#endif
 {0x3e,0x91,0x40,0xd7,0x05,0x39,0x10,0x9d,0xb3,0xbe,0x40,0xd1,0x05,0x9f,0x39,0xfd,0x09,0x8a,0x8f,0x68,0x34,0x84,0xc1,0xa5,0x67,0x12,0xf8,0x98,0x92,0x2f,0xfd,0x44,0x85,0x3b,0x8c,0xf5,0xc6,0x93,0xbc,0x2f,0x19,0x0e,0x8c,0xfb,0xc6,0x2d,0x93,0xcf,0xc2,0x42,0x3d,0x64,0x98,0x48,0x0b,0x27,0x65,0xba,0xd4,0x33,0x3a,0x9d,0xcf,0x07,0x59,0xbb,0x6f,0x4b,0x67,0x15,0xbd,0xdb,0xea,0xa5,0xa2,0xee,0x00,0x3f,0xe1,0x41,0xfa,0xc6,0x57,0xc9,0x1c,0x9d,0xd4,0xcd,0xca,0xec,0x16,0xaf,0x1f,0xbe,0x0e,0x4f},
 {0xa8,0xd5,0xb4,0x42,0x60,0xa5,0x99,0x8a,0xf6,0xac,0x60,0x4e,0x0c,0x81,0x2b,0x8f,0xaa,0x37,0x6e,0xb1,0x6b,0x23,0x9e,0xe0,0x55,0x25,0xc9,0x69,0xa6,0x95,0xb5,0x6b,0xd7,0x71,0x3c,0x93,0xfc,0xe7,0x24,0x92,0xb5,0xf5,0x0f,0x7a,0x96,0x9d,0x46,0x9f,0x02,0x07,0xd6,0xe1,0x65,0x9a,0xa6,0x5a,0x2e,0x2e,0x7d,0xa8,0x3f,0x06,0x0c,0x59,0x02,0x68,0xd3,0xda,0xaa,0x7e,0x34,0x6e,0x05,0x48,0xee,0x83,0x93,0x59,0xf3,0xba,0x26,0x68,0x07,0xe6,0x10,0xbe,0xca,0x3b,0xb8,0xd1,0x5e,0x16,0x0a,0x4f,0x31,0x49},
 {0x65,0xd2,0xfc,0xa4,0xe8,0x1f,0x61,0x56,0x7d,0xba,0xc1,0xe5,0xfd,0x53,0xd3,0x3b,0xbd,0xd6,0x4b,0x21,0x1a,0xf3,0x31,0x81,0x62,0xda,0x5b,0x55,0x87,0x15,0xb9,0x2a,0x30,0x97,0xee,0x4c,0xa8,0xb0,0x25,0xaf,0x8a,0x4b,0x86,0xe8,0x30,0x84,0x5a,0x02,0x32,0x67,0x01,0x9f,0x02,0x50,0x1b,0xc1,0xf4,0xf8,0x80,0x9a,0x1b,0x4e,0x16,0x7a,0x34,0x48,0x67,0xf1,0xf4,0x11,0xf2,0x9b,0x95,0xf8,0x2d,0xf6,0x17,0x6b,0x4e,0xb8,0x4e,0x2a,0x72,0x5b,0x07,0x6f,0xde,0xd7,0x21,0x2a,0xbb,0x63,0xb9,0x04,0x9a,0x54},

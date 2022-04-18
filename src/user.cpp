@@ -1,7 +1,9 @@
 #include <stdio.h>
 #include <string.h>
-#include <stdint.h>
 #include <stdlib.h>
+#include <stdint.h>
+#define __STDC_FORMAT_MACROS
+#include <inttypes.h>
 #include <raims/crypt.h>
 #include <raims/user.h>
 #include <raimd/md_types.h>
@@ -52,10 +54,10 @@ UserBuf::copy( const ConfigTree::User &u ) noexcept
   if ( this->pub_len == 0 )
     this->pub[ 0 ] = '\0';
   if ( this->pri_len != u.pri.len )
-    fprintf( stderr, "pri len %u > %lu\n", u.pri.len,
+    fprintf( stderr, "pri len %u > %" PRIu64 "\n", u.pri.len,
              ECDH_CIPHER_B64_LEN );
   if ( this->pub_len != u.pub.len )
-    fprintf( stderr, "pub len %u > %lu\n", u.pub.len,
+    fprintf( stderr, "pub len %u > %" PRIu64 "\n", u.pub.len,
              ECDH_CIPHER_B64_LEN );
 }
 
@@ -569,9 +571,9 @@ ServiceBuf::copy( const ConfigTree::Service &s ) noexcept
   if ( this->pub_len == 0 )
     this->pub[ 0 ] = '\0';
   if ( this->pri_len != s.pri.len )
-    fprintf( stderr, "pri len %u > %lu\n", s.pri.len, DSA_CIPHER_B64_LEN );
+    fprintf( stderr, "pri len %u > %" PRIu64 "\n", s.pri.len, DSA_CIPHER_B64_LEN );
   if ( this->pub_len != s.pub.len )
-    fprintf( stderr, "pub len %u > %lu\n", s.pub.len, DSA_CIPHER_B64_LEN );
+    fprintf( stderr, "pub len %u > %" PRIu64 "\n", s.pub.len, DSA_CIPHER_B64_LEN );
 }
 
 bool

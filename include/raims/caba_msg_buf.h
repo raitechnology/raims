@@ -32,17 +32,17 @@ struct BMsgBufT {
   BMsgBufT( void *m ) : out( (char *) m ), msg( (char *) m ) {}
 
   void emit_u16( uint16_t val ) {   /* tib sass is big endian */
-    val = __builtin_bswap16( val );
+    val = kv_bswap16( val );
     ::memcpy( this->out, &val, 2 );
     this->out += 2;
   }
   void emit_u32( uint32_t val ) {
-    val = __builtin_bswap32( val );
+    val = kv_bswap32( val );
     ::memcpy( this->out, &val, 4 );
     this->out += 4;
   }
   void emit_u64( uint64_t val ) {
-    val = __builtin_bswap64( val );
+    val = kv_bswap64( val );
     ::memcpy( this->out, &val, 8 );
     this->out += 8;
   }
@@ -68,11 +68,11 @@ struct BMsgBufT {
     if ( (uint64_t) ( n >> 32 ) == 0 ) {
       if ( (uint64_t) ( n >> 16 ) == 0 ) {
         this->emit_u16( CLS_U_SHORT | opt );
-        this->emit_u16( n );
+        this->emit_u16( (uint16_t) n );
       }
       else {
         this->emit_u16( CLS_U_INT | opt );
-        this->emit_u32( n );
+        this->emit_u32( (uint32_t) n );
       }
     }
     else {
@@ -84,7 +84,7 @@ struct BMsgBufT {
   T &i( uint8_t opt,  uint32_t n ) {  /* uint32/16 out */
     if ( (uint32_t) ( n >> 16 ) == 0 ) {
       this->emit_u16( CLS_U_SHORT | opt );
-      this->emit_u16( n );
+      this->emit_u16( (uint16_t) n );
     }
     else {
       this->emit_u16( CLS_U_INT | opt );
@@ -138,7 +138,7 @@ struct MsgBufDigestT : public BMsgBufT<T> {
   uint32_t * hdr;
   char     * dig, * sub;
   MsgBufDigestT( void *m ) : BMsgBufT<T>( m ), hdr( 0 ), dig( 0 ), sub( 0 ) {}
-  T &  open       ( const Nonce &bridge,  uint16_t sublen ) {
+  T &  open       ( const Nonce &bridge,  size_t sublen ) {
     this->hdr  = (uint32_t *) (void *) this->out;
     this->out += 8;
     this->n( FID_BRIDGE, bridge );
@@ -157,7 +157,7 @@ struct MsgBufDigestT : public BMsgBufT<T> {
     return (T &) *this;
   }
   void close_msg  ( uint32_t h,  CabaFlags caba ) {
-    uint32_t sz = this->len() - 8,
+    uint32_t sz = (uint32_t) ( this->len() - 8 ),
              fl = ( (uint32_t) caba.flags << CABA_LENGTH_BITS );
     if ( sz <= CABA_LENGTH_MASK )
       sz |= fl; /* <flags><length> */
@@ -165,8 +165,8 @@ struct MsgBufDigestT : public BMsgBufT<T> {
       sz  = fl; /* length bits == 0 */
       h   = sz; /* size too big, use the hash field */
     }
-    this->hdr[ 0 ] = __builtin_bswap32( sz );
-    this->hdr[ 1 ] = __builtin_bswap32( h );
+    this->hdr[ 0 ] = kv_bswap32( sz );
+    this->hdr[ 1 ] = kv_bswap32( h );
   }
   void close_submsg( uint8_t opt ) {
     size_t sz = this->len();
@@ -174,7 +174,7 @@ struct MsgBufDigestT : public BMsgBufT<T> {
     char * sav = this->out;
     this->out = (char *) (void *) this->hdr;
     this->emit_u16( CLS_LONG_OPAQUE | opt );
-    this->emit_u32( sz - 6 );
+    this->emit_u32( (uint32_t) ( sz - 6 ) );
     this->out = sav;
   }
   T &  session    ( const HmacDigest &hmac,  const Nonce &bridge ) {
@@ -189,31 +189,31 @@ struct MsgBufDigestT : public BMsgBufT<T> {
     return this->k( FID_SESS_KEY, key ); }
 
   T &  subject    ( const char *in, size_t in_len ) {
-    return this->b( FID_SUBJECT, in, in_len ); }
+    return this->b( FID_SUBJECT, in, (uint16_t) in_len ); }
   T &  pattern    ( const char *in, size_t in_len ) {
-    return this->b( FID_PATTERN, in, in_len ); }
+    return this->b( FID_PATTERN, in, (uint16_t) in_len ); }
   T &  reply      ( const char *in, size_t in_len ) {
-    return this->b( FID_REPLY, in, in_len ); }
+    return this->b( FID_REPLY, in, (uint16_t) in_len ); }
   T &  wildcard   ( const char *in, size_t in_len ) {
-    return this->b( FID_WILDCARD, in, in_len ); }
+    return this->b( FID_WILDCARD, in, (uint16_t) in_len ); }
   T &  ucast_url  ( const char *in, size_t in_len ) {
-    return this->b( FID_UCAST_URL, in, in_len ); }
+    return this->b( FID_UCAST_URL, in, (uint16_t) in_len ); }
   T &  mesh_url   ( const char *in, size_t in_len ) {
-    return this->b( FID_MESH_URL, in, in_len ); }
+    return this->b( FID_MESH_URL, in, (uint16_t) in_len ); }
   T &  format     ( const char *in, size_t in_len ) {
-    return this->b( FID_FORMAT, in, in_len ); }
+    return this->b( FID_FORMAT, in, (uint16_t) in_len ); }
   T &  dictionary ( const char *in, size_t in_len ) {
-    return this->b( FID_DICTIONARY, in, in_len ); }
+    return this->b( FID_DICTIONARY, in, (uint16_t) in_len ); }
   T &  tport      ( const char *in, size_t in_len ) {
-    return this->b( FID_TPORT, in, in_len ); }
+    return this->b( FID_TPORT, in, (uint16_t) in_len ); }
   T &  user       ( const char *in, size_t in_len ) {
-    return this->b( FID_USER, in, in_len ); }
+    return this->b( FID_USER, in, (uint16_t) in_len ); }
   T &  service    ( const char *in, size_t in_len ) {
-    return this->b( FID_SERVICE, in, in_len ); }
+    return this->b( FID_SERVICE, in, (uint16_t) in_len ); }
   T &  create     ( const char *in, size_t in_len ) {
-    return this->b( FID_CREATE, in, in_len ); }
+    return this->b( FID_CREATE, in, (uint16_t) in_len ); }
   T &  expires    ( const char *in, size_t in_len ) {
-    return this->b( FID_EXPIRES, in, in_len ); }
+    return this->b( FID_EXPIRES, in, (uint16_t) in_len ); }
 
   T  & sync_bridge( const Nonce &bridge ) {
     return this->n( FID_SYNC_BRIDGE, bridge ); }
@@ -223,11 +223,11 @@ struct MsgBufDigestT : public BMsgBufT<T> {
     return this->n( FID_MESH_CSUM, csum ); }
 
   T  & mesh_filter( const void *in, size_t in_len ) {
-    return this->o( FID_MESH_FILTER, in, in_len ); }
+    return this->o( FID_MESH_FILTER, in, (uint32_t) in_len ); }
   T  & bloom      ( const void *in, size_t in_len ) {
-    return this->o( FID_BLOOM, in, in_len ); }
+    return this->o( FID_BLOOM, in, (uint32_t) in_len ); }
   T  & data       ( const void *in, size_t in_len ) {
-    return this->o( FID_DATA, in, in_len ); }
+    return this->o( FID_DATA, in, (uint32_t) in_len ); }
 
   T  & cnonce( const Nonce &val ) { return this->n( FID_CNONCE, val ); }
 
@@ -263,7 +263,7 @@ struct MsgBufDigestT : public BMsgBufT<T> {
   void insert_subject( const char *subject, size_t sublen ) {
     char * sav = this->out;
     this->out = this->sub;
-    this->b( FID_SUB, subject, sublen );
+    this->b( FID_SUB, subject, (uint16_t) sublen );
     this->out = sav;
   }
   void insert_digest( const HashDigest &ha1 ) {

@@ -2,9 +2,15 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdint.h>
+#define __STDC_FORMAT_MACROS
+#include <inttypes.h>
+#ifndef _MSC_VER
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netdb.h>
+#else
+#include <raikv/win.h>
+#endif
 #include <raims/ev_inbox_transport.h>
 #include <raims/transport.h>
 #include <raikv/ev_publish.h>
@@ -20,9 +26,9 @@ EvInboxTransport::listen( const char *ip,  int port ) noexcept
 {
   if ( this->EvUdp::listen2( ip, port, DEFAULT_UDP_CONNECT_OPTS,
                              "inbox_listen" ) == 0 ) {
-    static uint64_t inbox_timer_id;
+    static kv_atom_uint64_t inbox_timer_id;
     this->timer_id = ( (uint64_t) this->sock_type << 56 ) |
-      __sync_fetch_and_add( &inbox_timer_id, 1 );
+      kv_sync_add( &inbox_timer_id, (uint64_t) 1 );
     this->cur_mono_time = current_monotonic_time_ns();
     this->poll.timer.add_timer_micros( this->fd, 250, this->timer_id, 0 );
     d_ibx( "inbox fd %u (%s)\n", this->fd, this->peer_address.buf );
@@ -75,7 +81,8 @@ EvInboxTransport::process( void ) noexcept
       if ( p == NULL ) {
         struct sockaddr * addr    = (struct sockaddr *)
                                     this->in_mhdr[ i ].msg_hdr.msg_name;
-        socklen_t         addrlen = this->in_mhdr[ i ].msg_hdr.msg_namelen;
+        socklen_t         addrlen = (socklen_t)
+                                    this->in_mhdr[ i ].msg_hdr.msg_namelen;
         p = this->resolve_src_uid( dest_uid, my_peer_id, dest_peer_id, addr,
                                    addrlen );
       }
@@ -165,7 +172,7 @@ EvInboxTransport::repair_window( InboxPeer &p ) noexcept
     el->pkt.code.set_repair();
     /*el->pkt.src_seqno  = p.out_seqno;*/
     el->pkt.dest_seqno = p.in_seqno;
-    d_ibx( "%d.%d rexmit s_no %u d_no %u win %u cnt %ld\n",
+    d_ibx( "%d.%d rexmit s_no %u d_no %u win %u cnt %" PRId64 "\n",
             el->window.peer.peer_id, el->window.peer.dest_peer_id,
             seqno, p.in_seqno, p.out_window_seqno, cnt );
     rexmit.push_hd( el );
@@ -387,7 +394,7 @@ EvInboxTransport::write( void ) noexcept
     }
     o++;
   }
-  this->out_nmsgs = o;
+  this->out_nmsgs = (uint32_t) o;
   this->out_count = 0;
   if ( this->out_nmsgs > 0 )
     this->EvUdp::write();
@@ -439,10 +446,10 @@ EvInboxTransport::timer_expire( uint64_t tid, uint64_t ) noexcept
   this->cur_mono_time = current_monotonic_time_ns();
   if ( debug_ibx ) {
     if ( this->cur_mono_time - this->last_mono_time > 1000000000ULL * 10 ) {
-      printf( "duplicate pkt count %lu\n", this->duplicate_count );
-      printf( "repair    pkt count %lu\n", this->repair_count );
-      printf( "total     pkt sent  %lu\n", this->total_sent_count );
-      printf( "total     pkt recv  %lu\n", this->total_recv_count );
+      printf( "duplicate pkt count %" PRIu64 "\n", this->duplicate_count );
+      printf( "repair    pkt count %" PRIu64 "\n", this->repair_count );
+      printf( "total     pkt sent  %" PRIu64 "\n", this->total_sent_count );
+      printf( "total     pkt recv  %" PRIu64 "\n", this->total_recv_count );
       this->last_mono_time = this->cur_mono_time;
     }
   }
@@ -583,13 +590,13 @@ EvInboxTransport::post_msg( InboxPeer &p,  const void *msg,
       frag_size = msg_len - off;
       is_last = true;
     }
-    el = p.alloc_window( frag_size );
+    el = p.alloc_window( (uint32_t) frag_size );
     el->pkt.code.set_message( p.peer_id, p.dest_peer_id );
     el->pkt.src_uid    = p.src_uid;
     el->pkt.dest_uid   = p.dest_uid;
     el->pkt.src_seqno  = ++p.out_seqno;
     el->pkt.dest_seqno = p.in_seqno;
-    el->pkt.msg_len    = frag_size;
+    el->pkt.msg_len    = (uint32_t) frag_size;
     if ( ! is_last )
       el->pkt.code.set_fragment();
     else
@@ -718,7 +725,7 @@ InboxDestArray::remove( InboxPeer &p ) noexcept
 void
 InboxDestArray::insert( InboxPeer &p,  uint32_t dest_uid ) noexcept
 {
-  this->InboxPeerArray::insert( p, this->size, dest_uid );
+  this->InboxPeerArray::insert( p, (uint32_t) this->size, dest_uid );
 }
 
 InboxPeer *
@@ -874,7 +881,7 @@ EvInboxTransport::resolve_dest_url( uint32_t src_uid, const char *url,
   if ( ai == NULL )
     return NULL;
   if ( a != NULL )
-    p = this->resolve_dest_uid( src_uid, a->ai_addr, a->ai_addrlen,
+    p = this->resolve_dest_uid( src_uid, a->ai_addr, (uint32_t) a->ai_addrlen,
                                 url_hash );
   ::freeaddrinfo( ai );
   return p;

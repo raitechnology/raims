@@ -361,8 +361,8 @@ struct InboxPublish : public kv::EvPublish {
   uint32_t     peer_uid,
                url_hash;
 
-  InboxPublish( const char *subj,  uint16_t subj_len,  const void *data,
-                uint32_t data_len,  kv::RoutePublish &src_rt,  uint32_t src_fd,
+  InboxPublish( const char *subj,  size_t subj_len,  const void *data,
+                size_t data_len,  kv::RoutePublish &src_rt,  uint32_t src_fd,
                 uint32_t hash, uint32_t enc,  const char *url,  uint32_t uid,
                 uint32_t url_h ) :
     EvPublish( subj, subj_len, NULL, 0, data, data_len, src_rt, src_fd, hash,

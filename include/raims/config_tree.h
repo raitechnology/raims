@@ -9,6 +9,9 @@
 namespace rai {
 namespace ms {
 
+#ifdef _MSC_VER
+#define __attribute__(x)
+#endif
 struct ConfigPrinter {
   virtual int printf( const char *fmt,  ... ) noexcept
     __attribute__((format(printf,2,3)));

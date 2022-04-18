@@ -10,7 +10,6 @@
 namespace rai {
 namespace ms {
 
-
 static const size_t ED25519_SIG_LEN     = 64,
                     ED25519_SIG_B64_LEN = KV_BASE64_SIZE( 64 ),
                     ED25519_KEY_LEN     = 32,

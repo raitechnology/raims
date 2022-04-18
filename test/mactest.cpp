@@ -17,8 +17,8 @@ main( int argc, char *argv[] )
   const char * sub     = argc > 1 ? argv[ 1 ] : "subject",
              * data    = argc > 2 ? argv[ 2 ] :
                "datadatadatadatadataas3asddatatatadateaeraedsfaefaad0123456789012345";
-  uint32_t     sublen  = ::strlen( sub ),
-               datalen = ::strlen( data );
+  uint32_t     sublen  = (uint32_t) ::strlen( sub ),
+               datalen = (uint32_t) ::strlen( data );
   uint64_t     tm,
                tok;
   Nonce        nonce;
@@ -54,7 +54,7 @@ main( int argc, char *argv[] )
     m.sign( sub, sublen, ha1 );
 
     if ( ++i == 1000000 ) {
-      printf( "sz %lu, ns = %.2f\n", m.len(),
+      printf( "sz %u, ns = %.2f\n", (uint32_t) m.len(),
               ( current_realtime_ns() - tm ) / 1000000.0 );
 
       MDOutput mout;

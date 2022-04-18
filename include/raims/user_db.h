@@ -203,7 +203,7 @@ struct UserBridge : public UserStateTest<UserBridge> {
   static const uint32_t USER_ROUTE_BASE = 8;    /* the shift 3 below */
   static const uint32_t MAX_ROUTE_PTR = 524280; /* u_buf[ 15 ][ 262143 ] max */
   UserRoute * user_route_ptr( UserDB &me,  uint32_t id ) {
-    uint32_t i = 31 - __builtin_clz( ( id >> 3 ) + 1 ),
+    uint32_t i = 31 - kv_clzw( ( id >> 3 ) + 1 ),
              j = id - ( ( ( 1 << i ) - 1 ) << 3 );
     if ( id < this->max_route ) {
       UserRoute * u_ptr = &this->u_buf[ i ][ j ];
@@ -266,7 +266,7 @@ struct UserBridge : public UserStateTest<UserBridge> {
     uint32_t len = sizeof( _INBOX ) - 1;
     ::memcpy( ibx, _INBOX, len );
     ibx[ len++ ] = '.';
-    len += this->bridge_id.nonce.to_base64( &ibx[ len ] );
+    len += (uint32_t) this->bridge_id.nonce.to_base64( &ibx[ len ] );
     ibx[ len++ ] = '.';
     while ( *suffix != '\0' )
       ibx[ len++ ] = *suffix++;

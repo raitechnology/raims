@@ -508,7 +508,7 @@ struct MsgFramePublish : public kv::EvPublish {
   uint32_t         flags; /* MsgFrameFlags */
   MsgHdrDecoder    dec;   /* hdr field decoder */
 
-  MsgFramePublish( const char *subj,  uint16_t subj_len,  CabaMsg *m,
+  MsgFramePublish( const char *subj,  size_t subj_len,  CabaMsg *m,
                    uint32_t src_fd,  uint32_t hash,  uint32_t enc,
                    TransportRoute &r,  kv::RoutePublish &sub_rt ) :
     EvPublish( subj, subj_len, NULL, 0,

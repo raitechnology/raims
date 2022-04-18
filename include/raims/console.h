@@ -14,7 +14,7 @@ extern "C" {
   struct LineCook_s;
   struct Term_s;
   int console_complete( struct LineCook_s *state,  const char *buf,  size_t off,
-                        size_t len ) noexcept;
+                        size_t len,  void *me ) noexcept;
   void console_help( struct Term_s *term ) noexcept;
 }
 
@@ -72,14 +72,14 @@ struct PortOutput {
   void local_addr( const char *buf,  uint32_t len = 0 ) {
     this->local.val = buf;
     if ( len == 0 )
-      this->local.len = kv::get_strlen64( buf );
+      this->local.len = (uint32_t) kv::get_strlen64( buf );
     else
       this->local.len = len;
   }
   void remote_addr( const char *buf,  uint32_t len = 0 ) {
     this->remote.val = buf;
     if ( len == 0 )
-      this->remote.len = kv::get_strlen64( buf );
+      this->remote.len = (uint32_t) kv::get_strlen64( buf );
     else
       this->remote.len = len;
   }
@@ -87,7 +87,7 @@ struct PortOutput {
 
   void put_status( void ) noexcept;
 
-  uint32_t output( void ( PortOutput::*put )( void ) ) noexcept;
+  size_t output( void ( PortOutput::*put )( void ) ) noexcept;
 };
 
 enum PrintType {
@@ -182,7 +182,7 @@ struct TabPrint {
   }
   void set( const char *s ) {
     this->val = s;
-    this->len = ( s != NULL ? ::strlen( s ) : 0 );
+    this->len = (uint32_t) ( s != NULL ? ::strlen( s ) : 0 );
     this->typ = PRINT_STRING_NT;
   }
   void set( UserBridge *bridge,  PrintType t ) {
@@ -321,10 +321,10 @@ struct Console : public md::MDOutput, public SubOnMsg, public ConfigPrinter {
   kv::ArrayCount< char, 8192 > log;
   kv::ArrayCount< char, 8192 > tmp;
   kv::ArrayCount< TabPrint, 64 > table;
-  uint32_t          max_log,
+  size_t            max_log,
                     log_index,
-                    log_ptr,
-                    inbox_num;
+                    log_ptr;
+  uint32_t          inbox_num;
   uint64_t          log_rotate_time;
   char            * log_filename;
   int               log_fd;
@@ -374,12 +374,12 @@ struct Console : public md::MDOutput, public SubOnMsg, public ConfigPrinter {
   virtual bool on_input( ConsoleOutput *p,  const char *buf,
                          size_t buflen ) noexcept;
   virtual void on_data( const SubMsgData &val ) noexcept;
-  int find_tport( const char *name,  uint32_t len,
+  int find_tport( const char *name,  size_t len,
                   ConfigTree::Transport *&tree_idx,
                   uint32_t &tport_id ) noexcept;
-  void connect( const char *arg,  uint32_t arglen ) noexcept;
-  void listen( const char *arg,  uint32_t arglen ) noexcept;
-  void shutdown( const char *arg,  uint32_t arglen ) noexcept;
+  void connect( const char *arg,  size_t arglen ) noexcept;
+  void listen( const char *arg,  size_t arglen ) noexcept;
+  void shutdown( const char *arg,  size_t arglen ) noexcept;
   void get_active_tports( ConfigTree::TransportArray &listen, 
                           ConfigTree::TransportArray &connect ) noexcept;
   void config_save( void ) noexcept;
@@ -390,8 +390,8 @@ struct Console : public md::MDOutput, public SubOnMsg, public ConfigPrinter {
                      size_t nvals ) noexcept;
   void config_tport_route( const char *param,  size_t plen,
                            const char *value,  size_t vlen ) noexcept;
-  void show_subs( const char *arg,  uint32_t arglen ) noexcept;
-  void ping_peer( const char *arg,  uint32_t arglen ) noexcept;
+  void show_subs( const char *arg,  size_t arglen ) noexcept;
+  void ping_peer( const char *arg,  size_t arglen ) noexcept;
   void mcast_ping( void ) noexcept;
 
   void on_ping( ConsolePing &ping ) noexcept;
@@ -686,8 +686,9 @@ static const ConsoleCmdString help_cmd[] = {
   { CMD_MUTE_LOG         , "mute                       Mute the log output"                               },
   { CMD_UNMUTE_LOG       , "unmute                     Unmute the log output"                             },
   { CMD_DEBUG            , "debug ival                 Set debug flags to ival, bit mask of:\n"
-                           " 1=tcp,     2=pgm,      4=ibx,    8=tport,   0x10=usr,   0x20=link, 0x40=peer,\n"
-                           " 0x80=auth, 0x100=sess, 0x200=hb, 0x400=sub, 0x800=mrcv, 0x1000=telnet"       },
+                           " 1=tcp,     2=pgm,      4=inbox,  8=tport,   0x10=user,  0x20=link, 0x40=peer,\n"
+                           " 0x80=auth, 0x100=sess, 0x200=hb, 0x400=sub, 0x800=mrcv, 0x1000=msghex,\n"
+                           " 0x2000=telnet, 0x4000=rv, 0x8000=nats"                                       },
   { CMD_QUIT             , "quit/exit                  Exit console"                                      }
 };
 
@@ -780,23 +781,23 @@ struct CmdMask {
     kv::BitSetT<uint64_t> set( this->bits );
     set.zero( max_bit );
   }
-  void mask( uint32_t nbits ) {
+  void mask( size_t nbits ) {
     kv::BitSetT<uint64_t> set( this->bits );
     set.zero( max_bit );
     for ( uint32_t b = 0; b < nbits; b++ )
       set.add( b );
   }
-  bool is_member( uint32_t b ) {
+  bool is_member( size_t b ) {
     kv::BitSetT<uint64_t> set( this->bits );
-    return set.is_member( b );
+    return set.is_member( (uint32_t) b );
   }
-  void add( uint32_t b ) {
+  void add( size_t b ) {
     kv::BitSetT<uint64_t> set( this->bits );
-    return set.add( b );
+    return set.add( (uint32_t) b );
   }
-  void remove( uint32_t b ) {
+  void remove( size_t b ) {
     kv::BitSetT<uint64_t> set( this->bits );
-    return set.remove( b );
+    return set.remove( (uint32_t) b );
   }
   uint32_t count( void ) {
     kv::BitSetT<uint64_t> set( this->bits );

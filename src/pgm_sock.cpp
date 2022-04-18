@@ -1,10 +1,17 @@
 #include <stdio.h>
+#define __STDC_FORMAT_MACROS
+#include <inttypes.h>
+#ifndef _MSC_VER
 #include <poll.h>
 #include <sys/time.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netdb.h>
 #include <raims/pgm_sock.h>
+#else
+#include <raims/pgm_sock.h>
+#include <raikv/win.h>
+#endif
 #include <raims/debug.h>
 #include <raikv/util.h>
 
@@ -120,7 +127,7 @@ PgmSock::start_pgm( const char *network,  int svc,  int &fd ) noexcept
                       &is_uncontrolled, sizeof( is_uncontrolled ) );
   b&= pgm_setsockopt( this->sock, IPPROTO_PGM, PGM_UNCONTROLLED_RDATA,
                       &is_uncontrolled, sizeof( is_uncontrolled ) );
-  int txw_size = this->txw_sqns;
+  int txw_size = (int) this->txw_sqns;
   b&= pgm_setsockopt( this->sock, IPPROTO_PGM, PGM_TXW_SQNS, &txw_size,
                       sizeof( txw_size ) );
   b&= pgm_setsockopt( this->sock, IPPROTO_PGM, PGM_AMBIENT_SPM,
@@ -252,13 +259,27 @@ PgmSock::start_pgm( const char *network,  int svc,  int &fd ) noexcept
   }
   this->is_connected = b;
   if ( b ) {
+#ifndef _MSC_VER
     struct pollfd fds[ 5 ];
     int           n_fds = 5;
     if ( pgm_poll_info( this->sock, fds, &n_fds, POLLIN ) < 1 ) {
       this->status = 9;
       b = false;
     }
-    fd = fds[ 0 ].fd;
+    else {
+      fd = fds[ 0 ].fd;
+    }
+#else
+    WSAPOLLFD fds[ 5 ];
+    ULONG     n_fds;
+    if ( pgm_wsapoll_info( this->sock, fds, &n_fds, POLLRDNORM ) < 1 ) {
+      this->status = 9;
+      b = false;
+    }
+    else {
+      fd = wp_register_fd( fds[ 0 ].fd );
+    }
+#endif
   }
 
   return b;
@@ -380,7 +401,7 @@ PgmSock::recv_msgs( void ) noexcept
       case PGM_IO_STATUS_NORMAL: {
         if ( debug_pgm ) {
           if ( bytes_read > 0 )
-            printf( "pgm normal, bytss %lu\n", bytes_read );
+            printf( "pgm normal, bytss %" PRIu64 "\n", bytes_read );
         }
         this->len = bytes_read;
         this->status = 0;
@@ -415,7 +436,7 @@ PgmSock::recv_msgs( void ) noexcept
           this->lost_count += skb->sequence;
         }
 /*        pgm_tsi_print_r( &this->lost_tsi, tsi_buf, sizeof( tsi_buf ) );
-        fprintf( stderr, "lost %lu seq @ %s\n", this->lost_count, tsi_buf );*/
+        fprintf( stderr, "lost %" PRIu64 " seq @ %s\n", this->lost_count, tsi_buf );*/
         pgm_free_skb( skb );
       }
       /* fall thru */
@@ -439,7 +460,7 @@ PgmSock::print_lost( void ) noexcept
     pgm_tsi_print_r( &this->lost_tsi, tsi_buf, sizeof( tsi_buf ) );
     pgm_tsi_to_address_string( this->sock, &this->lost_tsi, addr_buf,
                                sizeof( addr_buf ) );
-    fprintf( stderr, "lost %lu seq tsi[%s] @ %s\n", this->lost_count, tsi_buf,
+    fprintf( stderr, "lost %" PRIu64 " seq tsi[%s] @ %s\n", this->lost_count, tsi_buf,
              addr_buf );
     this->lost_count = 0;
     ::memset( &this->lost_tsi, 0, sizeof( this->lost_tsi ) );

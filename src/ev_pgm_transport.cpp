@@ -18,9 +18,9 @@ EvPgmTransport::EvPgmTransport( EvPoll &p,  TransportRoute &r ) noexcept
       stats_timer( 0 ), notify( 0 ), backpressure( false ),
       fwd_all_msgs( false )
 {
-  static uint64_t pgm_timer_id;
+  static kv_atom_uint64_t pgm_timer_id;
   this->timer_id = ( (uint64_t) this->sock_type << 56 ) |
-    __sync_fetch_and_add( &pgm_timer_id, 1 );
+    kv_sync_add( &pgm_timer_id, (uint64_t) 1 );
 }
 
 bool
@@ -85,7 +85,8 @@ EvPgmTransport::on_msg( EvPublish &pub ) noexcept
     size_t          frag_size = this->pgm.geom.max_tsdu - sizeof( FragTrailer );
     FragTrailer     trl( this->pgm.my_tsi(), current_realtime_ns(),
                          pub.msg_len );
-    for ( trl.off = 0; trl.off < pub.msg_len; trl.off += frag_size ) {
+    for ( trl.off = 0; trl.off < pub.msg_len;
+          trl.off += (uint32_t) frag_size ) {
       if ( trl.off + frag_size > pub.msg_len )
         frag_size = pub.msg_len - trl.off;
       this->pgm.put_send_window( msg, frag_size, &trl, sizeof( FragTrailer ) );
@@ -210,7 +211,7 @@ EvPgmTransport::dispatch_data( const uint8_t *data,  size_t off,
     off += buflen;
     if ( status != 0 ) {
       MDOutput mout;
-      printf( "pgm msg_in status %d buflen %lu\n", status, buflen );
+      printf( "pgm msg_in status %d buflen %u\n", status, (uint32_t) buflen );
       mout.print_hex( buf, buflen > 256 ? 256 : buflen );
     }
     if ( buflen == 0 )

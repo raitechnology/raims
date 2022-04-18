@@ -27,6 +27,7 @@
 #include <raikv/key_hash.h>
 #include <raims/poly1305.h>
 #include <raikv/util.h>
+#include <raikv/atom.h>
 
 namespace rai {
 namespace ms {
@@ -44,8 +45,8 @@ struct CryptPass {
   static bool init_salt_file( const char *path ) noexcept;
 };
 
-extern int       kdf_hash_init;
-extern int       kdf_hash_ready;
+extern kv_atom_uint32_t kdf_hash_init;
+extern kv_atom_uint32_t kdf_hash_ready;
 extern uint8_t * T;
 extern uint8_t * U;
 

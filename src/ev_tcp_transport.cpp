@@ -2,14 +2,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
-#include <unistd.h>
-#include <fcntl.h>
-#include <errno.h>
-#include <arpa/inet.h>
 #include <raims/ev_tcp_transport.h>
 #include <raims/session.h>
 #include <raims/transport.h>
-#include <raimd/json_msg.h>
 
 using namespace rai;
 using namespace ms;
@@ -102,10 +97,10 @@ EvTcpTransport::process( void ) noexcept
       status = this->msg_in.unpack( buf, buflen );
       if ( status != 0 ) {
         MDOutput mout;
-        printf( "tcp msg_in status %d buflen %lu\n", status, buflen );
+        printf( "tcp msg_in status %d buflen %u\n", status, (uint32_t) buflen );
         mout.print_hex( buf, buflen > 256 ? 256 : buflen );
       }
-      this->off += buflen;
+      this->off += (uint32_t) buflen;
       if ( buflen > 0 && this->msg_in.msg != NULL ) {
         /* if backpressure, push messages to write side */
         if ( ! this->dispatch_msg() ) {

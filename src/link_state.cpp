@@ -2,6 +2,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#define __STDC_FORMAT_MACROS
+#include <inttypes.h>
 #include <stdarg.h>
 #include <raims/user_db.h>
 #include <raims/ev_inbox_transport.h>
@@ -32,11 +34,11 @@ struct AdjacencyRec : public MsgFldSet {
         break;
       case FID_TPORT:
         this->tport_name = (const char *) mref.fptr;
-        this->tport_len  = mref.fsize;
+        this->tport_len  = (uint32_t) mref.fsize;
         break;
       case FID_USER:
         this->user     = (const char *) mref.fptr;
-        this->user_len = mref.fsize;
+        this->user_len = (uint32_t) mref.fsize;
         break;;
       case FID_BRIDGE:
         this->nonce.copy_from( mref.fptr );
@@ -270,9 +272,9 @@ void
 UserDB::push_source_route( UserBridge &n ) noexcept
 {
   UserRoute * u_ptr;
-  uint32_t    count = this->transport_tab.count;
-  for ( uint32_t i = 0; i < count; i++ ) {
-    if ( (u_ptr = n.user_route_ptr( *this, i )) == NULL )
+  size_t      count = this->transport_tab.count;
+  for ( size_t i = 0; i < count; i++ ) {
+    if ( (u_ptr = n.user_route_ptr( *this, (uint32_t) i )) == NULL )
       break;
     this->push_user_route( n, *u_ptr );
   }
@@ -309,7 +311,7 @@ UserDB::push_user_route( UserBridge &n,  UserRoute &u_rte ) noexcept
       }
       if ( this->start_time > n.start_time ) {
         if ( n.start_time == 0 )
-          n.printe( "bad start time %lu\n", n.start_time );
+          n.printe( "bad start time %" PRIu64 "\n", n.start_time );
         else {
           if ( rte.oldest_uid == 0 )
             rte.oldest_uid = n.uid;
@@ -333,9 +335,9 @@ UserDB::pop_source_route( UserBridge &n ) noexcept
   /*if ( debug_lnk )*/
     n.printf( "pop_source_route\n" );
   if ( n.test_clear( IN_ROUTE_LIST_STATE ) ) {
-    uint32_t count = this->transport_tab.count;
-    for ( uint32_t i = 0; i < count; i++ ) {
-      UserRoute * u_ptr = n.user_route_ptr( *this, i );
+    size_t count = this->transport_tab.count;
+    for ( size_t i = 0; i < count; i++ ) {
+      UserRoute * u_ptr = n.user_route_ptr( *this, (uint32_t) i );
       if ( u_ptr == NULL )
         break;
       this->pop_user_route( n, *u_ptr );
@@ -414,8 +416,8 @@ UserDB::close_source_route( uint32_t fd ) noexcept
     this->pop_user_route( n, *u_ptr );
     u_ptr->hops = UserRoute::NO_HOPS;
 #if 0
-    uint32_t count = this->transport_tab.count;
-    for ( uint32_t i = 0; i < count; i++ ) {
+    size_t count = this->transport_tab.count;
+    for ( size_t i = 0; i < count; i++ ) {
       if ( (u_ptr = n.user_route_ptr( *this, i )) == NULL )
         break;
       if ( u_ptr->is_set( IN_ROUTE_LIST_STATE ) )
@@ -540,14 +542,14 @@ UserDB::recv_adjacency_change( const MsgFramePublish &pub,  UserBridge &n,
   if ( link_state != n.link_state_seqno + 1 ) {
     if ( n.link_state_seqno >= link_state ) {
       if ( debug_lnk )
-        n.printf( "already have link state %lu >= %lu\n", n.link_state_seqno,
-                   link_state );
+        n.printf( "already have link state %" PRIu64 " >= %" PRIu64 "\n",
+                  n.link_state_seqno, link_state );
       adj_change = HAVE_ADJ_CHANGE;
     }
     else {
       if ( debug_lnk )
-        n.printf( "missing link state %lu + 1 != %lu\n", n.link_state_seqno,
-                   link_state );
+        n.printf( "missing link state %" PRIu64 " + 1 != %" PRIu64 "\n",
+                  n.link_state_seqno, link_state );
       b = this->send_adjacency_request( n, ADJ_CHG_SYNC_REQ );
       adj_change = NEED_ADJ_SYNC;
     }
@@ -556,7 +558,7 @@ UserDB::recv_adjacency_change( const MsgFramePublish &pub,  UserBridge &n,
     this->peer_dist.clear_cache_if_dirty();
 
     if ( debug_lnk )
-      n.printf( "recv change link state %lu\n", link_state );
+      n.printf( "recv change link state %" PRIu64 "\n", link_state );
     adj_change = UPDATE_ADJ_CHANGE;
     AdjacencyRec * rec_list =
       dec.decode_rec_list<AdjacencyRec>( FID_ADJACENCY );
@@ -715,7 +717,7 @@ UserDB::adjacency_size( UserBridge *sync ) noexcept
   MsgEst e;
   if ( sync != NULL ) { /* sync adjacency */
     UserBridge &n = *sync;
-    count = n.adjacency.count;
+    count = (uint32_t) n.adjacency.count;
     last  = count;
     for ( i = 0; i < count; i++ ) {
       AdjacencySpace * set = n.adjacency.ptr[ i ];
@@ -743,7 +745,7 @@ UserDB::adjacency_size( UserBridge *sync ) noexcept
     }
   }
   else { /* my adjacency */
-    count = this->transport_tab.count;
+    count = (uint32_t) this->transport_tab.count;
     last  = count;
     for ( i = 0; i < count; i++ ) {
       TransportRoute * rte = this->transport_tab.ptr[ i ];
@@ -776,7 +778,7 @@ UserDB::adjacency_submsg( UserBridge *sync,  MsgCat &m ) noexcept
 
   if ( sync != NULL ) { /* sync adjacacency */
     UserBridge &n = *sync;
-    count = n.adjacency.count;
+    count = (uint32_t) n.adjacency.count;
     last  = count;
     for ( i = 0; i < count; i++ ) {
       AdjacencySpace * set = n.adjacency.ptr[ i ];
@@ -804,7 +806,7 @@ UserDB::adjacency_submsg( UserBridge *sync,  MsgCat &m ) noexcept
     }
   }
   else { /* my adjacency */
-    count = this->transport_tab.count;
+    count = (uint32_t) this->transport_tab.count;
     last  = count;
     for ( i = 0; i < count; i++ ) {
       TransportRoute * rte = this->transport_tab.ptr[ i ];
@@ -904,7 +906,7 @@ UserDB::recv_adjacency_request( const MsgFramePublish &,  UserBridge &n,
   if ( dec.test( FID_SYNC_BRIDGE ) )
     m.sync_bridge( nonce );
 
-  d_lnk( "recv_adj_request(%s,%lu,%lu)\n",
+  d_lnk( "recv_adj_request(%s,%" PRIu64 ",%" PRIu64 ")\n",
        sync == NULL ? "me" : sync->peer.user.val, rq_sub_seqno, rq_link_seqno );
 
   if ( rq_sub_seqno != sub_seqno ) {
@@ -967,8 +969,8 @@ UserDB::recv_adjacency_result( const MsgFramePublish &pub,  UserBridge &n,
   dec.get_ival<uint32_t>( FID_ADJ_INFO, reas );
 
   if ( debug_lnk )
-    n.printf( "recv_adj_result(%s,lnk=%lu,blm=%lu,%u)\n", sync->peer.user.val,
-              link_state, sub_seqno, reas );
+    n.printf( "recv_adj_result(%s,lnk=%" PRIu64 ",blm=%" PRIu64 ",%u)\n",
+              sync->peer.user.val, link_state, sub_seqno, reas );
 
   if ( reas == UNKNOWN_ADJ_REQ ) /* from a sync_result, sync_req -> sync_rpy */
     reas = PEER_SYNC_REQ;
@@ -1059,7 +1061,7 @@ void
 AdjDistance::clear_cache( void ) noexcept
 {
   uint32_t max      = this->user_db.next_uid,
-           rte_cnt  = this->user_db.transport_tab.count;
+           rte_cnt  = (uint32_t) this->user_db.transport_tab.count;
   this->cache_seqno = this->update_seqno;
   this->max_tport   = rte_cnt;
   this->max_uid     = max;
@@ -1077,7 +1079,8 @@ AdjDistance::clear_cache( void ) noexcept
                 wsz * sizeof( uint64_t );    /* cache */
                 /*rte_cnt * sizeof( uint32_t ); * tport_dist */
 
-  d_lnk( "ADJacency clear cache %lu wsz=%lu max_tport=%u max_uid=%u\n",
+  d_lnk( "ADJacency clear cache %" PRIu64
+         " wsz=%" PRIu64 " max_tport=%u max_uid=%u\n",
           this->update_seqno, wsz, this->max_tport, max );
   /*this->tport_dist    = (uint32_t *) this->make( size );
   this->cache.ptr     = (uint64_t *) (void *) &this->tport_dist[ rte_cnt ];*/
@@ -1102,10 +1105,10 @@ uint32_t
 AdjDistance::adjacency_count( uint32_t uid ) const noexcept
 {
   if ( uid == 0 )
-    return this->user_db.transport_tab.count;
+    return (uint32_t) this->user_db.transport_tab.count;
   if ( ! this->user_db.uid_authenticated.is_member( uid ) )
     return 0;
-  return this->user_db.bridge_tab.ptr[ uid ]->adjacency.count;
+  return (uint32_t) this->user_db.bridge_tab.ptr[ uid ]->adjacency.count;
 }
 
 BitSpace *
@@ -1132,7 +1135,7 @@ AdjDistance::uid_refs( uint32_t from,  uint32_t to ) noexcept
   size_t count  = this->adjacency_count( from );
   uint32_t refs = 0;
   for ( size_t i = 0; i < count; i++ ) {
-    BitSpace * set = this->adjacency_set( from, i );
+    BitSpace * set = this->adjacency_set( from, (uint32_t) i );
     if ( set == NULL )
       continue;
     if ( set->is_member( to ) )
@@ -1312,7 +1315,7 @@ AdjDistance::calc_distance( uint32_t dest_uid ) noexcept
   for ( uint32_t i = 0; i < this->max_tport; i++ ) {
     TransportRoute *rte = this->user_db.transport_tab.ptr[ i ];
     size_t   off = rte->tport_id * this->max_uid + dest_uid;
-    uint32_t d   = this->cache.get( off );
+    uint32_t d   = (uint32_t) this->cache.get( off );
     if ( d != 0 )
       d -= 1;
     else {

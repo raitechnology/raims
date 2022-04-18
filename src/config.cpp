@@ -3,15 +3,17 @@
 #include <string.h>
 #include <stdint.h>
 #include <stdarg.h>
-#include <unistd.h>
-#include <fcntl.h>
+#define __STDC_FORMAT_MACROS
+#include <inttypes.h>
+#include <raikv/util.h>
+#include <raikv/os_file.h>
+#ifndef _MSC_VER
 #include <glob.h>
+#endif
 #include <ctype.h>
 #include <errno.h>
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <sys/mman.h>
 #include <raimd/json_msg.h>
+#include <raikv/key_hash.h>
 #include <raims/parse_config.h>
 #include <raims/gen_config.h>
 
@@ -103,17 +105,23 @@ resolve_obj( MDMsg &msg ) noexcept
 }
 
 struct ConfigDB::InodeStack {
-  size_t tos;
-  ino_t  stk[ 1000 ];
+  size_t   tos;
+  uint64_t stk[ 1000 ];
 
   InodeStack() : tos( 0 ) {}
 
-  bool push( ino_t node ) {
+  bool push( const char *fn,  uint64_t node ) {
     if ( this->tos == sizeof( this->stk ) / sizeof( this->stk[ 0 ] ) )
       return false;
-    for ( size_t i = 0; i < this->tos; i++ )
-      if ( this->stk[ i ] == node )
+    if ( node == 0 )
+      node = kv_hash_murmur64( fn, ::strlen( fn ), 0 );
+    for ( size_t i = 0; i < this->tos; i++ ) {
+      if ( this->stk[ i ] == node ) {
+        /*fprintf( stderr, "ino %" PRIu64 " repeat, fn: \"%s\"\n",
+                 (uint64_t) node, fn );*/
         return false;
+      }
+    }
     this->stk[ this->tos++ ] = node;
     return true;
   }
@@ -146,71 +154,123 @@ ConfigDB::parse_jsfile( const char *fn,  StringTab &st,
   ConfigDB     db( *tree, st.mem, &ino, st );
   StringVal    ref;
 
-  /*db.star_id  = db.str.ref_string( "*", 1, ref );
-  db.gt_id    = db.str.ref_string( ">", 1, ref );*/
   db.filename = fn;
 
   if ( db.parse_glob( fn ) != 0 || ! db.check_strings( err ) ) {
     fprintf( stderr, "Parse failed \"%s\"\n", fn );
     return NULL;
   }
-#if 0
-  if ( ! db.index_nodes() ) {
-    fprintf( stderr, "Index failed \"%s\"\n", fn );
-    return NULL;
-  }
-#endif
   return tree;
 }
+
+#ifndef _MSC_VER
+struct Glob {
+  glob_t g;
+  size_t i;
+  int    status;
+  Glob( const char *spec ) : i( 0 ) {
+    this->status = ::glob( spec, GLOB_MARK | GLOB_TILDE, NULL, &this->g );
+  }
+  ~Glob() {
+    if ( this->status == 0 )
+      ::globfree( &this->g );
+  }
+  const char *first( void ) {
+    this->i = 0;
+    if ( this->status != 0 || this->i >= g.gl_pathc )
+      return NULL;
+    return this->g.gl_pathv[ this->i++ ];
+  }
+  const char *next( void ) {
+    if ( this->status != 0 || this->i >= g.gl_pathc )
+      return NULL;
+    return this->g.gl_pathv[ this->i++ ];
+  }
+};
+#else
+struct Glob {
+  struct _finddata_t fileinfo;
+  intptr_t     ptr;
+  const char * dir;
+  int          dirlen;
+  char         buf[ _MAX_PATH ];
+  
+  Glob( const char *spec ) {
+    this->ptr = _findfirst( spec, &this->fileinfo );
+    this->dir = ::strrchr( spec, '/' );
+    if ( this->dir == NULL )
+      this->dir = ::strrchr( spec, '\\' );
+    if ( this->dir != NULL ) {
+      this->dirlen = (int) ( this->dir - spec );
+      this->dir    = spec;
+    }
+    else {
+      this->dirlen = 0;
+    }
+  }
+  const char *get_path( void ) {
+    char * slash;
+    if ( this->dir == NULL )
+      return this->fileinfo.name;
+    ::snprintf( this->buf, sizeof( this->buf ), "%.*s/%s",
+                this->dirlen, this->dir, this->fileinfo.name );
+    slash = buf;
+    while ( (slash = ::strchr( slash, '\\' )) != NULL )
+      *slash++ = '/';
+    return this->buf;
+  }
+  const char *first( void ) {
+    if ( this->ptr == -1 )
+      return NULL;
+    return this->get_path();
+  }
+  const char *next( void ) {
+    if ( this->ptr == -1 )
+      return NULL;
+    if ( _findnext( this->ptr, &this->fileinfo ) != 0 )
+      return NULL;
+    return this->get_path();
+  }
+};
+#endif
 
 int
 ConfigDB::parse_glob( const char *fn ) noexcept
 {
-  glob_t g;
-  int status = ::glob( fn, GLOB_MARK | GLOB_TILDE, NULL, &g );
-  if ( status == 0 ) {
-    for ( size_t i = 0; i < g.gl_pathc; i++ ) {
-      int fd = ::open( g.gl_pathv[ i ], O_RDONLY );
-      if ( fd < 0 ) {
-        ::perror( fn );
-        status = -1;
-        break;
-      }
-      status = this->parse_fd( g.gl_pathv[ i ], fd );
-      ::close( fd );
+  int status = 0;
+  Glob g( fn );
+  const char *path = g.first();
+  if ( path != NULL ) {
+    do {
+      status = this->parse_file( path );
       if ( status != 0 )
         break;
-    }
-    globfree( &g );
+    } while ( (path = g.next()) != NULL );
   }
   return status;
 }
 
 int
-ConfigDB::parse_fd( const char *fn, int fd ) noexcept
+ConfigDB::parse_file( const char *fn ) noexcept
 {
-  struct stat st;
-  void * map = NULL;
-  size_t input_off;
-  int    status = 0;
+  MapFile map( fn );
+  os_stat st;
+  int status;
 
-  if ( ::fstat( fd, &st ) != 0 ) {
-    ::perror( fn );
-    return -1;
-  }
+  status = os_fstat( fn, &st );
+  if ( status < 0 )
+    perror( fn );
   /* recursion check */
-  if ( (input_off = st.st_size) > 0 ) {
-    if ( ! this->ino_stk->push( st.st_ino ) )
-      return 0;
-    map = ::mmap( 0, input_off, PROT_READ, MAP_SHARED, fd, 0 );
-    if ( map == MAP_FAILED ) {
-      ::perror( fn );
+  else if ( st.st_size > 0 ) {
+    if ( ! this->ino_stk->push( fn, (uint64_t) st.st_ino ) )
+      status = 0;
+    else {
+      if ( ! map.open() )
+        status = -1;
+      else
+        status = this->parse_jsconfig( (char *) map.map, map.map_size, fn );
       this->ino_stk->pop();
-      return -1;
     }
-    status = this->parse_jsconfig( (char *) map, input_off, fn );
-    ::munmap( map, input_off );
-    this->ino_stk->pop();
   }
   return status;
 }
@@ -225,7 +285,7 @@ ConfigDB::parse_jsconfig( const char *buf,  size_t buflen,
   int        status;
   bool       is_yaml;
 
-  if ( len > 5 && ::strcasecmp( &fn[ len - 5 ], ".yaml" ) == 0 )
+  if ( len > 5 && kv_strcasecmp( &fn[ len - 5 ], ".yaml" ) == 0 )
     is_yaml = true;
   else
     is_yaml = false;
@@ -234,8 +294,8 @@ ConfigDB::parse_jsconfig( const char *buf,  size_t buflen,
     fprintf( stderr, "JSON parse error in \"%s\", status %d/%s\n", fn,
              status, Err::err( status )->descr );
     if ( ctx.input != NULL ) {
-      fprintf( stderr, "line %lu col %lu\n", ctx.input->line_count,
-               ctx.input->offset - ctx.input->line_start + 1 );
+      fprintf( stderr, "line %u col %u\n", (uint32_t) ctx.input->line_count,
+               (uint32_t) ( ctx.input->offset - ctx.input->line_start + 1 ) );
     }
     return status;
   }
@@ -249,7 +309,7 @@ is_absolute_path( const char *fn,  size_t len ) noexcept
     return false;
   if ( fn[ 0 ] != '/' ) {
     if ( fn[ 0 ] == '~' ) { /* ~/ or ~user/ */
-      if ( ::memchr( fn, len, '/' ) != NULL )
+      if ( ::memchr( fn, '/', len ) != NULL )
         return true; /* ~/ or ~user/ */
     }
     return false; /* no ~ or no slash */
@@ -410,9 +470,7 @@ ConfigTree::save_new( void ) const noexcept
 {
   const char * sep = "/";
   char path_new[ 1024 ];
-  size_t i;
   GenFileList ops;
-  glob_t g;
 
   if ( this->dir_name.len == 0 )
     sep = "";
@@ -422,19 +480,19 @@ ConfigTree::save_new( void ) const noexcept
     fprintf( stderr, "dir path too big\n" );
     return false;
   }
-  if ( ::glob( path_new, GLOB_MARK | GLOB_TILDE, NULL, &g ) != 0 ) {
-    fprintf( stderr, "glob path %s failed: %d/%s\n", path_new, errno,
-             strerror( errno ) );
+
+  Glob g( path_new );
+  const char *path;
+  if ( (path = g.first() ) == NULL )
     return false;
-  }
-  for ( i = 0; i < g.gl_pathc; i++ ) {
+
+  do {
     static const char run_file[] = "startup.yaml.new";
     static const char param_file[] = "param.yaml.new";
     static size_t run_file_size = sizeof( run_file ) - 1;
     static size_t param_file_size = sizeof( param_file ) - 1;
     const char * descr;
-    GenFileTrans * t = GenFileTrans::create_file_path( GEN_CREATE_FILE,
-                                                       g.gl_pathv[ i ] );
+    GenFileTrans * t = GenFileTrans::create_file_path( GEN_CREATE_FILE, path );
     if ( t->len >= run_file_size &&
          ::strcmp( &t->path[ t->len - run_file_size ], run_file ) == 0 )
       descr = "startup config";
@@ -444,7 +502,8 @@ ConfigTree::save_new( void ) const noexcept
     else
       descr = "transport";
     GenFileTrans::trans_if_neq( t, descr, ops );
-  }
+  } while ( (path = g.next()) != NULL );
+
   ops.print_files();
   if ( ops.commit_phase1() ) {
     ops.commit_phase2();
@@ -724,8 +783,8 @@ ConfigDB::parse_object_array( const char *where, MDMsg &msg, MDReference &mref,
          aref.ftype != MD_MESSAGE ||
          msg.get_sub_msg( aref, amsg ) != 0 ||
          this->parse_object( where, *amsg, obj ) != 0 ) {
-      fprintf( stderr, "Expecting array of objects in \"%s\", element %lu\n",
-               where, i );
+      fprintf( stderr, "Expecting array of objects in \"%s\", element %u\n",
+               where, (uint32_t) i );
       return Err::BAD_SUB_MSG;
     }
   }
@@ -1005,7 +1064,7 @@ StringTab::ref_string( const char *str,  size_t len,  StringVal &sv ) noexcept
         if ( (sv.val = ptr->str[ val - ptr->first ]) != NULL &&
              ::memcmp( str, sv.val, len ) == 0 && sv.val[ len ] == '\0' ) {
           sv.id  = val;
-          sv.len = len;
+          sv.len = (uint32_t) len;
           return val;
         }
         break; /* seg range is unique */
@@ -1016,7 +1075,7 @@ StringTab::ref_string( const char *str,  size_t len,  StringVal &sv ) noexcept
       if ( ::memcmp( str, col->str, len ) == 0 && col->str[ len ] == '\0' ) {
         sv.val = col->str;
         sv.id  = col->id;
-        sv.len = len;
+        sv.len = (uint32_t) len;
         return col->id;
       }
     }
@@ -1025,7 +1084,7 @@ StringTab::ref_string( const char *str,  size_t len,  StringVal &sv ) noexcept
           StringCollision();
   }
   if ( len <= 31 ) {
-    uint32_t sz = align<uint32_t>( len + 1, sizeof( char * ) );
+    uint32_t sz = align<uint32_t>( (uint32_t) ( len + 1 ), sizeof( char * ) );
     if ( this->small_left < sz ) {
       this->small_str  = (char *) this->mem.make( 256 );
       this->small_left = 256;
@@ -1069,7 +1128,7 @@ StringTab::ref_string( const char *str,  size_t len,  StringVal &sv ) noexcept
   }
   sv.val = s;
   sv.id  = str_id;
-  sv.len = len;
+  sv.len = (uint32_t) len;
   return str_id;
 }
 
@@ -1083,7 +1142,7 @@ StringTab::get_string( uint32_t val,  StringVal &sv ) noexcept
     if ( val >= ptr->first && val < ptr->last ) {
       if ( (sv.val = ptr->str[ val - ptr->first ]) != NULL ) {
         sv.id  = val;
-        sv.len = ::strlen( sv.val );
+        sv.len = (uint32_t) ::strlen( sv.val );
         return true;
       }
       break; /* seg range is unique */
@@ -1094,7 +1153,7 @@ StringTab::get_string( uint32_t val,  StringVal &sv ) noexcept
     if ( col->id == val ) {
       sv.val = col->str;
       sv.id  = val;
-      sv.len = ::strlen( col->str );
+      sv.len = (uint32_t) ::strlen( col->str );
       return true;
     }
   }

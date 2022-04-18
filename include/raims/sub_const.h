@@ -48,61 +48,61 @@ namespace ms {
 #define _ACK            "ack"
 #define _ANY            "any"
 
-extern const char   X_HELLO[],
-                    X_HB[],
-                    X_BYE[],
-                    Z_ADD[],
-                    Z_DEL[],
-                    Z_BLM[],
-                    Z_ADJ[],
-                    S_JOIN[],
-                    S_LEAVE[],
-                    P_PSUB[],
-                    P_PSTOP[];
+extern const char     X_HELLO[],
+                      X_HB[],
+                      X_BYE[],
+                      Z_ADD[],
+                      Z_DEL[],
+                      Z_BLM[],
+                      Z_ADJ[],
+                      S_JOIN[],
+                      S_LEAVE[],
+                      P_PSUB[],
+                      P_PSTOP[];
                     /* prefix string size */
-extern const size_t X_HELLO_SZ,
-                    X_HB_SZ,
-                    X_BYE_SZ,
-                    Z_ADD_SZ,
-                    Z_DEL_SZ,
-                    Z_BLM_SZ,
-                    Z_ADJ_SZ,
-                    S_JOIN_SZ,
-                    S_LEAVE_SZ,
-                    P_PSUB_SZ,
-                    P_PSTOP_SZ;
+extern const uint16_t X_HELLO_SZ,
+                      X_HB_SZ,
+                      X_BYE_SZ,
+                      Z_ADD_SZ,
+                      Z_DEL_SZ,
+                      Z_BLM_SZ,
+                      Z_ADJ_SZ,
+                      S_JOIN_SZ,
+                      S_LEAVE_SZ,
+                      P_PSUB_SZ,
+                      P_PSTOP_SZ;
 /* hashes of above */
-extern uint32_t     hello_h, hb_h, bye_h, add_h, del_h, blm_h, adj_h,
-                    join_h, leave_h, psub_h, pstop_h;
+extern uint32_t hello_h, hb_h, bye_h, add_h, del_h, blm_h, adj_h,
+                join_h, leave_h, psub_h, pstop_h;
 
 #ifdef DECLARE_SUB_CONST
 
-const char          X_HELLO[]  = _SESSION_HELLO    ,
-                    X_HB[]     = _SESSION_HB       ,
-                    X_BYE[]    = _SESSION_BYE      ,
-                    Z_ADD[]    = _PEER_ADD         ,
-                    Z_DEL[]    = _PEER_DEL         ,
-                    Z_BLM[]    = _BLOOM_FILTER     ,
-                    Z_ADJ[]    = _ADJACENCY        ,
-                    S_JOIN[]   = _SUB_JOIN      ".",
-                    S_LEAVE[]  = _SUB_LEAVE     ".",
-                    P_PSUB[]   = _PSUB_START    ".",
-                    P_PSTOP[]  = _PSUB_STOP     ".";
+const char     X_HELLO[]  = _SESSION_HELLO    ,
+               X_HB[]     = _SESSION_HB       ,
+               X_BYE[]    = _SESSION_BYE      ,
+               Z_ADD[]    = _PEER_ADD         ,
+               Z_DEL[]    = _PEER_DEL         ,
+               Z_BLM[]    = _BLOOM_FILTER     ,
+               Z_ADJ[]    = _ADJACENCY        ,
+               S_JOIN[]   = _SUB_JOIN      ".",
+               S_LEAVE[]  = _SUB_LEAVE     ".",
+               P_PSUB[]   = _PSUB_START    ".",
+               P_PSTOP[]  = _PSUB_STOP     ".";
                     /* prefix string size */
-const size_t        X_HELLO_SZ = sizeof( X_HELLO ) - 1,
-                    X_HB_SZ    = sizeof( X_HB    ) - 1,
-                    X_BYE_SZ   = sizeof( X_BYE   ) - 1,
-                    Z_ADD_SZ   = sizeof( Z_ADD   ) - 1,
-                    Z_DEL_SZ   = sizeof( Z_DEL   ) - 1,
-                    Z_BLM_SZ   = sizeof( Z_BLM   ) - 1,
-                    Z_ADJ_SZ   = sizeof( Z_ADJ   ) - 1,
-                    S_JOIN_SZ  = sizeof( S_JOIN  ) - 1,
-                    S_LEAVE_SZ = sizeof( S_LEAVE ) - 1,
-                    P_PSUB_SZ  = sizeof( P_PSUB  ) - 1,
-                    P_PSTOP_SZ = sizeof( P_PSTOP ) - 1;
+const uint16_t X_HELLO_SZ = (uint16_t) sizeof( X_HELLO ) - 1,
+               X_HB_SZ    = (uint16_t) sizeof( X_HB    ) - 1,
+               X_BYE_SZ   = (uint16_t) sizeof( X_BYE   ) - 1,
+               Z_ADD_SZ   = (uint16_t) sizeof( Z_ADD   ) - 1,
+               Z_DEL_SZ   = (uint16_t) sizeof( Z_DEL   ) - 1,
+               Z_BLM_SZ   = (uint16_t) sizeof( Z_BLM   ) - 1,
+               Z_ADJ_SZ   = (uint16_t) sizeof( Z_ADJ   ) - 1,
+               S_JOIN_SZ  = (uint16_t) sizeof( S_JOIN  ) - 1,
+               S_LEAVE_SZ = (uint16_t) sizeof( S_LEAVE ) - 1,
+               P_PSUB_SZ  = (uint16_t) sizeof( P_PSUB  ) - 1,
+               P_PSTOP_SZ = (uint16_t) sizeof( P_PSTOP ) - 1;
 
-uint32_t            hello_h, hb_h, bye_h, add_h, del_h, blm_h, adj_h,
-                    join_h, leave_h, psub_h, pstop_h;
+uint32_t       hello_h, hb_h, bye_h, add_h, del_h, blm_h, adj_h,
+               join_h, leave_h, psub_h, pstop_h;
 #endif
 
 }

@@ -5,13 +5,85 @@
 
 /* $OpenBSD: poly1305.c,v 1.3 2013/12/19 22:57:13 djm Exp $ */
 #include <string.h>
+#include <stdint.h>
 #include <raims/poly1305.h>
 
+using namespace rai;
+using namespace ms;
+
+#ifndef _MSC_VER
+typedef __uint128_t uint128_t;
+
+static inline uint64_t SHR( uint128_t in, int shift ) {
+  return (uint64_t)( in >> shift );
+}
+static inline void ADD( uint128_t &a, uint128_t b ) {
+  a += b;
+}
+static inline void ADDLO( uint128_t &a, uint64_t b ) {
+  a += b;
+}
+static inline uint64_t LO( uint128_t a ) {
+  return (uint64_t) a;
+}
+static inline void MUL( uint128_t &out, uint64_t a, uint64_t b ) {
+  out = (uint128_t) a * b;
+}
+#else
+#include <intrin.h>
+
+typedef struct uint128_s {
+  uint64_t lo, hi;
+
+  uint128_s() {}
+  uint128_s( uint64_t l,  uint64_t h = 0 ) : lo( l ), hi( h ) {}
+  uint128_s( const uint128_s &b ) : lo( b.lo ), hi( b.hi ) {}
+
+  uint64_t operator >>( int shift ) const {
+    return __shiftright128( this->lo, this->hi, shift );
+  }
+  uint128_s operator *( uint64_t m ) const {
+    uint128_s x;
+    x.lo = _umul128( this->lo, m, &x.hi );
+    return x;
+  }
+  uint128_s operator +( const uint128_s &b ) const {
+    uint128_s a = *this;;
+    return a += b;
+  }
+  uint128_s &operator +=( const uint128_s &b ) {
+    uint64_t p = this->lo;
+    this->lo += b.lo;
+    this->hi += b.hi + ( this->lo < p );
+    return *this;
+  }
+  explicit operator uint64_t() const {
+    return this->lo;
+  }
+} uint128_t;
+
+static inline uint64_t SHR( uint128_t in, int shift ) {
+  return in >> shift;
+}
+static inline void ADD( uint128_t &a, uint128_t b ) {
+  a += b;
+}
+static inline void ADDLO( uint128_t &a, uint64_t b ) {
+  a += b;
+}
+static inline uint64_t LO( uint128_t a ) {
+  return (uint64_t) a;
+}
+static inline void MUL( uint128_t &out, uint64_t a, uint64_t b ) {
+  out = (uint128_t) a * b;
+}
+#endif
+
 void
-poly1305_auth( uint8_t out[ POLY1305_W64TAG ],
-               const unsigned char *m,
-               size_t inlen,
-               const uint8_t key[ POLY1305_W64KEY ] )
+rai::ms::poly1305_auth( uint8_t out[ POLY1305_W64TAG ],
+                        const unsigned char *m,
+                        size_t inlen,
+                        const uint8_t key[ POLY1305_W64KEY ] ) noexcept
 {
   poly1305_vec_t vec = { m, inlen };
   if ( ( (uintptr_t) (void *) out & 7 ) == 0 &&
@@ -28,10 +100,10 @@ poly1305_auth( uint8_t out[ POLY1305_W64TAG ],
 }
 
 void
-poly1305_auth_v( uint64_t out[ POLY1305_W64TAG ],
-                 const poly1305_vec_t *vec,
-                 size_t veclen,
-                 const uint64_t key[ POLY1305_W64KEY ] )
+rai::ms::poly1305_auth_v( uint64_t out[ POLY1305_W64TAG ],
+                          const poly1305_vec_t *vec,
+                          size_t veclen,
+                          const uint64_t key[ POLY1305_W64KEY ] ) noexcept
 {
   uint64_t t0, t1;
   uint64_t h0, h1, h2, h_add;
@@ -39,7 +111,7 @@ poly1305_auth_v( uint64_t out[ POLY1305_W64TAG ],
   uint64_t g0, g1, g2;
   uint64_t s1, s2;
   uint64_t c;
-  __uint128_t d0, d1, d2, d;
+  uint128_t d0, d1, d2, d;
   size_t i, j, k, inlen, inoff;
   uint8_t mp[16];
   const uint8_t *m;
@@ -85,7 +157,7 @@ poly1305_auth_v( uint64_t out[ POLY1305_W64TAG ],
           goto break_loop;
         }
         j = 0;
-        m = vec[ i ].buf;
+        m = (const uint8_t *) vec[ i ].buf;
         while ( j < vec[ i ].buflen ) {
           mp[ k++ ] = ((const uint8_t *) m)[ j++ ];
           if ( k == 16 )
@@ -101,12 +173,6 @@ poly1305_auth_v( uint64_t out[ POLY1305_W64TAG ],
     h0 += (( t0                    ) & 0xfffffffffff);
     h1 += (((t0 >> 44) | (t1 << 20)) & 0xfffffffffff);
     h2 += (((t1 >> 24)             ) & 0x3ffffffffff) | h_add;
-
-#define MUL(out, x, y) out = ((__uint128_t)x * y)
-#define ADD(out, in) out += in
-#define ADDLO(out, in) out += in
-#define SHR(in, shift) (uint64_t)(in >> (shift))
-#define LO(in) (uint64_t)(in)
 
     /* h *= r */
     MUL(d0, h0, r0); MUL(d, h1, s2); ADD(d0, d); MUL(d, h2, s1); ADD(d0, d);
@@ -358,7 +424,7 @@ static void
 poly1305_block2( const uint64_t r[ 3 ],  const uint64_t s[ 2 ],
                  uint64_t h[ 3 ],  const void *m,  uint64_t h_add )
 {
-  __uint128_t d0, d1, d2, d;
+  uint128_t d0, d1, d2, d;
   uint64_t t[ 2 ];
   uint64_t c;
 
@@ -388,7 +454,7 @@ poly1305_block642( const uint64_t r[ 3 ],  const uint64_t s[ 2 ],
                    uint64_t h[ 3 ],  const void *m )
 {
   static const uint64_t h_add = (uint64_t) 1 << 40;
-  __uint128_t d0, d1, d2, d;
+  uint128_t d0, d1, d2, d;
   uint64_t t[ 8 ];
   uint64_t c;
   uint32_t i;

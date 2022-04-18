@@ -318,10 +318,10 @@ struct HmacDecrypt : public HmacKdf {
   }
 
   bool decrypt( const UserBuf &b,  const char *b64,  size_t b64_len ) {
-    return this->decrypt( b.user, b.user_len, b64, b64_len );
+    return this->decrypt( b.user, (int) b.user_len, b64, b64_len );
   }
   bool decrypt( const ServiceBuf &b,  const char *b64,  size_t b64_len ) {
-    return this->decrypt( b.service, b.service_len, b64, b64_len );
+    return this->decrypt( b.service, (int) b.service_len, b64, b64_len );
   }
   bool decrypt( const char *n,  int l,  const char *b64,  size_t b64_len ) {
     if ( KV_BASE64_BIN_SIZE( b64_len ) > MAX_CIPHER_LEN ) {
@@ -364,7 +364,8 @@ struct HmacEncrypt : public HmacKdf {
                                 this->ctr );
     this->cipher_len = this->plain_len + HMAC_SIZE;
     if ( KV_BASE64_SIZE( this->cipher_len ) > out_size ) {
-      fprintf( stderr, "base64 sz %lu > %lu\n", this->cipher_len, out_size );
+      fprintf( stderr, "base64 sz %u > %u\n",
+               (uint32_t) this->cipher_len, (uint32_t) out_size );
       out_size = 0;
       return false;
     }

@@ -3,14 +3,11 @@
 #include <string.h>
 #include <stdint.h>
 #include <stdarg.h>
-#include <unistd.h>
-#include <fcntl.h>
-#include <errno.h>
-#include <arpa/inet.h>
+#ifndef _MSC_VER
 #include <sys/socket.h>
-#define TELCMDS
-#define TELOPTS
-#include <arpa/telnet.h>
+#else
+#include <raikv/win.h>
+#endif
 #include <raims/ev_telnet.h>
 #include <raims/debug.h>
 #include <linecook/linecook.h>
@@ -25,6 +22,10 @@ using namespace md;
 static const char *
 code_to_str( uint32_t code ) noexcept
 {
+  static const char *telcmds[] = {
+    "EOF", "SUSP", "ABORT", "EOR", "SE",   "NOP", "DMARK",
+    "BRK", "IP",   "AO",    "AYT", "EC",   "EL",  "GA",
+    "SB",  "WILL", "WONT",  "DO",  "DONT", "IAC", 0, };
   /* code == WILL, WONT, DO, DONT */
   if ( code >= xEOF && code <= IAC )
     return telcmds[ code - xEOF ];
@@ -34,9 +35,17 @@ code_to_str( uint32_t code ) noexcept
 static const char *
 opt_to_str( uint32_t opt ) noexcept
 {
+  static const char *telopts[ NTELOPTS + 1 ] = {
+    "BINARY", "ECHO", "RCP", "SUPPRESS GO AHEAD", "NAME", "STATUS",
+    "TIMING MARK", "RCTE", "NAOL", "NAOP", "NAOCRD", "NAOHTS", "NAOHTD",
+    "NAOFFD", "NAOVTS", "NAOVTD", "NAOLFD", "EXTEND ASCII", "LOGOUT",
+    "BYTE MACRO", "DATA ENTRY TERMINAL", "SUPDUP", "SUPDUP OUTPUT",
+    "SEND LOCATION", "TERMINAL TYPE", "END OF RECORD", "TACACS UID",
+    "OUTPUT MARKING", "TTYLOC", "3270 REGIME", "X.3 PAD", "NAWS", "TSPEED",
+    "LFLOW", "LINEMODE", "XDISPLOC", "OLD-ENVIRON", "AUTHENTICATION", "ENCRYPT",
+    "NEW-ENVIRON", 0, };
   /* opt BINARY, ECHO, SGA, NAWS, ... */
-  if ( opt < NTELOPTS )
-    return telopts[ opt ];
+  if ( opt < NTELOPTS ) return telopts[ opt ];
   return "?opt?";
 }
 
@@ -78,7 +87,46 @@ state_bits_to_str( uint8_t bits,  char *buf ) noexcept
   buf[ i ] = '\0';
   return buf;
 }
+#if 0
+struct DbgOutput : public MDOutput {
+  FILE *fp;
+  DbgOutput( FILE *f ) : fp( f ) {}
+  virtual int printf( const char *fmt, ... ) noexcept;
+  virtual int puts( const char *s ) noexcept;
+};
 
+int
+DbgOutput::printf( const char *fmt, ... ) noexcept
+{
+  va_list ap;
+  int n;
+  va_start( ap, fmt );
+  n = vfprintf( this->fp, fmt, ap );
+  va_end( ap );
+  return n;
+}
+
+int
+DbgOutput::puts( const char *s ) noexcept
+{
+  if ( s != NULL )
+    return fputs( s, this->fp );
+  return 0;
+}
+
+static void
+dbg_buf( const char *w,  const char *out_buf,  size_t out_len ) noexcept
+{
+  static FILE *fp;
+  if ( fp == NULL ) {
+    fp = fopen( "telnet.dbg", "w" );
+  }
+  fprintf( fp, "%s:\n", w );
+  DbgOutput mout( fp );
+  mout.print_hex( out_buf, out_len );
+  fflush( fp );
+}
+#endif
 bool
 TelnetListen::accept( void ) noexcept
 {
@@ -146,7 +194,7 @@ TelnetService::set_slc_func( uint8_t func,  uint8_t level,
 void
 TelnetService::send_opt( uint8_t cmd,  uint8_t opt ) noexcept
 {
-  char * buf = this->alloc( 3 );
+  uint8_t * buf = (uint8_t *) this->alloc( 3 );
   buf[ 0 ] = IAC;
   buf[ 1 ] = cmd;
   buf[ 2 ] = opt;
@@ -176,7 +224,7 @@ TelnetService::add_state( uint8_t opt,  uint8_t state ) noexcept
   if ( opt == TELOPT_LINEMODE ) {
     if ( opt_st == ( DO_SENT | WILL_RECV ) ||
          opt_st == ( WILL_SENT | DO_RECV ) ) {
-      char * buf = this->alloc( 7 );
+      uint8_t * buf = (uint8_t *) this->alloc( 7 );
       /* IAC SB LINEMODE LM_MODE MODE_TRAPSIG IAC SE */
       buf[ 0 ] = IAC;
       buf[ 1 ] = SB;
@@ -186,6 +234,10 @@ TelnetService::add_state( uint8_t opt,  uint8_t state ) noexcept
       buf[ 5 ] = IAC;
       buf[ 6 ] = SE;
       this->sz += 7;
+      if ( ! this->term_started )
+        this->start_term();
+    }
+    else if ( opt_st == ( DO_SENT | WONT_RECV ) ) {
       if ( ! this->term_started )
         this->start_term();
     }
@@ -271,7 +323,7 @@ TelnetService::start_term( void ) noexcept
   this->term_started = true;
 
   this->term.tty_init();
-  this->term.closure = this->console;
+  this->term.lc->complete_arg = this->console;
   this->term.lc->complete_cb = console_complete;
   this->term.help_cb = console_help;
   static char iec[] = "-iec", question[] = "?", show_help[] = "&show-help";
@@ -324,7 +376,11 @@ TelnetService::on_quit( void ) noexcept
 void
 TelnetService::process_shutdown( void ) noexcept
 {
+#ifndef _MSC_VER
   ::shutdown( this->fd, SHUT_WR );
+#else
+  wp_shutdown_fd( this->fd, SD_SEND );
+#endif
   this->pushpop( EV_CLOSE, EV_SHUTDOWN );
 }
 
@@ -338,6 +394,7 @@ TelnetService::flush_term( void ) noexcept
 void
 TelnetService::flush_buf( const char *out_buf,  size_t out_len ) noexcept
 {
+  /*dbg_buf( "flush_buf", out_buf, out_len );*/
   for ( size_t i = 0; ; ) {
     if ( i == out_len )
       return;
@@ -356,9 +413,11 @@ TelnetService::flush_buf( const char *out_buf,  size_t out_len ) noexcept
       }
       left = eol - ptr;
     }
+    /*dbg_buf( "append", ptr, left );*/
     this->append( ptr, left );
     i += left;
     if ( need_cr ) {
+      /*dbg_buf( "append_cr", "\r\n", 2 );*/
       this->append( "\r\n", 2 );
       i++;
     }
@@ -381,19 +440,19 @@ TelnetService::process( void ) noexcept
         if ( tel > ptr ) {
           size_t prefix = tel - ptr;
           this->output( ptr, prefix );
-          this->off += prefix;
+          this->off += (uint32_t) prefix;
           ptr       += prefix;
           buflen    -= prefix;
         }
         if ( ! this->process_iac( ptr, buflen ) )
           break;
-        this->off += buflen;
+        this->off += (uint32_t) buflen;
         consumed = true;
       }
     }
     if ( ! consumed ) {
       this->output( ptr, buflen );
-      this->off += buflen;
+      this->off += (uint32_t) buflen;
     }
   }
   if ( this->process_console() ||
@@ -414,6 +473,7 @@ TelnetService::output( const char *ptr,  size_t buflen ) noexcept
   const char * end = &ptr[ buflen ];
   char * lbuf = NULL;
   size_t off  = 0;
+  /*dbg_buf( "output", ptr, buflen );*/
   if ( ! this->term_started ) {
     lbuf = (char *) ::realloc( this->line_buf, this->line_buflen + buflen + 1 );
     this->line_buf = lbuf;
@@ -422,6 +482,9 @@ TelnetService::output( const char *ptr,  size_t buflen ) noexcept
   while ( ptr < end ) {
     size_t       len = end - ptr;
     const char * eos = (const char *) ::memchr( ptr, '\0', len );
+    /* some telnets use \r \0, putty uses \r \n, eat line feeds */
+    if ( eos == NULL && this->term_started )
+      eos = (const char *) ::memchr( ptr, '\n', len );
     if ( eos == NULL ) {
       if ( this->term_started )
         this->term.tty_input( ptr, len );

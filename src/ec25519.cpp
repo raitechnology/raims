@@ -1,7 +1,6 @@
 /*
  * From Andrew Moon, https://github.com/floodyberry/ec25519-donna
  */
-
 #include <string.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -12,11 +11,66 @@ using namespace ms;
 using namespace kv;
 
 typedef uint64_t bignum25519[5];
+
+#ifndef _MSC_VER
+
 typedef __uint128_t uint128_t;
-#define shr128(out,in,shift) out = (uint64_t)(in >> (shift));
-#define add128(a,b) a += b;
-#define add128_64(a,b) a += (uint64_t)b;
-#define lo128(a) ((uint64_t)a)
+
+static inline void shr128( uint64_t &out, uint128_t in, int shift ) {
+  out = (uint64_t)( in >> shift );
+}
+static inline void add128_64( uint128_t &a, uint64_t b ) {
+  a += b;
+}
+static inline uint64_t lo128( uint128_t a ) {
+  return (uint64_t) a;
+}
+
+#else
+
+#include <intrin.h>
+
+typedef struct uint128_s {
+  uint64_t lo, hi;
+  uint128_s() {}
+  uint128_s( uint64_t l ) : lo( l ), hi( 0 ) {}
+  uint128_s( const uint128_s &b ) : lo( b.lo ), hi( b.hi ) {}
+
+  uint64_t operator >>( int shift ) const {
+    return __shiftright128( this->lo, this->hi, shift );
+  }
+  uint128_s operator *( uint64_t m ) const {
+    uint128_s x;
+    x.lo = _umul128( this->lo, m, &x.hi );
+    return x;
+  }
+  uint128_s operator +( const uint128_s &b ) const {
+    uint128_s a = *this;;
+    return a += b;
+  }
+  uint128_s &operator +=( const uint128_s &b ) {
+    uint64_t p = this->lo;
+    this->lo += b.lo;
+    this->hi += b.hi + ( this->lo < p );
+    return *this;
+  }
+  explicit operator uint64_t() const {
+    return this->lo;
+  }
+} uint128_t;
+
+static inline void shr128( uint64_t &out, uint128_t in, int shift ) {
+  out = __shiftright128( in.lo, in.hi, shift );
+}
+static inline void add128_64( uint128_t &a, uint64_t b ) {
+  uint64_t p = a.lo;
+  a.lo += b;
+  a.hi += (a.lo < p);
+}
+static inline uint64_t lo128( uint128_t a ) {
+  return a.lo;
+}
+#endif
 
 static void ec25519_scalarmult_donna( ec25519_key &mypublic,
                                       const ec25519_key &n,
@@ -156,19 +210,19 @@ ec25519_scalar_product( bignum25519 out, const bignum25519 in,
 
   a        = ( (uint128_t) in[ 0 ] ) * scalar;
   out[ 0 ] = (uint64_t) a & reduce_mask_51;
-  c        = ( uint64_t )( a >> 51 );
+  c        = (uint64_t)( a >> 51 );
   a        = ( (uint128_t) in[ 1 ] ) * scalar + c;
   out[ 1 ] = (uint64_t) a & reduce_mask_51;
-  c        = ( uint64_t )( a >> 51 );
+  c        = (uint64_t)( a >> 51 );
   a        = ( (uint128_t) in[ 2 ] ) * scalar + c;
   out[ 2 ] = (uint64_t) a & reduce_mask_51;
-  c        = ( uint64_t )( a >> 51 );
+  c        = (uint64_t)( a >> 51 );
   a        = ( (uint128_t) in[ 3 ] ) * scalar + c;
   out[ 3 ] = (uint64_t) a & reduce_mask_51;
-  c        = ( uint64_t )( a >> 51 );
+  c        = (uint64_t)( a >> 51 );
   a        = ( (uint128_t) in[ 4 ] ) * scalar + c;
   out[ 4 ] = (uint64_t) a & reduce_mask_51;
-  c        = ( uint64_t )( a >> 51 );
+  c        = (uint64_t)( a >> 51 );
   out[ 0 ] += c * 19;
 }
 
@@ -216,13 +270,13 @@ ec25519_mul( bignum25519 out, const bignum25519 a,
 
   r0 = lo128( t[ 0 ] ) & reduce_mask_51;
   shr128( c, t[ 0 ], 51 );
-  add128_64( t[ 1 ], c ) r1 = lo128( t[ 1 ] ) & reduce_mask_51;
+  add128_64( t[ 1 ], c ); r1 = lo128( t[ 1 ] ) & reduce_mask_51;
   shr128( c, t[ 1 ], 51 );
-  add128_64( t[ 2 ], c ) r2 = lo128( t[ 2 ] ) & reduce_mask_51;
+  add128_64( t[ 2 ], c ); r2 = lo128( t[ 2 ] ) & reduce_mask_51;
   shr128( c, t[ 2 ], 51 );
-  add128_64( t[ 3 ], c ) r3 = lo128( t[ 3 ] ) & reduce_mask_51;
+  add128_64( t[ 3 ], c ); r3 = lo128( t[ 3 ] ) & reduce_mask_51;
   shr128( c, t[ 3 ], 51 );
-  add128_64( t[ 4 ], c ) r4 = lo128( t[ 4 ] ) & reduce_mask_51;
+  add128_64( t[ 4 ], c ); r4 = lo128( t[ 4 ] ) & reduce_mask_51;
   shr128( c, t[ 4 ], 51 );
   r0 += c * 19;
   c  = r0 >> 51;
@@ -271,13 +325,13 @@ ec25519_square_times( bignum25519 out, const bignum25519 in,
 
     r0 = lo128( t[ 0 ] ) & reduce_mask_51;
     shr128( c, t[ 0 ], 51 );
-    add128_64( t[ 1 ], c ) r1 = lo128( t[ 1 ] ) & reduce_mask_51;
+    add128_64( t[ 1 ], c ); r1 = lo128( t[ 1 ] ) & reduce_mask_51;
     shr128( c, t[ 1 ], 51 );
-    add128_64( t[ 2 ], c ) r2 = lo128( t[ 2 ] ) & reduce_mask_51;
+    add128_64( t[ 2 ], c ); r2 = lo128( t[ 2 ] ) & reduce_mask_51;
     shr128( c, t[ 2 ], 51 );
-    add128_64( t[ 3 ], c ) r3 = lo128( t[ 3 ] ) & reduce_mask_51;
+    add128_64( t[ 3 ], c ); r3 = lo128( t[ 3 ] ) & reduce_mask_51;
     shr128( c, t[ 3 ], 51 );
-    add128_64( t[ 4 ], c ) r4 = lo128( t[ 4 ] ) & reduce_mask_51;
+    add128_64( t[ 4 ], c ); r4 = lo128( t[ 4 ] ) & reduce_mask_51;
     shr128( c, t[ 4 ], 51 );
     r0 += c * 19;
     c  = r0 >> 51;
@@ -324,13 +378,13 @@ ec25519_square( bignum25519 out, const bignum25519 in ) noexcept
 
   r0 = lo128( t[ 0 ] ) & reduce_mask_51;
   shr128( c, t[ 0 ], 51 );
-  add128_64( t[ 1 ], c ) r1 = lo128( t[ 1 ] ) & reduce_mask_51;
+  add128_64( t[ 1 ], c ); r1 = lo128( t[ 1 ] ) & reduce_mask_51;
   shr128( c, t[ 1 ], 51 );
-  add128_64( t[ 2 ], c ) r2 = lo128( t[ 2 ] ) & reduce_mask_51;
+  add128_64( t[ 2 ], c ); r2 = lo128( t[ 2 ] ) & reduce_mask_51;
   shr128( c, t[ 2 ], 51 );
-  add128_64( t[ 3 ], c ) r3 = lo128( t[ 3 ] ) & reduce_mask_51;
+  add128_64( t[ 3 ], c ); r3 = lo128( t[ 3 ] ) & reduce_mask_51;
   shr128( c, t[ 3 ], 51 );
-  add128_64( t[ 4 ], c ) r4 = lo128( t[ 4 ] ) & reduce_mask_51;
+  add128_64( t[ 4 ], c ); r4 = lo128( t[ 4 ] ) & reduce_mask_51;
   shr128( c, t[ 4 ], 51 );
   r0 += c * 19;
   c  = r0 >> 51;

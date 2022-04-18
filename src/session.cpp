@@ -2,6 +2,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#define __STDC_FORMAT_MACROS
+#include <inttypes.h>
 #define DECLARE_SUB_CONST
 #include <raims/session.h>
 #include <raims/transport.h>
@@ -93,7 +95,7 @@ SessionMgr::init_session( const CryptPass &pwd ) noexcept
   this->sub_db.init( this->fd );
   this->console.update_prompt();
   char nonce_buf[ NONCE_B64_LEN + 1 ];
-  printf( "session %s.%s[%s] started, start time %lu.%lu\n",
+  printf( "session %s.%s[%s] started, start time %" PRIu64 ".%" PRIu64 "\n",
           this->user.user.val,
           this->svc.svc.val,
           this->user_db.bridge_id.nonce.to_base64_str( nonce_buf ),
@@ -102,7 +104,7 @@ SessionMgr::init_session( const CryptPass &pwd ) noexcept
   /*this->sub_seqno = 0;*/
 
   InboxBuf ibx( this->user_db.bridge_id );
-  this->ibx.len = ibx.len();
+  this->ibx.len = (uint16_t) ibx.len();
   this->ibx.init( ibx, _AUTH     , U_INBOX_AUTH );
   this->ibx.init( ibx, _SUBS     , U_INBOX_SUBS );
   this->ibx.init( ibx, _PING     , U_INBOX_PING );
@@ -123,7 +125,7 @@ SessionMgr::init_session( const CryptPass &pwd ) noexcept
   this->ibx.init( ibx, _ANY      , U_INBOX_ANY );
 
   McastBuf mcb;
-  this->mch.len = mcb.len();
+  this->mch.len = (uint16_t) mcb.len();
   this->mch.init( mcb, _PING     , U_MCAST_PING );
 
   if ( ! this->ibx.is_full() || ! this->mch.is_full() ) {
@@ -173,7 +175,7 @@ SessionMgr::add_wildcard_rte( const char *prefix,  size_t pref_len,
 {
   uint32_t seed = this->poll.sub_route.prefix_seed( pref_len ),
            hash = kv_crc_c( prefix, pref_len, seed );
-  this->sys_bloom.add_route( pref_len, hash );
+  this->sys_bloom.add_route( (uint16_t) pref_len, hash );
   if ( type != U_INBOX && type != U_MCAST ) {
     if ( ! this->u_tab.set( hash, pref_len, type ) ) {
       fprintf( stderr, "hash %x pref %.*s repeats\n",
@@ -194,7 +196,8 @@ SessionMgr::start( void ) noexcept
   this->user_db.hb_ival_mask = ival;
   for ( int i = 1; i <= 32; i *= 2 )
     this->user_db.hb_ival_mask |= ( this->user_db.hb_ival_mask >> i );
-  this->poll.timer.add_timer_nanos( this->fd, ival / 1000, this->timer_id, 0 );
+  this->poll.timer.add_timer_nanos( this->fd, (uint32_t) ( ival / 1000 ),
+                                    this->timer_id, 0 );
 }
 
 void
@@ -462,7 +465,7 @@ ExternalRoute::on_msg( EvPublish &pub ) noexcept
   if ( status > SEQNO_UID_NEXT ) {
     fpub.status = FRAME_STATUS_DUP_SEQNO;
     if ( debug_sess )
-      n.printf( "%s %.*s seqno %lu (%s)\n",
+      n.printf( "%s %.*s seqno %" PRIu64 " (%s)\n",
                 seqno_status_string( status ),
                 (int) fpub.subject_len, fpub.subject, dec.seqno,
                 fpub.rte.name );
@@ -687,12 +690,12 @@ SessionMgr::on_msg( EvPublish &pub ) noexcept
       }
       if ( dec.seqno <= n.sub_seqno ) {
         if ( debug_sess )
-          n.printf( "%.*s ignoring sub seqno replay %lu -> %lu (%s)\n",
+          n.printf( "%.*s ignoring sub seqno replay %" PRIu64 " -> %" PRIu64 " (%s)\n",
                     (int) fpub.subject_len, fpub.subject,
                     n.sub_seqno, dec.seqno, fpub.rte.name );
       }
       else if ( n.sub_seqno != 0 ) {
-        n.printf( "%.*s missing sub seqno %lu -> %lu (%s)\n",
+        n.printf( "%.*s missing sub seqno %" PRIu64 " -> %" PRIu64 " (%s)\n",
                   (int) fpub.subject_len, fpub.subject,
                   n.sub_seqno, dec.seqno, fpub.rte.name );
       }
@@ -716,7 +719,7 @@ SessionMgr::on_msg( EvPublish &pub ) noexcept
       }
       else {
         if ( debug_sess ) {
-          n.printf( "%.*s ignoring peer seqno replay %lu -> %lu (%s)\n",
+          n.printf( "%.*s ignoring peer seqno replay %" PRIu64 " -> %" PRIu64 " (%s)\n",
                     (int) fpub.subject_len, fpub.subject,
                     n.recv_peer_seqno, dec.seqno, fpub.rte.name );
         }
@@ -741,7 +744,7 @@ SessionMgr::on_msg( EvPublish &pub ) noexcept
     case U_INBOX_ANY_RTE:   /* _I.Nonce.any, external inbox */
       if ( dec.seqno > n.recv_inbox_seqno ) {
         if ( n.recv_inbox_seqno != 0 && dec.seqno != n.recv_inbox_seqno + 1 ) {
-          n.printf( "%.*s missing inbox seqno %lu -> %lu (%s)\n",
+          n.printf( "%.*s missing inbox seqno %" PRIu64 " -> %" PRIu64 " (%s)\n",
                     (int) fpub.subject_len, fpub.subject,
                     n.recv_inbox_seqno, dec.seqno, fpub.rte.name );
         }
@@ -767,7 +770,7 @@ SessionMgr::on_msg( EvPublish &pub ) noexcept
         }
       }
       else {
-        n.printf( "%.*s ignoring inbox seqno replay %lu -> %lu (%s)\n",
+        n.printf( "%.*s ignoring inbox seqno replay %" PRIu64 " -> %" PRIu64 " (%s)\n",
                   (int) fpub.subject_len, fpub.subject,
                   n.recv_inbox_seqno, dec.seqno, fpub.rte.name );
         fpub.status = FRAME_STATUS_DUP_SEQNO;
@@ -778,7 +781,7 @@ SessionMgr::on_msg( EvPublish &pub ) noexcept
     case U_MCAST:
       if ( dec.seqno > n.recv_mcast_seqno ) {
         if ( n.recv_mcast_seqno != 0 && dec.seqno != n.recv_mcast_seqno + 1 ) {
-          n.printf( "%.*s missing mcast seqno %lu -> %lu (%s)\n",
+          n.printf( "%.*s missing mcast seqno %" PRIu64 " -> %" PRIu64 " (%s)\n",
                     (int) fpub.subject_len, fpub.subject,
                     n.recv_mcast_seqno, dec.seqno, fpub.rte.name );
         }
@@ -786,7 +789,7 @@ SessionMgr::on_msg( EvPublish &pub ) noexcept
         return this->user_db.recv_ping_request( fpub, n, dec );
       }
       else {
-        n.printf( "%.*s ignoring mcast seqno replay %lu -> %lu (%s)\n",
+        n.printf( "%.*s ignoring mcast seqno replay %" PRIu64 " -> %" PRIu64 " (%s)\n",
                   (int) fpub.subject_len, fpub.subject,
                   n.recv_mcast_seqno, dec.seqno, fpub.rte.name );
         fpub.status = FRAME_STATUS_DUP_SEQNO;
@@ -817,7 +820,7 @@ SessionMgr::on_msg( EvPublish &pub ) noexcept
       /* if _I.Nonce.<inbox_ret>, find the inbox_ret */
       if ( dec.inbox_ret != 0 || type == U_INBOX_ANY ) {
         if ( dec.seqno != n.recv_inbox_seqno + 1 ) {
-          n.printf( "%.*s missing inbox return seqno %lu -> %lu (%s)\n",
+          n.printf( "%.*s missing inbox return seqno %" PRIu64 " -> %" PRIu64 " (%s)\n",
                     (int) fpub.subject_len, fpub.subject,
                     n.recv_inbox_seqno, dec.seqno, fpub.rte.name );
         }
@@ -837,7 +840,7 @@ SessionMgr::on_msg( EvPublish &pub ) noexcept
         }
         else if ( dec.test( FID_SUBJECT ) ) {
           const char * sub    = (const char *) dec.mref[ FID_SUBJECT ].fptr;
-          uint16_t     sublen = dec.mref[ FID_SUBJECT ].fsize;
+          uint16_t     sublen = (uint16_t) dec.mref[ FID_SUBJECT ].fsize;
           seq.cb = this->sub_db.match_any_sub( sub, sublen );
           if ( seq.cb == NULL ) {
             n.printf( "%.*s any match not found (%s)\n", (int) sublen, sub,
@@ -853,7 +856,7 @@ SessionMgr::on_msg( EvPublish &pub ) noexcept
         if ( status > SEQNO_UID_NEXT ) {
           fpub.status = FRAME_STATUS_DUP_SEQNO;
           if ( debug_sess )
-            n.printf( "%s %.*s seqno %lu (%s)\n",
+            n.printf( "%s %.*s seqno %" PRIu64 " (%s)\n",
                       seqno_status_string( status ),
                       (int) fpub.subject_len, fpub.subject, dec.seqno,
                       fpub.rte.name );
@@ -869,7 +872,7 @@ SessionMgr::on_msg( EvPublish &pub ) noexcept
       if ( seq.cb != NULL )
         seq.cb->on_data( val );
       else {
-        n.printf( "Not subscribed: %.*s seqno %lu (%s)\n",
+        n.printf( "Not subscribed: %.*s seqno %" PRIu64 " (%s)\n",
                   (int) fpub.subject_len, fpub.subject, dec.seqno,
                   fpub.rte.name );
       }

@@ -2,6 +2,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#define __STDC_FORMAT_MACROS
+#include <inttypes.h>
 #include <raims/session.h>
 
 using namespace rai;
@@ -303,7 +305,8 @@ SubDB::recv_subs_request( const MsgFramePublish &,  UserBridge &n,
 void
 SubDB::print_bloom( BloomBits &b ) noexcept
 {
-  printf( "width %lu, count %lu, seed=%x\n", b.width, b.count, b.seed );
+  printf( "width %" PRIu64 ", count %" PRIu64 ", seed=%x\n",
+          b.width, b.count, b.seed );
   for ( size_t i = 0; i < b.width * 8; i++ ) {
     uint8_t shft = i % 64;
     size_t  off  = i / 64;
@@ -312,14 +315,14 @@ SubDB::print_bloom( BloomBits &b ) noexcept
   }
   printf( "\n" );
   for ( size_t j = 0; j < 4; j++ ) {
-    printf( "ht[ %lu ] = elem_count %lu tab_mask %lx\n", j,
-            b.ht[ j ]->elem_count, b.ht[ j ]->tab_mask );
+    printf( "ht[ %" PRIu64 " ] = elem_count %" PRIu64 " tab_mask %" PRIx64 "\n",
+            j, b.ht[ j ]->elem_count, b.ht[ j ]->tab_mask );
     size_t k;
     if ( b.ht[ j ]->first( k ) ) {
       do {
         uint32_t h, v;
         b.ht[ j ]->get( k, h, v );
-        printf( "%lu.%x = %u, ", k, h, v );
+        printf( "%" PRIu64 ".%x = %u, ", k, h, v );
       } while ( b.ht[ j ]->next( k ) );
       printf( "\n" );
     }
@@ -394,11 +397,11 @@ SubDB::recv_bloom( const MsgFramePublish &pub,  UserBridge &n,
   if ( dec.test_2( FID_BLOOM, FID_SUB_SEQNO ) ) {
     uint64_t sub_seqno = 0;
     cvt_number<uint64_t>( dec.mref[ FID_SUB_SEQNO ], sub_seqno );
-    d_sub( "sub_seqno %lu >= %lu\n", sub_seqno, n.sub_seqno );
+    d_sub( "sub_seqno %" PRIu64 " >= %" PRIu64 "\n", sub_seqno, n.sub_seqno );
     if ( sub_seqno >= n.sub_seqno ) {
       if ( n.bloom.decode( dec.mref[ FID_BLOOM ].fptr,
                            dec.mref[ FID_BLOOM ].fsize ) ) {
-        d_sub( "update_bloom count %lu\n", n.bloom.bits->count );
+        d_sub( "update_bloom count %" PRIu64 "\n", n.bloom.bits->count );
         if ( debug_sub )
           print_bloom( *n.bloom.bits );
 
@@ -406,7 +409,7 @@ SubDB::recv_bloom( const MsgFramePublish &pub,  UserBridge &n,
         n.sub_recv_mono_time = current_monotonic_time_ns();
         this->sub_update_mono_time = n.sub_recv_mono_time;
         this->user_db.events.recv_bloom( n.uid, pub.rte.tport_id,
-                                         n.bloom.bits->count );
+                                         (uint32_t) n.bloom.bits->count );
       }
       else {
         n.printe( "failed to update bloom\n" );
@@ -498,7 +501,7 @@ SubDB::recv_resub_result( const MsgFramePublish &,  UserBridge &,
       rte.sub_route.notify_sub( hash, sub, sublen, u_rte.mcast_fd,
                                 rcnt, 's' );
     }
-    n.printf( "%.*s start %lu end %lu\n",
+    n.printf( "%.*s start %" PRIu64 " end %" PRIu64 "\n",
             (int) pub.subject_len, pub.subject, start, seqno );
   }
   if ( n.test_clear( SUBS_REQUEST_STATE ) )
@@ -521,7 +524,7 @@ SubDB::resize_bloom( void ) noexcept
     this->index_bloom( *b, INTERNAL_SUB | EXTERNAL_SUB );
     if ( debug_sub )
       print_bloom( *b );
-    this->user_db.events.resize_bloom( b->count );
+    this->user_db.events.resize_bloom( (uint32_t) b->count );
   }
   if ( internal_resize ) {
     b = this->internal.bits->resize( this->internal.bits,
@@ -836,7 +839,7 @@ AnyMatchTab::get_match( const char *sub,  uint16_t sublen,  uint32_t h,
 
   any = (AnyMatch *) (void *) &p[ this->max_off ];
   any->init_any( sub, sublen, pre_seed, max_uid );
-  this->ht->set_rsz( this->ht, h, pos, this->max_off );
+  this->ht->set_rsz( this->ht, h, pos, (uint32_t) this->max_off );
   this->max_off += sz;
   return any;
 }

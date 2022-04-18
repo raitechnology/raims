@@ -101,7 +101,7 @@ struct KeyDeriveFun
       if ( this->off + n > full )
         n = full - this->off;
       ::memcpy( &this->S[ this->off ], in, n );
-      this->off += n;
+      this->off += (uint32_t) n;
       if ( this->off == full ) {
         this->merge();
         this->off = start;

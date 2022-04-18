@@ -215,8 +215,8 @@ struct SubTab {
     if ( ! rt->rem( ctx ) )
       return SUB_UPDATED;
     if ( ! this->list.pop( rt->start_seqno ) ) {
-      printf( "stop %.*s seqno %lu not found\n", 
-              (int) ctx.sublen, ctx.sub, rt->start_seqno );
+      printf( "stop %.*s seqno %u not found\n", 
+              (int) ctx.sublen, ctx.sub, (uint32_t) rt->start_seqno );
     }
     this->tab.remove( loc );
     return SUB_OK;

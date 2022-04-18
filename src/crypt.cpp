@@ -2,13 +2,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
-#include <unistd.h>
-#include <fcntl.h>
 #include <assert.h>
-#include <sys/stat.h>
-#include <sys/mman.h>
-#include <openssl/sha.h>
-#include <openssl/aes.h>
+#include <raikv/os_file.h>
+#include <raikv/atom.h>
+#include <raims/sha512.h>
+#include <raims/aes.h>
 #include <raims/crypt.h>
 #include <raims/user.h>
 #include <raikv/key_hash.h>
@@ -73,8 +71,8 @@ static char kdf_hash_data[ 640 ] =
 "exhaustion of the mined rock salt supplies resulted in a change to wild brine  "
 "Salt is extracted from underground beds either by mining or by solution mining ";
 
-int       rai::ms::kdf_hash_init;
-int       rai::ms::kdf_hash_ready;
+kv_atom_uint32_t rai::ms::kdf_hash_init;
+kv_atom_uint32_t rai::ms::kdf_hash_ready;
 uint8_t * rai::ms::T;
 uint8_t * rai::ms::U;
 
@@ -86,31 +84,20 @@ uint8_t * rai::ms::U;
 void *
 rai::ms::alloc_secure_mem( size_t len ) noexcept
 {
-  size_t page_align = (size_t) ::sysconf( _SC_PAGESIZE ),
-         map_size = align<size_t>( len, page_align );
-  void * p;
-  p = ::mmap( 0, map_size, PROT_READ | PROT_WRITE,
-                           MAP_PRIVATE | MAP_ANONYMOUS, -1, 0 );
-  if ( p == MAP_FAILED ) {
-    perror( "mmap secure mem" );
-    assert( 0 );
+  MapFile map( NULL, len );
+  if ( ! map.open( MAP_FILE_RDWR | MAP_FILE_PRIVATE | MAP_FILE_LOCK |
+                   MAP_FILE_SECURE | MAP_FILE_NOUNMAP ) ) {
+    perror( "secure mem" );
+    if ( map.map == NULL )
+      assert( 0 );
   }
-  if ( ::madvise( p, map_size, MADV_DONTDUMP ) != 0 )
-    perror( "madvise" );
-#ifdef MLOCK_ONFAULT
-  ::mlock2( p, map_size, MLOCK_ONFAULT );
-#else
-  ::mlock( p, map_size );
-#endif
-  return p;
+  return map.map;
 }
 
 void
 rai::ms::free_secure_mem( void *p,  size_t len ) noexcept
 {
-  size_t page_align = (size_t) ::sysconf( _SC_PAGESIZE ),
-         map_size = align<size_t>( len, page_align );
-  ::munmap( p, map_size );
+  MapFile::unmap( p, len );
 }
 
 bool
@@ -140,7 +127,7 @@ rai::ms::load_secure_env( const char *env,  const char *unlnk_env,
     /* if burn after reading */
     if ( unlnk_env != NULL ) {
       if ( ::getenv( unlnk_env ) != NULL ) {
-        if ( ::unlink( &env_data[ 5 ] ) < 0 )
+        if ( os_unlink( &env_data[ 5 ] ) < 0 )
           ::perror( env_data );
       }
     }
@@ -152,34 +139,21 @@ rai::ms::load_secure_env( const char *env,  const char *unlnk_env,
 bool
 rai::ms::load_secure_file( const char *fn,  void *&mem,  size_t &sz ) noexcept
 {
-/* if redirected to file, read that */
-  int    fd  = ::open( fn, O_RDONLY );
-  void * map = MAP_FAILED;
-  struct stat st;
-
-  if ( fd < 0 ) {
+  MapFile map( fn );
+  if ( ! map.open() ) {
     ::perror( fn );
     return false;
   }
-  if ( ::fstat( fd, &st ) == 0 )
-    map = ::mmap( 0, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0 );
-  if ( map == MAP_FAILED ) {
-    ::perror( fn );
-    ::close( fd );
-    return false;
-  }
-  ::close( fd );
-  sz = st.st_size;
+  sz = map.map_size;
   /* strip one cr/nl */
-  if ( ((char *) map)[ sz - 1 ] == '\n' ) {
+  if ( ((char *) map.map)[ sz - 1 ] == '\n' ) {
     sz--;
-    if ( ((char *) map)[ sz - 1 ] == '\r' )
+    if ( ((char *) map.map)[ sz - 1 ] == '\r' )
       sz--;
   }
   /* copy to secure mem */
   mem = alloc_secure_mem( sz );
-  ::memcpy( mem, map, sz );
-  ::munmap( map, st.st_size );
+  ::memcpy( mem, map.map, sz );
 
   return true;
 }
@@ -267,7 +241,9 @@ rai::ms::init_kdf( const void *mem,  size_t mem_sz ) noexcept
   bool success = true;
   /* this hash is used for any hash calculation, crossing process boundaries
    * it needs to be globally set for any two endpoints to authenticate */
-  if ( ! __sync_fetch_and_add( &kdf_hash_init, 1 ) ) {
+  if ( ! kv_sync_xchg32( &kdf_hash_init, 1 ) ) {
+    kv_acquire_fence();
+
     void       * data       = NULL;
     size_t       data_sz    = 0;
     const char * hash_iters = ::getenv( "RAI_KDF_ITERS" ),
@@ -298,25 +274,25 @@ rai::ms::init_kdf( const void *mem,  size_t mem_sz ) noexcept
     ::memset( T_init, 0, sizeof( T_init ) );
     ::memset( U_init, 0, sizeof( U_init ) );
 
-    size_t cnt   = sizeof( T_init ) / SHA512_DIGEST_LENGTH,
+    size_t cnt   = sizeof( T_init ) / SHA512_HASH_SIZE,
            chunk = len / cnt,
            off   = 0;
     if ( chunk == 0 )
       chunk = 1;
+    Sha512Context ctx, ctx2;
     /* merge crypt_hash into T[], U[] */
-    for ( size_t i = 0; ; i += SHA512_DIGEST_LENGTH ) {
-      SHA512_CTX ctx, ctx2;
-      SHA512_Init( &ctx );
-      SHA512_Init( &ctx2 );
+    for ( size_t i = 0; ; i += SHA512_HASH_SIZE ) {
+      ctx.initialize();
+      ctx2.initialize();
       size_t size = len - off;
       if ( size > chunk )
         size = chunk;
-      SHA512_Update( &ctx, &hash_seed[ off ], size );
-      SHA512_Update( &ctx2, &hash_seed[ off ], size );
-      SHA512_Update( &ctx, &T[ i % sizeof( T_init ) ], SHA512_DIGEST_LENGTH );
-      SHA512_Update( &ctx2, &U[ i % sizeof( U_init ) ], SHA512_DIGEST_LENGTH );
-      SHA512_Final( &T[ i % sizeof( T_init ) ], &ctx );
-      SHA512_Final( &U[ i % sizeof( U_init ) ], &ctx2 );
+      ctx.update( &hash_seed[ off ], size );
+      ctx2.update(  &hash_seed[ off ], size );
+      ctx.update( &T[ i % sizeof( T_init ) ], SHA512_HASH_SIZE );
+      ctx2.update( &U[ i % sizeof( U_init ) ], SHA512_HASH_SIZE );
+      ctx.finalize( &T[ i % sizeof( T_init ) ] );
+      ctx2.finalize( &U[ i % sizeof( U_init ) ] );
       off += size;
       if ( off == len ) {
         if ( iters == 0 || --iters == 0 )
@@ -327,13 +303,14 @@ rai::ms::init_kdf( const void *mem,  size_t mem_sz ) noexcept
     ::memset( kdf_hash_data, 0, sizeof( kdf_hash_data ) );
     if ( data != NULL )
       free_secure_mem( data, data_sz );
-    __sync_synchronize();
-    __sync_fetch_and_add( &kdf_hash_ready, 1 );
+    kv_release_fence();
+    kv_sync_xchg32( &kdf_hash_ready, 1 );
   }
   else {
-    while ( ! __sync_fetch_and_add( &kdf_hash_ready, 0 ) )
-      ;
-    __sync_synchronize();
+    kv_acquire_fence();
+    while ( ! kv_sync_load32( &kdf_hash_ready ) )
+      kv_sync_pause();
+    kv_release_fence();
   }
   return success;
 }
@@ -392,7 +369,7 @@ void
 HashDigest::encrypt_hmac( const void *data,  size_t data_len,  void *data_out,
                           uint64_t ctr ) noexcept
 {
-  AES_KEY         key;
+  AES128          aes;
   uint8_t       * hmac_out   = (uint8_t *) data_out;
   uint8_t       * cipher_out = &hmac_out[ HMAC_SIZE ];
   const uint8_t * plain_in   = (const uint8_t *) data;
@@ -401,12 +378,12 @@ HashDigest::encrypt_hmac( const void *data,  size_t data_len,  void *data_out,
   size_t          i, k;
 
   /* first 16 bytes is AES key */
-  AES_set_encrypt_key( this->digest(), 128, &key );
+  aes.expand_key( this->digest() );
   /* second 16 bytes is AES ctr mode IV */
   ::memcpy( iv, this->digest() + 16, 16 );
 
   iv[ 1 ] += ctr++;
-  AES_encrypt( (uint8_t *) (void *) iv, tmp, &key );
+  aes.encrypt( iv, tmp );
   for ( i = 0; ; i += 16 ) {
     if ( i + 16 >= data_len )
       break;
@@ -415,7 +392,7 @@ HashDigest::encrypt_hmac( const void *data,  size_t data_len,  void *data_out,
       cipher_out[ i + k ] = plain_in[ i + k ] ^ tmp[ k ];
     /* next block, incr ctr */
     iv[ 1 ] += ctr++;
-    AES_encrypt( (uint8_t *) (void *) iv, tmp, &key );
+    aes.encrypt( iv, tmp );
   }
   /* trail block */
   for ( k = 0; k < data_len - i; k++ )
@@ -430,7 +407,7 @@ bool
 HashDigest::decrypt_hmac( const void *data,  size_t data_len,  void *data_out,
                           uint64_t ctr ) noexcept
 {
-  AES_KEY         key;
+  AES128          aes;
   uint8_t       * plain_out  = (uint8_t *) data_out;
   const uint8_t * hmac_in    = (const uint8_t *) data;
   const uint8_t * cipher_in  = &hmac_in[ HMAC_SIZE ];
@@ -445,12 +422,12 @@ HashDigest::decrypt_hmac( const void *data,  size_t data_len,  void *data_out,
     return false;
 
   /* first 16 bytes is AES key */
-  AES_set_encrypt_key( this->digest(), 128, &key );
+  aes.expand_key( this->digest() );
   /* second 16 bytes is AES ctr mode IV */
   ::memcpy( iv, this->digest() + 16, 16 );
 
   iv[ 1 ] += ctr++;
-  AES_encrypt( (uint8_t *) (void *) iv, tmp, &key );
+  aes.encrypt( iv, tmp );
   for ( i = 0; ; i += 16 ) {
     if ( i + 16 >= cipher_len )
       break;
@@ -459,7 +436,7 @@ HashDigest::decrypt_hmac( const void *data,  size_t data_len,  void *data_out,
       plain_out[ i + k ] = cipher_in[ i + k ] ^ tmp[ k ];
     /* next block, incr ctr */
     iv[ 1 ] += ctr++;
-    AES_encrypt( (uint8_t *) (void *) iv, tmp, &key );
+    aes.encrypt( iv, tmp );
   }
   /* trail block */
   for ( k = 0; k < cipher_len - i; k++ )
@@ -518,10 +495,10 @@ void
 HashDigest::encrypt_hash( const HashDigest &challenge_hash,
                           const HashDigest &hash ) noexcept
 {
-  AES_KEY key;
+  AES128 aes;
   for ( size_t i = 0; i < HASH_DIGEST_SIZE; i += 16 ) {
-    AES_set_encrypt_key( challenge_hash.digest() + i, 128, &key );
-    AES_encrypt( hash.digest() + i, this->digest() + i, &key );
+    aes.expand_key( challenge_hash.digest() + i );
+    aes.encrypt( hash.digest() + i, this->digest() + i );
   }
 }
 /* AES_decrypt[ challenge, encrypted_hash ] -> hash */
@@ -529,10 +506,10 @@ void
 HashDigest::decrypt_hash( const HashDigest &challenge_hash,
                           const HashDigest &encrypted_hash ) noexcept
 {
-  AES_KEY key;
+  AES128 aes;
   for ( size_t i = 0; i < HASH_DIGEST_SIZE; i += 16 ) {
-    AES_set_decrypt_key( challenge_hash.digest() + i, 128, &key );
-    AES_decrypt( encrypted_hash.digest() + i, this->digest() + i, &key );
+    aes.expand_key( challenge_hash.digest() + i );
+    aes.decrypt( encrypted_hash.digest() + i, this->digest() + i );
   }
 }
 /* AES_encrypt[ key, nonce, hash ] -> encrypted_hash */
@@ -541,13 +518,13 @@ HashDigest::encrypt_key_nonce( const HashDigest &key_hash,
                                const Nonce &key_nonce,
                                const HashDigest &hash ) noexcept
 {
-  AES_KEY key;
-  Nonce   nonce;
+  AES128 aes;
+  Nonce  nonce;
   const uint64_t * dig = key_hash.dig;
   for ( size_t i = 0; i < HASH_DIGEST_SIZE; i += 16 ) {
     nonce = key_nonce ^ dig;  dig += 2;
-    AES_set_encrypt_key( nonce.digest(), 128, &key );
-    AES_encrypt( hash.digest() + i, this->digest() + i, &key );
+    aes.expand_key( nonce.digest() );
+    aes.encrypt( hash.digest() + i, this->digest() + i );
   }
 }
 /* AES_decrypt[ key, nonce, encrypted_hash ] -> hash */
@@ -556,13 +533,13 @@ HashDigest::decrypt_key_nonce( const HashDigest &key_hash,
                                const Nonce &key_nonce,
                                const HashDigest &encrypted_hash ) noexcept
 {
-  AES_KEY key;
-  Nonce   nonce;
+  AES128 aes;
+  Nonce  nonce;
   const uint64_t * dig = key_hash.dig;
   for ( size_t i = 0; i < HASH_DIGEST_SIZE; i += 16 ) {
     nonce = key_nonce ^ dig; dig += 2;
-    AES_set_decrypt_key( nonce.digest(), 128, &key );
-    AES_decrypt( encrypted_hash.digest() + i, this->digest() + i, &key );
+    aes.expand_key( nonce.digest() );
+    aes.decrypt( encrypted_hash.digest() + i, this->digest() + i );
   }
 }
 

@@ -180,7 +180,7 @@ main( int argc, char *argv[] )
     for ( i = 2; ; i++ ) {
       size_t user_len = ::strlen( new_user );
       cfg.add_user( new_user, user_len, expires, expires_len, pass );
-      new_user = get_arg( argc, argv, i, "-u", NULL );
+      new_user = get_arg( argc, argv, (int) i, "-u", NULL );
       if ( new_user == NULL || new_user[ 0 ] == '-' )
         break;
     }
@@ -191,7 +191,7 @@ main( int argc, char *argv[] )
       ok = cfg.remove_user( dir_name, del_user, ::strlen( del_user ) );
       if ( ! ok )
         break;
-      del_user = get_arg( argc, argv, i, "-r", NULL );
+      del_user = get_arg( argc, argv, (int) i, "-r", NULL );
       if ( del_user == NULL || del_user[ 0 ] == '-' )
         break;
     }
@@ -202,7 +202,7 @@ main( int argc, char *argv[] )
       ok = cfg.revoke_user( rev_user, ::strlen( rev_user ) );
       if ( ! ok )
         break;
-      rev_user = get_arg( argc, argv, i, "-k", NULL );
+      rev_user = get_arg( argc, argv, (int) i, "-k", NULL );
       if ( rev_user == NULL || rev_user[ 0 ] == '-' )
         break;
     }
@@ -221,7 +221,7 @@ main( int argc, char *argv[] )
                                 want_transports );
       if ( ! ok )
         break;
-      exp_user = get_arg( argc, argv, i, "-x", NULL );
+      exp_user = get_arg( argc, argv, (int) i, "-x", NULL );
       if ( exp_user == NULL || exp_user[ 0 ] == '-' )
         break;
     }
