@@ -432,9 +432,9 @@ struct SubDB {
                sub_update_mono_time; /* last time any sub recvd */
   SeqnoTab     seqno_tab;    /* sub -> seqno, time */
   InboxTab     inbox_tab;    /* inbox -> seqno, time */
+  SubList      sub_list;     /* list of { seqno, subscriptions } */
   SubTab       sub_tab;      /* subject -> { state, seqno } */
   PatTab       pat_tab;      /* pattern -> { state, seqno } */
-  SubList      sub_list;     /* list of { seqno, subscriptions } */
   PubTab       pub_tab;      /* subject -> seqno */
   AnyMatchTab  any_tab;
   kv::BloomRef bloom,
