@@ -1243,10 +1243,14 @@ Console::print_table( const char **hdr,  uint32_t ncols ) noexcept
                tabsz = (uint32_t) this->table.count;
   TabPrint   * tab   = this->table.ptr;
   UserDB     & u     = this->user_db;
-  uint32_t     width[ 64 ];
+  uint32_t   * width, wbuf[ 64 ];
   char         buf[ 80 ];
   const char * v, * fmt;
 
+  if ( ncols <= 64 )
+    width = wbuf;
+  else
+    width = (uint32_t *) ::malloc( sizeof( uint32_t ) * ncols );
   for ( j = 0; j < ncols; j++ ) {
     width[ j ] = (uint32_t) ::strlen( hdr[ j ] );
   }
@@ -1308,6 +1312,8 @@ Console::print_table( const char **hdr,  uint32_t ncols ) noexcept
     if ( tab[ i + ncols - 1 ].separator() )
       this->print_dashes( width, ncols );
   }
+  if ( width != wbuf )
+    ::free( width );
 }
 
 UserBridge *

@@ -90,6 +90,10 @@ struct Nonce {
     for ( size_t i = 0; i < NONCE_WORDS; i++ )
       this->nonce[ i ] = 0;
   }
+  Nonce() {}
+  Nonce( const Nonce &x ) {
+    ::memcpy( this->nonce, x.nonce, NONCE_SIZE );
+  }
   Nonce & operator=( const Nonce &x ) {
     ::memcpy( this->nonce, x.nonce, NONCE_SIZE );
     return *this;

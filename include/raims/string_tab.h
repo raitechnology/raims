@@ -23,8 +23,8 @@ struct StringVal {
     return this->equals( s, ::strlen( s ) );
   }
   bool equals( const StringVal &sv ) const {
-    if ( sv.id != 0 && this->id != 0 )
-      return sv.id == this->id;
+    if ( sv.id == this->id && this->id != 0 )
+      return true;
     return this->equals( sv.val, sv.len );
   }
   bool is_null( void ) const {
@@ -33,6 +33,10 @@ struct StringVal {
   StringVal( const StringVal &s ) : val( s.val ), id( s.id ), len( s.len ) {}
   StringVal( const char *s = NULL,  uint32_t l = 0 )
     : val( s ), id( 0 ), len( l ) {}
+  StringVal & operator=( const StringVal &s ) {
+    this->val = s.val; this->id = s.id; this->len = s.len;
+    return *this;
+  }
   void print_js( ConfigPrinter &p ) const noexcept;
   void print_y( ConfigPrinter &p ) const noexcept;
   void zero( void ) { this->val = NULL; this->id = 0; this->len = 0; }

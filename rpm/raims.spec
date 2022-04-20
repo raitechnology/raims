@@ -20,7 +20,6 @@ BuildRequires:  rdbparser
 BuildRequires:  linecook
 BuildRequires:  libdecnumber
 BuildRequires:  pcre2-devel
-BuildRequires:  openssl-devel
 BuildRequires:  liblzf-devel
 BuildRequires:  git-core
 Requires:       raikv
@@ -29,7 +28,6 @@ Requires:       openpgm
 Requires:       raids
 Requires:       libdecnumber
 Requires:       pcre2
-Requires:       openssl
 Requires:       liblzf
 Requires:       h3
 Requires:       rdbparser

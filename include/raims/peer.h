@@ -51,7 +51,7 @@ struct PeerEntry {
                  expires;
   void * operator new( size_t, void *ptr ) { return ptr; }
   PeerEntry() {
-    ::memset( this, 0, sizeof( *this ) );
+    ::memset( (void *) this, 0, sizeof( *this ) );
   }
   void print( void ) noexcept;
 };
@@ -64,6 +64,10 @@ struct PendingUid {
   PendingUid * next;
   PendingUid( const PendingUid &puid )
     : uid( puid.uid ), tport_id( puid.tport_id ), next( 0 ) {}
+  PendingUid & operator=( const PendingUid &puid ) {
+    this->uid = puid.uid; this->tport_id = puid.tport_id; this->next = NULL;
+    return *this;
+  }
   PendingUid( uint32_t i = 0,  uint32_t t = 0 )
     : uid( i ), tport_id( t ), next( 0 ) {}
   bool operator==( const PendingUid &x ) const {
@@ -140,7 +144,10 @@ struct PeerKeyHash {
   PeerKeyHash() {}
   PeerKeyHash( uint32_t src,  uint32_t dest )
     : src_uid( src ), dest_uid( dest ) {}
-
+  PeerKeyHash( const PeerKeyHash &h ) {
+    this->src_uid  = h.src_uid;
+    this->dest_uid = h.dest_uid;
+  }
   uint64_t u64( void ) const {
     return ( (uint64_t) this->src_uid  << 32 ) | (uint64_t) this->dest_uid;
   }
