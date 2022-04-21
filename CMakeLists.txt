@@ -93,7 +93,7 @@ set_property (TARGET natsmd PROPERTY IMPORTED_LOCATION_DEBUG ../natsmd/build/Deb
 set_property (TARGET natsmd PROPERTY IMPORTED_LOCATION_RELEASE ../natsmd/build/Release/natsmd.lib)
 endif ()
 else ()
-add_compile_options (-Wall -Wextra -Werror -ggdb -O3 -Ofast -mavx -maes -fno-omit-frame-pointer)
+add_compile_options (-Wall -Wextra -Werror -ggdb -mavx -maes -fno-omit-frame-pointer)
 if (TARGET pcre2-8-static)
 include_directories (${CMAKE_BINARY_DIR}/pcre2)
 set (pcre2lib pcre2-8-static pcre2-32-static)
