@@ -253,6 +253,7 @@ struct MsgBufDigestT : public BMsgBufT<T> {
   T  & hops       ( uint32_t n )  { return this->i( FID_HOPS, n ); }
   T  & tportid    ( uint32_t n )  { return this->i( FID_TPORTID, n ); }
   T  & uid_count  ( uint32_t n )  { return this->i( FID_UID_COUNT, n ); }
+  T  & subj_hash  ( uint32_t n )  { return this->i( FID_SUBJ_HASH, n ); }
   T  & link_add   ( uint8_t n )   { return this->y( FID_LINK_ADD, n ); }
   T  & start_ack  ( uint8_t n )   { return this->y( FID_START_ACK, n ); }
   T  & stop_ack   ( uint8_t n )   { return this->y( FID_STOP_ACK, n ); }
@@ -381,6 +382,7 @@ struct MsgEst {
   MsgEst & hops       ( void ) { sz += fid_est( FID_HOPS ); return *this; }
   MsgEst & tportid    ( void ) { sz += fid_est( FID_TPORTID ); return *this; }
   MsgEst & uid_count  ( void ) { sz += fid_est( FID_UID_COUNT ); return *this; }
+  MsgEst & subj_hash  ( void ) { sz += fid_est( FID_SUBJ_HASH ); return *this; }
   MsgEst & link_add   ( void ) { sz += fid_est( FID_LINK_ADD ); return *this; }
   MsgEst & start_ack  ( void ) { sz += fid_est( FID_START_ACK ); return *this; }
   MsgEst & stop_ack   ( void ) { sz += fid_est( FID_STOP_ACK ); return *this; }

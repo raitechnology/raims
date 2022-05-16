@@ -18,9 +18,13 @@ libd      := $(build_dir)/lib64
 objd      := $(build_dir)/obj
 dependd   := $(build_dir)/dep
 
+default_cflags := -ggdb -O3
 # use 'make port_extra=-g' for debug build
 ifeq (-g,$(findstring -g,$(port_extra)))
-  DEBUG = true
+  default_cflags := -ggdb
+endif
+ifeq (-a,$(findstring -a,$(port_extra)))
+  default_cflags := -fsanitize=address -ggdb -O3
 endif
 
 CC          ?= gcc
@@ -40,11 +44,6 @@ gcc_wflags  := -Wall -Wextra -Werror
 fpicflags   := -fPIC
 soflag      := -shared
 
-ifdef DEBUG
-default_cflags := -ggdb
-else
-default_cflags := -ggdb -O3 -Ofast
-endif
 # rpmbuild uses RPM_OPT_FLAGS
 CFLAGS := $(default_cflags)
 #RPM_OPT_FLAGS ?= $(default_cflags)
@@ -303,6 +302,7 @@ all_dlls    :=
 all_depends :=
 gen_files   :=
 
+session_defines := -DMS_VER=$(ver_build)
 libraims_files := config user transport ev_tcp_transport ev_pgm_transport \
                  pgm_sock ev_inbox_transport ev_telnet ev_rv_transport \
 		 ev_nats_transport ev_redis_transport msg session heartbeat \

@@ -336,7 +336,7 @@ TelnetService::start_term( void ) noexcept
   lc_set_geom( this->term.lc, tty->cols, tty->lines );
   this->term.tty_prompt();
   this->flush_term();
-  this->idle_push( EV_WRITE );
+  this->idle_push_write();
 }
 
 void
@@ -346,7 +346,7 @@ TelnetService::on_prompt( const char *prompt ) noexcept
     linecook::TTY *tty = static_cast<linecook::TTY *>( this->term.tty );
     lc_tty_set_prompt( tty, TTYP_PROMPT1, prompt );
     this->flush_term();
-    this->idle_push( EV_WRITE );
+    this->idle_push_write();
   }
 }
 
@@ -363,7 +363,7 @@ TelnetService::on_output( const char *buf,  size_t buflen ) noexcept
   else {
     this->flush_buf( buf, buflen );
   }
-  this->idle_push( EV_WRITE );
+  this->idle_push_write();
   return true;
 }
 

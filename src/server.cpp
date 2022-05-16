@@ -155,11 +155,11 @@ SubNotify::on_reassert( uint32_t fd,  RouteVec<RouteSub> &,
 int
 main( int argc, char *argv[] )
 {
-#ifndef _MSC_VER
+/*#ifndef _MSC_VER*/
   static const char cfg_dir[] = "config";
-#else
+/*#else
   static const char cfg_dir[] = "/Users/gchri/rai/build/raims/config";
-#endif
+#endif*/
   const char * di = get_arg( argc, argv, 1, "-d", cfg_dir ),
              * us = get_arg( argc, argv, 1, "-u", "A.test" ),
              * ti = get_arg( argc, argv, 1, "-t", NULL ),
@@ -175,7 +175,9 @@ main( int argc, char *argv[] )
             "   -l file       : log to file\n"
             "   -f flags      : debug flags to set\n"
             "   -c            : run with console\n"
-            "Connect or listen user to service on transports\n", argv[ 0 ] );
+            "Connect or listen user to service on transports\n"
+            "RaiMS version %s\n",
+            argv[ 0 ], ms_get_version() );
     return 0;
   }
 
@@ -204,21 +206,21 @@ main( int argc, char *argv[] )
   EvShm  shm;
   SignalHandler sighndl;
   Logger & log = *Logger::create();
-  HashTabGeom geom;
+  /*HashTabGeom geom;*/
   /*TelnetListen tel( poll );*/
   sighndl.install();
   poll.init( 1024, false );
-  geom.map_size         = sizeof( HashTab ) + 1024;
+  /*geom.map_size         = sizeof( HashTab ) + 1024;
   geom.max_value_size   = 0;
   geom.hash_entry_size  = 64;
   geom.hash_value_ratio = 1;
   geom.cuckoo_buckets   = 0;
-  geom.cuckoo_arity     = 0;
-  shm.map    = HashTab::alloc_map( geom );
+  geom.cuckoo_arity     = 0;*/
+  /*shm.map    = HashTab::alloc_map( geom );
   shm.map->hdr.ht_read_only = 1;
   shm.ctx_id = 0;
-  shm.dbx_id = 0;
-  poll.init_shm( shm );
+  shm.dbx_id = 0;*/
+  poll.sub_route.init_shm( shm );
 
   TermCallback cb;
   MySessionMgr sess( poll, log, *tree, *usr, *svc, st );
@@ -275,7 +277,8 @@ main( int argc, char *argv[] )
       }
     }
   }
-  if ( ! sess.add_startup_transports( *svc ) )
+  if ( ! sess.add_external_transport( *svc ) ||
+       ! sess.add_startup_transports( *svc ) )
     status = -1;
 #if 0
   size_t count = sess.user_db.transport_tab.count;

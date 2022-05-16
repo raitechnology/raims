@@ -15,9 +15,9 @@ SubDB::SubDB( EvPoll &p,  UserDB &udb,  SessionMgr &smg ) noexcept
      : user_db( udb ), mgr( smg ), my_src_fd( -1 ), next_inbox( 0 ),
        sub_seqno( 0 ), sub_update_mono_time( 0 ), sub_tab( this->sub_list ),
        pat_tab( this->sub_list, p.sub_route.pre_seed ),
-       bloom( (uint32_t) udb.rand.next(), "sub" ),
-       internal( (uint32_t) udb.rand.next(), "int" ),
-       external( (uint32_t) udb.rand.next(), "ext" )
+       bloom( (uint32_t) udb.rand.next(), "sub", p.g_bloom_db ),
+       internal( (uint32_t) udb.rand.next(), "int", p.g_bloom_db ),
+       external( (uint32_t) udb.rand.next(), "ext", p.g_bloom_db )
 {
 }
 
@@ -27,10 +27,16 @@ SubDB::sub_start( SubArgs &ctx ) noexcept
   SubStatus status = this->sub_tab.start( ctx );
   if ( status == SUB_OK || status == SUB_UPDATED ) {
     this->update_bloom( ctx );
-    if ( status == SUB_OK ) {
+
+    if ( ctx.bloom_updated )
       this->fwd_sub( ctx );
+
+    if ( ctx.resize_bloom )
+      this->resize_bloom();
+
+    if ( status == SUB_OK )
       return this->sub_seqno;
-    }
+
     if ( status == SUB_UPDATED )
       return ctx.seqno;
   }
@@ -43,10 +49,16 @@ SubDB::sub_stop( SubArgs &ctx ) noexcept
   SubStatus status = this->sub_tab.stop( ctx );
   if ( status == SUB_OK || status == SUB_UPDATED ) {
     this->update_bloom( ctx );
-    if ( status == SUB_OK ) {
+
+    if ( ctx.bloom_updated )
       this->fwd_sub( ctx );
+
+    if ( ctx.resize_bloom )
+      this->resize_bloom();
+
+    if ( status == SUB_OK )
       return this->sub_seqno;
-    }
+
     if ( status == SUB_UPDATED )
       return ctx.seqno;
   }
@@ -56,26 +68,31 @@ SubDB::sub_stop( SubArgs &ctx ) noexcept
 void
 SubDB::update_bloom( SubArgs &ctx ) noexcept
 {
-  bool rsz = false;
   this->update_seqno++;
   if ( ctx.is_start ) {
-    if ( ctx.sub_count == 1 )
-      rsz = this->bloom.add( ctx.hash );
-    if ( ( ctx.flags & INTERNAL_SUB ) != 0 && ctx.internal_count == 1 )
-      rsz |= this->internal.add( ctx.hash );
-    if ( ( ctx.flags & EXTERNAL_SUB ) != 0 && ctx.external_count == 1 )
-      rsz |= this->external.add( ctx.hash );
+    if ( ctx.sub_count == 1 && ctx.sub_coll == 0 ) {
+      ctx.resize_bloom  = this->bloom.add( ctx.hash );
+      ctx.bloom_updated = true;
+    }
+    if ( ( ctx.flags & INTERNAL_SUB ) != 0 &&
+         ctx.internal_count == 1 && ctx.internal_coll == 0 )
+      ctx.resize_bloom |= this->internal.add( ctx.hash );
+    if ( ( ctx.flags & EXTERNAL_SUB ) != 0 &&
+         ctx.external_count == 1 && ctx.external_coll == 0 )
+      ctx.resize_bloom |= this->external.add( ctx.hash );
   }
   else {
-    if ( ctx.sub_count == 0 )
+    if ( ctx.sub_count == 0 && ctx.sub_coll == 0 ) {
       this->bloom.del( ctx.hash );
-    if ( ( ctx.flags & INTERNAL_SUB ) != 0 && ctx.internal_count == 0 )
+      ctx.bloom_updated = true;
+    }
+    if ( ( ctx.flags & INTERNAL_SUB ) != 0 &&
+         ctx.internal_count == 0 && ctx.internal_coll == 0 )
       this->internal.del( ctx.hash );
-    if ( ( ctx.flags & EXTERNAL_SUB ) != 0 && ctx.external_count == 0 )
+    if ( ( ctx.flags & EXTERNAL_SUB ) != 0 &&
+         ctx.external_count == 0 && ctx.external_coll == 0 )
       this->external.del( ctx.hash );
   }
-  if ( rsz )
-    this->resize_bloom();
 }
 
 /* my subscripion started */
@@ -99,7 +116,7 @@ uint64_t
 SubDB::external_sub_start( NotifySub &sub,  uint32_t tport_id ) noexcept
 {
   SubArgs ctx( sub.subject, sub.subject_len, true, NULL, this->sub_seqno + 1,
-               EXTERNAL_SUB, tport_id );
+               EXTERNAL_SUB, tport_id, sub.subj_hash );
   return this->sub_start( ctx );
 }
 /* my subscripion stopped on an external tport */
@@ -107,7 +124,7 @@ uint64_t
 SubDB::external_sub_stop( NotifySub &sub,  uint32_t tport_id ) noexcept
 {
   SubArgs ctx( sub.subject, sub.subject_len, false, NULL, 0, EXTERNAL_SUB,
-               tport_id );
+               tport_id, sub.subj_hash );
   return this->sub_stop( ctx );
 }
 
@@ -118,32 +135,42 @@ SubDB::fwd_sub( SubArgs &ctx ) noexcept
   const char * sub_prefix = ( ctx.is_start ? S_JOIN : S_LEAVE );
   size_t       sub_prelen = ( ctx.is_start ? S_JOIN_SZ : S_LEAVE_SZ );
   SubjectVar s( sub_prefix, sub_prelen, ctx.sub, ctx.sublen );
+  TransportRoute * rte;
 
+  d_sub( "%ssub(%.*s)\n", ( ctx.is_start ? "" : "un" ),
+         (int) ctx.sublen, ctx.sub );
   MsgEst e( s.len() );
-  e.seqno  ()
-   .subject( ctx.sublen );
+  e.seqno     ()
+   .subj_hash ()
+   .subject   ( ctx.sublen );
 
   MsgCat m;
   m.reserve( e.sz );
 
   m.open( this->user_db.bridge_id.nonce, s.len() )
-   .seqno  ( ++this->sub_seqno )
-   .subject( ctx.sub, ctx.sublen );
+   .seqno     ( ++this->sub_seqno )
+   .subj_hash ( ctx.hash )
+   .subject   ( ctx.sub, ctx.sublen );
   uint32_t h = s.hash();
   m.close( e.sz, h, CABA_RTR_ALERT );
   m.sign( s.msg, s.len(), *this->user_db.session_key );
 
-  size_t count = this->user_db.transport_tab.count;
-  for ( size_t i = 0; i < count; i++ ) {
-    TransportRoute * rte = this->user_db.transport_tab.ptr[ i ];
-    if ( ! rte->is_set( TPORT_IS_EXTERNAL ) ) {
+  if ( ( ctx.flags & INTERNAL_SUB ) != 0 ) {
+    rte = this->user_db.external_transport;
+    if ( rte != NULL ) {
       NotifySub nsub( ctx.sub, ctx.sublen, ctx.hash, this->my_src_fd,
                       false, 'M');
+      nsub.bref = &this->internal;
       if ( ctx.is_start )
         rte->sub_route.do_notify_sub( nsub );
       else
         rte->sub_route.do_notify_unsub( nsub );
-
+    }
+  }
+  size_t count = this->user_db.transport_tab.count;
+  for ( size_t i = 0; i < count; i++ ) {
+    TransportRoute * rte = this->user_db.transport_tab.ptr[ i ];
+    if ( ! rte->is_set( TPORT_IS_EXTERNAL ) ) {
       EvPublish pub( s.msg, s.len(), NULL, 0, m.msg, m.len(),
                      rte->sub_route, this->my_src_fd, h,
                      CABA_TYPE_ID, 'p' );
@@ -410,6 +437,7 @@ SubDB::recv_bloom( const MsgFramePublish &pub,  UserBridge &n,
         this->sub_update_mono_time = n.sub_recv_mono_time;
         this->user_db.events.recv_bloom( n.uid, pub.rte.tport_id,
                                          (uint32_t) n.bloom.bits->count );
+        this->notify_bloom_update( n.bloom );
       }
       else {
         n.printe( "failed to update bloom\n" );
@@ -435,19 +463,22 @@ bool
 SubDB::recv_sub_start( const MsgFramePublish &pub,  UserBridge &n,
                        const MsgHdrDecoder &dec ) noexcept
 {
-  if ( dec.test( FID_SUBJECT ) ) {
-    UserRoute      & u_rte  = *n.user_route;
-    TransportRoute & rte    = u_rte.rte;
-    size_t           sublen = dec.mref[ FID_SUBJECT ].fsize;
-    const char     * sub    = (const char *) dec.mref[ FID_SUBJECT ].fptr;
-    uint32_t         hash   = kv_crc_c( sub, sublen, 0 );
+  if ( dec.test_2( FID_SUBJECT, FID_SUBJ_HASH ) ) {
+    size_t       sublen = dec.mref[ FID_SUBJECT ].fsize;
+    const char * sub    = (const char *) dec.mref[ FID_SUBJECT ].fptr;
+    uint32_t     hash;
 
+    dec.get_ival<uint32_t>( FID_SUBJ_HASH, hash );
     n.bloom.add( hash );
-    NotifySub nsub( sub, sublen, hash, u_rte.mcast_fd, false, 'M' );
-    rte.sub_route.do_notify_sub( nsub );
+    TransportRoute *rte = this->user_db.external_transport;
+    if ( rte != NULL ) {
+      UserRoute & u_rte = *n.user_route;
+      NotifySub   nsub( sub, sublen, hash, u_rte.mcast_fd, false, 'M' );
+      nsub.bref = &n.bloom;
+      rte->sub_route.do_notify_sub( nsub );
+    }
     if ( debug_sub )
       n.printf( "start %.*s\n", (int) pub.subject_len, pub.subject );
-
     this->user_db.forward_pub( pub, n, dec );
   }
   return true;
@@ -457,19 +488,22 @@ bool
 SubDB::recv_sub_stop( const MsgFramePublish &pub,  UserBridge &n,
                       const MsgHdrDecoder &dec ) noexcept
 {
-  if ( dec.test( FID_SUBJECT ) ) {
-    UserRoute      & u_rte  = *n.user_route;
-    TransportRoute & rte    = u_rte.rte;
-    size_t           sublen = dec.mref[ FID_SUBJECT ].fsize;
-    const char     * sub    = (const char *) dec.mref[ FID_SUBJECT ].fptr;
-    uint32_t         hash   = kv_crc_c( sub, sublen, 0 );
+  if ( dec.test_2( FID_SUBJECT, FID_SUBJ_HASH ) ) {
+    size_t       sublen = dec.mref[ FID_SUBJECT ].fsize;
+    const char * sub    = (const char *) dec.mref[ FID_SUBJECT ].fptr;
+    uint32_t     hash;
 
+    dec.get_ival<uint32_t>( FID_SUBJ_HASH, hash );
     n.bloom.del( hash );
-    NotifySub nsub( sub, sublen, hash, u_rte.mcast_fd, false, 'M' );
-    rte.sub_route.do_notify_unsub( nsub );
+    TransportRoute *rte = this->user_db.external_transport;
+    if ( rte != NULL ) {
+      UserRoute & u_rte = *n.user_route;
+      NotifySub   nsub( sub, sublen, hash, u_rte.mcast_fd, false, 'M' );
+      nsub.bref = &n.bloom;
+      rte->sub_route.do_notify_unsub( nsub );
+    }
     if ( debug_sub )
       n.printf( "stop %.*s\n", (int) pub.subject_len, pub.subject );
-
     this->user_db.forward_pub( pub, n, dec );
   }
   return true;
@@ -525,18 +559,21 @@ SubDB::resize_bloom( void ) noexcept
     if ( debug_sub )
       print_bloom( *b );
     this->user_db.events.resize_bloom( (uint32_t) b->count );
+    this->notify_bloom_update( this->bloom );
   }
   if ( internal_resize ) {
     b = this->internal.bits->resize( this->internal.bits,
                                      this->internal.bits->seed );
     this->internal.bits = b;
     this->index_bloom( *b, INTERNAL_SUB );
+    this->notify_bloom_update( this->internal );
   }
   if ( external_resize ) {
     b = this->external.bits->resize( this->external.bits,
                                      this->external.bits->seed );
     this->external.bits = b;
     this->index_bloom( *b, EXTERNAL_SUB );
+    this->notify_bloom_update( this->external );
   }
 
   if ( bloom_resize ) {
@@ -569,6 +606,13 @@ SubDB::resize_bloom( void ) noexcept
       }
     }
   }
+}
+
+void
+SubDB::notify_bloom_update( BloomRef &ref ) noexcept
+{
+  for ( uint32_t i = 0; i < ref.nlinks; i++ )
+    ((RoutePublish &) ref.links[ i ]->rdb).do_notify_bloom_ref( ref );
 }
 
 void
@@ -620,6 +664,7 @@ SubDB::match_seqno( SeqnoArgs &ctx ) noexcept
   RouteLoc   loc;
   SubSeqno * seq = this->seqno_tab.upsert( pub.subj_hash, pub.subject,
                                            pub.subject_len, loc );
+  uint32_t   uid = ( pub.n == NULL ? 0 : pub.n->uid );
   if ( seq == NULL )
     return SEQNO_ERROR;
   /* starting a new uid/seqno/time triplet */
@@ -628,7 +673,7 @@ SubDB::match_seqno( SeqnoArgs &ctx ) noexcept
       this->seqno_tab.remove( loc );
       return SEQNO_NOT_SUBSCR;
     }
-    return seq->init( pub.n->uid, pub.dec.seqno, ctx.start_seqno, ctx.time,
+    return seq->init( uid, pub.dec.seqno, ctx.start_seqno, ctx.time,
                       this->update_seqno, ctx.cb, ctx.tport_mask );
   }
 
@@ -652,7 +697,7 @@ SubDB::match_seqno( SeqnoArgs &ctx ) noexcept
     ctx.cb          = seq->on_data;
     ctx.tport_mask  = seq->tport_mask;
   }
-  return seq->update( pub.n->uid, pub.dec.seqno, ctx.time, ctx.last_seqno,
+  return seq->update( uid, pub.dec.seqno, ctx.time, ctx.last_seqno,
                       ctx.last_time );
 }
 

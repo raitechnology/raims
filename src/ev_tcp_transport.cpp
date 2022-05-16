@@ -166,9 +166,7 @@ EvTcpTransport::fwd_msg( EvPublish &pub ) noexcept
   this->sz += pub.msg_len;
   this->msgs_sent++;
 
-  bool flow_good = ( this->pending() <= this->send_highwater );
-  this->idle_push( flow_good ? EV_WRITE : EV_WRITE_HI );
-  return flow_good;
+  return this->idle_push_write();
 }
 
 bool

@@ -13,16 +13,17 @@ using namespace ms;
 using namespace kv;
 using namespace md;
 
-UserDB::UserDB( EvPoll &/*p*/,  ConfigTree::User &u,
+UserDB::UserDB( EvPoll &p,  ConfigTree::User &u,
                 ConfigTree::Service &s,  SubDB &sdb,
                 StringTab &st,  EventRecord &ev ) noexcept
-  : user( u ), svc( s ), sub_db( sdb ), string_tab( st ), events( ev ),
-    session_key( 0 ), hello_key( 0 ), cnonce( 0 ), node_ht( 0 ), zombie_ht( 0 ),
-    uid_tab( 0 ), peer_ht( 0 ), peer_key_ht( 0 ), peer_keys( 0 ),
-    auth_bloom( 0, "auth" ), hb_interval( HB_DEFAULT_INTERVAL ),
-    next_uid( 0 ), free_uid_count( 0 ), my_src_fd( -1 ), uid_auth_count( 0 ),
-    uid_hb_count( 0 ), send_peer_seqno( 0 ), link_state_seqno( 0 ),
-    mcast_seqno( 0 ), hb_ival_ns( 0 ), hb_ival_mask( 0 ), next_ping_mono( 0 ),
+  : external_transport( 0 ), user( u ), svc( s ), sub_db( sdb ),
+    string_tab( st ), events( ev ), session_key( 0 ), hello_key( 0 ),
+    cnonce( 0 ), node_ht( 0 ), zombie_ht( 0 ), uid_tab( 0 ), peer_ht( 0 ),
+    peer_key_ht( 0 ), peer_keys( 0 ), auth_bloom( 0, "auth", p.g_bloom_db ),
+    hb_interval( HB_DEFAULT_INTERVAL ), next_uid( 0 ), free_uid_count( 0 ),
+    my_src_fd( -1 ), uid_auth_count( 0 ), uid_hb_count( 0 ),
+    send_peer_seqno( 0 ), link_state_seqno( 0 ), mcast_seqno( 0 ),
+    hb_ival_ns( 0 ), hb_ival_mask( 0 ), next_ping_mono( 0 ),
     peer_dist( *this )
 {
   this->start_mono_time = current_monotonic_time_ns(); 
@@ -996,7 +997,7 @@ UserDB::add_user( TransportRoute &rte,  const UserRoute *src,  uint32_t fd,
   rtsz = sizeof( UserRoute ) * UserBridge::USER_ROUTE_BASE;
   size = sizeof( UserBridge ) + rtsz;
   seed = (uint32_t) this->rand.next();
-  n    = this->make_user_bridge( size, peer, seed );
+  n    = this->make_user_bridge( size, peer, rte.poll.g_bloom_db, seed );
   n->bridge_id = user_bridge_id;
   n->uid       = uid;
   ::memset( (void *) &n[ 1 ], 0, rtsz );
@@ -1053,7 +1054,7 @@ UserDB::retire_source( TransportRoute &rte,  uint32_t fd ) noexcept
     this->send_adjacency_change();
 
   if ( fd < this->route_list.count ) {
-    UserRouteList  & list = this->route_list[ fd ];
+    UserRouteList & list = this->route_list[ fd ];
     if ( list.sys_route_refs == 0 ) {
       BloomRoute *b = this->auth_bloom.get_bloom_by_fd( fd );
       if ( b != NULL ) {
@@ -1222,7 +1223,10 @@ UserDB::remove_authenticated( UserBridge &n,  ByeReason bye ) noexcept
   if ( n.test_clear( PING_STATE ) )
     this->ping_queue.remove( &n );
 
-  n.bloom.unlink( true );
+  if ( this->external_transport != NULL &&
+       n.bloom.has_link( this->external_transport->fd ) )
+    this->external_transport->sub_route.do_notify_bloom_deref( n.bloom );
+  n.bloom.unlink( false );
   n.bloom.zero();
   n.sub_seqno = 0;
   n.link_state_seqno = 0;
@@ -1285,10 +1289,14 @@ UserDB::add_transport( TransportRoute &rte ) noexcept
     if ( this->transport_tab.count == 2 &&
          ! n.bloom.has_link( t->router_rt->r ) ) {
       t->router_rt->add_bloom_ref( &n.bloom );
+      if ( t->is_set( TPORT_IS_EXTERNAL ) )
+        t->sub_route.do_notify_bloom_ref( n.bloom );
       d_usr( "add_bloom_ref( %s, %s )\n", n.peer.user.val,
               t->transport.tport.val );
     }
     rte.router_rt->add_bloom_ref( &n.bloom );
+    if ( rte.is_set( TPORT_IS_EXTERNAL ) )
+      rte.sub_route.do_notify_bloom_ref( n.bloom );
     d_usr( "add_bloom_ref( %s, %s )\n", n.peer.user.val,
            rte.transport.tport.val );
   }
@@ -1319,6 +1327,9 @@ UserDB::add_inbox_route( UserBridge &n,  UserRoute *primary ) noexcept
       if ( debug_usr )
         n.printf( "del inbox route %.*s -> %u\n",
                   (int) ibx.len(), ibx.buf, inbox->inbox_fd );
+      if ( this->external_transport != NULL &&
+           n.bloom.has_link( this->external_transport->fd ) )
+        this->external_transport->sub_route.do_notify_bloom_deref( n.bloom );
       n.bloom.unlink( false );
       inbox->rte.sub_route.del_pattern_route_str( ibx.buf, (uint16_t) ibx.len(),
                                                   inbox->inbox_fd );
@@ -1346,6 +1357,7 @@ UserDB::add_inbox_route( UserBridge &n,  UserRoute *primary ) noexcept
               primary->ucast_url_len == 0 ? "ptp" : primary->ucast_url,
               primary->mcast_fd );
     primary->rte.sub_route.create_bloom_route( primary->mcast_fd, &n.bloom );
+    primary->rte.sub_route.do_notify_bloom_ref( n.bloom );
     primary->rte.sub_route.add_pattern_route_str( ibx.buf, (uint16_t) ibx.len(),
                                                   primary->inbox_fd );
     primary->rte.primary_count++;
@@ -1367,6 +1379,8 @@ UserDB::add_inbox_route( UserBridge &n,  UserRoute *primary ) noexcept
       TransportRoute *t = this->transport_tab.ptr[ i ];
       if ( ! n.bloom.has_link( t->router_rt->r ) ) {
         t->router_rt->add_bloom_ref( &n.bloom );
+        if ( t->is_set( TPORT_IS_EXTERNAL ) )
+          t->sub_route.do_notify_bloom_ref( n.bloom );
         d_usr( "add_bloom_ref( %s, %s )\n", n.peer.user.val,
                t->transport.tport.val );
       }

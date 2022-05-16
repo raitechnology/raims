@@ -79,12 +79,12 @@ TransportRoute::TransportRoute( kv::EvPoll &p,  SessionMgr &m,
     this->switch_rt =
       this->sub_route.create_bloom_route( m.fd, &m.sub_db.internal );
     this->eswitch_rt =
-      this->sub_route.create_bloom_route( m.ext.fd, &m.sub_db.external );
+      this->sub_route.create_bloom_route( m.external.fd, &m.sub_db.external );
     this->switch_rt->add_bloom_ref( &m.sys_bloom );
   }
   else {
     this->switch_rt =
-      this->sub_route.create_bloom_route( m.fd, &m.sub_db.internal );
+      this->sub_route.create_bloom_route( m.internal.fd, &m.sub_db.internal );
     /* extrenal routes do not have system subjects */
   }
   this->sub_route.route_id = id;
@@ -108,7 +108,7 @@ TransportRoute::init( void ) noexcept
   this->mgr.router_set.add( pfd );
   /* router_rt tport causes msgs to flow from tport -> routable user subs */
   this->router_rt =
-    this->sub_route.create_bloom_route( pfd, &this->mgr.router_bloom );
+    this->sub_route.create_bloom_route( pfd, NULL /*&this->mgr.router_bloom*/ );
   return 0;
 }
 
@@ -161,6 +161,47 @@ SessionMgr::add_transport( ConfigTree::Service &s,
 }
 
 bool
+SessionMgr::add_external_transport( ConfigTree::Service &s ) noexcept
+{
+  if ( ! this->in_list( IN_ACTIVE_LIST ) ) {
+    if ( this->init_sock() != 0 )
+      return false;
+  }
+  ConfigTree::Transport * tptr;
+  TransportRoute * rte;
+  uint32_t f = TPORT_IS_SVC | TPORT_IS_EXTERNAL;
+  StringTab & stab = this->user_db.string_tab;
+
+  tptr = this->tree.find_transport( "ext", 3 );
+  if ( tptr == NULL ) {
+    tptr = stab.make<ConfigTree::Transport>();
+    stab.ref_string( "ext", 3, tptr->type );
+    tptr->tport = tptr->type;
+    tptr->tport_id = this->tree.transport_cnt++;
+    this->tree.transports.push_tl( tptr );
+  }
+  uint32_t id = (uint32_t) this->user_db.transport_tab.count;
+  void * p = aligned_malloc( sizeof( TransportRoute ) );
+  rte = new ( p ) TransportRoute( this->poll, *this, s, *tptr, "ext", 0, id, f );
+  if ( rte->init() != 0 )
+    return false;
+
+  this->user_db.transport_tab[ id ] = rte;
+  rte->ext = new ( ::malloc( sizeof( ExtRteList ) ) ) ExtRteList( *rte );
+  rte->sub_route.add_route_notify( *rte->ext );
+  this->user_db.external_transport = rte;
+
+  const char *ipc_name = NULL;
+  if ( this->tree.find_parameter( "ipc", ipc_name, NULL ) ) {
+    EvShm shm;
+    shm.ipc_name = ipc_name;
+    rte->sub_route.init_shm( shm );
+  }
+  this->user_db.add_transport( *rte );
+  return true;
+}
+
+bool
 SessionMgr::add_transport2( ConfigTree::Service &s,
                             ConfigTree::Transport &t,
                             bool is_service,
@@ -200,7 +241,7 @@ SessionMgr::add_transport2( ConfigTree::Service &s,
 
   rte = NULL;
   if ( ( f & TPORT_IS_EXTERNAL ) != 0 )
-    rte = this->external_tport;
+    rte = this->user_db.external_transport;
 
   if ( rte == NULL ) {
     void * p = aligned_malloc( sizeof( TransportRoute ) );
@@ -212,7 +253,7 @@ SessionMgr::add_transport2( ConfigTree::Service &s,
     if ( ( f & TPORT_IS_EXTERNAL ) != 0 ) {
       rte->ext = new ( ::malloc( sizeof( ExtRteList ) ) ) ExtRteList( *rte );
       rte->sub_route.add_route_notify( *rte->ext );
-      this->external_tport = rte;
+      this->user_db.external_transport = rte;
     }
     is_new = true;
   }
@@ -1438,39 +1479,44 @@ ExtRteList::ExtRteList( TransportRoute &r ) noexcept
 void
 ExtRteList::on_sub( NotifySub &sub ) noexcept
 {
-  if ( sub.is_start() ) {
+  if ( sub.src_type != 'M' ) {
     this->rte.mgr.sub_db.external_sub_start( sub, this->rte.tport_id );
+    d_tran( "on_sub(%.*s) rcnt=%u src_type=%c\n", (int) sub.subject_len,
+           sub.subject, sub.sub_count, sub.src_type );
   }
-  d_tran( "on_sub(%.*s) rcnt=%u src_type=%c\n", (int) sub.subject_len,
-         sub.subject, sub.sub_count, sub.src_type );
 }
 
 void
 ExtRteList::on_unsub( NotifySub &sub ) noexcept
 {
-  if ( sub.is_stop() )
-    this->rte.mgr.sub_db.external_sub_stop( sub, this->rte.tport_id );
-  d_tran( "on_unsub(%.*s) rcnt=%u src_type=%c\n", (int) sub.subject_len,
-        sub.subject, sub.sub_count, sub.src_type );
+  if ( sub.src_type != 'M' ) {
+    if ( sub.sub_count == 0 ) {
+      this->rte.mgr.sub_db.external_sub_stop( sub, this->rte.tport_id );
+    }
+    d_tran( "on_unsub(%.*s) rcnt=%u src_type=%c\n", (int) sub.subject_len,
+          sub.subject, sub.sub_count, sub.src_type );
+  }
 }
 
 void
 ExtRteList::on_psub( NotifyPattern &pat ) noexcept
 {
-  if ( pat.sub_count == 1 ) {
+  if ( pat.src_type != 'M' ) {
     this->rte.mgr.sub_db.external_psub_start( pat, this->rte.tport_id );
+    d_tran( "on_psub(%.*s) rcnt=%u src_type=%c\n", (int) pat.pattern_len,
+          pat.pattern, pat.sub_count, pat.src_type );
   }
-  d_tran( "on_psub(%.*s) rcnt=%u src_type=%c\n", (int) pat.pattern_len,
-        pat.pattern, pat.sub_count, pat.src_type );
 }
 
 void
 ExtRteList::on_punsub( NotifyPattern &pat ) noexcept
 {
-  if ( pat.sub_count == 0 )
-    this->rte.mgr.sub_db.external_psub_stop( pat, this->rte.tport_id );
-  d_tran( "on_punsub(%.*s) rcnt=%u src_type=%c\n", (int) pat.pattern_len,
-        pat.pattern, pat.sub_count, pat.src_type );
+  if ( pat.src_type != 'M' ) {
+    if ( pat.sub_count == 0 )
+      this->rte.mgr.sub_db.external_psub_stop( pat, this->rte.tport_id );
+    d_tran( "on_punsub(%.*s) rcnt=%u src_type=%c\n", (int) pat.pattern_len,
+          pat.pattern, pat.sub_count, pat.src_type );
+  }
 }
 
 void

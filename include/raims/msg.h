@@ -203,31 +203,32 @@ enum MsgFid {
   FID_TPORTID      = 34 , /* which transport adjacency belongs to */
   FID_UID          = 35 , /* uid reference */
   FID_UID_COUNT    = 36 , /* how many peers, sent with hello */
+  FID_SUBJ_HASH    = 37 , /* hash of subject */
 
-  FID_SUBJECT      = 37 , /* subject of subscription */
-  FID_PATTERN      = 38 , /* pattern subject wildcard */
-  FID_REPLY        = 39 , /* publish reply */
-  FID_WILDCARD     = 40 , /* XXX */
-  FID_UCAST_URL    = 41 , /* unicast route for inbox data */
-  FID_MESH_URL     = 42 , /* mesh route for interconnecting uids */
-  FID_FORMAT       = 43 , /* XXX */
-  FID_DICTIONARY   = 44 , /* XXX */
-  FID_TPORT        = 45 , /* tport name */
+  FID_SUBJECT      = 38 , /* subject of subscription */
+  FID_PATTERN      = 39 , /* pattern subject wildcard */
+  FID_REPLY        = 40 , /* publish reply */
+  FID_WILDCARD     = 41 , /* XXX */
+  FID_UCAST_URL    = 42 , /* unicast route for inbox data */
+  FID_MESH_URL     = 43 , /* mesh route for interconnecting uids */
+  FID_FORMAT       = 44 , /* XXX */
+  FID_DICTIONARY   = 45 , /* XXX */
+  FID_TPORT        = 46 , /* tport name */
 
-  FID_USER         = 46 , /* name of user */
-  FID_SERVICE      = 47 , /* service of user to add */
-  FID_CREATE       = 48 , /* create time of user to add */
-  FID_EXPIRES      = 49 , /* expire time of user to add */
+  FID_USER         = 47 , /* name of user */
+  FID_SERVICE      = 48 , /* service of user to add */
+  FID_CREATE       = 49 , /* create time of user to add */
+  FID_EXPIRES      = 50 , /* expire time of user to add */
 
-  FID_DICT_CSUM    = 50 , /* XXX */
-  FID_ENTI_CSUM    = 51 , /* XXX */
+  FID_DICT_CSUM    = 51 , /* XXX */
+  FID_ENTI_CSUM    = 52 , /* XXX */
 
-  FID_LINK_ADD     = 52 , /* whether to add or delete link in adjacency */
-  FID_START_ACK    = 53 , /* XXX */
-  FID_STOP_ACK     = 54 , /* XXX */
-  FID_INITIAL      = 55 , /* XXX */
-  FID_DATABASE     = 56 , /* XXX */
-  FID_AUTH_STAGE   = 57   /* what stage of authentication */
+  FID_LINK_ADD     = 53 , /* whether to add or delete link in adjacency */
+  FID_START_ACK    = 54 , /* XXX */
+  FID_STOP_ACK     = 55 , /* XXX */
+  FID_INITIAL      = 56 , /* XXX */
+  FID_DATABASE     = 57 , /* XXX */
+  FID_AUTH_STAGE   = 58   /* what stage of authentication */
 };
 static const int FID_TYPE_SHIFT = 8,
                  FID_MAX        = 1 << FID_TYPE_SHIFT; /* 64 */
@@ -516,6 +517,16 @@ struct MsgFramePublish : public kv::EvPublish {
                sub_rt, src_fd, hash, enc, 'X' ),
     n( 0 ), rte( r ), status( FRAME_STATUS_UNKNOWN ), flags( 0 ), dec( m ) {}
 
+  MsgFramePublish( kv::EvPublish &pub,  CabaMsg *m, TransportRoute &r ) :
+    EvPublish( pub ),
+    n( 0 ), rte( r ), status( FRAME_STATUS_OK ), flags( 0 ), dec( m ) {
+    this->msg        = &((uint8_t *) m->msg_buf)[ m->msg_off ];
+    this->msg_len    = m->msg_end - m->msg_off,
+    this->pub_type   = 'X';
+    this->hash       = pub.hash;
+    this->prefix     = pub.prefix;
+    this->prefix_cnt = pub.prefix_cnt;
+  }
   void print( const char *what ) const noexcept;
   const char *status_string( void ) const noexcept;
 };
@@ -642,6 +653,7 @@ static FidTypeName fid_type_name[] = {
 { FID_TPORTID     , U_SHORT | U_INT                  , "tportid" },
 { FID_UID         , U_SHORT | U_INT                  , "uid" },
 { FID_UID_COUNT   , U_SHORT | U_INT                  , "uid_count" },
+{ FID_SUBJ_HASH   , U_INT                            , "subj_hash" },
 
 { FID_SUBJECT     , SHORT_STRING                     , "subject" },
 { FID_PATTERN     , SHORT_STRING                     , "pattern" },

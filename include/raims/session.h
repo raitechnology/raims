@@ -6,6 +6,10 @@
 #include <raims/console.h>
 #include <raims/event_rec.h>
 
+extern "C" {
+const char *ms_get_version( void );
+}
+
 namespace rai {
 namespace ms {
 
@@ -94,7 +98,7 @@ typedef HashPub< U_MCAST, U_MCAST_PING, McastBuf > McastHash;
 /* subscribed message recvd, either mcast or point to point */
 struct SubMsgData {
   MsgFramePublish & pub;
-  UserBridge      & src_bridge; /* which peer it's from */
+  UserBridge      * src_bridge; /* which peer it's from */
   uint64_t          seqno,   /* the seqno of the published message */
                     time,    /* the optional time of message at the publisher */
                     last_seqno,/* previous seqno recvd */
@@ -107,7 +111,7 @@ struct SubMsgData {
   /* start_seqno : seqno of subscripton */
   /* sub2, sublen2 : subject of inbox */
 
-  SubMsgData( MsgFramePublish &p,  UserBridge &n,  const void *d,
+  SubMsgData( MsgFramePublish &p,  UserBridge *n,  const void *d,
               size_t dl )
     : pub( p ), src_bridge( n ), seqno( 0 ), time( 0 ),
       last_seqno( 0 ), last_time( 0 ),
@@ -154,11 +158,11 @@ struct StringTab;
 struct TelnetListen;
 struct SessionMgr;
 
-struct ExternalRoute : public kv::EvSocket {
+struct BridgeRoute : public kv::EvSocket {
   SessionMgr & mgr;
   UserDB     & user_db;
   SubDB      & sub_db;
-  ExternalRoute( kv::EvPoll &p,  SessionMgr &m ) noexcept;
+  BridgeRoute( kv::EvPoll &p,  SessionMgr &m ) noexcept;
   /* EvSocket */
   virtual bool on_msg( kv::EvPublish &pub ) noexcept;
   bool on_inbox( const MsgFramePublish &pub,  UserBridge &n,
@@ -169,8 +173,22 @@ struct ExternalRoute : public kv::EvSocket {
   virtual void release( void ) noexcept;
 };
 
+struct InternalRoute : public kv::EvSocket {
+  SessionMgr & mgr;
+  UserDB     & user_db;
+  SubDB      & sub_db;
+  InternalRoute( kv::EvPoll &p,  SessionMgr &m ) noexcept;
+  /* EvSocket */
+  virtual bool on_msg( kv::EvPublish &pub ) noexcept;
+  virtual void write( void ) noexcept;
+  virtual void read( void ) noexcept;
+  virtual void process( void ) noexcept;
+  virtual void release( void ) noexcept;
+};
+
 struct SessionMgr : public kv::EvSocket {
-  ExternalRoute           ext;
+  BridgeRoute             external;       /* network -> rv sub, ds sub, etc */
+  InternalRoute           internal;       /* rv pub, ds pub -> internal sub */
   ConfigTree            & tree;           /* config db */
   ConfigTree::User      & user;           /* my user */
   ConfigTree::Service   & svc;            /* this transport */
@@ -182,14 +200,13 @@ struct SessionMgr : public kv::EvSocket {
   UserDB                  user_db;        /* db of user nonce routes */
   SubDB                   sub_db;         /* track subscriptions */
   kv::BitSpace            router_set;
-  kv::BloomRef            sys_bloom,
-                          router_bloom;
+  kv::BloomRef            sys_bloom;
+                          /*router_bloom;*/
   EventRecord             events;
   Console                 console;
   kv::Logger            & log;
   TelnetListen          * telnet;
   ConfigTree::Transport * telnet_tport;
-  TransportRoute        * external_tport;
   uint8_t                 tcp_accept_sock_type, /* free list sock types */
                           tcp_connect_sock_type;
 
@@ -201,6 +218,7 @@ struct SessionMgr : public kv::EvSocket {
                       bool is_service ) noexcept;
   bool add_transport2( ConfigTree::Service &s,  ConfigTree::Transport &t,
                        bool is_service,  TransportRoute *&rte ) noexcept;
+  bool add_external_transport( ConfigTree::Service &s ) noexcept;
   bool start_transport( TransportRoute &rte,  bool is_service ) noexcept;
   bool add_startup_transports( ConfigTree::Service &s ) noexcept;
   uint32_t shutdown_transport( ConfigTree::Service &s,

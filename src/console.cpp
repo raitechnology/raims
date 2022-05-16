@@ -25,9 +25,6 @@
 #include <linecook/ttycook.h>
 
 namespace rai {
-namespace kv {
-extern uint32_t kv_debug;
-}
 namespace sassrv {
 extern uint32_t rv_debug;
 }
@@ -1477,8 +1474,12 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
         this->printf( "recalculate peer dist\n" );
       }
       else if ( len >= 2 && ::memcmp( arg, "kv", 2 ) == 0 ) {
-        kv_debug = ! kv_debug;
-        this->printf( "kv debug %s\n", kv_debug ? "on" : "off" );
+        kv_pub_debug = ! kv_pub_debug;
+        this->printf( "kv pub debug %s\n", kv_pub_debug ? "on" : "off" );
+      }
+      else if ( len >= 4 && ::memcmp( arg, "kvps", 4 ) == 0 ) {
+        kv_ps_debug = ! kv_ps_debug;
+        this->printf( "kv ps debug %s\n", kv_ps_debug ? "on" : "off" );
       }
       else if ( len >= 2 && ::memcmp( arg, "rv", 2 ) == 0 ) {
         sassrv::rv_debug = ! sassrv::rv_debug;
@@ -2483,11 +2484,11 @@ Console::show_tports( const char *name,  size_t len ) noexcept
     if ( rte != NULL ) {
       is_accepting = ( rte->listener != NULL );
     }
-    else if ( this->mgr.external_tport != NULL ) {
-      for ( ExtRte *ext = this->mgr.external_tport->ext->list.hd; ext != NULL;
-            ext = ext->next ) {
+    else if ( this->user_db.external_transport != NULL ) {
+      for ( ExtRte *ext = this->user_db.external_transport->ext->list.hd;
+            ext != NULL; ext = ext->next ) {
         if ( tport == &ext->transport ) {
-          rte = this->mgr.external_tport;
+          rte = this->user_db.external_transport;
           is_accepting = true;
           break;
         }
@@ -3273,8 +3274,8 @@ Console::show_blooms( void ) noexcept
           s = "sys";
         else if ( ref == &this->user_db.auth_bloom )
           s = "auth";
-        else if ( ref == &this->mgr.router_bloom )
-          s = rtr_str; /* emtpy */
+        /*else if ( ref == &this->mgr.router_bloom )
+          s = rtr_str;*/
         else {
           for ( uid = 0; uid < this->user_db.next_uid; uid++ ) {
             UserBridge * n = this->user_db.bridge_tab[ uid ];
@@ -3377,14 +3378,14 @@ ConsoleRPC::on_data( const SubMsgData &val ) noexcept
 void
 ConsolePing::on_data( const SubMsgData &val ) noexcept
 {
-  if ( this->complete || val.token != this->token )
+  if ( this->complete || val.token != this->token || val.src_bridge == NULL )
     return;
   uint32_t i = this->total_recv++;
   PingReply &reply = this->reply[ i ];
   if ( this->total_recv >= this->count )
     this->complete = true;
 
-  reply.uid       = val.src_bridge.uid;
+  reply.uid       = val.src_bridge->uid;
   reply.tid       = val.pub.rte.tport_id;
   reply.sent_time = val.time;
   reply.recv_time = current_realtime_ns();
@@ -3396,7 +3397,7 @@ ConsolePing::on_data( const SubMsgData &val ) noexcept
 void
 ConsoleSubs::on_data( const SubMsgData &val ) noexcept
 {
-  if ( this->complete || val.token != this->token )
+  if ( this->complete || val.token != this->token || val.src_bridge == NULL )
     return;
   const MsgHdrDecoder & dec = val.pub.dec;
   const char * str = NULL;
@@ -3415,7 +3416,7 @@ ConsoleSubs::on_data( const SubMsgData &val ) noexcept
   if ( dec.test( FID_END ) ) {
     uint64_t end = 0;
     cvt_number<uint64_t>( dec.mref[ FID_END ], end );
-    if ( end >= val.src_bridge.sub_seqno ) {
+    if ( end >= val.src_bridge->sub_seqno ) {
       if ( ++this->total_recv >= this->count )
         this->complete = true;
     }
@@ -3430,7 +3431,7 @@ ConsoleSubs::on_data( const SubMsgData &val ) noexcept
     sub[ len ] = '\0';
     this->strings.count += len + 1;
 
-    reply.uid        = val.src_bridge.uid;
+    reply.uid        = val.src_bridge->uid;
     reply.sub_off    = off;
     reply.sub_len    = (uint16_t) len;
     reply.is_pattern = is_pattern;
@@ -3450,16 +3451,24 @@ Console::on_data( const SubMsgData &val ) noexcept
                   rz, rc, (double) delta / 1000.0, nz, nc );
   }
   char src_nonce[ NONCE_B64_LEN + 1 ];
-  val.src_bridge.bridge_id.nonce.to_base64_str( src_nonce );
+  if ( val.src_bridge != NULL )
+    val.src_bridge->bridge_id.nonce.to_base64_str( src_nonce );
+  else
+    this->user_db.bridge_id.nonce.to_base64_str( src_nonce );
+
+  const char *user_val;
+  if ( val.src_bridge != NULL )
+    user_val = val.src_bridge->peer.user.val;
+  else
+    user_val = this->user_db.user.user.val;
   if ( val.datalen > 0 ) {
     if ( val.fmt != 0 ) {
       MDMsgMem mem;
       MDMsg * m = MDMsg::unpack( (void *) val.data, 0, val.datalen, val.fmt,
                                  MsgFrameDecoder::msg_dict, &mem );
-      
       this->printf( "%.*s%.*s%.*s n=%" PRIu64 " (%s @ %s via %s)\n",
               bz, bc, (int) sublen, sub, nz, nc, val.seqno,
-              val.src_bridge.peer.user.val, src_nonce, val.pub.rte.name );
+              user_val, src_nonce, val.pub.rte.name );
       if ( m != NULL )
         this->print_msg( *m );
     }
@@ -3467,14 +3476,14 @@ Console::on_data( const SubMsgData &val ) noexcept
       this->printf( "%.*s%.*s%.*s n=%" PRIu64
                     " (%s @ %s via %s) : %.*s%.*s%.*s\n",
               bz, bc, (int) sublen, sub, nz, nc, val.seqno,
-              val.src_bridge.peer.user.val, src_nonce, val.pub.rte.name, cz, cc,
+              user_val, src_nonce, val.pub.rte.name, cz, cc,
               (int) val.datalen, (char *) val.data, nz, nc );
     }
   }
   else {
     this->printf( "%.*s%.*s%.*s n=%" PRIu64 " (%s @ %s via %s)\n",
             bz, bc, (int) sublen, sub, nz, nc, val.seqno,
-            val.src_bridge.peer.user.val, src_nonce, val.pub.rte.name );
+            user_val, src_nonce, val.pub.rte.name );
 
     this->print_msg( *val.pub.dec.msg );
   }

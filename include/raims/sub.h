@@ -129,13 +129,22 @@ struct SubArgs {
                tport_id,
                sub_count,
                internal_count,
-               external_count;
+               external_count,
+               sub_coll,
+               internal_coll,
+               external_coll;
+  bool         bloom_updated,
+               resize_bloom;
 
   SubArgs( const char *s,  uint16_t len,  bool start,  SubOnMsg *on_msg,
-          uint64_t n,  uint32_t fl,  uint32_t tp ) :
+           uint64_t n,  uint32_t fl,  uint32_t tp,  uint32_t h = 0 ) :
     sub( s ), sublen( len ), is_start( start ), cb( on_msg ), seqno( n ),
-    flags( fl ), hash( kv_crc_c( s, len, 0 ) ), tport_id( tp ),
-    sub_count( 0 ), internal_count( 0 ), external_count( 0 ) {}
+    flags( fl ), hash( h ), tport_id( tp ),
+    sub_count( 0 ), internal_count( 0 ), external_count( 0 ),
+    sub_coll( 0 ), internal_coll( 0 ), external_coll( 0 ),
+    bloom_updated( false ), resize_bloom( false ) {
+    if ( h == 0 ) this->hash = kv_crc_c( s, len, 0 );
+  }
 };
 
 struct SubRoute {
@@ -192,9 +201,12 @@ struct SubTab {
 
   SubStatus start( SubArgs &ctx ) {
     kv::RouteLoc loc;
-    SubRoute *rt = this->tab.upsert( ctx.hash, ctx.sub, ctx.sublen, loc );
+    uint32_t hcnt;
+    SubRoute *rt = this->tab.upsert2( ctx.hash, ctx.sub, ctx.sublen, loc, hcnt);
     if ( rt == NULL )
       return SUB_ERROR;
+    if ( hcnt > 0 )
+      this->resolve_coll( ctx, rt );
     if ( loc.is_new ) {
       rt->start( ctx );
       this->list.push( ctx.seqno, ctx.hash, ACTION_SUB_JOIN );
@@ -207,19 +219,23 @@ struct SubTab {
 
   SubStatus stop( SubArgs &ctx ) {
     kv::RouteLoc loc;
-    SubRoute *rt = this->tab.find( ctx.hash, ctx.sub, ctx.sublen, loc );
+    uint32_t hcnt;
+    SubRoute *rt = this->tab.find2( ctx.hash, ctx.sub, ctx.sublen, loc, hcnt );
     if ( rt == NULL ) {
       printf( "\"%.*s\" not found\n", (int) ctx.sublen, ctx.sub );
       return SUB_NOT_FOUND;
     }
-    if ( ! rt->rem( ctx ) )
-      return SUB_UPDATED;
-    if ( ! this->list.pop( rt->start_seqno ) ) {
-      printf( "stop %.*s seqno %u not found\n", 
-              (int) ctx.sublen, ctx.sub, (uint32_t) rt->start_seqno );
+    if ( hcnt > 1 )
+      this->resolve_coll( ctx, rt );
+    if ( rt->rem( ctx ) ) {
+      if ( ! this->list.pop( rt->start_seqno ) ) {
+        printf( "stop %.*s seqno %u not found\n", 
+                (int) ctx.sublen, ctx.sub, (uint32_t) rt->start_seqno );
+      }
+      this->tab.remove( loc );
+      return SUB_OK;
     }
-    this->tab.remove( loc );
-    return SUB_OK;
+    return SUB_UPDATED;
   }
 
   SubRoute *find_sub( uint32_t hash, uint64_t seqno ) {
@@ -231,6 +247,18 @@ struct SubTab {
       rt = this->tab.find_next_by_hash( hash, loc );
     }
     return rt;
+  }
+  void resolve_coll( SubArgs &ctx,  SubRoute *rt ) {
+    kv::RouteLoc loc;
+    SubRoute *rt2 = this->tab.find_by_hash( ctx.hash, loc );
+    while ( rt2 != NULL ) {
+      if ( rt != rt2 ) {
+        ctx.sub_coll += rt->ref.ref_count();
+        ctx.internal_coll += rt->ref.internal_ref;
+        ctx.external_coll += rt->ref.external_refs;
+      }
+      rt2 = this->tab.find_next_by_hash( ctx.hash, loc );
+    }
   }
 
   void release( void ) {
@@ -482,6 +510,7 @@ struct SubDB {
   bool match_subscription( SeqnoArgs &ctx ) noexcept;
 
   void resize_bloom( void ) noexcept;
+  static void notify_bloom_update( kv::BloomRef &ref ) noexcept;
 
   static void print_bloom( kv::BloomBits &bits ) noexcept;
 

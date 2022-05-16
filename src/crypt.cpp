@@ -102,8 +102,8 @@ rai::ms::free_secure_mem( void *p,  size_t len ) noexcept
 
 bool
 rai::ms::load_secure_env( const char *env,  const char *unlnk_env,
-                            const char *data,  void *&mem,
-                            size_t &mem_sz ) noexcept
+                          const char *data,  void *&mem,
+                          size_t &mem_sz ) noexcept
 {
   const char *env_data = data;
   mem    = NULL;

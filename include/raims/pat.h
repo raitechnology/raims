@@ -30,15 +30,20 @@ struct PatternArgs {
   kv::RouteLoc           loc;
   PatRoute             * rt;
   SubOnMsg             * cb;
+  bool                   bloom_updated,
+                         resize_bloom,
+                         sub_coll;
 
   PatternArgs( const char *p,  uint16_t len,  const kv::PatternCvt &c,
                bool start, SubOnMsg *on_msg,  uint64_t n,  uint32_t fl,
-               uint32_t tp ) : 
-    pat( p ), patlen( len ), is_start( start ), hash( 0 ),
+               uint32_t tp,  uint32_t h = 0 ) : 
+    pat( p ), patlen( len ), is_start( start ), hash( h ),
     flags( fl ), tport_id( tp ), sub_count( 0 ), internal_count( 0 ),
-    external_count( 0 ), seqno( n ), cvt( c ), rt( 0 ), cb( on_msg ) {}
+    external_count( 0 ), seqno( n ), cvt( c ), rt( 0 ), cb( on_msg ),
+    bloom_updated( false ), resize_bloom( false ), sub_coll( false ) {}
 
-  bool cvt_wild( const uint32_t *seed,  kv::PatternFmt fmt ) noexcept;
+  bool cvt_wild( kv::PatternCvt &cvt,  const uint32_t *seed,
+                 kv::PatternFmt fmt ) noexcept;
 };
 
 struct PatRoute : public kv::BloomDetail {

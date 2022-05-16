@@ -13,10 +13,23 @@ using namespace ms;
 using namespace kv;
 using namespace md;
 
+extern "C" {
+const char *
+ms_get_version( void )
+{
+  return kv_stringify( MS_VER );
+}
+}
 int rai::ms::dbg_flags; /* TCP_DBG | PGM_DBG | IBX_DBG */
 
-ExternalRoute::ExternalRoute( EvPoll &p,  SessionMgr &m ) noexcept
-             : EvSocket( p, p.register_type( "external_route" ) ),
+BridgeRoute::BridgeRoute( EvPoll &p,  SessionMgr &m ) noexcept
+           : EvSocket( p, p.register_type( "bridge_route" ) ),
+             mgr( m ), user_db( m.user_db ), sub_db( m.sub_db ) {
+  this->sock_opts = OPT_NO_POLL;
+}
+
+InternalRoute::InternalRoute( EvPoll &p,  SessionMgr &m ) noexcept
+             : EvSocket( p, p.register_type( "internal_route" ) ),
                mgr( m ), user_db( m.user_db ), sub_db( m.sub_db ) {
   this->sock_opts = OPT_NO_POLL;
 }
@@ -24,13 +37,14 @@ ExternalRoute::ExternalRoute( EvPoll &p,  SessionMgr &m ) noexcept
 SessionMgr::SessionMgr( EvPoll &p,  Logger &l,  ConfigTree &c,
                         ConfigTree::User &u,  ConfigTree::Service &s,
                         StringTab &st ) noexcept
-           : EvSocket( p, p.register_type( "session_mgr" ) ), ext( p, *this ),
+           : EvSocket( p, p.register_type( "session_mgr" ) ),
+             external( p, *this ), internal( p, *this ),
              tree( c ), user( u ), svc( s ), next_timer( 1 ), timer_id( 0 ),
              user_db( p, u, s, this->sub_db, st, this->events ),
              sub_db( p, this->user_db, *this ),
-             sys_bloom( 0, "sys" ), router_bloom( 0, "rtr" ),
-             console( *this ), log( l ), telnet( 0 ), telnet_tport( 0 ),
-             external_tport( 0 )
+             sys_bloom( 0, "sys", p.g_bloom_db ),
+             /*router_bloom( 0, "rtr", p.bloom_db ),*/
+             console( *this ), log( l ), telnet( 0 ), telnet_tport( 0 )
 {
   this->sock_opts = OPT_NO_POLL;
   this->tcp_accept_sock_type = p.register_type( "ev_tcp_tport" );
@@ -62,19 +76,25 @@ SessionMgr::init_sock( void ) noexcept
   this->events.startup( this->user_db.start_time );
 
   int efd = this->poll.get_null_fd(),
+      ifd = this->poll.get_null_fd(),
       pfd = this->poll.get_null_fd();
-  if ( pfd < efd ) { /* make efd the lower fd number, dispatched first */
-    int tmp = efd;
-    efd = pfd;
-    pfd = tmp;
-  }
+  #define swap( x, y ) { int z = x; x = y; y = z; }
+  if ( pfd < efd ) /* make efd, ifd the lower fd number, dispatched first */
+    swap( pfd, efd );
+  if ( pfd < ifd )
+    swap( pfd, ifd );
+  #undef swap
   this->router_set.add( efd );
+  this->router_set.add( ifd );
   this->router_set.add( pfd );
 
-  this->ext.PeerData::init_peer( efd, NULL, "external_route" );
+  this->external.PeerData::init_peer( efd, NULL, "external_route" );
+  this->internal.PeerData::init_peer( ifd, NULL, "internal_route" );
   this->PeerData::init_peer( pfd, NULL, "session_mgr" );
 
-  int status = this->poll.add_sock( &this->ext );
+  int status = this->poll.add_sock( &this->external );
+  if ( status == 0 )
+    status = this->poll.add_sock( &this->internal );
   if ( status == 0 )
     status = this->poll.add_sock( this );
   return status;
@@ -380,14 +400,14 @@ SessionMgr::parse_msg_hdr( MsgFramePublish &fpub ) noexcept
 }
 
 bool
-ExternalRoute::on_msg( EvPublish &pub ) noexcept
+BridgeRoute::on_msg( EvPublish &pub ) noexcept
 {
   this->msgs_recv++;
   this->bytes_recv += pub.msg_len;
   if ( pub.src_route == (uint32_t) this->fd )
     return true;
   if ( pub.pub_type != 'X' ) {
-    fprintf( stderr, "Publish has no frame %.*s\n",
+    fprintf( stderr, "External publish has no frame %.*s\n",
              (int) pub.subject_len, pub.subject );
     return true;
   }
@@ -510,7 +530,7 @@ ExternalRoute::on_msg( EvPublish &pub ) noexcept
   }
   if ( seq.cb != NULL ) {
     fpub.flags |= MSG_FRAME_EXTERNAL_CONTROL;
-    SubMsgData val( fpub, n, data, datalen );
+    SubMsgData val( fpub, &n, data, datalen );
 
     val.seqno      = dec.seqno;
     val.time       = seq.time;
@@ -525,8 +545,62 @@ ExternalRoute::on_msg( EvPublish &pub ) noexcept
 }
 
 bool
-ExternalRoute::on_inbox( const MsgFramePublish &fpub,  UserBridge &,
-                         MsgHdrDecoder &dec ) noexcept
+InternalRoute::on_msg( EvPublish &pub ) noexcept
+{
+  RouteLoc loc;
+  Pub * p = this->sub_db.pub_tab.upsert( pub.subj_hash, pub.subject,
+                                         pub.subject_len, loc );
+  if ( p == NULL )
+    return false;
+  if ( loc.is_new )
+    p->init( false );
+  uint64_t seqno = p->next_seqno();
+
+  MsgEst e( pub.subject_len );
+  e.seqno ();
+
+  MsgCat m;
+  m.reserve( e.sz );
+
+  m.open( this->user_db.bridge_id.nonce, pub.subject_len )
+   .seqno ( seqno );
+  m.close( e.sz, pub.subj_hash, CABA_MCAST );
+
+  m.sign( pub.subject, pub.subject_len, *this->user_db.session_key );
+  TransportRoute & rte = *this->user_db.external_transport;
+
+  CabaMsg * msg;
+  MDMsgMem  mem;
+  size_t    end = m.len();
+  CabaMsg::unpack2( (uint8_t *) m.msg, 0, end, &mem, msg );
+  MsgFramePublish fpub( pub, msg, rte );
+  fpub.dec.decode_msg();
+  fpub.dec.get_ival<uint64_t>( FID_SEQNO, fpub.dec.seqno );
+  SeqnoArgs seq( fpub );
+  SeqnoStatus status = this->sub_db.match_seqno( seq );
+
+  if ( status > SEQNO_UID_NEXT ) {
+    printf( "uid status %d\n", status );
+  }
+  if ( seq.cb != NULL ) {
+    fpub.flags |= MSG_FRAME_EXTERNAL_CONTROL;
+    SubMsgData val( fpub, NULL, pub.msg, pub.msg_len );
+
+    val.seqno      = seqno;
+    val.time       = 0;
+    val.fmt        = pub.msg_enc;
+    val.last_seqno = seq.last_seqno;
+    val.last_time  = seq.last_time;
+    val.token      = 0;
+    val.reply      = 0;
+    seq.cb->on_data( val );
+  }
+  return true;
+}
+
+bool
+BridgeRoute::on_inbox( const MsgFramePublish &fpub,  UserBridge &,
+                       MsgHdrDecoder &dec ) noexcept
 {
   if ( ! dec.test( FID_SUBJECT ) ) {
     fprintf( stderr, "No inbox subject\n" );
@@ -574,7 +648,7 @@ SessionMgr::on_msg( EvPublish &pub ) noexcept
   if ( pub.src_route == (uint32_t) this->fd )
     return true;
   if ( pub.pub_type != 'X' ) {
-    fprintf( stderr, "Publish has no frame %.*s\n",
+    fprintf( stderr, "Session publish has no frame %.*s\n",
              (int) pub.subject_len, pub.subject );
     return true;
   }
@@ -765,7 +839,7 @@ SessionMgr::on_msg( EvPublish &pub ) noexcept
           case U_INBOX_ADJ_RPY:   return this->user_db.recv_adjacency_result( fpub, n, dec );
           case U_INBOX_MESH_REQ:  return this->user_db.recv_mesh_request( fpub, n, dec );
           case U_INBOX_MESH_RPY:  return this->user_db.recv_mesh_result( fpub, n, dec );
-          case U_INBOX_ANY_RTE:   return this->ext.on_inbox( fpub, n, dec );
+          case U_INBOX_ANY_RTE:   return this->external.on_inbox( fpub, n, dec );
           default: break;
         }
       }
@@ -808,7 +882,7 @@ SessionMgr::on_msg( EvPublish &pub ) noexcept
         data    = dec.mref[ FID_DATA ].fptr;
         datalen = dec.mref[ FID_DATA ].fsize;
       }
-      SubMsgData val( fpub, n, data, datalen );
+      SubMsgData val( fpub, &n, data, datalen );
       SeqnoArgs  seq( fpub );
 
       val.seqno = dec.seqno;
@@ -1222,10 +1296,14 @@ void SessionMgr::write( void ) noexcept {}
 void SessionMgr::read( void ) noexcept {}
 void SessionMgr::process( void ) noexcept {}
 void SessionMgr::release( void ) noexcept {}
-void ExternalRoute::write( void ) noexcept {}
-void ExternalRoute::read( void ) noexcept {}
-void ExternalRoute::process( void ) noexcept {}
-void ExternalRoute::release( void ) noexcept {}
+void BridgeRoute::write( void ) noexcept {}
+void BridgeRoute::read( void ) noexcept {}
+void BridgeRoute::process( void ) noexcept {}
+void BridgeRoute::release( void ) noexcept {}
+void InternalRoute::write( void ) noexcept {}
+void InternalRoute::read( void ) noexcept {}
+void InternalRoute::process( void ) noexcept {}
+void InternalRoute::release( void ) noexcept {}
 
 #if 0
 void

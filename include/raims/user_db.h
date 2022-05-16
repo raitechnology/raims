@@ -190,8 +190,8 @@ struct UserBridge : public UserStateTest<UserBridge> {
   UserRoute        * u_buf[ 16 ];         /* indexes user_route */
   void * operator new( size_t, void *ptr ) { return ptr; }
 
-  UserBridge( const PeerEntry &pentry,  uint32_t seed )
-      : peer( pentry ), bloom( seed, pentry.user.val ) {
+  UserBridge( const PeerEntry &pentry,  kv::BloomDB &db,  uint32_t seed )
+      : peer( pentry ), bloom( seed, pentry.user.val, db ) {
     this->peer_key.zero();
     this->uid_csum.zero();
     this->hb_cnonce.zero();
@@ -355,7 +355,7 @@ struct StringTab;
 struct UserDB {
   static const uint32_t MY_UID = 0;      /* bridge_tab[ 0 ] reserved for me */
   TransportTab         transport_tab;
-  //TransportList         transport_list;  /* list of transport links */
+  TransportRoute     * external_transport;
   /* my identity */
   ConfigTree::User    & user;            /* my user */
   ConfigTree::Service & svc;             /* my service */
@@ -437,8 +437,8 @@ struct UserDB {
     return new ( this->alloc( sizeof( Obj ) ) ) Obj();
   }
   UserBridge *make_user_bridge( size_t len,  const PeerEntry &peer,
-                                uint32_t seed ) {
-    return new ( this->alloc( len ) ) UserBridge( peer, seed );
+                                kv::BloomDB &db,  uint32_t seed ) {
+    return new ( this->alloc( len ) ) UserBridge( peer, db, seed );
   }
   PeerEntry *make_peer_entry( size_t len ) {
     return new ( this->alloc( len ) ) PeerEntry();
