@@ -3,6 +3,7 @@
 #include <string.h>
 #include <stdint.h>
 #include <assert.h>
+#include <errno.h>
 #include <raikv/os_file.h>
 #include <raikv/atom.h>
 #include <raims/sha512.h>
@@ -87,9 +88,18 @@ rai::ms::alloc_secure_mem( size_t len ) noexcept
   MapFile map( NULL, len );
   if ( ! map.open( MAP_FILE_RDWR | MAP_FILE_PRIVATE | MAP_FILE_LOCK |
                    MAP_FILE_SECURE | MAP_FILE_NOUNMAP ) ) {
-    perror( "secure mem" );
-    if ( map.map == NULL )
+    if ( map.map == NULL ) {
+      perror( "alloc_secure_mem" );
       assert( 0 );
+    }
+    else {
+      static int first;
+      if ( first++ == 0 ) {
+        int e = errno;
+        fprintf( stderr, "unable to mlock() memory, ulimit -l (%d/%s)\n",
+                 e, strerror( e ) );
+      }
+    }
   }
   return map.map;
 }
