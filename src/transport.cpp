@@ -161,7 +161,8 @@ SessionMgr::add_transport( ConfigTree::Service &s,
 }
 
 bool
-SessionMgr::add_external_transport( ConfigTree::Service &s ) noexcept
+SessionMgr::add_external_transport( ConfigTree::Service &s,
+                                    const char *ipc ) noexcept
 {
   if ( ! this->in_list( IN_ACTIVE_LIST ) ) {
     if ( this->init_sock() != 0 )
@@ -191,8 +192,9 @@ SessionMgr::add_external_transport( ConfigTree::Service &s ) noexcept
   rte->sub_route.add_route_notify( *rte->ext );
   this->user_db.external_transport = rte;
 
-  const char *ipc_name = NULL;
-  if ( this->tree.find_parameter( "ipc", ipc_name, NULL ) ) {
+  const char *ipc_name = ipc;
+  if ( ipc_name != NULL ||
+       this->tree.find_parameter( "ipc", ipc_name, NULL ) ) {
     EvShm shm;
     shm.ipc_name = ipc_name;
     rte->sub_route.init_shm( shm );

@@ -165,6 +165,7 @@ main( int argc, char *argv[] )
              * ti = get_arg( argc, argv, 1, "-t", NULL ),
              * lo = get_arg( argc, argv, 1, "-l", NULL ),
              * fl = get_arg( argc, argv, 1, "-f", NULL ),
+             * ip = get_arg( argc, argv, 1, "-i", NULL ),
              * co = get_arg( argc, argv, 0, "-c", NULL ),
              * he = get_arg( argc, argv, 0, "-h", NULL );
   if ( he != NULL ) {
@@ -174,6 +175,7 @@ main( int argc, char *argv[] )
             "   -t tport.list : transport name + listen or connect\n"
             "   -l file       : log to file\n"
             "   -f flags      : debug flags to set\n"
+            "   -i name       : connect with ipc name\n"
             "   -c            : run with console\n"
             "Connect or listen user to service on transports\n"
             "RaiMS version %s\n",
@@ -277,7 +279,7 @@ main( int argc, char *argv[] )
       }
     }
   }
-  if ( ! sess.add_external_transport( *svc ) ||
+  if ( ! sess.add_external_transport( *svc, ip ) ||
        ! sess.add_startup_transports( *svc ) )
     status = -1;
 #if 0

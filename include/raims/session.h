@@ -218,7 +218,8 @@ struct SessionMgr : public kv::EvSocket {
                       bool is_service ) noexcept;
   bool add_transport2( ConfigTree::Service &s,  ConfigTree::Transport &t,
                        bool is_service,  TransportRoute *&rte ) noexcept;
-  bool add_external_transport( ConfigTree::Service &s ) noexcept;
+  bool add_external_transport( ConfigTree::Service &s,
+                               const char *ipc_name ) noexcept;
   bool start_transport( TransportRoute &rte,  bool is_service ) noexcept;
   bool add_startup_transports( ConfigTree::Service &s ) noexcept;
   uint32_t shutdown_transport( ConfigTree::Service &s,
