@@ -340,7 +340,8 @@ struct Console : public md::MDOutput, public SubOnMsg, public ConfigPrinter {
   uint64_t last_secs, last_ms;
 
   Console( SessionMgr &mgr ) noexcept;
-  bool open_log( const char *fn ) noexcept;
+  bool open_log( const char *fn,  bool add_hdr ) noexcept;
+  static bool log_header( int fd ) noexcept;
   bool rotate_log( void ) noexcept;
   size_t make_prompt( const char *where = NULL,  size_t wsz = 0 ) noexcept;
   void update_prompt( const char *where = NULL,  size_t wsz = 0 ) noexcept;

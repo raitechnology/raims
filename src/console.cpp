@@ -81,34 +81,14 @@ static const char *cc = ANSI_CYAN;
 static int         cz = ANSI_CYAN_SIZE;
 
 bool
-Console::open_log( const char *fn ) noexcept
+Console::open_log( const char *fn,  bool add_hdr ) noexcept
 {
   this->log_fd = os_open( fn, O_APPEND | O_WRONLY | O_CREAT, 0666 );
   if ( this->log_fd < 0 ) {
     ::perror( fn );
     return false;
   }
-  time_t now = ::time( NULL );
-  struct tm local;
-  char   line[ 128 ];
-  size_t off = 0;
-  ms_localtime( now, local );
-  int diff_hr = local.tm_hour - ( ( now / 3600 ) % 24 );
-  int diff_mi = local.tm_min  - ( ( now / 60 ) % 60 );
-  if ( diff_mi < 0 ) diff_mi = -diff_mi;
-
-  ::strcpy( &line[ off ], "=--=--=--=\n" );  off = ::strlen( line );
-  ::strcpy( &line[ off ], ::ctime( &now ) ); off = ::strlen( line );
-#ifndef _MSC_VER
-  const char *tz = tzname[ daylight ];
-#else
-  const char *tz = _tzname[ _daylight ];
-#endif
-  ::snprintf( &line[ off ], sizeof( line ) - off,
-    "UTC offset: %d:%02d (%s)\n", diff_hr, diff_mi, tz );
-  off = ::strlen( line );
-  ::strcpy( &line[ off ], "=--=--=--=\n" );  off = ::strlen( line );
-  if ( (size_t) os_write( this->log_fd, line, off ) != off ) {
+  if ( add_hdr && ! Console::log_header( this->log_fd ) ) {
     ::perror( fn );
     os_close( this->log_fd );
     this->log_fd = -1;
@@ -118,6 +98,36 @@ Console::open_log( const char *fn ) noexcept
     this->log_filename = (char *) ::malloc( ::strlen( fn ) * 2 + 24 );
     ::strcpy( this->log_filename, fn );
   }
+  return true;
+}
+
+bool
+Console::log_header( int fd ) noexcept
+{
+  static const char sep[] = "=--=--=--=\n";
+  time_t now = ::time( NULL );
+  struct tm local;
+  char   line[ 256 ];
+  size_t off = 0;
+  ms_localtime( now, local );
+  int diff_hr = local.tm_hour - ( ( now / 3600 ) % 24 );
+  int diff_mi = local.tm_min  - ( ( now / 60 ) % 60 );
+  if ( diff_mi < 0 ) diff_mi = -diff_mi;
+
+  ::strcpy( &line[ off ], "=--=--=--=\n" );  off = sizeof( sep ) - 1;
+  ::strcpy( &line[ off ], ::ctime( &now ) ); off = ::strlen( line );
+#ifndef _MSC_VER
+  const char *tz = tzname[ daylight ];
+#else
+  const char *tz = _tzname[ _daylight ];
+#endif
+  off += ::snprintf( &line[ off ], sizeof( line ) - off,
+    "UTC offset: %d:%02d (%s)\n", diff_hr, diff_mi, tz );
+  off += ::snprintf( &line[ off ], sizeof( line ) - off,
+    "PID: %d, ms_server version: %s\n", ::getpid(), ms_get_version() );
+  ::strcpy( &line[ off ], "=--=--=--=\n" );  off += sizeof( sep ) - 1;
+  if ( (size_t) os_write( fd, line, off ) != off )
+    return false;
   return true;
 }
 
@@ -146,7 +156,7 @@ Console::rotate_log( void ) noexcept
       ::perror( newpath );
       return false;
     }
-    return this->open_log( this->log_filename );
+    return this->open_log( this->log_filename, true );
   }
   return true;
 }

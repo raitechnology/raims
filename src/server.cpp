@@ -183,6 +183,11 @@ main( int argc, char *argv[] )
     return 0;
   }
 
+  if ( lo != NULL ) {
+    ::freopen( lo, "a", stderr );
+    ::setvbuf( stderr, NULL, _IOLBF, 1024 );
+    Console::log_header( STDERR_FILENO );
+  }
   if ( fl != NULL )
     dbg_flags = (int) string_to_uint64( fl, ::strlen( fl ) );
   MDMsgMem         mem;
@@ -208,20 +213,8 @@ main( int argc, char *argv[] )
   EvShm  shm;
   SignalHandler sighndl;
   Logger & log = *Logger::create();
-  /*HashTabGeom geom;*/
-  /*TelnetListen tel( poll );*/
   sighndl.install();
   poll.init( 1024, false );
-  /*geom.map_size         = sizeof( HashTab ) + 1024;
-  geom.max_value_size   = 0;
-  geom.hash_entry_size  = 64;
-  geom.hash_value_ratio = 1;
-  geom.cuckoo_buckets   = 0;
-  geom.cuckoo_arity     = 0;*/
-  /*shm.map    = HashTab::alloc_map( geom );
-  shm.map->hdr.ht_read_only = 1;
-  shm.ctx_id = 0;
-  shm.dbx_id = 0;*/
   poll.sub_route.init_shm( shm );
 
   TermCallback cb;
@@ -229,7 +222,7 @@ main( int argc, char *argv[] )
   EvTerminal   term( poll, cb );
 
   if ( lo != NULL )
-    sess.console.open_log( lo );
+    sess.console.open_log( lo, false );
   if ( co != NULL ) {
     sess.console.term_list.push_tl( &cb );
     term.term.prompt = ""; /* no prompt until after init */
@@ -279,17 +272,11 @@ main( int argc, char *argv[] )
       }
     }
   }
-  if ( ! sess.add_external_transport( *svc, ip ) ||
-       ! sess.add_startup_transports( *svc ) )
-    status = -1;
-#if 0
-  size_t count = sess.user_db.transport_tab.count;
-  for ( size_t i = 0; i < count; i++ ) {
-    TransportRoute * t = sess.user_db.transport_tab.ptr[ i ];
-    SubNotify * n = new ( ::malloc( sizeof( SubNotify ) ) ) SubNotify( &term );
-    t->sub_route.add_route_notify( *n );
+  if ( status == 0 ) {
+    if ( ! sess.add_external_transport( *svc, ip ) ||
+         ! sess.add_startup_transports( *svc ) )
+      status = -1;
   }
-#endif
   if ( status == 0 )
     status = sess.init_session( pwd );
   pwd.clear_pass(); /* no longer need pass */
