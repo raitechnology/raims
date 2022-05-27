@@ -14,7 +14,7 @@ struct TelnetListen : public kv::EvTcpListen {
   TelnetListen( kv::EvPoll &p )
     : kv::EvTcpListen( p, "telnet_listen", "telnet_sock" ), console( 0 ) {}
 
-  virtual bool accept( void ) noexcept;
+  virtual EvSocket *accept( void ) noexcept;
 };
 
 /* linemode "set local chars" */

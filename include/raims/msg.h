@@ -321,7 +321,7 @@ enum PublishType {
   U_MCAST_PING      = 35, /* _M.ping */
   U_MCAST           = 36, /* _M.> */
   /* other subject */
-  U_INBOX_ANY_RTE   = 37, /* _I.Nonce.any, external inbox */
+  U_INBOX_ANY_RTE   = 37, /* _I.Nonce.any, ipc inbox */
   MCAST_SUBJECT     = 38, /* not _XX subject */
   UNKNOWN_SUBJECT   = 39  /* init, not resolved */
 };
@@ -494,9 +494,10 @@ enum MsgFrameStatus {
 };
 
 enum MsgFrameFlags {
-  MSG_FRAME_ACK_CONTROL      = 1, /* if ack / trace was handled */
-  MSG_FRAME_TPORT_CONTROL    = 2, /* if transport routing was handled */
-  MSG_FRAME_EXTERNAL_CONTROL = 4  /* if external routing was handled */
+  MSG_FRAME_ACK_CONTROL     = 1, /* if ack / trace was handled */
+  MSG_FRAME_TPORT_CONTROL   = 2, /* if transport routing was handled */
+  MSG_FRAME_IPC_CONTROL     = 4, /* if ipc routing was handled */
+  MSG_FRAME_CONSOLE_CONTROL = 8  /* if console routing was handled */
 };
 
 struct TransportRoute;

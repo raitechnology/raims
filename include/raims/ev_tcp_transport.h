@@ -16,7 +16,7 @@ struct EvTcpTransportListen : public kv::EvTcpListen {
 
   EvTcpTransportListen( kv::EvPoll &p, TransportRoute &r ) noexcept;
   /* EvListen */
-  virtual bool accept( void ) noexcept;
+  virtual EvSocket *accept( void ) noexcept;
   virtual int listen( const char *ip,  int port,  int opts ) noexcept;
   virtual void release( void ) noexcept final;
   virtual void process_close( void ) noexcept final;

@@ -50,6 +50,7 @@ EvPgmTransport::connect( EvPgmTransportParameters &p,
     fprintf( stderr, "failed to add sock %d\n", this->fd );
     return false;
   }
+  this->rte.set_peer_name( *this, "pgm" );
   d_pgm( "pgm fd %u\n", this->fd );
   this->start();
   return true;

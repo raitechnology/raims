@@ -13,6 +13,7 @@
 #include <raims/ev_pgm_transport.h>
 #include <raims/ev_inbox_transport.h>
 #include <raims/ev_telnet.h>
+#include <raims/ev_web.h>
 #include <raims/ev_rv_transport.h>
 #include <raims/ev_nats_transport.h>
 #include <raims/ev_redis_transport.h>
@@ -59,7 +60,7 @@ TransportRoute::TransportRoute( kv::EvPoll &p,  SessionMgr &m,
     : EvSocket( p, p.register_type( "transport_route" ) ),
       poll( p ), mgr( m ), user_db( m.user_db ),
       sub_route( p.sub_route.get_service( svc_name, svc_id ) ),
-      switch_rt( NULL ), eswitch_rt( NULL ), router_rt( NULL ),
+      console_rt( NULL ), ipc_rt( NULL ), router_rt( NULL ),
       uid_in_mesh( &this->mesh_connected ),
       mesh_csum( &this->mesh_csum2 ),
       hb_time( 0 ), hb_mono_time( 0 ), hb_seqno( 0 ), reachable_seqno( 0 ),
@@ -74,17 +75,17 @@ TransportRoute::TransportRoute( kv::EvPoll &p,  SessionMgr &m,
   this->sock_opts = OPT_NO_POLL;
   /* external tports do not have protocol for link state routing:
    *   _I.inbox, _X.HB, _Z.ADD, _Z.BLM, _Z.ADJ, _S.JOIN, _P.PSUB, etc */
-  /* switch_rt causes msgs to flow from tport -> session management */
-  if ( ! this->is_set( TPORT_IS_EXTERNAL ) ) {
-    this->switch_rt =
-      this->sub_route.create_bloom_route( m.fd, &m.sub_db.internal );
-    this->eswitch_rt =
-      this->sub_route.create_bloom_route( m.external.fd, &m.sub_db.external );
-    this->switch_rt->add_bloom_ref( &m.sys_bloom );
+  /* console_rt causes msgs to flow from tport -> session management */
+  if ( ! this->is_set( TPORT_IS_IPC ) ) {
+    this->console_rt =
+      this->sub_route.create_bloom_route( m.fd, &m.sub_db.console );
+    this->console_rt->add_bloom_ref( &m.sys_bloom );
+    this->ipc_rt =
+      this->sub_route.create_bloom_route( m.ipc_rt.fd, &m.sub_db.ipc );
   }
   else {
-    this->switch_rt =
-      this->sub_route.create_bloom_route( m.internal.fd, &m.sub_db.internal );
+    this->console_rt =
+      this->sub_route.create_bloom_route( m.console_rt.fd, &m.sub_db.console );
     /* extrenal routes do not have system subjects */
   }
   this->sub_route.route_id = id;
@@ -100,8 +101,7 @@ TransportRoute::init( void ) noexcept
   int pfd = this->poll.get_null_fd();
   d_tran( "tport %s fd %d\n", this->sub_route.service_name, pfd );
   this->PeerData::init_peer( pfd, NULL, "tport" );
-  this->PeerData::set_name( this->sub_route.service_name,
-                            ::strlen( this->sub_route.service_name ) );
+  this->set_peer_name( *this, "tport" );
   int status = this->poll.add_sock( this );
   if ( status != 0 )
     return status;
@@ -110,6 +110,17 @@ TransportRoute::init( void ) noexcept
   this->router_rt =
     this->sub_route.create_bloom_route( pfd, NULL /*&this->mgr.router_bloom*/ );
   return 0;
+}
+
+void
+TransportRoute::set_peer_name( PeerData &pd,  const char *suff ) noexcept
+{
+  ConfigTree::Transport & tport = this->transport;
+  ConfigTree::Service   & svc   = this->svc;
+  char buf[ 256 ];
+  int len = ::snprintf( buf, sizeof( buf ), "%s.%s.%s",
+                        svc.svc.val, tport.tport.val, suff );
+  pd.set_name( buf, len );
 }
 
 bool
@@ -161,8 +172,8 @@ SessionMgr::add_transport( ConfigTree::Service &s,
 }
 
 bool
-SessionMgr::add_external_transport( ConfigTree::Service &s,
-                                    const char *ipc ) noexcept
+SessionMgr::add_ipc_transport( ConfigTree::Service &s,  const char *ipc,
+                               const char *map,  uint8_t db ) noexcept
 {
   if ( ! this->in_list( IN_ACTIVE_LIST ) ) {
     if ( this->init_sock() != 0 )
@@ -170,35 +181,45 @@ SessionMgr::add_external_transport( ConfigTree::Service &s,
   }
   ConfigTree::Transport * tptr;
   TransportRoute * rte;
-  uint32_t f = TPORT_IS_SVC | TPORT_IS_EXTERNAL;
+  uint32_t f = TPORT_IS_SVC | TPORT_IS_IPC;
   StringTab & stab = this->user_db.string_tab;
 
-  tptr = this->tree.find_transport( "ext", 3 );
+  tptr = this->tree.find_transport( "ipc", 3 );
   if ( tptr == NULL ) {
     tptr = stab.make<ConfigTree::Transport>();
-    stab.ref_string( "ext", 3, tptr->type );
+    stab.ref_string( "ipc", 3, tptr->type );
     tptr->tport = tptr->type;
     tptr->tport_id = this->tree.transport_cnt++;
     this->tree.transports.push_tl( tptr );
   }
   uint32_t id = (uint32_t) this->user_db.transport_tab.count;
   void * p = aligned_malloc( sizeof( TransportRoute ) );
-  rte = new ( p ) TransportRoute( this->poll, *this, s, *tptr, "ext", 0, id, f );
+  rte = new ( p ) TransportRoute( this->poll, *this, s, *tptr, "ipc", 0, id, f );
   if ( rte->init() != 0 )
     return false;
 
   this->user_db.transport_tab[ id ] = rte;
-  rte->ext = new ( ::malloc( sizeof( ExtRteList ) ) ) ExtRteList( *rte );
+  rte->ext = new ( ::malloc( sizeof( IpcRteList ) ) ) IpcRteList( *rte );
   rte->sub_route.add_route_notify( *rte->ext );
-  this->user_db.external_transport = rte;
+  this->user_db.ipc_transport = rte;
 
+  EvShm shm( "ms_server" );
   const char *ipc_name = ipc;
-  if ( ipc_name != NULL ||
-       this->tree.find_parameter( "ipc", ipc_name, NULL ) ) {
-    EvShm shm;
-    shm.ipc_name = ipc_name;
-    rte->sub_route.init_shm( shm );
-  }
+  const char *map_name = map;
+  uint32_t    db_num   = db;
+
+  if ( ipc_name == NULL )
+    this->tree.find_parameter( "ipc", ipc_name, NULL );
+  if ( map_name == NULL )
+    this->tree.find_parameter( "map", map_name, NULL );
+
+  shm.ipc_name = ipc_name;
+  if ( map_name != NULL )
+    shm.open( map_name, db_num );
+  else
+    shm.open_rdonly();
+
+  rte->sub_route.init_shm( shm );
   this->user_db.add_transport( *rte );
   return true;
 }
@@ -215,6 +236,8 @@ SessionMgr::add_transport2( ConfigTree::Service &s,
   }
   if ( t.type.equals( "telnet" ) )
     return this->create_telnet( t );
+  if ( t.type.equals( "web" ) )
+    return this->create_web( t );
 
   ConfigTree::Transport * tptr = &t;
   uint32_t f = ( is_service ? TPORT_IS_SVC : 0 );
@@ -222,13 +245,13 @@ SessionMgr::add_transport2( ConfigTree::Service &s,
   if ( t.type.equals( "rv" ) || t.type.equals( "nats" ) ||
        t.type.equals( "redis" ) ) {
     StringTab & stab = this->user_db.string_tab;
-    f |= TPORT_IS_EXTERNAL;
+    f |= TPORT_IS_IPC;
     size_t svc_len =
-      ::snprintf( svc_name, sizeof( svc_name ), "%s.ext", s.svc.val );
+      ::snprintf( svc_name, sizeof( svc_name ), "%s.ipc", s.svc.val );
     tptr = this->tree.find_transport( svc_name, svc_len );
     if ( tptr == NULL ) {
       tptr = stab.make<ConfigTree::Transport>();
-      stab.ref_string( "ext", 3, tptr->type );
+      stab.ref_string( "ipc", 3, tptr->type );
       stab.ref_string( svc_name, svc_len, tptr->tport );
       tptr->tport_id = this->tree.transport_cnt++;
       this->tree.transports.push_tl( tptr );
@@ -242,8 +265,8 @@ SessionMgr::add_transport2( ConfigTree::Service &s,
   d_tran( "add transport %s tport_id %u\n", svc_name, id );
 
   rte = NULL;
-  if ( ( f & TPORT_IS_EXTERNAL ) != 0 )
-    rte = this->user_db.external_transport;
+  if ( ( f & TPORT_IS_IPC ) != 0 )
+    rte = this->user_db.ipc_transport;
 
   if ( rte == NULL ) {
     void * p = aligned_malloc( sizeof( TransportRoute ) );
@@ -252,10 +275,10 @@ SessionMgr::add_transport2( ConfigTree::Service &s,
     if ( rte->init() != 0 )
       return false;
     this->user_db.transport_tab[ id ] = rte;
-    if ( ( f & TPORT_IS_EXTERNAL ) != 0 ) {
-      rte->ext = new ( ::malloc( sizeof( ExtRteList ) ) ) ExtRteList( *rte );
+    if ( ( f & TPORT_IS_IPC ) != 0 ) {
+      rte->ext = new ( ::malloc( sizeof( IpcRteList ) ) ) IpcRteList( *rte );
       rte->sub_route.add_route_notify( *rte->ext );
-      this->user_db.external_transport = rte;
+      this->user_db.ipc_transport = rte;
     }
     is_new = true;
   }
@@ -275,6 +298,8 @@ SessionMgr::shutdown_transport( ConfigTree::Service &s,
 {
   if ( t.type.equals( "telnet" ) )
     return this->shutdown_telnet();
+  if ( t.type.equals( "web" ) )
+    return this->shutdown_web();
 
   uint32_t id,
            count = (uint32_t) this->user_db.transport_tab.count,
@@ -701,10 +726,10 @@ TransportRoute::on_msg( EvPublish &pub ) noexcept
   if ( pub.pub_type != 'X' ) {
     uint32_t id = pub.sub_route.route_id;
     TransportRoute * rte = this->user_db.transport_tab.ptr[ id ];
-    if ( rte->is_set( TPORT_IS_EXTERNAL ) ) {
+    if ( rte->is_set( TPORT_IS_IPC ) ) {
       d_tran( "rte(%s) forward external: on_msg (%.*s)\n",
               rte->name, (int) pub.subject_len, pub.subject );
-      return this->mgr.forward_external( *rte, pub );
+      return this->mgr.forward_ipc( *rte, pub );
     }
     d_tran( "rte(%s) pub_type == (%c) transport_route: on_msg (%.*s)\n",
             rte->name, pub.pub_type, (int) pub.subject_len, pub.subject );
@@ -1169,7 +1194,7 @@ TransportRoute::create_rv_listener( ConfigTree::Transport &tport ) noexcept
   if ( l == NULL )
     return false;
   this->ext->list.push_tl(
-    new ( ::malloc( sizeof( ExtRte ) ) ) ExtRte( tport, l ) );
+    new ( ::malloc( sizeof( IpcRte ) ) ) IpcRte( tport, l ) );
   return true;
 }
 
@@ -1183,7 +1208,7 @@ TransportRoute::create_nats_listener( ConfigTree::Transport &tport ) noexcept
   if ( l == NULL )
     return false;
   this->ext->list.push_tl(
-    new ( ::malloc( sizeof( ExtRte ) ) ) ExtRte( tport, l ) );
+    new ( ::malloc( sizeof( IpcRte ) ) ) IpcRte( tport, l ) );
   return true;
 }
 
@@ -1197,7 +1222,7 @@ TransportRoute::create_redis_listener( ConfigTree::Transport &tport ) noexcept
   if ( l == NULL )
     return false;
   this->ext->list.push_tl(
-    new ( ::malloc( sizeof( ExtRte ) ) ) ExtRte( tport, l ) );
+    new ( ::malloc( sizeof( IpcRte ) ) ) IpcRte( tport, l ) );
   return true;
 }
 
@@ -1262,8 +1287,32 @@ SessionMgr::create_telnet( ConfigTree::Transport &tport ) noexcept
   this->telnet_tport = &tport;
 
   if ( ! l->in_list( IN_ACTIVE_LIST ) ) {
-    if ( l->listen2( parm.host, parm.port, parm.opts,
-                     "telnet_listen" ) != 0 )
+    if ( l->listen2( parm.host, parm.port, parm.opts, "telnet_listen" ) != 0 )
+      return false;
+    l->console = &this->console;
+    printf( "%s listening on %s\n", tport.tport.val, l->peer_address.buf );
+  }
+  else {
+    printf( "%s is already active on %s\n", tport.tport.val,
+            l->peer_address.buf );
+  }
+  return true;
+}
+
+bool
+SessionMgr::create_web( ConfigTree::Transport &tport ) noexcept
+{
+  if ( this->web == NULL ) {
+    void * p = aligned_malloc( sizeof( WebListen ) );
+    this->web = new ( p ) WebListen( this->poll );
+  }
+  WebListen * l = this->web;
+  EvTcpTransportParameters parm;
+  parse_tcp_param( parm, "listen", tport, true, false );
+  this->web_tport = &tport;
+
+  if ( ! l->in_list( IN_ACTIVE_LIST ) ) {
+    if ( l->listen2( parm.host, parm.port, parm.opts, "web_listen" ) != 0 )
       return false;
     l->console = &this->console;
     printf( "%s listening on %s\n", tport.tport.val, l->peer_address.buf );
@@ -1281,6 +1330,19 @@ SessionMgr::shutdown_telnet( void ) noexcept
   if ( this->telnet == NULL )
     return 0;
   TelnetListen * l = this->telnet;
+  if ( l->in_list( IN_ACTIVE_LIST ) ) {
+    l->idle_push( EV_SHUTDOWN );
+    return 1;
+  }
+  return 0;
+}
+
+uint32_t
+SessionMgr::shutdown_web( void ) noexcept
+{
+  if ( this->web == NULL )
+    return 0;
+  WebListen * l = this->web;
   if ( l->in_list( IN_ACTIVE_LIST ) ) {
     l->idle_push( EV_SHUTDOWN );
     return 1;
@@ -1472,28 +1534,28 @@ void TransportRoute::read( void ) noexcept {}
 void TransportRoute::process( void ) noexcept {}
 void TransportRoute::release( void ) noexcept {}
 
-ExtRteList::ExtRteList( TransportRoute &r ) noexcept
+IpcRteList::IpcRteList( TransportRoute &r ) noexcept
           : RouteNotify( r.sub_route ), rte( r )
 {
   r.sub_route.add_route_notify( *this );
 }
 
 void
-ExtRteList::on_sub( NotifySub &sub ) noexcept
+IpcRteList::on_sub( NotifySub &sub ) noexcept
 {
   if ( sub.src_type != 'M' ) {
-    this->rte.mgr.sub_db.external_sub_start( sub, this->rte.tport_id );
+    this->rte.mgr.sub_db.ipc_sub_start( sub, this->rte.tport_id );
     d_tran( "on_sub(%.*s) rcnt=%u src_type=%c\n", (int) sub.subject_len,
            sub.subject, sub.sub_count, sub.src_type );
   }
 }
 
 void
-ExtRteList::on_unsub( NotifySub &sub ) noexcept
+IpcRteList::on_unsub( NotifySub &sub ) noexcept
 {
   if ( sub.src_type != 'M' ) {
     if ( sub.sub_count == 0 ) {
-      this->rte.mgr.sub_db.external_sub_stop( sub, this->rte.tport_id );
+      this->rte.mgr.sub_db.ipc_sub_stop( sub, this->rte.tport_id );
     }
     d_tran( "on_unsub(%.*s) rcnt=%u src_type=%c\n", (int) sub.subject_len,
           sub.subject, sub.sub_count, sub.src_type );
@@ -1501,28 +1563,28 @@ ExtRteList::on_unsub( NotifySub &sub ) noexcept
 }
 
 void
-ExtRteList::on_psub( NotifyPattern &pat ) noexcept
+IpcRteList::on_psub( NotifyPattern &pat ) noexcept
 {
   if ( pat.src_type != 'M' ) {
-    this->rte.mgr.sub_db.external_psub_start( pat, this->rte.tport_id );
+    this->rte.mgr.sub_db.ipc_psub_start( pat, this->rte.tport_id );
     d_tran( "on_psub(%.*s) rcnt=%u src_type=%c\n", (int) pat.pattern_len,
           pat.pattern, pat.sub_count, pat.src_type );
   }
 }
 
 void
-ExtRteList::on_punsub( NotifyPattern &pat ) noexcept
+IpcRteList::on_punsub( NotifyPattern &pat ) noexcept
 {
   if ( pat.src_type != 'M' ) {
     if ( pat.sub_count == 0 )
-      this->rte.mgr.sub_db.external_psub_stop( pat, this->rte.tport_id );
+      this->rte.mgr.sub_db.ipc_psub_stop( pat, this->rte.tport_id );
     d_tran( "on_punsub(%.*s) rcnt=%u src_type=%c\n", (int) pat.pattern_len,
           pat.pattern, pat.sub_count, pat.src_type );
   }
 }
 
 void
-ExtRteList::on_reassert( uint32_t , kv::RouteVec<kv::RouteSub> &,
+IpcRteList::on_reassert( uint32_t , kv::RouteVec<kv::RouteSub> &,
                          kv::RouteVec<kv::RouteSub> & ) noexcept
 {
   d_tran( "on_reassert()\n" );

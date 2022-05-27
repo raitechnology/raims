@@ -19,6 +19,24 @@ EvRvTransportListen::EvRvTransportListen( kv::EvPoll &p,
   this->notify = &r;
 }
 
+EvSocket *
+EvRvTransportListen::accept( void ) noexcept
+{
+  EvSocket *c = this->EvRvListen::accept();
+  if ( c != NULL )
+    this->rte.set_peer_name( *c, "rv.acc" );
+  return c;
+}
+
+int
+EvRvTransportListen::listen( const char *ip,  int port,  int opts ) noexcept
+{
+  int res = this->EvRvListen::listen( ip, port, opts );
+  if ( res == 0 )
+    this->rte.set_peer_name( *this, "rv.list" );
+  return res;
+}
+
 static void
 set_route_string( ConfigTree::Transport *t,  StringTab &stab,
                   const char *parm,  size_t parm_len,

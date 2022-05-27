@@ -22,15 +22,15 @@ ms_get_version( void )
 }
 int rai::ms::dbg_flags; /* TCP_DBG | PGM_DBG | IBX_DBG */
 
-BridgeRoute::BridgeRoute( EvPoll &p,  SessionMgr &m ) noexcept
-           : EvSocket( p, p.register_type( "bridge_route" ) ),
-             mgr( m ), user_db( m.user_db ), sub_db( m.sub_db ) {
+IpcRoute::IpcRoute( EvPoll &p,  SessionMgr &m ) noexcept
+        : EvSocket( p, p.register_type( "ipc_route" ) ),
+          mgr( m ), user_db( m.user_db ), sub_db( m.sub_db ) {
   this->sock_opts = OPT_NO_POLL;
 }
 
-InternalRoute::InternalRoute( EvPoll &p,  SessionMgr &m ) noexcept
-             : EvSocket( p, p.register_type( "internal_route" ) ),
-               mgr( m ), user_db( m.user_db ), sub_db( m.sub_db ) {
+ConsoleRoute::ConsoleRoute( EvPoll &p,  SessionMgr &m ) noexcept
+            : EvSocket( p, p.register_type( "console_route" ) ),
+              mgr( m ), user_db( m.user_db ), sub_db( m.sub_db ) {
   this->sock_opts = OPT_NO_POLL;
 }
 
@@ -38,13 +38,13 @@ SessionMgr::SessionMgr( EvPoll &p,  Logger &l,  ConfigTree &c,
                         ConfigTree::User &u,  ConfigTree::Service &s,
                         StringTab &st ) noexcept
            : EvSocket( p, p.register_type( "session_mgr" ) ),
-             external( p, *this ), internal( p, *this ),
+             ipc_rt( p, *this ), console_rt( p, *this ),
              tree( c ), user( u ), svc( s ), next_timer( 1 ), timer_id( 0 ),
              user_db( p, u, s, this->sub_db, st, this->events ),
              sub_db( p, this->user_db, *this ),
              sys_bloom( 0, "sys", p.g_bloom_db ),
-             /*router_bloom( 0, "rtr", p.bloom_db ),*/
-             console( *this ), log( l ), telnet( 0 ), telnet_tport( 0 )
+             console( *this ), log( l ), telnet( 0 ), web( 0 ),
+             telnet_tport( 0 ), web_tport( 0 )
 {
   this->sock_opts = OPT_NO_POLL;
   this->tcp_accept_sock_type = p.register_type( "ev_tcp_tport" );
@@ -88,13 +88,21 @@ SessionMgr::init_sock( void ) noexcept
   this->router_set.add( ifd );
   this->router_set.add( pfd );
 
-  this->external.PeerData::init_peer( efd, NULL, "external_route" );
-  this->internal.PeerData::init_peer( ifd, NULL, "internal_route" );
-  this->PeerData::init_peer( pfd, NULL, "session_mgr" );
+  char buf[ 256 ];
+  int  len;
+  this->ipc_rt.PeerData::init_peer( efd, NULL, "ipc" );
+  len = ::snprintf( buf, sizeof( buf ), "%s.ipc", this->svc.svc.val );
+  this->ipc_rt.PeerData::set_name( buf, len );
+  this->console_rt.PeerData::init_peer( ifd, NULL, "console" );
+  len = ::snprintf( buf, sizeof( buf ), "%s.console", this->svc.svc.val );
+  this->console_rt.PeerData::set_name( buf, len );
+  this->PeerData::init_peer( pfd, NULL, "session" );
+  len = ::snprintf( buf, sizeof( buf ), "%s.session", this->svc.svc.val );
+  this->PeerData::set_name( buf, len );
 
-  int status = this->poll.add_sock( &this->external );
+  int status = this->poll.add_sock( &this->ipc_rt );
   if ( status == 0 )
-    status = this->poll.add_sock( &this->internal );
+    status = this->poll.add_sock( &this->console_rt );
   if ( status == 0 )
     status = this->poll.add_sock( this );
   return status;
@@ -400,14 +408,14 @@ SessionMgr::parse_msg_hdr( MsgFramePublish &fpub ) noexcept
 }
 
 bool
-BridgeRoute::on_msg( EvPublish &pub ) noexcept
+IpcRoute::on_msg( EvPublish &pub ) noexcept
 {
   this->msgs_recv++;
   this->bytes_recv += pub.msg_len;
   if ( pub.src_route == (uint32_t) this->fd )
     return true;
   if ( pub.pub_type != 'X' ) {
-    fprintf( stderr, "External publish has no frame %.*s\n",
+    fprintf( stderr, "IPC publish has no frame %.*s\n",
              (int) pub.subject_len, pub.subject );
     return true;
   }
@@ -501,7 +509,7 @@ BridgeRoute::on_msg( EvPublish &pub ) noexcept
     for ( i = 0; i < count; i++ ) {
       TransportRoute *rte = this->user_db.transport_tab.ptr[ i ];
       if ( &fpub.rte != rte ) {
-        if ( rte->is_set( TPORT_IS_EXTERNAL ) ) {
+        if ( rte->is_set( TPORT_IS_IPC ) ) {
           EvPublish pub( fpub.subject, fpub.subject_len, reply, replylen,
                          data, datalen, rte->sub_route, this->fd,
                          fpub.subj_hash, fmt, 'p' );
@@ -518,7 +526,7 @@ BridgeRoute::on_msg( EvPublish &pub ) noexcept
       if ( is_set ) {
         TransportRoute *rte = this->user_db.transport_tab.ptr[ i ];
         if ( &fpub.rte != rte ) {
-          if ( rte->is_set( TPORT_IS_EXTERNAL ) ) {
+          if ( rte->is_set( TPORT_IS_IPC ) ) {
             EvPublish pub( fpub.subject, fpub.subject_len, reply, replylen,
                            data, datalen, rte->sub_route, this->fd,
                            fpub.subj_hash, fmt, 'p' );
@@ -529,7 +537,7 @@ BridgeRoute::on_msg( EvPublish &pub ) noexcept
     }
   }
   if ( seq.cb != NULL ) {
-    fpub.flags |= MSG_FRAME_EXTERNAL_CONTROL;
+    fpub.flags |= MSG_FRAME_IPC_CONTROL;
     SubMsgData val( fpub, &n, data, datalen );
 
     val.seqno      = dec.seqno;
@@ -545,7 +553,7 @@ BridgeRoute::on_msg( EvPublish &pub ) noexcept
 }
 
 bool
-InternalRoute::on_msg( EvPublish &pub ) noexcept
+ConsoleRoute::on_msg( EvPublish &pub ) noexcept
 {
   RouteLoc loc;
   Pub * p = this->sub_db.pub_tab.upsert( pub.subj_hash, pub.subject,
@@ -567,7 +575,7 @@ InternalRoute::on_msg( EvPublish &pub ) noexcept
   m.close( e.sz, pub.subj_hash, CABA_MCAST );
 
   m.sign( pub.subject, pub.subject_len, *this->user_db.session_key );
-  TransportRoute & rte = *this->user_db.external_transport;
+  TransportRoute & rte = *this->user_db.ipc_transport;
 
   CabaMsg * msg;
   MDMsgMem  mem;
@@ -583,7 +591,7 @@ InternalRoute::on_msg( EvPublish &pub ) noexcept
     printf( "uid status %d\n", status );
   }
   if ( seq.cb != NULL ) {
-    fpub.flags |= MSG_FRAME_EXTERNAL_CONTROL;
+    fpub.flags |= MSG_FRAME_CONSOLE_CONTROL;
     SubMsgData val( fpub, NULL, pub.msg, pub.msg_len );
 
     val.seqno      = seqno;
@@ -599,8 +607,8 @@ InternalRoute::on_msg( EvPublish &pub ) noexcept
 }
 
 bool
-BridgeRoute::on_inbox( const MsgFramePublish &fpub,  UserBridge &,
-                       MsgHdrDecoder &dec ) noexcept
+IpcRoute::on_inbox( const MsgFramePublish &fpub,  UserBridge &,
+                    MsgHdrDecoder &dec ) noexcept
 {
   if ( ! dec.test( FID_SUBJECT ) ) {
     fprintf( stderr, "No inbox subject\n" );
@@ -630,7 +638,7 @@ BridgeRoute::on_inbox( const MsgFramePublish &fpub,  UserBridge &,
   for ( i = 0; i < count; i++ ) {
     TransportRoute *rte = this->user_db.transport_tab.ptr[ i ];
     if ( &fpub.rte != rte ) {
-      if ( rte->is_set( TPORT_IS_EXTERNAL ) ) {
+      if ( rte->is_set( TPORT_IS_IPC ) ) {
         EvPublish pub( subject, subjlen, reply, replylen,
                        data, datalen, rte->sub_route, this->fd, h, fmt, 'p' );
         b &= rte->sub_route.forward_except( pub, this->mgr.router_set );
@@ -653,7 +661,8 @@ SessionMgr::on_msg( EvPublish &pub ) noexcept
     return true;
   }
   MsgFramePublish & fpub = (MsgFramePublish &) pub;
-  if ( ( fpub.flags & MSG_FRAME_EXTERNAL_CONTROL ) != 0 )
+  if ( ( fpub.flags &
+         ( MSG_FRAME_CONSOLE_CONTROL | MSG_FRAME_IPC_CONTROL ) ) != 0 )
     return true;
   /* find user and determine message type */
   if ( fpub.dec.type == UNKNOWN_SUBJECT ) {
@@ -815,7 +824,7 @@ SessionMgr::on_msg( EvPublish &pub ) noexcept
     case U_INBOX_ADJ_RPY:   /* _I.Nonce.adj_rpy   */
     case U_INBOX_MESH_REQ:  /* _I.Nonce.mesh_req  */
     case U_INBOX_MESH_RPY:  /* _I.Nonce.mesh_rpy  */
-    case U_INBOX_ANY_RTE:   /* _I.Nonce.any, external inbox */
+    case U_INBOX_ANY_RTE:   /* _I.Nonce.any, ipc_rt inbox */
       if ( dec.seqno > n.recv_inbox_seqno ) {
         if ( n.recv_inbox_seqno != 0 && dec.seqno != n.recv_inbox_seqno + 1 ) {
           n.printf( "%.*s missing inbox seqno %" PRIu64 " -> %" PRIu64 " (%s)\n",
@@ -839,7 +848,7 @@ SessionMgr::on_msg( EvPublish &pub ) noexcept
           case U_INBOX_ADJ_RPY:   return this->user_db.recv_adjacency_result( fpub, n, dec );
           case U_INBOX_MESH_REQ:  return this->user_db.recv_mesh_request( fpub, n, dec );
           case U_INBOX_MESH_RPY:  return this->user_db.recv_mesh_result( fpub, n, dec );
-          case U_INBOX_ANY_RTE:   return this->external.on_inbox( fpub, n, dec );
+          case U_INBOX_ANY_RTE:   return this->ipc_rt.on_inbox( fpub, n, dec );
           default: break;
         }
       }
@@ -1039,7 +1048,7 @@ SessionMgr::publish( PubMcastData &mc ) noexcept
                        rte->sub_route, this->fd, h, CABA_TYPE_ID, 'p' );
         b &= rte->sub_route.forward_except( pub, this->router_set );
       }
-      else if ( rte->is_set( TPORT_IS_EXTERNAL ) ) {
+      else if ( rte->is_set( TPORT_IS_IPC ) ) {
         EvPublish pub( mc.sub, mc.sublen, NULL, 0, mc.data, mc.datalen,
                        rte->sub_route, this->fd, h, 
                        ( mc.fmt ? mc.fmt : (uint32_t) MD_STRING ), 'p' );
@@ -1097,8 +1106,7 @@ SessionMgr::forward_inbox( EvPublish &fwd ) noexcept
 }
 
 bool
-SessionMgr::forward_external( TransportRoute &src_rte,
-                              EvPublish &fwd ) noexcept
+SessionMgr::forward_ipc( TransportRoute &src_rte,  EvPublish &fwd ) noexcept
 {
   CabaFlags fl( CABA_MCAST );
   RouteLoc loc;
@@ -1152,7 +1160,7 @@ SessionMgr::forward_external( TransportRoute &src_rte,
                        CABA_TYPE_ID, 'p' );
         b &= rte->sub_route.forward_except( pub, this->router_set );
       }
-      else if ( rte->is_set( TPORT_IS_EXTERNAL ) ) {
+      else if ( rte->is_set( TPORT_IS_IPC ) ) {
         EvPublish pub( fwd.subject, fwd.subject_len, NULL, 0,
                        fwd.msg, fwd.msg_len,
                        rte->sub_route, this->fd, fwd.subj_hash,
@@ -1296,14 +1304,14 @@ void SessionMgr::write( void ) noexcept {}
 void SessionMgr::read( void ) noexcept {}
 void SessionMgr::process( void ) noexcept {}
 void SessionMgr::release( void ) noexcept {}
-void BridgeRoute::write( void ) noexcept {}
-void BridgeRoute::read( void ) noexcept {}
-void BridgeRoute::process( void ) noexcept {}
-void BridgeRoute::release( void ) noexcept {}
-void InternalRoute::write( void ) noexcept {}
-void InternalRoute::read( void ) noexcept {}
-void InternalRoute::process( void ) noexcept {}
-void InternalRoute::release( void ) noexcept {}
+void IpcRoute::write( void ) noexcept {}
+void IpcRoute::read( void ) noexcept {}
+void IpcRoute::process( void ) noexcept {}
+void IpcRoute::release( void ) noexcept {}
+void ConsoleRoute::write( void ) noexcept {}
+void ConsoleRoute::read( void ) noexcept {}
+void ConsoleRoute::process( void ) noexcept {}
+void ConsoleRoute::release( void ) noexcept {}
 
 #if 0
 void

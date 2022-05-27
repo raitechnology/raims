@@ -355,7 +355,7 @@ struct StringTab;
 struct UserDB {
   static const uint32_t MY_UID = 0;      /* bridge_tab[ 0 ] reserved for me */
   TransportTab         transport_tab;
-  TransportRoute     * external_transport;
+  TransportRoute     * ipc_transport;
   /* my identity */
   ConfigTree::User    & user;            /* my user */
   ConfigTree::Service & svc;             /* my service */

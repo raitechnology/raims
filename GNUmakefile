@@ -304,7 +304,7 @@ gen_files   :=
 
 session_defines := -DMS_VER=$(ver_build)
 libraims_files := config user transport ev_tcp_transport ev_pgm_transport \
-                 pgm_sock ev_inbox_transport ev_telnet ev_rv_transport \
+                 pgm_sock ev_inbox_transport ev_telnet ev_web ev_rv_transport \
 		 ev_nats_transport ev_redis_transport msg session heartbeat \
 		 user_db auth peer link_state sub pat crypt poly1305 ec25519 \
 		 ed25519 sha512 aes gen_config console

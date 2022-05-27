@@ -21,6 +21,7 @@
 #include <raims/session.h>
 #include <raims/ev_tcp_transport.h>
 #include <raims/ev_telnet.h>
+#include <raims/ev_web.h>
 #include <linecook/linecook.h>
 #include <linecook/ttycook.h>
 
@@ -79,6 +80,13 @@ static int         gz = ANSI_GREEN_SIZE;
 static int         yz = ANSI_YELLOW_SIZE;*/
 static const char *cc = ANSI_CYAN;
 static int         cz = ANSI_CYAN_SIZE;
+
+static const char  html_rc[] = "<span style=\"color:red\">";
+static int         html_rz   = sizeof( html_rc ) - 1;
+static const char  html_gc[] = "<span style=\"color:green\">";
+static int         html_gz   = sizeof( html_gc ) - 1;
+static const char  html_nc[] = "</span>";
+static int         html_nz   = sizeof( html_nc ) - 1;
 
 bool
 Console::open_log( const char *fn,  bool add_hdr ) noexcept
@@ -276,11 +284,14 @@ Console::log_output( int stream,  uint64_t stamp,  size_t len,
 }
 
 bool
-Console::colorize_log( const char *buf,  size_t len ) noexcept
+Console::colorize_log( ConsoleOutput *p, const char *buf, size_t len ) noexcept
 {
+  const bool is_html = ( p != NULL && p->is_html );
   const char * end = &buf[ len ];
   bool b = true;
 
+  if ( is_html )
+    p->on_output( "<pre>", 5 );
   while ( buf < end ) {
     const char *ptr = (const char *) ::memchr( buf, '\n', end - buf );
     if ( ptr == NULL ) {
@@ -291,12 +302,14 @@ Console::colorize_log( const char *buf,  size_t len ) noexcept
         ptr--;
     }
     if ( &buf[ TSHDR_LEN ] < ptr ) {
-      const char * color    = gc;
-      size_t       color_sz = gz;
+      const char * color    = is_html ? html_gc : gc;
+      size_t       color_sz = is_html ? html_gz : gz;
+      const char * no_col   = is_html ? html_nc : nc;
+      size_t       no_sz    = is_html ? html_nz : nz;
 
       if ( buf[ TSERR_OFF ] != ' ' ) {
-        color    = rc;
-        color_sz = rz;
+        color    = is_html ? html_rc : rc;
+        color_sz = is_html ? html_rz : rz;
       }
       size_t off  = 0,
              sz   = ptr - &buf[ TSHDR_LEN ];
@@ -305,11 +318,14 @@ Console::colorize_log( const char *buf,  size_t len ) noexcept
       ::memcpy( line, buf, TSHDR_LEN );                off += TSHDR_LEN;
       ::memcpy( &line[ off ], color, color_sz );       off += color_sz;
       ::memcpy( &line[ off ], &buf[ TSHDR_LEN ], sz ); off += sz;
-      ::memcpy( &line[ off ], nc, nz );                off += nz;
+      ::memcpy( &line[ off ], no_col, no_sz );         off += no_sz;
       line[ off++ ] = '\n';
 
-      for ( ConsoleOutput *o = this->term_list.hd; o!= NULL; o = o->next ) {
-        b &= o->on_output( line, off );
+      if ( p != NULL )
+        b &= p->on_output( line, off );
+      else {
+        for ( ConsoleOutput *o = this->term_list.hd; o!= NULL; o = o->next )
+          b &= o->on_output( line, off );
       }
     }
     buf = ptr;
@@ -322,13 +338,17 @@ Console::colorize_log( const char *buf,  size_t len ) noexcept
 }
 
 bool
-Console::flush_output( void ) noexcept
+Console::flush_output( ConsoleOutput *p ) noexcept
 {
   bool b = true;
   if ( this->out.count > 0 ) {
     size_t len = this->out.count;
-    for ( ConsoleOutput *o = this->term_list.hd; o != NULL; o = o->next ) {
-      b &= o->on_output( this->out.ptr, len );
+    if ( p != NULL )
+      b &= p->on_output(  this->out.ptr, len );
+    else {
+      for ( ConsoleOutput *o = this->term_list.hd; o != NULL; o = o->next ) {
+        b &= o->on_output( this->out.ptr, len );
+      }
     }
     this->out.count = 0;
   }
@@ -342,7 +362,7 @@ Console::flush_output( void ) noexcept
         this->log_status = 0;
     }
     if ( ! this->mute_log )
-      b &= this->colorize_log( lptr, lsz );
+      b &= this->colorize_log( p, lptr, lsz );
     if ( this->log_ptr == 0 && this->log_index >= this->max_log )
       this->log_ptr = this->log_index;
     this->log_index = this->log.count;
@@ -404,7 +424,7 @@ Console::on_log( Logger &log ) noexcept
     }
   }
   if ( b )
-    this->flush_output();
+    this->flush_output( NULL );
   return b;
 }
 
@@ -795,24 +815,31 @@ console_help( struct Term_s *t ) noexcept
 }
 
 void
-Console::output_help( int c ) noexcept
+Console::output_help( ConsoleOutput *, int c ) noexcept
 {
   const ConsoleCmdString * help;
   size_t nhelp;
   size_t i = 0;
   this->get_valid_help_cmds( help, nhelp );
-  for ( ; i < nhelp && c != help[ i ].cmd; i++ )
-    ;
-  if ( i < nhelp ) {
-    const char * s = help[ i ].str;
+  for ( i = 0; i < nhelp; i++ ) {
+    if ( c != help[ i ].cmd && c != CMD_BAD )
+      continue;
+    static const int width = 28;
+    const char * s = help[ i ].str,
+               * a = help[ i ].args,
+               * d = help[ i ].descr;
+    int len = ::strlen( s ) + 1 + ::strlen( a ) + 1;
+    this->printf( "%s %s ", s, a );
+    if ( width > len )
+      this->printf( "%*s", width - len, "" );
     for (;;) {
-      const char * e = (const char *) ::memchr( s, '\n', ::strlen( s ) );
+      const char * e = (const char *) ::memchr( d, '\n', ::strlen( d ) );
       if ( e != NULL ) {
-        this->printf( "%.*s\n", (int) ( e - s ), s );
-        s = &e[ 1 ];
+        this->printf( "%.*s\n", (int) ( e - d ), d );
+        d = &e[ 1 ];
       }
       else {
-        this->printf( "%s\n", s );
+        this->printf( "%s\n", d );
         break;
       }
     }
@@ -1198,7 +1225,7 @@ TabPrint::string( char *buf ) noexcept
       if ( this->len & TPORT_IS_CONNECT   ) buf[ j++ ] = 'C';
       if ( this->len & TPORT_IS_TCP       ) buf[ j++ ] = 'T';
       if ( this->len & TPORT_IS_EDGE      ) buf[ j++ ] = 'E';
-      if ( this->len & TPORT_IS_EXTERNAL  ) buf[ j++ ] = 'B';
+      if ( this->len & TPORT_IS_IPC       ) buf[ j++ ] = 'I';
       if ( this->len & TPORT_IS_SHUTDOWN  ) buf[ j++ ] = '-';
       if ( this->len & TPORT_IS_PREFERRED ) buf[ j++ ] = '%';
       buf[ j ] = '\0';
@@ -1243,9 +1270,51 @@ Console::print_dashes( const uint32_t *width,  uint32_t ncols ) noexcept
   }
 }
 
-void
-Console::print_table( const char **hdr,  uint32_t ncols ) noexcept
+static const char *
+hdr_full( const char *h )
 {
+  static const char *abrev[] = {
+    "ac",   "accept",
+    "bs",   "bytes sent",
+    "br",   "bytes recv",
+    "dist", "distance",
+    "fl",   "flags",
+    "lat",  "latency",
+    "link", "link seqno",
+    "sub",  "sub seqno",
+    "ms",   "msgs sent",
+    "mr",   "msgs recv",
+    "rq",   "recv queue",
+    "wq",   "send queue",
+  };
+  static uint8_t ht[ 256 ];
+  static int init = 0;
+  uint32_t k;
+  uint8_t j;
+  if ( ! init ) {
+    static const uint32_t abrev_cnt = sizeof( abrev ) / sizeof( abrev[ 0 ] );
+    for ( k = 0; k < abrev_cnt; k += 2 ) {
+      j = (uint8_t) abrev[ k ][ 0 ] ^ (uint8_t) abrev[ k ][ 1 ];
+      while ( ht[ j ] != 0 )
+        j++;
+      ht[ j ] = (uint8_t) ( k / 2 + 1 );
+    }
+    init = 1;
+  }
+  j = (uint8_t) h[ 0 ] ^ (uint8_t) h[ 1 ];
+  for ( ; ht[ j ] != 0; j++ ) {
+    k = (uint32_t) ( ht[ j ] - 1 ) * 2;
+    if ( ::strcmp( h, abrev[ k ] ) == 0 )
+      return abrev[ k + 1 ];
+  }
+  return h;
+}
+
+void
+Console::print_table( ConsoleOutput *p,  const char **hdr,
+                      uint32_t ncols ) noexcept
+{
+  const bool is_html = ( p != NULL && p->is_html );
   uint32_t     i, j,
                tabsz = (uint32_t) this->table.count;
   TabPrint   * tab   = this->table.ptr;
@@ -1254,6 +1323,26 @@ Console::print_table( const char **hdr,  uint32_t ncols ) noexcept
   char         buf[ 80 ];
   const char * v, * fmt;
 
+  if ( is_html ) {
+    this->puts( "<table><thead><tr>" );
+    for ( j = 0; j < ncols; j++ ) {
+      this->printf( "<th>%s</th>", hdr_full( hdr[ j ] ) );
+    }
+    this->puts( "</tr></thead><tbody>" );
+    for ( i = 0; i < tabsz; i += ncols ) {
+      this->puts( "<tr>" );
+      for ( j = 0; j < ncols; j++ ) {
+        this->puts( "<td>" );
+        if ( tab[ i + j ].type() == PRINT_DIST )
+          tab[ i + j ].width( u, buf );
+        this->puts( tab[ i + j ].string( buf ) );
+        this->puts( "</td>" );
+      }
+      this->puts( "</tr>" );
+    }
+    this->puts( "</tbody></table>\n" );
+    return;
+  }
   if ( ncols <= 16 ) {
     width = wbuf;
     ::memset( wbuf, 0, sizeof( wbuf ) );
@@ -1347,14 +1436,8 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
   ConsoleCmd cmd = CMD_BAD;
   if ( 0 ) {
   help:;
-    if ( cmd != CMD_BAD ) {
-      this->output_help( cmd );
-    }
-    else {
-      for ( size_t i = 0; i < num_help_cmds; i++ )
-        this->output_help( help_cmd[ i ].cmd );
-    }
-    return this->flush_output();
+    this->output_help( p, cmd );
+    return this->flush_output( p );
   }
   const char * args[ MAXARGS ]; /* all args */
   size_t       arglen[ MAXARGS ], argc;
@@ -1364,14 +1447,14 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
     this->parse_command( buf, &buf[ buflen ], arg, len, args, arglen, argc );
   /* empty line, skip it */
   if ( cmd == CMD_EMPTY )
-    return this->flush_output();
+    return this->flush_output( p );
 
   switch ( cmd ) {
     default:
       goto help;
 
     case CMD_QUIT: {
-      bool b = this->flush_output();
+      bool b = this->flush_output( p );
       p->on_quit();
       return b;
     }
@@ -1442,39 +1525,39 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
       this->mute_log = false;
       break;
 
-    case CMD_SHOW_PEERS:     this->show_peers();     break;
-    case CMD_SHOW_PORTS:     this->show_ports( arg, len ); break;
-    case CMD_SHOW_STATUS:    this->show_status( arg, len ); break;
-    case CMD_SHOW_ADJACENCY: this->show_adjacency(); break;
-    case CMD_SHOW_ROUTES:    this->show_routes();    break;
-    case CMD_SHOW_URLS:      this->show_urls();      break;
-    case CMD_SHOW_TPORTS:    this->show_tports( arg, len ); break;
-    case CMD_SHOW_USERS:     this->show_users();     break;
-    case CMD_SHOW_EVENTS:    this->show_events();    break;
-    case CMD_SHOW_UNKNOWN:   this->show_unknown();   break;
+    case CMD_SHOW_PEERS:     this->show_peers( p );     break;
+    case CMD_SHOW_PORTS:     this->show_ports( p, arg, len ); break;
+    case CMD_SHOW_STATUS:    this->show_status( p, arg, len ); break;
+    case CMD_SHOW_ADJACENCY: this->show_adjacency( p ); break;
+    case CMD_SHOW_ROUTES:    this->show_routes( p );    break;
+    case CMD_SHOW_URLS:      this->show_urls( p );      break;
+    case CMD_SHOW_TPORTS:    this->show_tports( p, arg, len ); break;
+    case CMD_SHOW_USERS:     this->show_users( p );     break;
+    case CMD_SHOW_EVENTS:    this->show_events( p );    break;
+    case CMD_SHOW_UNKNOWN:   this->show_unknown( p );   break;
     case CMD_SHOW_LOG:
-      this->colorize_log( this->log.ptr, this->log_index );
+      this->colorize_log( p, this->log.ptr, this->log_index );
       break;
-    case CMD_SHOW_COUNTERS:  this->show_counters();  break;
-    case CMD_SHOW_REACHABLE: this->show_reachable(); break;
+    case CMD_SHOW_COUNTERS:  this->show_counters( p );  break;
+    case CMD_SHOW_REACHABLE: this->show_reachable( p ); break;
     case CMD_SHOW_TREE:
-      this->show_tree( this->find_user( arg, len ) );
+      this->show_tree( p, this->find_user( arg, len ) );
       break;
-    case CMD_SHOW_PRIMARY:   this->show_primary();   break;
-    case CMD_SHOW_FDS:       this->show_fds();       break;
-    case CMD_SHOW_BLOOMS:    this->show_blooms();    break;
+    case CMD_SHOW_PRIMARY:   this->show_primary( p );   break;
+    case CMD_SHOW_FDS:       this->show_fds( p );       break;
+    case CMD_SHOW_BLOOMS:    this->show_blooms( p );    break;
     case CMD_SHOW_RUN:
-      this->show_running( PRINT_NORMAL, arg, len ); break;
+      this->show_running( p, PRINT_NORMAL, arg, len ); break;
     case CMD_SHOW_RUN_TPORTS:
-      this->show_running( PRINT_TRANSPORTS | PRINT_HDR, arg, len ); break;
+      this->show_running( p, PRINT_TRANSPORTS | PRINT_HDR, arg, len ); break;
     case CMD_SHOW_RUN_SVCS:
-      this->show_running( PRINT_SERVICES | PRINT_HDR, arg, len ); break;
+      this->show_running( p, PRINT_SERVICES | PRINT_HDR, arg, len ); break;
     case CMD_SHOW_RUN_USERS:
-      this->show_running( PRINT_USERS | PRINT_HDR, arg, len ); break;
+      this->show_running( p, PRINT_USERS | PRINT_HDR, arg, len ); break;
     case CMD_SHOW_RUN_GROUPS:
-      this->show_running( PRINT_GROUPS | PRINT_HDR, arg, len ); break;
+      this->show_running( p, PRINT_GROUPS | PRINT_HDR, arg, len ); break;
     case CMD_SHOW_RUN_PARAM:
-      this->show_running( PRINT_PARAMETERS | PRINT_HDR, arg, len ); break;
+      this->show_running( p, PRINT_PARAMETERS | PRINT_HDR, arg, len ); break;
 
     case CMD_DEBUG:
       if ( len == 0 )
@@ -1516,68 +1599,77 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
       }
       break;
 
-    case CMD_CANCEL:
+    case CMD_CANCEL: {
+      uint32_t pcount = 0, scount = 0;
       for ( ConsoleRPC *rpc = this->rpc_list.hd; rpc != NULL; rpc = rpc->next ){
         if ( ! rpc->complete ) {
           if ( rpc->type == PING_RPC ) {
             rpc->complete = true;
             this->on_ping( *(ConsolePing *) rpc );
+            pcount++;
           }
           else if ( rpc->type == SUBS_RPC ) {
             rpc->complete = true;
             this->on_subs( *(ConsoleSubs *) rpc );
+            scount++;
           }
         }
       }
+      if ( pcount > 0 )
+        this->printf( "%u ping canceled\n", pcount );
+      if ( scount > 0 )
+        this->printf( "%u subs canceled\n", pcount );
+      if ( pcount + scount == 0 )
+        this->printf( "nothing to cancel\n" );
       break;
-
-    case CMD_SHOW_SUBS: this->show_subs( arg, len ); break;
-    case CMD_PING:      this->ping_peer( arg, len ); break;
-    case CMD_MPING:     this->mcast_ping();             break;
+    }
+    case CMD_SHOW_SUBS: this->show_subs( p, arg, len ); break;
+    case CMD_PING:      this->ping_peer( p, arg, len ); break;
+    case CMD_MPING:     this->mcast_ping( p );          break;
 
     case CMD_SUB_START: /* sub */
       if ( len == 0 )
         goto help;
       this->printf( "start(%.*s) seqno = %" PRIu64 "\n", (int) len, arg,
-        this->sub_db.internal_sub_start( arg, (uint16_t) len, this ) );
+        this->sub_db.console_sub_start( arg, (uint16_t) len, this ) );
       break;
     case CMD_SUB_STOP: /* unsub */
       if ( len == 0 )
         goto help;
       this->printf( "stop(%.*s) seqno = %" PRIu64 "\n", 
-        (int) len, arg, this->sub_db.internal_sub_stop( arg, (uint16_t) len ) );
+        (int) len, arg, this->sub_db.console_sub_stop( arg, (uint16_t) len ) );
       break;
     case CMD_PSUB_START: /* psub */
       if ( len == 0 )
         goto help;
       this->printf( "pstart(%.*s) seqno = %" PRIu64 "\n", 
         (int) len, arg,
-        this->sub_db.internal_psub_start( arg, (uint16_t) len,
-                                          RV_PATTERN_FMT, this ) );
+        this->sub_db.console_psub_start( arg, (uint16_t) len,
+                                         RV_PATTERN_FMT, this ) );
       break;
     case CMD_PSUB_STOP: /* pstop */
       if ( len == 0 )
         goto help;
       this->printf( "pstop(%.*s) seqno = %" PRIu64 "\n", 
         (int) len, arg,
-        this->sub_db.internal_psub_stop( arg, (uint16_t) len,
-                                         RV_PATTERN_FMT ) );
+        this->sub_db.console_psub_stop( arg, (uint16_t) len,
+                                        RV_PATTERN_FMT ) );
       break;
     case CMD_GSUB_START: /* gsub */
       if ( len == 0 )
         goto help;
       this->printf( "gstart(%.*s) seqno = %" PRIu64 "\n", 
         (int) len, arg,
-        this->sub_db.internal_psub_start( arg, (uint16_t) len,
-                                          GLOB_PATTERN_FMT, this ) );
+        this->sub_db.console_psub_start( arg, (uint16_t) len,
+                                         GLOB_PATTERN_FMT, this ) );
       break;
     case CMD_GSUB_STOP: /* gstop */
       if ( len == 0 )
         goto help;
       this->printf( "gstop(%.*s) seqno = %" PRIu64 "\n", 
         (int) len, arg,
-        this->sub_db.internal_psub_stop( arg, (uint16_t) len,
-                                         GLOB_PATTERN_FMT ) );
+        this->sub_db.console_psub_stop( arg, (uint16_t) len,
+                                        GLOB_PATTERN_FMT ) );
       break;
 
     case CMD_RPC:
@@ -1618,7 +1710,7 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
       break;
     }
   }
-  return this->flush_output();
+  return this->flush_output( p );
 }
 
 enum {
@@ -1736,8 +1828,8 @@ Console::get_active_tports( ConfigTree::TransportArray &listen,
       TransportRoute *rte = this->user_db.transport_tab.ptr[ t ];
       if ( &rte->transport == tport ) {
         if ( ! rte->is_set( TPORT_IS_SHUTDOWN ) ) {
-          if ( rte->is_set( TPORT_IS_EXTERNAL ) ) {
-            for ( ExtRte *ext = rte->ext->list.hd; ext != NULL;
+          if ( rte->is_set( TPORT_IS_IPC ) ) {
+            for ( IpcRte *ext = rte->ext->list.hd; ext != NULL;
                   ext = ext->next ) {
               listen.push_unique( &ext->transport );
             }
@@ -1764,6 +1856,10 @@ Console::get_active_tports( ConfigTree::TransportArray &listen,
   if ( this->mgr.telnet != NULL &&
        this->mgr.telnet->in_list( IN_ACTIVE_LIST ) ) {
     listen.push( this->mgr.telnet_tport );
+  }
+  if ( this->mgr.web != NULL &&
+       this->mgr.web->in_list( IN_ACTIVE_LIST ) ) {
+    listen.push( this->mgr.web_tport );
   }
 }
 
@@ -1877,12 +1973,13 @@ Console::config_tport_route( const char *param, size_t plen,
 }
 
 void
-Console::show_subs( const char *arg,  size_t arglen ) noexcept
+Console::show_subs( ConsoleOutput *p,  const char *arg,
+                    size_t arglen ) noexcept
 {
   UserBridge  * n;
   char          isub[ UserDB::INBOX_BASE_SIZE + sizeof( _SUBS ) ];
   uint32_t      len;
-  ConsoleSubs * rpc = this->create_rpc<ConsoleSubs>( SUBS_RPC );
+  ConsoleSubs * rpc = this->create_rpc<ConsoleSubs>( p, SUBS_RPC );
 
   for ( uint32_t uid = 0; uid < this->user_db.next_uid; uid++ ) {
     n = this->user_db.bridge_tab[ uid ];
@@ -1910,12 +2007,13 @@ Console::show_subs( const char *arg,  size_t arglen ) noexcept
 }
 
 void
-Console::ping_peer( const char *arg,  size_t arglen ) noexcept
+Console::ping_peer( ConsoleOutput *p,  const char *arg,
+                    size_t arglen ) noexcept
 {
   UserBridge  * n;
   char          isub[ UserDB::INBOX_BASE_SIZE + sizeof( _PING ) ];
   uint32_t      len;
-  ConsolePing * rpc = this->create_rpc<ConsolePing>( PING_RPC );
+  ConsolePing * rpc = this->create_rpc<ConsolePing>( p, PING_RPC );
 
   for ( uint32_t uid = 0; uid < this->user_db.next_uid; uid++ ) {
     n = this->user_db.bridge_tab[ uid ];
@@ -1948,9 +2046,9 @@ Console::ping_peer( const char *arg,  size_t arglen ) noexcept
 }
 
 void
-Console::mcast_ping( void ) noexcept
+Console::mcast_ping( ConsoleOutput *p ) noexcept
 {
-  ConsolePing * rpc = this->create_rpc<ConsolePing>( PING_RPC );
+  ConsolePing * rpc = this->create_rpc<ConsolePing>( p, PING_RPC );
 
   rpc->count = this->user_db.uid_auth_count;
   if ( rpc->count == 0 ) {
@@ -2002,8 +2100,8 @@ Console::on_ping( ConsolePing &ping ) noexcept
   }
   this->table.count = i;
   static const char *hdr[ ncols ] = { "user", "dist", "lat", "tport" };
-  this->print_table( hdr, ncols );
-  this->flush_output();
+  this->print_table( ping.out, hdr, ncols );
+  this->flush_output( ping.out );
 }
 
 void
@@ -2069,13 +2167,13 @@ Console::on_subs( ConsoleSubs &subs ) noexcept
   }
 
   this->table.count = i;
-  static const char *hdr[ ncols ] = { "user", "sub" };
-  this->print_table( hdr, ncols );
-  this->flush_output();
+  static const char *hdr[ ncols ] = { "user", "subject" };
+  this->print_table( subs.out, hdr, ncols );
+  this->flush_output( subs.out );
 }
 
 void
-Console::show_users( void ) noexcept
+Console::show_users( ConsoleOutput *p ) noexcept
 {
   uint32_t i = 0;
   static const uint32_t ncols = 5;
@@ -2095,11 +2193,11 @@ Console::show_users( void ) noexcept
   }
   static const char *hdr[ ncols ] = { "uid", "user", "svc", "create",
                                       "expires" };
-  this->print_table( hdr, ncols );
+  this->print_table( p, hdr, ncols );
 }
 
 void
-Console::show_events( void ) noexcept
+Console::show_events( ConsoleOutput *p ) noexcept
 {
   const EventRec * ev;
   uint32_t n, i = 0, tid, uid;
@@ -2146,11 +2244,11 @@ Console::show_events( void ) noexcept
   }
   static const char *hdr[ ncols ] = { "stamp", "tport", "user", "peer", "event",
                                       "data" };
-  this->print_table( hdr, ncols );
+  this->print_table( p, hdr, ncols );
 }
 
 void
-Console::show_unknown( void ) noexcept
+Console::show_unknown( ConsoleOutput *p ) noexcept
 {
   const AdjPending * u;
   uint32_t i = 0, count = 0;
@@ -2177,7 +2275,7 @@ Console::show_unknown( void ) noexcept
   }
   static const char *hdr[ ncols ] = { "tport", "bridge", "source",
                                       "adj_tp", "user", "reason" };
-  this->print_table( hdr, ncols );
+  this->print_table( p, hdr, ncols );
 }
 
 PortOutput::PortOutput( Console &c,  uint32_t t,  uint32_t nc ) noexcept :
@@ -2201,7 +2299,7 @@ PortOutput::init( TransportRoute *rte,  int fl,  int fd,
 }
 
 void
-PortOutput::init( TransportRoute *rte,  ExtRte *ext ) noexcept
+PortOutput::init( TransportRoute *rte,  IpcRte *ext ) noexcept
 {
   this->stats.zero(); 
   this->rte   = rte;
@@ -2226,8 +2324,8 @@ PortOutput::output( void ( PortOutput::*put )( void ) ) noexcept
     this->init( rte, P_IS_DOWN, -1 );
     (this->*put)();
   }
-  else if ( rte->is_set( TPORT_IS_EXTERNAL ) ) {
-    for ( ExtRte * ext = rte->ext->list.hd; ext != NULL; ext = ext->next ) {
+  else if ( rte->is_set( TPORT_IS_IPC ) ) {
+    for ( IpcRte * ext = rte->ext->list.hd; ext != NULL; ext = ext->next ) {
       this->init( rte, ext );
       ext->listener->client_stats( this->stats );
       this->local_addr( ext->listener->peer_address.buf );
@@ -2351,7 +2449,7 @@ PortOutput::put_show_ports( void ) noexcept
 }
 
 void
-Console::show_ports( const char *name,  size_t len ) noexcept
+Console::show_ports( ConsoleOutput *p, const char *name,  size_t len ) noexcept
 {
   static const uint32_t ncols = 10;
   size_t count = this->user_db.transport_tab.count;
@@ -2374,7 +2472,7 @@ Console::show_ports( const char *name,  size_t len ) noexcept
   }
   static const char *hdr[ ncols ] = { "tport", "type", "fd", "bs", "br", "ms",
                                       "mr", "lat", "fl", "address" };
-  this->print_table( hdr, ncols );
+  this->print_table( p, hdr, ncols );
 }
 
 void
@@ -2420,7 +2518,7 @@ PortOutput::put_status( void ) noexcept
 }
 
 void
-Console::show_status( const char *name,  size_t len ) noexcept
+Console::show_status( ConsoleOutput *p, const char *name,  size_t len ) noexcept
 {
   static const uint32_t ncols = 5;
   size_t count = this->user_db.transport_tab.count;
@@ -2442,11 +2540,11 @@ Console::show_status( const char *name,  size_t len ) noexcept
     out.output( &PortOutput::put_status );
   }
   static const char *hdr[ ncols ] = { "tport", "type", "fd", "fl", "status" };
-  this->print_table( hdr, ncols );
+  this->print_table( p, hdr, ncols );
 }
 
 void
-Console::show_tports( const char *name,  size_t len ) noexcept
+Console::show_tports( ConsoleOutput *p, const char *name,  size_t len ) noexcept
 {
   static const uint32_t ncols = 5;
   size_t           i = 0, t, count = this->user_db.transport_tab.count;
@@ -2494,24 +2592,34 @@ Console::show_tports( const char *name,  size_t len ) noexcept
     if ( rte != NULL ) {
       is_accepting = ( rte->listener != NULL );
     }
-    else if ( this->user_db.external_transport != NULL ) {
-      for ( ExtRte *ext = this->user_db.external_transport->ext->list.hd;
+    else if ( tport == this->mgr.telnet_tport ) {
+      if ( this->mgr.telnet != NULL &&
+           this->mgr.telnet->in_list( IN_ACTIVE_LIST ) )
+        is_accepting = true;
+    }
+    else if ( tport == this->mgr.web_tport ) {
+      if ( this->mgr.web != NULL &&
+           this->mgr.web->in_list( IN_ACTIVE_LIST ) )
+        is_accepting = true;
+    }
+    else if ( this->user_db.ipc_transport != NULL ) {
+      for ( IpcRte *ext = this->user_db.ipc_transport->ext->list.hd;
             ext != NULL; ext = ext->next ) {
         if ( tport == &ext->transport ) {
-          rte = this->user_db.external_transport;
+          rte = this->user_db.ipc_transport;
           is_accepting = true;
           break;
         }
       }
     }
-    if ( rte == NULL )
+    if ( is_accepting )
+      tab[ i++ ].set( "accepting" );
+    else if ( rte == NULL )
       tab[ i++ ].set( "-" ); /* state */
     else if ( rte->is_set( TPORT_IS_SHUTDOWN ) )
       tab[ i++ ].set( "shutdown" );
-    else if ( is_accepting )
-      tab[ i++ ].set( "accepting" );
-    else if ( rte->is_set( TPORT_IS_EXTERNAL ) )
-      tab[ i++ ].set( "external" );
+    else if ( rte->is_set( TPORT_IS_IPC ) )
+      tab[ i++ ].set( "ipc" );
     else if ( rte->is_mcast() )
       tab[ i++ ].set( "joined" );
     else
@@ -2538,11 +2646,11 @@ Console::show_tports( const char *name,  size_t len ) noexcept
   }
   static const char *hdr[ ncols ] = { "tport", "type", "state", "listen",
                                       "connect" };
-  this->print_table( hdr, ncols );
+  this->print_table( p, hdr, ncols );
 }
 
 void
-Console::show_peers( void ) noexcept
+Console::show_peers( ConsoleOutput *p ) noexcept
 {
   static const uint32_t ncols = 8;
   uint32_t     i = 0;
@@ -2635,11 +2743,11 @@ Console::show_peers( void ) noexcept
   }
   static const char *hdr[ ncols ] = { "user", "bridge", "sub", "link", "lat",
                                       "tport", "dist", "address" };
-  this->print_table( hdr, ncols );
+  this->print_table( p, hdr, ncols );
 }
 
 void
-Console::show_adjacency( void ) noexcept
+Console::show_adjacency( ConsoleOutput *p ) noexcept
 {
   static const size_t cols = 3;
   TabPrint * tab = NULL;
@@ -2739,7 +2847,7 @@ Console::show_adjacency( void ) noexcept
     }
   }
   const char *hdr[ cols ] = { "user", "adj", "tport" };
-  this->print_table( hdr, cols );
+  this->print_table( p, hdr, cols );
 
   this->printf( "consistent: %s\n",
     this->user_db.peer_dist.is_consistent() ? "true" : "false" );
@@ -2759,7 +2867,7 @@ Console::show_adjacency( void ) noexcept
 }
 
 void
-Console::show_routes( void ) noexcept
+Console::show_routes( ConsoleOutput *p ) noexcept
 {
   static const uint32_t ncols = 6;
   size_t       i = 0;
@@ -2866,11 +2974,11 @@ Console::show_routes( void ) noexcept
   }
   static const char *hdr[ ncols ] = { "user", "tport", "state",
                                       "dist", "lat", "route" };
-  this->print_table( hdr, ncols );
+  this->print_table( p, hdr, ncols );
 }
 
 void
-Console::show_urls( void ) noexcept
+Console::show_urls( ConsoleOutput *p ) noexcept
 {
   static const uint32_t ncols = 8;
   size_t       i = 0;
@@ -2972,11 +3080,11 @@ Console::show_urls( void ) noexcept
   static const char *hdr[ ncols ] = { "user", "tport", "state",
                                       "dist", "mesh", "url",
                                       "local", "remote" };
-  this->print_table( hdr, ncols );
+  this->print_table( p, hdr, ncols );
 }
 
 void
-Console::show_counters( void ) noexcept
+Console::show_counters( ConsoleOutput *p ) noexcept
 {
   static const uint32_t ncols = 14;
   uint32_t     i = 0;
@@ -3016,14 +3124,14 @@ Console::show_counters( void ) noexcept
     tab[ i++ ].set_int( n->seqno_not_subscr );
   }
   static const char *hdr[ ncols ] =
-    { "user", "start", "hb", "hb_time", "isnd", "ircv",
-      "pisnd", "ping_stime", "porcv", "pong_rtime",
-      "pircv", "ping_rtime", "repeat", "not_subscr" };
-  this->print_table( hdr, ncols );
+    { "user", "start", "hb seqno", "hb time", "snd ibx", "rcv ibx",
+      "ping snd", "ping stime", "pong rcv", "pong time",
+      "ping rcv", "ping rtime", "repeat", "not subed" };
+  this->print_table( p, hdr, ncols );
 }
 
 void
-Console::show_reachable( void ) noexcept
+Console::show_reachable( ConsoleOutput *p ) noexcept
 {
   static const uint32_t ncols = 2;
   size_t       i = 0, t, count = this->user_db.transport_tab.count;
@@ -3051,11 +3159,11 @@ Console::show_reachable( void ) noexcept
 
   static const char *hdr[ ncols ] =
     { "tport", "reachable" };
-  this->print_table( hdr, ncols );
+  this->print_table( p, hdr, ncols );
 }
 
 void
-Console::show_tree( const UserBridge *src ) noexcept
+Console::show_tree( ConsoleOutput *p,  const UserBridge *src ) noexcept
 {
   static const uint32_t ncols = 4;
   AdjDistance & peer_dist = this->user_db.peer_dist;
@@ -3102,11 +3210,11 @@ Console::show_tree( const UserBridge *src ) noexcept
 
   static const char *hdr[ ncols ] =
     { "dist", "source", "tport", "dest" };
-  this->print_table( hdr, ncols );
+  this->print_table( p, hdr, ncols );
 }
 
 void
-Console::show_primary( void ) noexcept
+Console::show_primary( ConsoleOutput *p ) noexcept
 {
   static const uint32_t ncols = 3;
   AdjDistance & peer_dist = this->user_db.peer_dist;
@@ -3144,11 +3252,11 @@ Console::show_primary( void ) noexcept
 
   static const char *hdr[ ncols ] =
     { "source", "tport", "dest" };
-  this->print_table( hdr, ncols );
+  this->print_table( p, hdr, ncols );
 }
 
 void
-Console::show_fds( void ) noexcept
+Console::show_fds( ConsoleOutput *p ) noexcept
 {
   static const uint32_t ncols = 13;
   EvPoll     & poll = this->mgr.poll;
@@ -3221,15 +3329,15 @@ Console::show_fds( void ) noexcept
   static const char *hdr[ ncols ] =
     { "fd", "bs", "br", "ms", "mr", "ac", "rq", "wq", "fl",
       "type", "kind", "name", "address" };
-  this->print_table( hdr, ncols );
+  this->print_table( p, hdr, ncols );
 }
 
 void
-Console::show_blooms( void ) noexcept
+Console::show_blooms( ConsoleOutput *p ) noexcept
 {
   static const uint32_t ncols = 8;
   TabPrint * tab;
-  uint32_t   uid;
+  /*uint32_t   uid;*/
   size_t     i = 0, count = this->user_db.transport_tab.count;
 
   this->table.count = 0;
@@ -3247,8 +3355,12 @@ Console::show_blooms( void ) noexcept
       tab[ i++ ].set_int( p->r );
       if ( p->r == (uint32_t) this->mgr.fd )
         tab[ i++ ].set( "session" );
+      else if ( p->r == (uint32_t) this->mgr.console_rt.fd )
+        tab[ i++ ].set( "console" );
+      else if ( p->r == (uint32_t) this->mgr.ipc_rt.fd )
+        tab[ i++ ].set( "ipc" );
       else if ( p->r == (uint32_t) rte->fd )
-        tab[ i++ ].set( rte->transport.tport, rte->tport_id );
+        tab[ i++ ].set( "route" );
       else {
         if ( ! this->user_db.route_list.is_empty( p->r ) ) {
           UserRoute * u_ptr = this->user_db.route_list[ p->r ].hd;
@@ -3267,42 +3379,13 @@ Console::show_blooms( void ) noexcept
       uint64_t pref_mask = 0, detail_mask = 0;
       uint32_t subs = 0, total = 0;
       for ( uint32_t j = 0; j < p->nblooms; j++ ) {
-        static const char rtr_str[] = "rtr";
         BloomRef   * ref = p->bloom[ j ];
-        const char * s  = NULL;
         pref_mask |= ref->pref_mask;
         detail_mask |= ref->detail_mask;
         total += (uint32_t) ref->bits->count;
         subs  += ref->pref_count[ SUB_RTE ];
-        if ( ref == &this->sub_db.bloom )
-          s = "sub";
-        else if ( ref == &this->sub_db.internal )
-          s = "int";
-        else if ( ref == &this->sub_db.external )
-          s = "ext";
-        else if ( ref == &this->mgr.sys_bloom )
-          s = "sys";
-        else if ( ref == &this->user_db.auth_bloom )
-          s = "auth";
-        /*else if ( ref == &this->mgr.router_bloom )
-          s = rtr_str;*/
-        else {
-          for ( uid = 0; uid < this->user_db.next_uid; uid++ ) {
-            UserBridge * n = this->user_db.bridge_tab[ uid ];
-            if ( n == NULL )
-              continue;
-            if ( ref == &n->bloom ) {
-              s = n->peer.user.val;
-              break;
-            }
-          }
-        }
-        if ( s != rtr_str ) {
-          if ( s == NULL )
-            s = "??";
-          sz = cat80( buf, sz, s );
-          sz = cat80( buf, sz, ", " );
-        }
+        sz = cat80( buf, sz, ref->name );
+        sz = cat80( buf, sz, ", " );
       }
       if ( sz > 1 ) sz -= 2; /* strip , */
       buf[ sz ] = '\0';
@@ -3315,12 +3398,16 @@ Console::show_blooms( void ) noexcept
   }
   static const char *hdr[ ncols ] =
     { "fd", "dest", "tport", "bloom", "prefix", "detail", "subs", "total" };
-  this->print_table( hdr, ncols );
+  this->print_table( p, hdr, ncols );
 }
 
 void
-Console::show_running( int which,  const char *name,  size_t namelen ) noexcept
+Console::show_running( ConsoleOutput *p,  int which,  const char *name,
+                       size_t namelen ) noexcept
 {
+  const bool is_html = ( p != NULL && p->is_html );
+  if ( is_html )
+    this->puts( "<pre>" );
   if ( ( which & PRINT_PARAMETERS ) != 0 ) {
     ConfigTree::TransportArray listen, connect;
     this->get_active_tports( listen, connect );
@@ -3497,6 +3584,6 @@ Console::on_data( const SubMsgData &val ) noexcept
 
     this->print_msg( *val.pub.dec.msg );
   }
-  this->flush_output();
+  this->flush_output( NULL );
 }
 

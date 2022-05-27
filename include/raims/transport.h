@@ -85,13 +85,13 @@ enum TransportRouteState {
   TPORT_IS_CONNECT   = 16,
   TPORT_IS_TCP       = 32,
   TPORT_IS_EDGE      = 64,
-  TPORT_IS_EXTERNAL  = 128,
+  TPORT_IS_IPC       = 128,
   TPORT_IS_SHUTDOWN  = 256,
   TPORT_IS_PREFERRED = 512
 };
 
-struct ExtRte {
-  ExtRte                * next,
+struct IpcRte {
+  IpcRte                * next,
                         * back;
   ConfigTree::Transport & transport;
   kv::EvTcpListen       * listener;       /* the listener if svc */
@@ -99,17 +99,17 @@ struct ExtRte {
   void * operator new( size_t, void *ptr ) { return ptr; }
   void operator delete( void *ptr ) { ::free( ptr ); }
 
-  ExtRte( ConfigTree::Transport &t,  kv::EvTcpListen *l )
+  IpcRte( ConfigTree::Transport &t,  kv::EvTcpListen *l )
     : next( 0 ), back( 0 ), transport( t ), listener( l ) {}
 };
 
-struct ExtRteList : public kv::RouteNotify {
+struct IpcRteList : public kv::RouteNotify {
   TransportRoute      & rte;
-  kv::DLinkList<ExtRte> list;
+  kv::DLinkList<IpcRte> list;
 
   void * operator new( size_t, void *ptr ) { return ptr; }
   void operator delete( void *ptr ) { ::free( ptr ); }
-  ExtRteList( TransportRoute &rte ) noexcept;
+  IpcRteList( TransportRoute &rte ) noexcept;
 
   /* sub notify */
   virtual void on_sub( kv::NotifySub &sub ) noexcept;
@@ -127,8 +127,8 @@ struct TransportRoute : public kv::EvSocket, public kv::EvConnectionNotify,
   SessionMgr            & mgr;            /* session of transport */
   UserDB                & user_db;        /* session of transport */
   kv::RoutePublish      & sub_route;      /* bus for transport */
-  kv::BloomRoute        * switch_rt,      /* local and system subs */
-                        * eswitch_rt,     /* external subs attached to local */
+  kv::BloomRoute        * console_rt,     /* local and system subs */
+                        * ipc_rt,         /* ipc subs attached to local */
                         * router_rt;      /* remote subs to other users */
   kv::BitSpace            connected,      /* which fds are connected */
                           connected_auth, /* which fds are authenticated */
@@ -164,7 +164,7 @@ struct TransportRoute : public kv::EvSocket, public kv::EvConnectionNotify,
                           mesh_conn_hash, /* hash of mesh url */
                           oldest_uid,     /* which uid is oldest connect */
                           primary_count;
-  ExtRteList            * ext;      
+  IpcRteList            * ext;      
   ConfigTree::Service   & svc;            /* service definition */
   ConfigTree::Transport & transport;      /* transport definition */
 
@@ -233,6 +233,7 @@ struct TransportRoute : public kv::EvSocket, public kv::EvConnectionNotify,
   /* a disconnect */
   virtual void on_shutdown( kv::EvSocket &conn,  const char *,
                             size_t ) noexcept;
+  void set_peer_name( kv::PeerData &pd,  const char *suff ) noexcept;
 };
 
 /*struct TransportList : public kv::SLinkList<TransportRoute> {

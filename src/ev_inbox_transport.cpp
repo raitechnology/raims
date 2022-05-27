@@ -31,6 +31,7 @@ EvInboxTransport::listen( const char *ip,  int port ) noexcept
       kv_sync_add( &inbox_timer_id, (uint64_t) 1 );
     this->cur_mono_time = current_monotonic_time_ns();
     this->poll.timer.add_timer_micros( this->fd, 250, this->timer_id, 0 );
+    this->rte.set_peer_name( *this, "inbox" );
     d_ibx( "inbox fd %u (%s)\n", this->fd, this->peer_address.buf );
     return true;
   }

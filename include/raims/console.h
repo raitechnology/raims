@@ -21,9 +21,12 @@ extern "C" {
 namespace rai {
 namespace ms {
 
+struct ConsoleRPC;
 struct ConsoleOutput {
   ConsoleOutput *next, *back;
-  ConsoleOutput() : next( 0 ), back( 0 ) {}
+  ConsoleRPC * rpc;
+  bool is_html;
+  ConsoleOutput( bool html = false ) : next( 0 ), back( 0 ), rpc( 0 ), is_html( html ) {}
   virtual bool on_output( const char *buf,  size_t buflen ) noexcept;
   virtual void on_prompt( const char *prompt ) noexcept;
   virtual void on_quit( void ) noexcept;
@@ -36,7 +39,7 @@ struct UserDB;
 struct SubDB;
 struct UserRoute;
 struct TransportRoute;
-struct ExtRte;
+struct IpcRte;
 struct Nonce;
 struct Console;
 
@@ -67,7 +70,7 @@ struct PortOutput {
 
   void init( TransportRoute *rte,  int fl,  int fd,
              UserBridge *user = NULL ) noexcept;
-  void init( TransportRoute *rte,  ExtRte *ext ) noexcept;
+  void init( TransportRoute *rte,  IpcRte *ext ) noexcept;
 
   void local_addr( const char *buf,  uint32_t len = 0 ) {
     this->local.val = buf;
@@ -212,17 +215,18 @@ enum ConsRpcType {
 
 struct Console;
 struct ConsoleRPC : public SubOnMsg {
-  ConsoleRPC * next,
-             * back;
-  Console    & console;
-  uint64_t     token;
-  uint32_t     inbox_num,
-               total_recv,
-               count;
-  ConsRpcType  type;
-  bool         complete;
-  ConsoleRPC( Console &c,  ConsRpcType t )
-    : next( 0 ), back( 0 ), console( c ), token( 0 ), inbox_num( 0 ),
+  ConsoleRPC    * next,
+                * back;
+  Console       & console;
+  ConsoleOutput * out;
+  uint64_t        token;
+  uint32_t        inbox_num,
+                  total_recv,
+                  count;
+  ConsRpcType     type;
+  bool            complete;
+  ConsoleRPC( Console &c,  ConsoleOutput *p,  ConsRpcType t )
+    : next( 0 ), back( 0 ), console( c ), out( p ), token( 0 ), inbox_num( 0 ),
       total_recv( 0 ), count( 0 ), type( t ), complete( false ) {}
   virtual void on_data( const SubMsgData &val ) noexcept;
   virtual void init( void ) noexcept {
@@ -243,7 +247,7 @@ struct ConsolePing : public ConsoleRPC {
 
   void * operator new( size_t, void *ptr ) { return ptr; }
   void operator delete( void *ptr ) { ::free( ptr ); }
-  ConsolePing( Console &c ) : ConsoleRPC( c, PING_RPC ) {}
+  ConsolePing( Console &c, ConsoleOutput *p ) : ConsoleRPC( c, p, PING_RPC ) {}
   virtual void on_data( const SubMsgData &val ) noexcept;
   virtual void init( void ) noexcept {
     this->ConsoleRPC::init();
@@ -264,7 +268,7 @@ struct ConsoleSubs : public ConsoleRPC {
 
   void * operator new( size_t, void *ptr ) { return ptr; }
   void operator delete( void *ptr ) { ::free( ptr ); }
-  ConsoleSubs( Console &c ) : ConsoleRPC( c, SUBS_RPC ) {}
+  ConsoleSubs( Console &c, ConsoleOutput *p ) : ConsoleRPC( c, p, SUBS_RPC ) {}
   virtual void on_data( const SubMsgData &val ) noexcept;
   virtual void init( void ) noexcept {
     this->ConsoleRPC::init();
@@ -348,8 +352,8 @@ struct Console : public md::MDOutput, public SubOnMsg, public ConfigPrinter {
   void change_prompt( const char *where = NULL,  size_t wsz = 0 ) noexcept;
   bool on_log( kv::Logger &log ) noexcept;
   void flush_log( kv::Logger &log ) noexcept;
-  bool colorize_log( const char *buf,  size_t len ) noexcept;
-  bool flush_output( void ) noexcept;
+  bool colorize_log( ConsoleOutput *p,  const char *buf,  size_t len ) noexcept;
+  bool flush_output( ConsoleOutput *p ) noexcept;
   void get_valid_cmds( const ConsoleCmdString *&cmds, size_t &ncmds ) noexcept;
   void get_valid_help_cmds( const ConsoleCmdString *&cmds,
                             size_t &ncmds ) noexcept;
@@ -357,9 +361,10 @@ struct Console : public md::MDOutput, public SubOnMsg, public ConfigPrinter {
                      const char *&arg,  size_t &len,
                      const char **args,  size_t *arglen,
                      size_t &argcount ) noexcept;
-  void output_help( int c ) noexcept;
+  void output_help( ConsoleOutput *p,  int c ) noexcept;
   void print_dashes( const uint32_t *width,  uint32_t ncols ) noexcept;
-  void print_table( const char **hdr,  uint32_t ncols ) noexcept;
+  void print_table( ConsoleOutput *p,  const char **hdr,
+                    uint32_t ncols ) noexcept;
   void tab_connection( const char *proto,  const char *remote,  uint32_t rsz,
                        const char *local,  uint32_t lsz,
                        const UserBridge &n,  TabPrint &pr ) noexcept;
@@ -391,32 +396,31 @@ struct Console : public md::MDOutput, public SubOnMsg, public ConfigPrinter {
                      size_t nvals ) noexcept;
   void config_tport_route( const char *param,  size_t plen,
                            const char *value,  size_t vlen ) noexcept;
-  void show_subs( const char *arg,  size_t arglen ) noexcept;
-  void ping_peer( const char *arg,  size_t arglen ) noexcept;
-  void mcast_ping( void ) noexcept;
+  void show_subs( ConsoleOutput *p,  const char *arg,  size_t arglen ) noexcept;
+  void ping_peer( ConsoleOutput *p,  const char *arg,  size_t arglen ) noexcept;
+  void mcast_ping( ConsoleOutput *p ) noexcept;
 
   void on_ping( ConsolePing &ping ) noexcept;
   void on_subs( ConsoleSubs &subs ) noexcept;
   void print_msg( md::MDMsg &msg ) noexcept;
-  void show_tports( const char *name,  size_t len ) noexcept;
-  void show_users( void ) noexcept;
-  void show_events( void ) noexcept;
-  void show_unknown( void ) noexcept;
-  void show_ports( const char *name,  size_t len ) noexcept;
-  void show_status( const char *name,  size_t len ) noexcept;
-  uint32_t show_port( uint32_t tport_id,  uint32_t ncols,
-                      uint32_t i ) noexcept;
-  void show_peers( void ) noexcept;
-  void show_adjacency( void ) noexcept;
-  void show_routes( void ) noexcept;
-  void show_urls( void ) noexcept;
-  void show_counters( void ) noexcept;
-  void show_reachable( void ) noexcept;
-  void show_tree( const UserBridge *src ) noexcept;
-  void show_primary( void ) noexcept;
-  void show_fds( void ) noexcept;
-  void show_blooms( void ) noexcept;
-  void show_running( int which,  const char *name,  size_t len ) noexcept;
+  void show_tports( ConsoleOutput *p,  const char *name,  size_t len ) noexcept;
+  void show_users( ConsoleOutput *p ) noexcept;
+  void show_events( ConsoleOutput *p ) noexcept;
+  void show_unknown( ConsoleOutput *p ) noexcept;
+  void show_ports( ConsoleOutput *p,  const char *name,  size_t len ) noexcept;
+  void show_status( ConsoleOutput *p,  const char *name,  size_t len ) noexcept;
+  void show_peers( ConsoleOutput *p ) noexcept;
+  void show_adjacency( ConsoleOutput *p ) noexcept;
+  void show_routes( ConsoleOutput *p ) noexcept;
+  void show_urls( ConsoleOutput *p ) noexcept;
+  void show_counters( ConsoleOutput *p ) noexcept;
+  void show_reachable( ConsoleOutput *p ) noexcept;
+  void show_tree( ConsoleOutput *p,  const UserBridge *src ) noexcept;
+  void show_primary( ConsoleOutput *p ) noexcept;
+  void show_fds( ConsoleOutput *p ) noexcept;
+  void show_blooms( ConsoleOutput *p ) noexcept;
+  void show_running( ConsoleOutput *p,  int which,  const char *name,
+                     size_t len ) noexcept;
   void config( const char *name,  size_t len ) noexcept;
   int puts( const char *s ) noexcept;
   virtual int printf( const char *fmt,  ... ) noexcept final __attribute__((format(printf,2,3)));
@@ -424,23 +428,24 @@ struct Console : public md::MDOutput, public SubOnMsg, public ConfigPrinter {
                    const char *buf ) noexcept;
 
   template<class T>
-  T * create_rpc( ConsRpcType type ) {
+  T * create_rpc( ConsoleOutput *p,  ConsRpcType type ) {
     ConsoleRPC * rpc;
     for ( rpc = this->rpc_list.hd; rpc != NULL; rpc = rpc->next ) {
       if ( rpc->complete && rpc->type == type )
         break;
     }
     if ( rpc == NULL ) {
-      rpc = new ( ::malloc( sizeof( T ) ) ) T( *this );
+      rpc = new ( ::malloc( sizeof( T ) ) ) T( *this, p );
       rpc->inbox_num = this->sub_db.inbox_start( 0, rpc );
       this->rpc_list.push_tl( rpc );
     }
+    rpc->out = p;
+    p->rpc = rpc;
     rpc->init();
     return (T *) rpc;
   }
 };
 
-#ifdef IMPORT_CONSOLE_CMDS
 enum ConsoleCmd {
   CMD_EMPTY            = 0,
   CMD_PING             = 1,  /* ping [U]                   */
@@ -523,7 +528,9 @@ enum ConsoleArgType {
 
 struct ConsoleCmdString {
   ConsoleCmd   cmd; /* enum val */
-  const char * str; /* command match string */
+  const char * str, /* command match string */
+             * args,
+             * descr;
 };
 
 struct ConsoleCmdType {
@@ -531,6 +538,7 @@ struct ConsoleCmdType {
   ConsoleArgType type; /* arg type */
 };
 
+#ifdef IMPORT_CONSOLE_CMDS
 static const ConsoleCmdType command_type[] = {
   { CMD_PING            , PEER_ARG   }, /* ping peers */
   { CMD_CONNECT         , TPORT_ARG  }, /* connect <tport> */
@@ -572,144 +580,144 @@ static inline ConsoleArgType console_command_type( ConsoleCmd cmd ) {
 }
 
 static const ConsoleCmdString console_cmd[] = {
-  { CMD_PING       , "ping"         }, /* ping peers */
-  { CMD_MPING      , "mping"        }, /* multicast ping peers */
-  { CMD_SHOW       , "show"         }, /* show <subcmd> */
-  { CMD_CONNECT    , "connect"      }, /* connect <tport> */
-  { CMD_LISTEN     , "listen"       }, /* listen <tport> */
-  { CMD_SHUTDOWN   , "shutdown"     }, /* shutdown <tport> */
-  { CMD_CONFIGURE  , "configure"    }, /* configure <subcmd> */
-  { CMD_SAVE       , "save"         }, /* save config */
-  { CMD_SUB_START  , "subscribe"    }, /* subscribe <subject> */
-  { CMD_SUB_STOP   , "unsubscribe"  }, /* unsubscribe <subject> */
-  { CMD_PSUB_START , "psubscribe"   }, /* psubscribe <rv-pattern> */
-  { CMD_PSUB_STOP  , "punsubscribe" }, /* punsubscribe <rv-pattern> */
-  { CMD_GSUB_START , "gsubscribe"   }, /* gsubscribe <glob-pattern> */
-  { CMD_GSUB_STOP  , "gunsubscribe" }, /* gunsubscribe <glob-pattern> */
-  { CMD_PUBLISH    , "publish"      }, /* pub <subject> message */
-  { CMD_TRACE      , "trace"        }, /* trace <subject> message */
-  { CMD_PUB_ACK    , "ack"          }, /* ack <subject> message */
-  { CMD_RPC        , "rpc"          }, /* rpc <subject> message */
-  { CMD_ANY        , "any"          }, /* any <subject> message */
-  { CMD_DEBUG      , "debug"        }, /* debug <integer> */
-  { CMD_CANCEL     , "cancel"       }, /* cancel incomplete rpc */
-  { CMD_MUTE_LOG   , "mute"         }, /* mute log */
-  { CMD_UNMUTE_LOG , "unmute"       }, /* unmute log */
-  { CMD_QUIT       , "quit"         },
-  { CMD_QUIT       , "exit"         }
+  { CMD_PING       , "ping"         ,0,0}, /* ping peers */
+  { CMD_MPING      , "mping"        ,0,0}, /* multicast ping peers */
+  { CMD_SHOW       , "show"         ,0,0}, /* show <subcmd> */
+  { CMD_CONNECT    , "connect"      ,0,0}, /* connect <tport> */
+  { CMD_LISTEN     , "listen"       ,0,0}, /* listen <tport> */
+  { CMD_SHUTDOWN   , "shutdown"     ,0,0}, /* shutdown <tport> */
+  { CMD_CONFIGURE  , "configure"    ,0,0}, /* configure <subcmd> */
+  { CMD_SAVE       , "save"         ,0,0}, /* save config */
+  { CMD_SUB_START  , "subscribe"    ,0,0}, /* subscribe <subject> */
+  { CMD_SUB_STOP   , "unsubscribe"  ,0,0}, /* unsubscribe <subject> */
+  { CMD_PSUB_START , "psubscribe"   ,0,0}, /* psubscribe <rv-pattern> */
+  { CMD_PSUB_STOP  , "punsubscribe" ,0,0}, /* punsubscribe <rv-pattern> */
+  { CMD_GSUB_START , "gsubscribe"   ,0,0}, /* gsubscribe <glob-pattern> */
+  { CMD_GSUB_STOP  , "gunsubscribe" ,0,0}, /* gunsubscribe <glob-pattern> */
+  { CMD_PUBLISH    , "publish"      ,0,0}, /* pub <subject> message */
+  { CMD_TRACE      , "trace"        ,0,0}, /* trace <subject> message */
+  { CMD_PUB_ACK    , "ack"          ,0,0}, /* ack <subject> message */
+  { CMD_RPC        , "rpc"          ,0,0}, /* rpc <subject> message */
+  { CMD_ANY        , "any"          ,0,0}, /* any <subject> message */
+  { CMD_DEBUG      , "debug"        ,0,0}, /* debug <integer> */
+  { CMD_CANCEL     , "cancel"       ,0,0}, /* cancel incomplete rpc */
+  { CMD_MUTE_LOG   , "mute"         ,0,0}, /* mute log */
+  { CMD_UNMUTE_LOG , "unmute"       ,0,0}, /* unmute log */
+  { CMD_QUIT       , "quit"         ,0,0},
+  { CMD_QUIT       , "exit"         ,0,0}
 };
 static const size_t num_console_cmds = ASZ( console_cmd );
 
 static const ConsoleCmdString show_cmd[] = {
-  { CMD_SHOW_SUBS      , "subscriptions" }, /* request sub tables */
-  { CMD_SHOW_ADJACENCY , "adjacency"     }, /* show adjacency */
-  { CMD_SHOW_PEERS     , "peers"         }, /* show peers */
-  { CMD_SHOW_PORTS     , "ports"         }, /* show ports tport */
-  { CMD_SHOW_STATUS    , "status"        }, /* show status tport */
-  { CMD_SHOW_ROUTES    , "routes"        }, /* show routes */
-  { CMD_SHOW_URLS      , "urls"          }, /* show urls */
-  { CMD_SHOW_TPORTS    , "tports"        }, /* show tport config */
-  { CMD_SHOW_USERS     , "users"         }, /* show user concig */
-  { CMD_SHOW_EVENTS    , "events"        }, /* show events */
-  { CMD_SHOW_UNKNOWN   , "unknown"       }, /* show unknown */
-  { CMD_SHOW_LOG       , "log"           }, /* show log */
-  { CMD_SHOW_COUNTERS  , "counters"      }, /* show counters */
-  { CMD_SHOW_REACHABLE , "reachable"     }, /* show reachable */
-  { CMD_SHOW_TREE      , "tree"          }, /* show tree */
-  { CMD_SHOW_PRIMARY   , "primary"       }, /* show primary */
-  { CMD_SHOW_FDS       , "fds"           }, /* show fds */
-  { CMD_SHOW_BLOOMS    , "blooms"        }, /* show blooms */
-  { CMD_SHOW_RUN       , "running"       }  /* show running */
+  { CMD_SHOW_SUBS      , "subscriptions" ,0,0}, /* request sub tables */
+  { CMD_SHOW_ADJACENCY , "adjacency"     ,0,0}, /* show adjacency */
+  { CMD_SHOW_PEERS     , "peers"         ,0,0}, /* show peers */
+  { CMD_SHOW_PORTS     , "ports"         ,0,0}, /* show ports tport */
+  { CMD_SHOW_STATUS    , "status"        ,0,0}, /* show status tport */
+  { CMD_SHOW_ROUTES    , "routes"        ,0,0}, /* show routes */
+  { CMD_SHOW_URLS      , "urls"          ,0,0}, /* show urls */
+  { CMD_SHOW_TPORTS    , "tports"        ,0,0}, /* show tport config */
+  { CMD_SHOW_USERS     , "users"         ,0,0}, /* show user concig */
+  { CMD_SHOW_EVENTS    , "events"        ,0,0}, /* show events */
+  { CMD_SHOW_UNKNOWN   , "unknown"       ,0,0}, /* show unknown */
+  { CMD_SHOW_LOG       , "log"           ,0,0}, /* show log */
+  { CMD_SHOW_COUNTERS  , "counters"      ,0,0}, /* show counters */
+  { CMD_SHOW_REACHABLE , "reachable"     ,0,0}, /* show reachable */
+  { CMD_SHOW_TREE      , "tree"          ,0,0}, /* show tree */
+  { CMD_SHOW_PRIMARY   , "primary"       ,0,0}, /* show primary */
+  { CMD_SHOW_FDS       , "fds"           ,0,0}, /* show fds */
+  { CMD_SHOW_BLOOMS    , "blooms"        ,0,0}, /* show blooms */
+  { CMD_SHOW_RUN       , "running"       ,0,0}  /* show running */
 };
 static const size_t num_show_cmds = ASZ( show_cmd );
 
 static const ConsoleCmdString run_cmd[] = {
-  { CMD_SHOW_RUN_TPORTS , "transports" }, /* config sections */
-  { CMD_SHOW_RUN_SVCS   , "services"   },
-  { CMD_SHOW_RUN_USERS  , "users"      },
-  { CMD_SHOW_RUN_GROUPS , "groups"     },
-  { CMD_SHOW_RUN_PARAM  , "parameters" }
+  { CMD_SHOW_RUN_TPORTS , "transports" ,0,0}, /* config sections */
+  { CMD_SHOW_RUN_SVCS   , "services"   ,0,0},
+  { CMD_SHOW_RUN_USERS  , "users"      ,0,0},
+  { CMD_SHOW_RUN_GROUPS , "groups"     ,0,0},
+  { CMD_SHOW_RUN_PARAM  , "parameters" ,0,0}
 };
 static const size_t num_run_cmds = ASZ( run_cmd );
 
 static const ConsoleCmdString config_cmd[] = {
-  { CMD_CONFIGURE_TPORT , "transport" },
-  { CMD_CONFIGURE_PARAM , "parameter" }
+  { CMD_CONFIGURE_TPORT , "transport" ,0,0},
+  { CMD_CONFIGURE_PARAM , "parameter" ,0,0}
 };
 static const size_t num_config_cmds = ASZ( config_cmd );
 
 static const ConsoleCmdString help_cmd[] = {
-  { CMD_PING             , "ping [U]                   Ping peers, all peers or only U"                   },
-  { CMD_MPING            , "mping                      Multicast ping all peers"                          },
-  { CMD_CONNECT          , "connect [T]                Start tport connect"                               },
-  { CMD_LISTEN           , "listen [T]                 Start tport listener"                              },
-  { CMD_SHUTDOWN         , "shutdown [T]               Shutdown tport"                                    },
-  { CMD_CONFIGURE        , "configure                  Configure ..."                                     },
-  { CMD_CONFIGURE_TPORT  , "configure transport T      Configure tport T"                                 },
-  { CMD_CONFIGURE_PARAM  , "configure parameter P V    Configure parameter P = V"                         },
-  { CMD_SAVE             , "save                       Save current config as startup"                    },
-  { CMD_SHOW_SUBS        , "show subs [U]              Get peers subscriptions, all peers or only U"      },
-  { CMD_SHOW_ADJACENCY   , "show adjacency             Show peers adjacency"                              },
-  { CMD_SHOW_PEERS       , "show peers                 Show peers"                                        },
-  { CMD_SHOW_PORTS       , "show ports [T]             Show ports T or all"                               },
-  { CMD_SHOW_STATUS      , "show status [T]            Show ports status T or all"                        },
-  { CMD_SHOW_ROUTES      , "show routes                Show routes"                                       },
-  { CMD_SHOW_URLS        , "show urls                  Show urls of peers"                                },
-  { CMD_SHOW_TPORTS      , "show tport [T]             Show tports, or only T"                            },
-  { CMD_SHOW_USERS       , "show user [U]              Show users, or only U"                             },
-  { CMD_SHOW_EVENTS      , "show events                Show event recorder"                               },
-  { CMD_SHOW_UNKNOWN     , "show unknown               Show the list of peers yet to be resolved"         },
-  { CMD_SHOW_LOG         , "show log                   Show log buffer"                                   },
-  { CMD_SHOW_COUNTERS    , "show counters              Show peers seqno and time values"                  },
-  { CMD_SHOW_REACHABLE   , "show reachable             Show reachable peers through tports"               },
-  { CMD_SHOW_TREE        , "show tree [U]              Show multicast tree from me or U"                  },
-  { CMD_SHOW_PRIMARY     , "show primary               Show primary multicast tree"                       },
-  { CMD_SHOW_FDS         , "show fds                   Show fd centric routes"                            },
-  { CMD_SHOW_BLOOMS      , "show blooms                Show bloom centric routes"                         },
-  { CMD_SHOW_RUN         , "show running               Show all config running"                           },
-  { CMD_SHOW_RUN_TPORTS  , "show running transport [T] Show transports running, T or all"                 },
-  { CMD_SHOW_RUN_SVCS    , "show running service [S]   Show services running config, S or all"            },
-  { CMD_SHOW_RUN_USERS   , "show running user [U]      Show users running config, U or all"               },
-  { CMD_SHOW_RUN_GROUPS  , "show running group [G]     Show groups running config, G or all"              },
-  { CMD_SHOW_RUN_PARAM   , "show running parameter [P] Show parameters running config, P or all"          },
-  { CMD_SUB_START        , "sub subject                Subscribe subject"                                 },
-  { CMD_SUB_STOP         , "unsub subject              Unsubscribe subject"                               },
-  { CMD_PSUB_START       , "psub wildcard              Subscribe rv-wildcard"                             },
-  { CMD_PSUB_STOP        , "punsub wildcard            Unsubscribe rv-wildcard"                           },
-  { CMD_GSUB_START       , "gsub wildcard              Subscribe glob-wildcard"                           },
-  { CMD_GSUB_STOP        , "gunsub wildcard            Unsubscribe glob-wildcard"                         },
-  { CMD_PUBLISH          , "pub subject msg            Publish msg string to subject"                     },
-  { CMD_TRACE            , "trace subject msg          Publish msg string to subject, route will reply"   },
-  { CMD_PUB_ACK          , "ack subject msg            Publish msg string to subject, recver will ack"    },
-  { CMD_RPC              , "rpc subject msg            Publish msg string to subject, with return"        },
-  { CMD_ANY              , "any subject msg            Publish msg string to any subject"                 },
-  { CMD_CANCEL           , "cancel                     Cancel and show incomplete (ping, show subs)"      },
-  { CMD_MUTE_LOG         , "mute                       Mute the log output"                               },
-  { CMD_UNMUTE_LOG       , "unmute                     Unmute the log output"                             },
-  { CMD_DEBUG            , "debug ival                 Set debug flags to ival, bit mask of:\n"
+  { CMD_PING             , "ping", "[U]",        "Ping peers, all peers or only U"                   },
+  { CMD_MPING            , "mping", "",          "Multicast ping all peers"                          },
+  { CMD_CONNECT          , "connect", "[T]",     "Start tport connect"                               },
+  { CMD_LISTEN           , "listen", "[T]",      "Start tport listener"                              },
+  { CMD_SHUTDOWN         , "shutdown", "[T]",    "Shutdown tport"                                    },
+  { CMD_CONFIGURE        , "configure", "",      "Configure ..."                                     },
+  { CMD_CONFIGURE_TPORT  , "configure transport", "T",  "Configure tport T"                          },
+  { CMD_CONFIGURE_PARAM  , "configure parameter", "P V", "Configure parameter P = V"                 },
+  { CMD_SAVE             , "save", "",           "Save current config as startup"                    },
+  { CMD_SHOW_SUBS        , "show subs", "[U]",   "Get peers subscriptions, all peers or only U"      },
+  { CMD_SHOW_ADJACENCY   , "show adjacency", "", "Show peers adjacency"                              },
+  { CMD_SHOW_PEERS       , "show peers", "",     "Show peers"                                        },
+  { CMD_SHOW_PORTS       , "show ports", "[T]",  "Show ports T or all"                               },
+  { CMD_SHOW_STATUS      , "show status", "[T]", "Show ports status T or all"                        },
+  { CMD_SHOW_ROUTES      , "show routes", "",    "Show routes"                                       },
+  { CMD_SHOW_URLS        , "show urls", "",      "Show urls of peers"                                },
+  { CMD_SHOW_TPORTS      , "show tport", "[T]",  "Show tports, or only T"                            },
+  { CMD_SHOW_USERS       , "show user", "[U]",   "Show users, or only U"                             },
+  { CMD_SHOW_EVENTS      , "show events", "",    "Show event recorder"                               },
+  { CMD_SHOW_UNKNOWN     , "show unknown", "",   "Show the list of peers yet to be resolved"         },
+  { CMD_SHOW_LOG         , "show log", "",       "Show log buffer"                                   },
+  { CMD_SHOW_COUNTERS    , "show counters", "",  "Show peers seqno and time values"                  },
+  { CMD_SHOW_REACHABLE   , "show reachable", "", "Show reachable peers through tports"               },
+  { CMD_SHOW_TREE        , "show tree", "[U]",   "Show multicast tree from me or U"                  },
+  { CMD_SHOW_PRIMARY     , "show primary", "",   "Show primary multicast tree"                       },
+  { CMD_SHOW_FDS         , "show fds", "",       "Show fd centric routes"                            },
+  { CMD_SHOW_BLOOMS      , "show blooms", "",    "Show bloom centric routes"                         },
+  { CMD_SHOW_RUN         , "show running", "",   "Show all config running"                           },
+  { CMD_SHOW_RUN_TPORTS  , "show running transport","[T]", "Show transports running, T or all"       },
+  { CMD_SHOW_RUN_SVCS    , "show running service","[S]",   "Show services running config, S or all"  },
+  { CMD_SHOW_RUN_USERS   , "show running user","[U]",      "Show users running config, U or all"     },
+  { CMD_SHOW_RUN_GROUPS  , "show running group","[G]",     "Show groups running config, G or all"    },
+  { CMD_SHOW_RUN_PARAM   , "show running parameter","[P]", "Show parameters running config, P or all"},
+  { CMD_SUB_START        , "sub","[S]",          "Subscribe subject S"                               },
+  { CMD_SUB_STOP         , "unsub","[S]",        "Unsubscribe subject S"                             },
+  { CMD_PSUB_START       , "psub","[W]",         "Subscribe rv-wildcard W"                           },
+  { CMD_PSUB_STOP        , "punsub","[W]",       "Unsubscribe rv-wildcard W"                         },
+  { CMD_GSUB_START       , "gsub","[W]",         "Subscribe glob-wildcard W"                         },
+  { CMD_GSUB_STOP        , "gunsub","[W]",       "Unsubscribe glob-wildcard W"                       },
+  { CMD_PUBLISH          , "pub","[S] [M]",      "Publish msg string M to subject S"                 },
+  { CMD_TRACE            , "trace","[S] [M]",    "Publish msg string M to subject S, with reply"     },
+  { CMD_PUB_ACK          , "ack","[S] [M]",      "Publish msg string M to subject S, with ack"       },
+  { CMD_RPC              , "rpc","[S] [M]",      "Publish msg string M to subject S, with return"    },
+  { CMD_ANY              , "any","[S] [M]",      "Publish msg string M to any subscriber of S"       },
+  { CMD_CANCEL           , "cancel","",          "Cancel and show incomplete (ping, show subs)"      },
+  { CMD_MUTE_LOG         , "mute","",            "Mute the log output"                               },
+  { CMD_UNMUTE_LOG       , "unmute","",          "Unmute the log output"                             },
+  { CMD_DEBUG            , "debug","[I]",        "Set debug flags to ival I, bit mask of:\n"
                            " 1=tcp,     2=pgm,      4=inbox,  8=tport,   0x10=user,  0x20=link, 0x40=peer,\n"
                            " 0x80=auth, 0x100=sess, 0x200=hb, 0x400=sub, 0x800=mrcv, 0x1000=msghex,\n"
-                           " 0x2000=telnet, 0x4000=rv, 0x8000=nats"                                       },
-  { CMD_QUIT             , "quit/exit                  Exit console"                                      }
+                           " 0x2000=telnet, 0x4000=rv, 0x8000=nats"                                  },
+  { CMD_QUIT             , "quit/exit","",       "Exit console"                                      }
 };
 
 static const size_t num_help_cmds = ASZ( help_cmd );
 
 static const ConsoleCmdString tport_cmd[] = {
-  { CMD_TPORT_NAME       , "tport"      },
-  { CMD_TPORT_TYPE       , "type"       },
-  { CMD_TPORT_LISTEN     , "listen"     },
-  { CMD_TPORT_CONNECT    , "connect"    },
-  { CMD_TPORT_PORT       , "port"       },
-  { CMD_TPORT_TIMEOUT    , "timeout"    },
-  { CMD_TPORT_MTU        , "mtu"        },
-  { CMD_TPORT_TXW_SQNS   , "txw_sqns"   },
-  { CMD_TPORT_RXW_SQNS   , "rxw_sqns"   },
-  { CMD_TPORT_MCAST_LOOP , "mcast_loop" },
-  { CMD_TPORT_EDGE       , "edge"       },
-  { CMD_TPORT_SHOW       , "show"       },
-  { CMD_TPORT_QUIT       , "quit"       },
-  { CMD_TPORT_QUIT       , "exit"       }
+  { CMD_TPORT_NAME       , "tport"      ,0,0},
+  { CMD_TPORT_TYPE       , "type"       ,0,0},
+  { CMD_TPORT_LISTEN     , "listen"     ,0,0},
+  { CMD_TPORT_CONNECT    , "connect"    ,0,0},
+  { CMD_TPORT_PORT       , "port"       ,0,0},
+  { CMD_TPORT_TIMEOUT    , "timeout"    ,0,0},
+  { CMD_TPORT_MTU        , "mtu"        ,0,0},
+  { CMD_TPORT_TXW_SQNS   , "txw_sqns"   ,0,0},
+  { CMD_TPORT_RXW_SQNS   , "rxw_sqns"   ,0,0},
+  { CMD_TPORT_MCAST_LOOP , "mcast_loop" ,0,0},
+  { CMD_TPORT_EDGE       , "edge"       ,0,0},
+  { CMD_TPORT_SHOW       , "show"       ,0,0},
+  { CMD_TPORT_QUIT       , "quit"       ,0,0},
+  { CMD_TPORT_QUIT       , "exit"       ,0,0}
 };
 static const size_t num_tport_cmds = ASZ( tport_cmd );
 
@@ -739,19 +747,19 @@ static const ConsoleCmd valid_redis[] =
     CMD_TPORT_SHOW, CMD_TPORT_QUIT };
 
 static const ConsoleCmdString tport_help_cmd[] = {
-  { CMD_TPORT_NAME       , "tport N      Name of transport" },
-  { CMD_TPORT_TYPE       , "type T       Type of transport (tcp,pgm,mesh,rv,nats,redis)" },
-  { CMD_TPORT_LISTEN     , "listen A     Listen address for passive transport" },
-  { CMD_TPORT_CONNECT    , "connect A    Connect address for active transport" },
-  { CMD_TPORT_PORT       , "port N       Port for address" },
-  { CMD_TPORT_TIMEOUT    , "timeout N    Timeout for connect or accept" },
-  { CMD_TPORT_MTU        , "mtu N        MTU for pgm type transport, which is the UDP datagram size" },
-  { CMD_TPORT_TXW_SQNS   , "txw_sqns N   Transmit window for pgm type transport, in datagram sequences" },
-  { CMD_TPORT_RXW_SQNS   , "rxw_sqns N   Recieve window for pgm type transport, in datagram sequences" },
-  { CMD_TPORT_MCAST_LOOP , "mcast_loop N Controls multicast loop: 0 - none, 2 - host loop and exclude sender" },
-  { CMD_TPORT_EDGE       , "edge B       When true, don't create a adjaceny and use existing" },
-  { CMD_TPORT_SHOW       , "show         Show tport config" },
-  { CMD_TPORT_QUIT       , "quit/exit    Exit config" }
+  { CMD_TPORT_NAME       , "tport","N",    "Name of transport" },
+  { CMD_TPORT_TYPE       , "type","T",     "Type of transport (tcp,pgm,mesh,rv,nats,redis)" },
+  { CMD_TPORT_LISTEN     , "listen","A",   "Listen address for passive transport" },
+  { CMD_TPORT_CONNECT    , "connect","A",  "Connect address for active transport" },
+  { CMD_TPORT_PORT       , "port","N",     "Port for address" },
+  { CMD_TPORT_TIMEOUT    , "timeout","N",  "Timeout for connect or accept" },
+  { CMD_TPORT_MTU        , "mtu","N",      "MTU for pgm type transport, which is the UDP datagram size" },
+  { CMD_TPORT_TXW_SQNS   , "txw_sqns","N", "Transmit window for pgm type transport, in datagram sequences" },
+  { CMD_TPORT_RXW_SQNS   , "rxw_sqns","N", "Recieve window for pgm type transport, in datagram sequences" },
+  { CMD_TPORT_MCAST_LOOP , "mcast_loop","N", "Controls multicast loop: 0 - none, 2 - host loop and exclude sender" },
+  { CMD_TPORT_EDGE       , "edge","B",     "When true, don't create a adjaceny and use existing" },
+  { CMD_TPORT_SHOW       , "show","",      "Show tport config" },
+  { CMD_TPORT_QUIT       , "quit/exit","", "Exit config" }
 };
 static const size_t num_tport_help_cmds = ASZ( tport_help_cmd );
 

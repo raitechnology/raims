@@ -49,27 +49,27 @@ struct SubOnMsg {
 };
 
 enum SubFlags {
-  INTERNAL_SUB = 1,
-  EXTERNAL_SUB = 2
+  CONSOLE_SUB = 1,
+  IPC_SUB     = 2
 };
 
 struct SubRefs {
   static const uint32_t ALL_MASK = ~(uint32_t) 0;
-  uint32_t internal_ref  : 1,
-           external_refs : 31;
+  uint32_t console_ref  : 1,
+           ipc_refs : 31;
   uint32_t tport_mask;
 
   void init( uint32_t flags,  uint32_t tport_id ) {
-    this->internal_ref  = 0;
-    this->external_refs = 0;
-    this->tport_mask    = 0;
+    this->console_ref = 0;
+    this->ipc_refs    = 0;
+    this->tport_mask  = 0;
     this->add( flags, tport_id );
   }
   bool add( uint32_t flags,  uint32_t tport_id ) {
-    if ( ( flags & INTERNAL_SUB ) != 0 ) {
-      if ( this->internal_ref != 0 )
+    if ( ( flags & CONSOLE_SUB ) != 0 ) {
+      if ( this->console_ref != 0 )
         return false;
-      this->internal_ref = 1;
+      this->console_ref = 1;
     }
     else {
       if ( tport_id >= 32 )
@@ -80,18 +80,18 @@ struct SubRefs {
           return false;
         this->tport_mask |= mask;
       }
-      this->external_refs++;
+      this->ipc_refs++;
     }
     return true;
   }
   bool rem( uint32_t flags,  uint32_t tport_id ) {
-    if ( ( flags & INTERNAL_SUB ) != 0 ) {
-      if ( this->internal_ref == 0 )
+    if ( ( flags & CONSOLE_SUB ) != 0 ) {
+      if ( this->console_ref == 0 )
         return false;
-      this->internal_ref = 0;
+      this->console_ref = 0;
     }
     else {
-      if ( this->external_refs == 0 )
+      if ( this->ipc_refs == 0 )
         return false;
       if ( this->tport_mask != ALL_MASK && tport_id < 32 ) {
         uint32_t mask = 1U << tport_id;
@@ -99,22 +99,22 @@ struct SubRefs {
           return false;
         this->tport_mask &= ~mask;
       }
-      this->external_refs--;
+      this->ipc_refs--;
     }
     return true;
   }
   bool is_empty( void ) const {
-    return ( this->internal_ref == 0 && this->external_refs == 0 );
+    return ( this->console_ref == 0 && this->ipc_refs == 0 );
   }
   bool test( uint32_t flags ) const {
-    if ( ( flags & INTERNAL_SUB ) != 0 && this->internal_ref != 0 )
+    if ( ( flags & CONSOLE_SUB ) != 0 && this->console_ref != 0 )
       return true;
-    if ( ( flags & EXTERNAL_SUB ) != 0 && this->external_refs != 0 )
+    if ( ( flags & IPC_SUB ) != 0 && this->ipc_refs != 0 )
       return true;
     return false;
   }
   uint32_t ref_count( void ) const {
-    return this->internal_ref + this->external_refs;
+    return this->console_ref + this->ipc_refs;
   }
 };
 
@@ -128,11 +128,11 @@ struct SubArgs {
                hash,
                tport_id,
                sub_count,
-               internal_count,
-               external_count,
+               console_count,
+               ipc_count,
                sub_coll,
-               internal_coll,
-               external_coll;
+               console_coll,
+               ipc_coll;
   bool         bloom_updated,
                resize_bloom;
 
@@ -140,8 +140,8 @@ struct SubArgs {
            uint64_t n,  uint32_t fl,  uint32_t tp,  uint32_t h = 0 ) :
     sub( s ), sublen( len ), is_start( start ), cb( on_msg ), seqno( n ),
     flags( fl ), hash( h ), tport_id( tp ),
-    sub_count( 0 ), internal_count( 0 ), external_count( 0 ),
-    sub_coll( 0 ), internal_coll( 0 ), external_coll( 0 ),
+    sub_count( 0 ), console_count( 0 ), ipc_count( 0 ),
+    sub_coll( 0 ), console_coll( 0 ), ipc_coll( 0 ),
     bloom_updated( false ), resize_bloom( false ) {
     if ( h == 0 ) this->hash = kv_crc_c( s, len, 0 );
   }
@@ -159,29 +159,29 @@ struct SubRoute {
     this->start_seqno = ctx.seqno;
     this->on_data     = ctx.cb;
     this->ref.init( ctx.flags, ctx.tport_id );
-    ctx.sub_count      = 1;
-    ctx.internal_count = this->ref.internal_ref;
-    ctx.external_count = this->ref.external_refs;
+    ctx.sub_count     = 1;
+    ctx.console_count = this->ref.console_ref;
+    ctx.ipc_count     = this->ref.ipc_refs;
   }
   bool add( SubArgs &ctx ) {
     if ( this->ref.add( ctx.flags, ctx.tport_id ) ) {
-      if ( ( ctx.flags & INTERNAL_SUB ) != 0 )
+      if ( ( ctx.flags & CONSOLE_SUB ) != 0 )
         this->on_data = ctx.cb;
-      ctx.sub_count      = this->ref.ref_count();
-      ctx.internal_count = this->ref.internal_ref;
-      ctx.external_count = this->ref.external_refs;
-      ctx.seqno          = this->start_seqno;
+      ctx.sub_count     = this->ref.ref_count();
+      ctx.console_count = this->ref.console_ref;
+      ctx.ipc_count     = this->ref.ipc_refs;
+      ctx.seqno         = this->start_seqno;
       return true;
     }
     return false;
   }
   bool rem( SubArgs &ctx ) {
     if ( this->ref.rem( ctx.flags, ctx.tport_id ) ) {
-      if ( ( ctx.flags & INTERNAL_SUB ) != 0 )
+      if ( ( ctx.flags & CONSOLE_SUB ) != 0 )
         this->on_data = NULL;
-      ctx.sub_count      = this->ref.ref_count();
-      ctx.internal_count = this->ref.internal_ref;
-      ctx.external_count = this->ref.external_refs;
+      ctx.sub_count     = this->ref.ref_count();
+      ctx.console_count = this->ref.console_ref;
+      ctx.ipc_count     = this->ref.ipc_refs;
       if ( ctx.sub_count == 0 )
         return true;
       ctx.seqno = this->start_seqno;
@@ -253,9 +253,9 @@ struct SubTab {
     SubRoute *rt2 = this->tab.find_by_hash( ctx.hash, loc );
     while ( rt2 != NULL ) {
       if ( rt != rt2 ) {
-        ctx.sub_coll += rt->ref.ref_count();
-        ctx.internal_coll += rt->ref.internal_ref;
-        ctx.external_coll += rt->ref.external_refs;
+        ctx.sub_coll     += rt->ref.ref_count();
+        ctx.console_coll += rt->ref.console_ref;
+        ctx.ipc_coll     += rt->ref.ipc_refs;
       }
       rt2 = this->tab.find_next_by_hash( ctx.hash, loc );
     }
@@ -466,8 +466,8 @@ struct SubDB {
   PubTab       pub_tab;      /* subject -> seqno */
   AnyMatchTab  any_tab;
   kv::BloomRef bloom,
-               internal,
-               external;
+               console,
+               ipc;
 
   SubDB( kv::EvPoll &p,  UserDB &udb,  SessionMgr &smg ) noexcept;
 
@@ -481,14 +481,14 @@ struct SubDB {
   uint64_t sub_stop( SubArgs &ctx ) noexcept;
   void update_bloom( SubArgs &ctx ) noexcept;
   /* start a new sub for this session */
-  uint64_t internal_sub_start( const char *sub,  uint16_t sublen,
-                               SubOnMsg *cb ) noexcept;
-  uint64_t internal_sub_stop( const char *sub,  uint16_t sublen ) noexcept;
+  uint64_t console_sub_start( const char *sub,  uint16_t sublen,
+                              SubOnMsg *cb ) noexcept;
+  uint64_t console_sub_stop( const char *sub,  uint16_t sublen ) noexcept;
   /* start a new pattern sub for this session */
-  uint64_t internal_psub_start( const char *pat,  uint16_t patlen,
-                                kv::PatternFmt fmt,  SubOnMsg *cb ) noexcept;
-  uint64_t internal_psub_stop( const char *pat,  uint16_t patlen,
-                               kv::PatternFmt fmt ) noexcept;
+  uint64_t console_psub_start( const char *pat,  uint16_t patlen,
+                               kv::PatternFmt fmt,  SubOnMsg *cb ) noexcept;
+  uint64_t console_psub_stop( const char *pat,  uint16_t patlen,
+                              kv::PatternFmt fmt ) noexcept;
 
   uint32_t inbox_start( uint32_t inbox_num,  SubOnMsg *cb ) noexcept;
 
@@ -498,14 +498,12 @@ struct SubDB {
   bool add_bloom( PatternArgs &ctx,  kv::BloomRef &b ) noexcept;
   void del_bloom( PatternArgs &ctx,  kv::BloomRef &b ) noexcept;
 
-  /* start a new sub for external tport */
-  uint64_t external_sub_start( kv::NotifySub &sub, uint32_t tport_id ) noexcept;
-  uint64_t external_sub_stop( kv::NotifySub &sub,  uint32_t tport_id ) noexcept;
-  /* start a new pattern sub external tport */
-  uint64_t external_psub_start( kv::NotifyPattern &pat,
-                                uint32_t tport_id ) noexcept;
-  uint64_t external_psub_stop( kv::NotifyPattern &pat,
-                               uint32_t tport_id ) noexcept;
+  /* start a new sub for ipc tport */
+  uint64_t ipc_sub_start( kv::NotifySub &sub, uint32_t tport_id ) noexcept;
+  uint64_t ipc_sub_stop( kv::NotifySub &sub,  uint32_t tport_id ) noexcept;
+  /* start a new pattern sub ipc tport */
+  uint64_t ipc_psub_start( kv::NotifyPattern &pat, uint32_t tport_id ) noexcept;
+  uint64_t ipc_psub_stop( kv::NotifyPattern &pat, uint32_t tport_id ) noexcept;
   SeqnoStatus match_seqno( SeqnoArgs &ctx ) noexcept;
   bool match_subscription( SeqnoArgs &ctx ) noexcept;
 

@@ -28,22 +28,25 @@ EvTcpTransportListen::EvTcpTransportListen( EvPoll &p,
 int
 EvTcpTransportListen::listen( const char *ip,  int port,  int opts ) noexcept
 {
-  return this->kv::EvTcpListen::listen2( ip, port, opts, "tcp_listen" );
+  int res = this->kv::EvTcpListen::listen2( ip, port, opts, "tcp_listen" );
+  if ( res == 0 )
+    this->rte.set_peer_name( *this, "list" );
+  return res;
 }
 
-bool
+EvSocket *
 EvTcpTransportListen::accept( void ) noexcept
 {
   EvTcpTransportService *c =
     this->poll.get_free_list<EvTcpTransportService>( this->accept_sock_type );
   if ( c == NULL )
-    return false;
+    return NULL;
   c->rte = &this->rte;
   c->notify = this->notify;
   if ( ! this->accept2( *c, "tcp_accept" ) )
-    return false;
+    return NULL;
   c->start();
-  return true;
+  return c;
 }
 
 
@@ -77,6 +80,7 @@ EvTcpTransportClient::connect( EvTcpTransportParameters &p,
 void
 EvTcpTransport::start( void ) noexcept
 {
+  this->rte->set_peer_name( *this, this->is_connect ? "conn" : "acc" );
   if ( this->fwd_all_msgs ) {
     uint32_t h = this->rte->sub_route.prefix_seed( 0 );
     this->rte->sub_route.add_pattern_route( h, this->fd, 0 );

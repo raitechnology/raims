@@ -15,9 +15,9 @@ SubDB::SubDB( EvPoll &p,  UserDB &udb,  SessionMgr &smg ) noexcept
      : user_db( udb ), mgr( smg ), my_src_fd( -1 ), next_inbox( 0 ),
        sub_seqno( 0 ), sub_update_mono_time( 0 ), sub_tab( this->sub_list ),
        pat_tab( this->sub_list, p.sub_route.pre_seed ),
-       bloom( (uint32_t) udb.rand.next(), "sub", p.g_bloom_db ),
-       internal( (uint32_t) udb.rand.next(), "int", p.g_bloom_db ),
-       external( (uint32_t) udb.rand.next(), "ext", p.g_bloom_db )
+       bloom( (uint32_t) udb.rand.next(), "node", p.g_bloom_db ),
+       console( (uint32_t) udb.rand.next(), "console", p.g_bloom_db ),
+       ipc( (uint32_t) udb.rand.next(), "ipc", p.g_bloom_db )
 {
 }
 
@@ -74,56 +74,56 @@ SubDB::update_bloom( SubArgs &ctx ) noexcept
       ctx.resize_bloom  = this->bloom.add( ctx.hash );
       ctx.bloom_updated = true;
     }
-    if ( ( ctx.flags & INTERNAL_SUB ) != 0 &&
-         ctx.internal_count == 1 && ctx.internal_coll == 0 )
-      ctx.resize_bloom |= this->internal.add( ctx.hash );
-    if ( ( ctx.flags & EXTERNAL_SUB ) != 0 &&
-         ctx.external_count == 1 && ctx.external_coll == 0 )
-      ctx.resize_bloom |= this->external.add( ctx.hash );
+    if ( ( ctx.flags & CONSOLE_SUB ) != 0 &&
+         ctx.console_count == 1 && ctx.console_coll == 0 )
+      ctx.resize_bloom |= this->console.add( ctx.hash );
+    if ( ( ctx.flags & IPC_SUB ) != 0 &&
+         ctx.ipc_count == 1 && ctx.ipc_coll == 0 )
+      ctx.resize_bloom |= this->ipc.add( ctx.hash );
   }
   else {
     if ( ctx.sub_count == 0 && ctx.sub_coll == 0 ) {
       this->bloom.del( ctx.hash );
       ctx.bloom_updated = true;
     }
-    if ( ( ctx.flags & INTERNAL_SUB ) != 0 &&
-         ctx.internal_count == 0 && ctx.internal_coll == 0 )
-      this->internal.del( ctx.hash );
-    if ( ( ctx.flags & EXTERNAL_SUB ) != 0 &&
-         ctx.external_count == 0 && ctx.external_coll == 0 )
-      this->external.del( ctx.hash );
+    if ( ( ctx.flags & CONSOLE_SUB ) != 0 &&
+         ctx.console_count == 0 && ctx.console_coll == 0 )
+      this->console.del( ctx.hash );
+    if ( ( ctx.flags & IPC_SUB ) != 0 &&
+         ctx.ipc_count == 0 && ctx.ipc_coll == 0 )
+      this->ipc.del( ctx.hash );
   }
 }
 
 /* my subscripion started */
 uint64_t
-SubDB::internal_sub_start( const char *sub,  uint16_t sublen,
+SubDB::console_sub_start( const char *sub,  uint16_t sublen,
                            SubOnMsg *cb ) noexcept
 {
-  SubArgs ctx( sub, sublen, true, cb, this->sub_seqno + 1, INTERNAL_SUB, 0 );
+  SubArgs ctx( sub, sublen, true, cb, this->sub_seqno + 1, CONSOLE_SUB, 0 );
   return this->sub_start( ctx );
 }
 
 /* my subscripion stopped */
 uint64_t
-SubDB::internal_sub_stop( const char *sub,  uint16_t sublen ) noexcept
+SubDB::console_sub_stop( const char *sub,  uint16_t sublen ) noexcept
 {
-  SubArgs ctx( sub, sublen, false, NULL, 0, INTERNAL_SUB, 0 );
+  SubArgs ctx( sub, sublen, false, NULL, 0, CONSOLE_SUB, 0 );
   return this->sub_stop( ctx );
 }
-/* my subscripion started on an external tport */
+/* my subscripion started on an ipc tport */
 uint64_t
-SubDB::external_sub_start( NotifySub &sub,  uint32_t tport_id ) noexcept
+SubDB::ipc_sub_start( NotifySub &sub,  uint32_t tport_id ) noexcept
 {
   SubArgs ctx( sub.subject, sub.subject_len, true, NULL, this->sub_seqno + 1,
-               EXTERNAL_SUB, tport_id, sub.subj_hash );
+               IPC_SUB, tport_id, sub.subj_hash );
   return this->sub_start( ctx );
 }
-/* my subscripion stopped on an external tport */
+/* my subscripion stopped on an ipc tport */
 uint64_t
-SubDB::external_sub_stop( NotifySub &sub,  uint32_t tport_id ) noexcept
+SubDB::ipc_sub_stop( NotifySub &sub,  uint32_t tport_id ) noexcept
 {
-  SubArgs ctx( sub.subject, sub.subject_len, false, NULL, 0, EXTERNAL_SUB,
+  SubArgs ctx( sub.subject, sub.subject_len, false, NULL, 0, IPC_SUB,
                tport_id, sub.subj_hash );
   return this->sub_stop( ctx );
 }
@@ -155,12 +155,12 @@ SubDB::fwd_sub( SubArgs &ctx ) noexcept
   m.close( e.sz, h, CABA_RTR_ALERT );
   m.sign( s.msg, s.len(), *this->user_db.session_key );
 
-  if ( ( ctx.flags & INTERNAL_SUB ) != 0 ) {
-    rte = this->user_db.external_transport;
+  if ( ( ctx.flags & CONSOLE_SUB ) != 0 ) {
+    rte = this->user_db.ipc_transport;
     if ( rte != NULL ) {
       NotifySub nsub( ctx.sub, ctx.sublen, ctx.hash, this->my_src_fd,
                       false, 'M');
-      nsub.bref = &this->internal;
+      nsub.bref = &this->console;
       if ( ctx.is_start )
         rte->sub_route.do_notify_sub( nsub );
       else
@@ -170,7 +170,7 @@ SubDB::fwd_sub( SubArgs &ctx ) noexcept
   size_t count = this->user_db.transport_tab.count;
   for ( size_t i = 0; i < count; i++ ) {
     TransportRoute * rte = this->user_db.transport_tab.ptr[ i ];
-    if ( ! rte->is_set( TPORT_IS_EXTERNAL ) ) {
+    if ( ! rte->is_set( TPORT_IS_IPC ) ) {
       EvPublish pub( s.msg, s.len(), NULL, 0, m.msg, m.len(),
                      rte->sub_route, this->my_src_fd, h,
                      CABA_TYPE_ID, 'p' );
@@ -470,7 +470,7 @@ SubDB::recv_sub_start( const MsgFramePublish &pub,  UserBridge &n,
 
     dec.get_ival<uint32_t>( FID_SUBJ_HASH, hash );
     n.bloom.add( hash );
-    TransportRoute *rte = this->user_db.external_transport;
+    TransportRoute *rte = this->user_db.ipc_transport;
     if ( rte != NULL ) {
       UserRoute & u_rte = *n.user_route;
       NotifySub   nsub( sub, sublen, hash, u_rte.mcast_fd, false, 'M' );
@@ -495,7 +495,7 @@ SubDB::recv_sub_stop( const MsgFramePublish &pub,  UserBridge &n,
 
     dec.get_ival<uint32_t>( FID_SUBJ_HASH, hash );
     n.bloom.del( hash );
-    TransportRoute *rte = this->user_db.external_transport;
+    TransportRoute *rte = this->user_db.ipc_transport;
     if ( rte != NULL ) {
       UserRoute & u_rte = *n.user_route;
       NotifySub   nsub( sub, sublen, hash, u_rte.mcast_fd, false, 'M' );
@@ -547,33 +547,32 @@ SubDB::recv_resub_result( const MsgFramePublish &,  UserBridge &,
 void
 SubDB::resize_bloom( void ) noexcept
 {
-  bool bloom_resize    = this->bloom.bits->test_resize(),
-       internal_resize = this->internal.bits->test_resize(),
-       external_resize = this->external.bits->test_resize();;
+  bool bloom_resize   = this->bloom.bits->test_resize(),
+       console_resize = this->console.bits->test_resize(),
+       ipc_resize     = this->ipc.bits->test_resize();;
   BloomBits * b;
 
   if ( bloom_resize ) {
     b = this->bloom.bits->resize( this->bloom.bits, this->bloom.bits->seed );
     this->bloom.bits = b;
-    this->index_bloom( *b, INTERNAL_SUB | EXTERNAL_SUB );
+    this->index_bloom( *b, CONSOLE_SUB | IPC_SUB );
     if ( debug_sub )
       print_bloom( *b );
     this->user_db.events.resize_bloom( (uint32_t) b->count );
     this->notify_bloom_update( this->bloom );
   }
-  if ( internal_resize ) {
-    b = this->internal.bits->resize( this->internal.bits,
-                                     this->internal.bits->seed );
-    this->internal.bits = b;
-    this->index_bloom( *b, INTERNAL_SUB );
-    this->notify_bloom_update( this->internal );
+  if ( console_resize ) {
+    b = this->console.bits->resize( this->console.bits,
+                                    this->console.bits->seed );
+    this->console.bits = b;
+    this->index_bloom( *b, CONSOLE_SUB );
+    this->notify_bloom_update( this->console );
   }
-  if ( external_resize ) {
-    b = this->external.bits->resize( this->external.bits,
-                                     this->external.bits->seed );
-    this->external.bits = b;
-    this->index_bloom( *b, EXTERNAL_SUB );
-    this->notify_bloom_update( this->external );
+  if ( ipc_resize ) {
+    b = this->ipc.bits->resize( this->ipc.bits, this->ipc.bits->seed );
+    this->ipc.bits = b;
+    this->index_bloom( *b, IPC_SUB );
+    this->notify_bloom_update( this->ipc );
   }
 
   if ( bloom_resize ) {
@@ -598,7 +597,7 @@ SubDB::resize_bloom( void ) noexcept
     size_t count = this->user_db.transport_tab.count;
     for ( size_t i = 0; i < count; i++ ) {
       TransportRoute * rte = this->user_db.transport_tab.ptr[ i ];
-      if ( ! rte->is_set( TPORT_IS_EXTERNAL ) ) {
+      if ( ! rte->is_set( TPORT_IS_IPC ) ) {
         EvPublish pub( Z_BLM, Z_BLM_SZ, NULL, 0, m.msg, m.len(),
                        rte->sub_route, this->my_src_fd,
                        blm_h, CABA_TYPE_ID, 'p' );
@@ -622,13 +621,13 @@ SubDB::index_bloom( BloomBits &bits,  uint32_t flags ) noexcept
   SubRoute * rt;
   PatRoute * pat;
 
-  /* bloom route has inbox and mcast, these are not needed in internal, external
+  /* bloom route has inbox and mcast, these are not needed in console, ipc
    * because they are routed in sys_bloom */
-  if ( flags == ( INTERNAL_SUB | EXTERNAL_SUB ) ) {
+  if ( flags == ( CONSOLE_SUB | IPC_SUB ) ) {
     bits.add( this->mgr.ibx.hash );
     bits.add( this->mgr.mch.hash );
   }
-  /* test() separates internal, external and also adds to bloom */
+  /* test() separates console, ipc and also adds to bloom */
   if ( (rt = this->sub_tab.tab.first( loc )) != NULL ) {
     do {
       if ( rt->test( flags ) )

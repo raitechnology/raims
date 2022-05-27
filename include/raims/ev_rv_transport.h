@@ -55,6 +55,8 @@ struct EvRvTransportListen : public sassrv::EvRvListen {
   EvRvTransportListen( kv::EvPoll &p,  TransportRoute &r ) noexcept;
 
   /* sassrv rv listen */
+  virtual EvSocket *accept( void ) noexcept;
+  virtual int listen( const char *ip,  int port,  int opts ) noexcept;
   virtual int start_host( sassrv::RvHost &host ) noexcept final;
   virtual int stop_host( sassrv::RvHost &host ) noexcept final;
 };

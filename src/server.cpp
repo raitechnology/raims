@@ -87,71 +87,6 @@ TermCallback::on_close( void ) noexcept
 {
 }
 
-#if 0
-struct SubNotify : public RouteNotify {
-  EvTerminal * term;
-  SubNotify( EvTerminal *t ) : term( t ) {}
-  void * operator new( size_t, void *ptr ) { return ptr; }
-
-  virtual void on_sub( uint32_t h,  const char *sub,  size_t len,
-                       uint32_t fd,  uint32_t rcnt,  char src_type,
-                       const char *rep,  size_t rlen ) noexcept;
-  virtual void on_unsub( uint32_t h,  const char *sub,  size_t len,
-                         uint32_t fd,  uint32_t rcnt,
-                         char src_type ) noexcept;
-  virtual void on_psub( uint32_t h,  const char *pattern,  size_t len,
-                        const char *prefix,  uint8_t prefix_len,
-                        uint32_t fd,  uint32_t rcnt,
-                        char src_type ) noexcept;
-  virtual void on_punsub( uint32_t h,  const char *pattern,  size_t len,
-                          const char *prefix,  uint8_t prefix_len,
-                          uint32_t fd,  uint32_t rcnt,
-                          char src_type ) noexcept;
-  virtual void on_reassert( uint32_t fd,  RouteVec<RouteSub> &sub_db,
-                            RouteVec<RouteSub> &pat_db ) noexcept;
-};
-void
-SubNotify::on_sub( uint32_t ,  const char *sub,  size_t len,
-                   uint32_t fd,  uint32_t rcnt,  char ,
-                   const char *,  size_t ) noexcept
-{
-  this->term->printf( "%.*son_sub%.*s( %.*s, fd=%u, rcnt=%u )%.*s\n",
-                      bz, bc, gz, gc, (int) len, sub, fd, rcnt, nz, nc );
-}
-void
-SubNotify::on_unsub( uint32_t ,  const char *sub,  size_t len,
-                  uint32_t fd,  uint32_t rcnt,  char ) noexcept
-{
-  this->term->printf( "%.*son_unsub%.*s( %.*s, fd=%u, rcnt=%u )%.*s\n",
-                      bz, bc, gz, gc, (int) len, sub, fd, rcnt, nz, nc );
-}
-void
-SubNotify::on_psub( uint32_t,  const char *pattern,  size_t len,
-                 const char *prefix,  uint8_t prefix_len,
-                 uint32_t fd,  uint32_t rcnt,  char ) noexcept
-{
-  this->term->printf( "%.*son_psub%.*s( %.*s, %.*s, fd=%u, rcnt=%u )%.*s\n",
-                      bz, bc, gz, gc, (int) len, pattern,
-                      (int) prefix_len, prefix, fd, rcnt, nz, nc );
-}
-void
-SubNotify::on_punsub( uint32_t,  const char *pattern,  size_t len,
-                   const char *prefix,  uint8_t prefix_len,
-                   uint32_t fd,  uint32_t rcnt, char ) noexcept
-{
-  this->term->printf( "%.*son_punsub%.*s( %.*s, %.*s, fd=%u, rcnt=%u )%.*s\n",
-                      bz, bc, gz, gc, (int) len, pattern, (int) prefix_len,
-                      prefix, fd, rcnt, nz, nc );
-}
-void
-SubNotify::on_reassert( uint32_t fd,  RouteVec<RouteSub> &,
-                     RouteVec<RouteSub> & ) noexcept
-{
-  this->term->printf( "%.*son_reassert%.*s( %u )%.*s\n",
-                      bz, bc, gz, gc, fd, nz, nc );
-}
-#endif
-
 int
 main( int argc, char *argv[] )
 {
@@ -166,6 +101,8 @@ main( int argc, char *argv[] )
              * lo = get_arg( argc, argv, 1, "-l", NULL ),
              * fl = get_arg( argc, argv, 1, "-f", NULL ),
              * ip = get_arg( argc, argv, 1, "-i", NULL ),
+             * ma = get_arg( argc, argv, 1, "-m", NULL ),
+             * db = get_arg( argc, argv, 1, "-D", NULL ),
              * co = get_arg( argc, argv, 0, "-c", NULL ),
              * he = get_arg( argc, argv, 0, "-h", NULL );
   if ( he != NULL ) {
@@ -176,6 +113,8 @@ main( int argc, char *argv[] )
             "   -l file       : log to file\n"
             "   -f flags      : debug flags to set\n"
             "   -i name       : connect with ipc name\n"
+            "   -m map        : attach to kv shm map\n"
+            "   -D dbnum      : default db num\n"
             "   -c            : run with console\n"
             "Connect or listen user to service on transports\n"
             "RaiMS version %s\n",
@@ -210,7 +149,7 @@ main( int argc, char *argv[] )
     return 1;
 
   EvPoll poll;
-  EvShm  shm;
+  EvShm  shm( "ms_server" );
   SignalHandler sighndl;
   Logger & log = *Logger::create();
   sighndl.install();
@@ -273,7 +212,7 @@ main( int argc, char *argv[] )
     }
   }
   if ( status == 0 ) {
-    if ( ! sess.add_external_transport( *svc, ip ) ||
+    if ( ! sess.add_ipc_transport( *svc, ip, ma, db ? atoi( db ) : 0 ) ||
          ! sess.add_startup_transports( *svc ) )
       status = -1;
   }

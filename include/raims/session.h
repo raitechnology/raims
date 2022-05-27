@@ -156,13 +156,14 @@ struct PubPtpData : public PubMcastData {
 struct EvTcpTransport;
 struct StringTab;
 struct TelnetListen;
+struct WebListen;
 struct SessionMgr;
 
-struct BridgeRoute : public kv::EvSocket {
+struct IpcRoute : public kv::EvSocket {
   SessionMgr & mgr;
   UserDB     & user_db;
   SubDB      & sub_db;
-  BridgeRoute( kv::EvPoll &p,  SessionMgr &m ) noexcept;
+  IpcRoute( kv::EvPoll &p,  SessionMgr &m ) noexcept;
   /* EvSocket */
   virtual bool on_msg( kv::EvPublish &pub ) noexcept;
   bool on_inbox( const MsgFramePublish &pub,  UserBridge &n,
@@ -173,11 +174,11 @@ struct BridgeRoute : public kv::EvSocket {
   virtual void release( void ) noexcept;
 };
 
-struct InternalRoute : public kv::EvSocket {
+struct ConsoleRoute : public kv::EvSocket {
   SessionMgr & mgr;
   UserDB     & user_db;
   SubDB      & sub_db;
-  InternalRoute( kv::EvPoll &p,  SessionMgr &m ) noexcept;
+  ConsoleRoute( kv::EvPoll &p,  SessionMgr &m ) noexcept;
   /* EvSocket */
   virtual bool on_msg( kv::EvPublish &pub ) noexcept;
   virtual void write( void ) noexcept;
@@ -187,8 +188,8 @@ struct InternalRoute : public kv::EvSocket {
 };
 
 struct SessionMgr : public kv::EvSocket {
-  BridgeRoute             external;       /* network -> rv sub, ds sub, etc */
-  InternalRoute           internal;       /* rv pub, ds pub -> internal sub */
+  IpcRoute                ipc_rt;         /* network -> rv sub, ds sub, etc */
+  ConsoleRoute            console_rt;     /* rv pub, ds pub -> console sub */
   ConfigTree            & tree;           /* config db */
   ConfigTree::User      & user;           /* my user */
   ConfigTree::Service   & svc;            /* this transport */
@@ -206,7 +207,9 @@ struct SessionMgr : public kv::EvSocket {
   Console                 console;
   kv::Logger            & log;
   TelnetListen          * telnet;
-  ConfigTree::Transport * telnet_tport;
+  WebListen             * web;
+  ConfigTree::Transport * telnet_tport,
+                        * web_tport;
   uint8_t                 tcp_accept_sock_type, /* free list sock types */
                           tcp_connect_sock_type;
 
@@ -218,8 +221,8 @@ struct SessionMgr : public kv::EvSocket {
                       bool is_service ) noexcept;
   bool add_transport2( ConfigTree::Service &s,  ConfigTree::Transport &t,
                        bool is_service,  TransportRoute *&rte ) noexcept;
-  bool add_external_transport( ConfigTree::Service &s,
-                               const char *ipc_name ) noexcept;
+  bool add_ipc_transport( ConfigTree::Service &s,  const char *ipc,
+                          const char *map,  uint8_t db ) noexcept;
   bool start_transport( TransportRoute &rte,  bool is_service ) noexcept;
   bool add_startup_transports( ConfigTree::Service &s ) noexcept;
   uint32_t shutdown_transport( ConfigTree::Service &s,
@@ -259,10 +262,11 @@ struct SessionMgr : public kv::EvSocket {
   void send_ack( const MsgFramePublish &pub,  UserBridge &,
                  const MsgHdrDecoder &dec,  const char *suf ) noexcept;
   bool forward_inbox( kv::EvPublish &pub ) noexcept;
-  bool forward_external( TransportRoute &src_rte,
-                         kv::EvPublish &pub ) noexcept;
+  bool forward_ipc( TransportRoute &src_rte, kv::EvPublish &pub ) noexcept;
   bool create_telnet( ConfigTree::Transport &t ) noexcept;
+  bool create_web( ConfigTree::Transport &t ) noexcept;
   uint32_t shutdown_telnet( void ) noexcept;
+  uint32_t shutdown_web( void ) noexcept;
   /* subscribed data recvd */
   /*void on_data( const SubMsgData &val ) noexcept;*/
 };

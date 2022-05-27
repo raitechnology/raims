@@ -17,3 +17,22 @@ EvRedisTransportListen::EvRedisTransportListen( kv::EvPoll &p,
 {
   this->notify = &r;
 }
+
+EvSocket *
+EvRedisTransportListen::accept( void ) noexcept
+{
+  EvSocket *c = this->EvRedisListen::accept();
+  if ( c != NULL )
+    this->rte.set_peer_name( *c, "redis.acc" );
+  return c;
+}
+
+int
+EvRedisTransportListen::listen( const char *ip,  int port,  int opts ) noexcept
+{
+  int res = this->EvRedisListen::listen( ip, port, opts );
+  if ( res == 0 )
+    this->rte.set_peer_name( *this, "redis.list" );
+  return res;
+}
+

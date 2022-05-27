@@ -23,8 +23,8 @@ struct PatternArgs {
                          flags,
                          tport_id,
                          sub_count,
-                         internal_count,
-                         external_count;
+                         console_count,
+                         ipc_count;
   uint64_t               seqno;
   const kv::PatternCvt & cvt;
   kv::RouteLoc           loc;
@@ -38,8 +38,8 @@ struct PatternArgs {
                bool start, SubOnMsg *on_msg,  uint64_t n,  uint32_t fl,
                uint32_t tp,  uint32_t h = 0 ) : 
     pat( p ), patlen( len ), is_start( start ), hash( h ),
-    flags( fl ), tport_id( tp ), sub_count( 0 ), internal_count( 0 ),
-    external_count( 0 ), seqno( n ), cvt( c ), rt( 0 ), cb( on_msg ),
+    flags( fl ), tport_id( tp ), sub_count( 0 ), console_count( 0 ),
+    ipc_count( 0 ), seqno( n ), cvt( c ), rt( 0 ), cb( on_msg ),
     bloom_updated( false ), resize_bloom( false ), sub_coll( false ) {}
 
   bool cvt_wild( kv::PatternCvt &cvt,  const uint32_t *seed,

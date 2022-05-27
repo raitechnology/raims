@@ -99,20 +99,20 @@ SubDB::update_bloom( PatternArgs &ctx ) noexcept
       ctx.resize_bloom  = this->add_bloom( ctx, this->bloom );
       ctx.bloom_updated = true;
     }
-    if ( ( ctx.flags & INTERNAL_SUB ) != 0 && ctx.internal_count == 1 )
-      ctx.resize_bloom |= this->add_bloom( ctx, this->internal );
-    if ( ( ctx.flags & EXTERNAL_SUB ) != 0 && ctx.external_count == 1 )
-      ctx.resize_bloom |= this->add_bloom( ctx, this->external );
+    if ( ( ctx.flags & CONSOLE_SUB ) != 0 && ctx.console_count == 1 )
+      ctx.resize_bloom |= this->add_bloom( ctx, this->console );
+    if ( ( ctx.flags & IPC_SUB ) != 0 && ctx.ipc_count == 1 )
+      ctx.resize_bloom |= this->add_bloom( ctx, this->ipc );
   }
   else {
     if ( ctx.sub_count == 0 ) {
       this->del_bloom( ctx, this->bloom );
       ctx.bloom_updated = true;
     }
-    if ( ( ctx.flags & INTERNAL_SUB ) != 0 && ctx.internal_count == 0 )
-      this->del_bloom( ctx, this->internal );
-    if ( ( ctx.flags & EXTERNAL_SUB ) != 0 && ctx.external_count == 0 )
-      this->del_bloom( ctx, this->external );
+    if ( ( ctx.flags & CONSOLE_SUB ) != 0 && ctx.console_count == 0 )
+      this->del_bloom( ctx, this->console );
+    if ( ( ctx.flags & IPC_SUB ) != 0 && ctx.ipc_count == 0 )
+      this->del_bloom( ctx, this->ipc );
   }
 }
 
@@ -143,42 +143,42 @@ PatternArgs::cvt_wild( PatternCvt &cvt,  const uint32_t *seed,
 }
 
 uint64_t
-SubDB::internal_psub_start( const char *pat,  uint16_t patlen,  PatternFmt fmt,
-                            SubOnMsg *cb ) noexcept
+SubDB::console_psub_start( const char *pat,  uint16_t patlen,  PatternFmt fmt,
+                           SubOnMsg *cb ) noexcept
 {
   PatternCvt cvt;
   PatternArgs ctx( pat, patlen, cvt, true, cb, this->sub_seqno + 1,
-                   INTERNAL_SUB, 0 );
+                   CONSOLE_SUB, 0 );
   if ( ! ctx.cvt_wild( cvt, this->pat_tab.seed, fmt ) )
     return 0;
   return this->psub_start( ctx );
 }
 
 uint64_t
-SubDB::internal_psub_stop( const char *pat,  uint16_t patlen,
-                           PatternFmt fmt ) noexcept
+SubDB::console_psub_stop( const char *pat,  uint16_t patlen,
+                          PatternFmt fmt ) noexcept
 {
   PatternCvt cvt;
-  PatternArgs ctx( pat, patlen, cvt, false, NULL, 0, INTERNAL_SUB, 0 );
+  PatternArgs ctx( pat, patlen, cvt, false, NULL, 0, CONSOLE_SUB, 0 );
   if ( ! ctx.cvt_wild( cvt, this->pat_tab.seed, fmt ) )
     return 0;
   return this->psub_stop( ctx );
 }
 
 uint64_t
-SubDB::external_psub_start( NotifyPattern &pat,  uint32_t tport_id ) noexcept
+SubDB::ipc_psub_start( NotifyPattern &pat,  uint32_t tport_id ) noexcept
 {
   PatternArgs ctx( pat.pattern, pat.pattern_len, pat.cvt, true, NULL,
-                   this->sub_seqno + 1, EXTERNAL_SUB, tport_id,
+                   this->sub_seqno + 1, IPC_SUB, tport_id,
                    pat.prefix_hash );
   return this->psub_start( ctx );
 }
 
 uint64_t
-SubDB::external_psub_stop( NotifyPattern &pat,  uint32_t tport_id ) noexcept
+SubDB::ipc_psub_stop( NotifyPattern &pat,  uint32_t tport_id ) noexcept
 {
   PatternArgs ctx( pat.pattern, pat.pattern_len, pat.cvt, false, NULL, 0,
-                   EXTERNAL_SUB, tport_id, pat.prefix_hash );
+                   IPC_SUB, tport_id, pat.prefix_hash );
   return this->psub_stop( ctx );
 }
 
@@ -211,12 +211,12 @@ SubDB::fwd_psub( PatternArgs &ctx ) noexcept
   m.close( e.sz, h, CABA_RTR_ALERT );
   m.sign( s.msg, s.len(), *this->user_db.session_key );
 
-  if ( ( ctx.flags & INTERNAL_SUB ) != 0 ) {
-    rte = this->user_db.external_transport;
+  if ( ( ctx.flags & CONSOLE_SUB ) != 0 ) {
+    rte = this->user_db.ipc_transport;
     if ( rte != NULL ) {
       NotifyPattern npat( ctx.cvt, ctx.pat, ctx.patlen, ctx.hash,
                           this->my_src_fd, false, 'M' );
-      npat.bref = &this->internal;
+      npat.bref = &this->console;
       if ( ctx.is_start )
         rte->sub_route.do_notify_psub( npat );
       else
@@ -226,7 +226,7 @@ SubDB::fwd_psub( PatternArgs &ctx ) noexcept
   size_t count = this->user_db.transport_tab.count;
   for ( size_t i = 0; i < count; i++ ) {
     rte = this->user_db.transport_tab.ptr[ i ];
-    if ( ! rte->is_set( TPORT_IS_EXTERNAL ) ) {
+    if ( ! rte->is_set( TPORT_IS_IPC ) ) {
       EvPublish pub( s.msg, s.len(), NULL, 0, m.msg, m.len(),
                      rte->sub_route, this->my_src_fd, h, CABA_TYPE_ID, 'p' );
       rte->forward_to_connected_auth( pub );
@@ -365,9 +365,9 @@ PatRoute::start( PatternArgs &ctx ) noexcept
     this->start_seqno = ctx.seqno;
     this->on_data     = ctx.cb;
     this->ref.init( ctx.flags, ctx.tport_id );
-    ctx.sub_count      = 1;
-    ctx.internal_count = this->ref.internal_ref;
-    ctx.external_count = this->ref.external_refs;
+    ctx.sub_count     = 1;
+    ctx.console_count = this->ref.console_ref;
+    ctx.ipc_count     = this->ref.ipc_refs;
     return true;
   }
   if ( this->md != NULL )
@@ -381,12 +381,12 @@ bool
 PatRoute::add( PatternArgs &ctx ) noexcept
 {
   if ( this->ref.add( ctx.flags, ctx.tport_id ) ) {
-    if ( ( ctx.flags & INTERNAL_SUB ) != 0 )
+    if ( ( ctx.flags & CONSOLE_SUB ) != 0 )
       this->on_data = ctx.cb;
-    ctx.sub_count      = this->ref.ref_count();
-    ctx.internal_count = this->ref.internal_ref;
-    ctx.external_count = this->ref.external_refs;
-    ctx.seqno          = this->start_seqno;
+    ctx.sub_count     = this->ref.ref_count();
+    ctx.console_count = this->ref.console_ref;
+    ctx.ipc_count     = this->ref.ipc_refs;
+    ctx.seqno         = this->start_seqno;
     return true;
   }
   return false;
@@ -396,11 +396,11 @@ bool
 PatRoute::rem( PatternArgs &ctx ) noexcept
 {
   if ( this->ref.rem( ctx.flags, ctx.tport_id ) ) {
-    if ( ( ctx.flags & INTERNAL_SUB ) != 0 )
+    if ( ( ctx.flags & CONSOLE_SUB ) != 0 )
       this->on_data = NULL;
-    ctx.sub_count      = this->ref.ref_count();
-    ctx.internal_count = this->ref.internal_ref;
-    ctx.external_count = this->ref.external_refs;
+    ctx.sub_count     = this->ref.ref_count();
+    ctx.console_count = this->ref.console_ref;
+    ctx.ipc_count     = this->ref.ipc_refs;
     if ( ctx.sub_count == 0 )
       return true;
     ctx.seqno = this->start_seqno;
@@ -465,7 +465,7 @@ SubDB::recv_psub_start( const MsgFramePublish &pub,  UserBridge &n,
                                  d.u.shard );
       }
     }
-    TransportRoute *rte = this->user_db.external_transport;
+    TransportRoute *rte = this->user_db.ipc_transport;
     if ( rte != NULL ) {
       UserRoute   & u_rte = *n.user_route;
       NotifyPattern npat( ctx.cvt, ctx.pat, ctx.patlen, ctx.hash,
@@ -507,7 +507,7 @@ SubDB::recv_psub_stop( const MsgFramePublish &pub,  UserBridge &n,
         n.bloom.del_shard_route( (uint16_t) cvt.prefixlen, ctx.hash,
                                  d.u.shard );
     }
-    TransportRoute *rte = this->user_db.external_transport;
+    TransportRoute *rte = this->user_db.ipc_transport;
     if ( rte != NULL ) {
       UserRoute   & u_rte = *n.user_route;
       NotifyPattern npat( cvt, ctx.pat, ctx.patlen, ctx.hash,

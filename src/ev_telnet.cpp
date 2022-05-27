@@ -127,20 +127,20 @@ dbg_buf( const char *w,  const char *out_buf,  size_t out_len ) noexcept
   fflush( fp );
 }
 #endif
-bool
+EvSocket *
 TelnetListen::accept( void ) noexcept
 {
   TelnetService *c =
     this->poll.get_free_list<TelnetService>( this->accept_sock_type );
   if ( c == NULL )
-    return false;
+    return NULL;
   if ( ! this->accept2( *c, "telnet" ) )
-    return false;
+    return NULL;
   c->init_state();
   c->console = this->console;
   this->console->term_list.push_tl( c );
   c->start();
-  return true;
+  return c;
 }
 
 TelnetService::TelnetService( EvPoll &p,  uint8_t t ) noexcept
