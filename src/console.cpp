@@ -2112,7 +2112,7 @@ Console::on_subs( ConsoleSubs &subs ) noexcept
   BitSpace users;
   this->table.count = subs.reply.count * ncols;
   SubListIter iter( this->sub_db.sub_list, 0, this->sub_db.sub_seqno );
-  this->table.count += iter.count();
+  this->table.count += iter.count() * ncols;
 
   TabPrint * tab = this->table.make( this->table.count );
   for ( bool ok = iter.first(); ok; ok = iter.next() ) {

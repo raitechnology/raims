@@ -645,6 +645,7 @@ CMakeLists.txt: .copr/Makefile
 	endif ()
 	add_library (raims STATIC $(libraims_cfile))
 	link_libraries (raims raids raikv raimd natsmd sassrv decnumber rdbparser linecook h3 lzf openpgm_st $${pcre2lib} $${ex_lib})
+	add_definitions(-DMS_VER=$(ver_build))
 	add_executable (ms_server $(ms_server_cfile))
 	add_executable (ms_gen_key $(ms_gen_key_cfile))
 	add_executable (kdftest $(kdftest_cfile))
