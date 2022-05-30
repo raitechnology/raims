@@ -251,7 +251,7 @@ struct SessionMgr : public kv::EvSocket {
   virtual void read( void ) noexcept;
   virtual void process( void ) noexcept;
   virtual void release( void ) noexcept;
-  MsgFrameStatus parse_msg_hdr( MsgFramePublish &fpub ) noexcept;
+  MsgFrameStatus parse_msg_hdr( MsgFramePublish &fpub,  bool is_ipc ) noexcept;
   void ignore_msg( const MsgFramePublish &fpub ) noexcept;
   void show_debug_msg( const MsgFramePublish &fpub,
                        const char *where ) noexcept;

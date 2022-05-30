@@ -328,7 +328,7 @@ SessionMgr::show_debug_msg( const MsgFramePublish &fpub,
 }
 
 MsgFrameStatus
-SessionMgr::parse_msg_hdr( MsgFramePublish &fpub ) noexcept
+SessionMgr::parse_msg_hdr( MsgFramePublish &fpub,  bool is_ipc ) noexcept
 {
   MsgHdrDecoder & dec = fpub.dec;
 
@@ -339,6 +339,8 @@ SessionMgr::parse_msg_hdr( MsgFramePublish &fpub ) noexcept
   PublishType  type  = MCAST_SUBJECT;
   CabaTypeFlag tflag = dec.msg->caba.type_flag();
   if ( tflag != CABA_MCAST ) {
+    if ( is_ipc )
+      return FRAME_STATUS_MY_MSG;
     uint8_t i;
     /* an inbox subject */
     if ( tflag == CABA_INBOX ) {
@@ -394,16 +396,21 @@ SessionMgr::parse_msg_hdr( MsgFramePublish &fpub ) noexcept
       }
     }
     if ( type == U_NORMAL ) {
-      printf( "?? %.*s %s %s\n", (int) fpub.subject_len, fpub.subject,
-              caba_type_flag_str( tflag ), publish_type_to_string( type ) );
+      printf( "?? %.*s %s %s (%x)\n", (int) fpub.subject_len, fpub.subject,
+              caba_type_flag_str( tflag ), publish_type_to_string( type ),
+              fpub.subj_hash );
+      for ( i = 0; i < fpub.prefix_cnt; i++ ) {
+        printf( "[%u] = %u.%x, type %s\n", i, fpub.prefix[ i ], fpub.hash[ i ],
+                publish_type_to_string( 
+                  this->u_tab.lookup( fpub.hash[ i ], fpub.prefix[ i ] ) ) );
+      }
     }
   }
   dec.type = type;
 
   fpub.n = this->user_db.lookup_user( fpub, dec );
-  if ( fpub.status == FRAME_STATUS_MY_MSG )
-    return FRAME_STATUS_MY_MSG;
-
+  /*if ( fpub.status == FRAME_STATUS_MY_MSG )
+    return FRAME_STATUS_MY_MSG;*/
   return fpub.status;
 }
 
@@ -424,7 +431,7 @@ IpcRoute::on_msg( EvPublish &pub ) noexcept
   if ( fpub.dec.type == UNKNOWN_SUBJECT ) {
     if ( fpub.status != FRAME_STATUS_UNKNOWN ) /* bad msg or no user */
       return true;
-    if ( this->mgr.parse_msg_hdr( fpub ) == FRAME_STATUS_MY_MSG )
+    if ( this->mgr.parse_msg_hdr( fpub, true ) == FRAME_STATUS_MY_MSG )
       return true;
   }
   //const PublishType type = fpub.dec.type;
@@ -437,7 +444,7 @@ IpcRoute::on_msg( EvPublish &pub ) noexcept
     return true;
   }
   if ( debug_msg )
-    this->mgr.show_debug_msg( fpub, "ext_rte" );
+    this->mgr.show_debug_msg( fpub, "ipc_rte" );
 
   UserBridge & n = *fpub.n;
   MsgHdrDecoder & dec = fpub.dec;
@@ -479,7 +486,7 @@ IpcRoute::on_msg( EvPublish &pub ) noexcept
     reply    = dec.mref[ FID_REPLY ].fptr;
     replylen = dec.mref[ FID_REPLY ].fsize;
   }
-  d_sess( "-> ext_rte: %.*s reply %.*s (len=%u, from %s, fd %d)\n",
+  d_sess( "-> ipc_rte: %.*s reply %.*s (len=%u, from %s, fd %d)\n",
           (int) fpub.subject_len, fpub.subject,
           (int) replylen, (char *) reply,
           fpub.msg_len, fpub.rte.name, fpub.src_route );
@@ -668,7 +675,7 @@ SessionMgr::on_msg( EvPublish &pub ) noexcept
   if ( fpub.dec.type == UNKNOWN_SUBJECT ) {
     if ( fpub.status != FRAME_STATUS_UNKNOWN ) /* bad msg or no user */
       return true;
-    if ( this->parse_msg_hdr( fpub ) == FRAME_STATUS_MY_MSG )
+    if ( this->parse_msg_hdr( fpub, false ) == FRAME_STATUS_MY_MSG )
       return true;
   }
   /* adj messages may occur before user is known */
