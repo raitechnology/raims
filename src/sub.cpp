@@ -860,6 +860,14 @@ AnyMatch::any_size( uint16_t sublen,  uint32_t uid_cnt ) noexcept
   return len;
 }
 
+void
+AnyMatchTab::reset( void ) noexcept
+{
+  this->tab.reset();
+  this->ht->clear_all();
+  this->max_off = 0;
+}
+
 AnyMatch *
 AnyMatchTab::get_match( const char *sub,  uint16_t sublen,  uint32_t h,
                         const uint32_t *pre_seed,  uint32_t max_uid ) noexcept
@@ -872,10 +880,7 @@ AnyMatchTab::get_match( const char *sub,  uint16_t sublen,  uint32_t h,
     if ( ::memcmp( any->sub, sub, sublen ) == 0 && any->sub[ sublen ] == '\0' &&
          any->max_uid >= max_uid )
       return any;
-    /* collision, toss tab */
-    this->tab.reset();
-    this->ht->clear_all();
-    this->max_off = 0;
+    this->reset();
     this->ht->find( h, pos );
   }
   size_t     sz = AnyMatch::any_size( sublen, max_uid ) / 8;
@@ -889,18 +894,34 @@ AnyMatchTab::get_match( const char *sub,  uint16_t sublen,  uint32_t h,
 }
 
 UserBridge *
+AnyMatch::get_destination( UserDB &user_db ) noexcept
+{
+  if ( this->set_count > 0 ) {
+    BitSetT<uint64_t> set( this->bits );
+    bool b = false;
+    uint32_t uid, pos = 0;
+    if ( this->set_count > 1 )
+      pos = user_db.rand.next() % this->set_count;
+    if ( pos == 0 )
+      b = set.first( uid, this->max_uid );
+    else
+      b = set.index( uid, pos, this->max_uid );
+    if ( b )
+      return user_db.bridge_tab[ uid ];
+  }
+  return NULL;
+}
+
+AnyMatch *
 SubDB::any_match( const char *sub,  uint16_t sublen,  uint32_t h ) noexcept
 {
-  uint32_t     max_uid = this->user_db.next_uid,
-               uid     = 0,
-               pos;
+  uint32_t     max_uid = this->user_db.next_uid;
   AnyMatch   * any;
-  UserBridge * n;
   any = this->any_tab.get_match( sub, sublen, h, this->pat_tab.seed, max_uid );
-  BitSetT<uint64_t> set( any->bits );
   if ( any->mono_time < this->sub_update_mono_time ) {
-    for ( uid = 1; uid < max_uid; uid++ ) {
-      n = this->user_db.bridge_tab[ uid ];
+    BitSetT<uint64_t> set( any->bits );
+    for ( uint32_t uid = 1; uid < max_uid; uid++ ) {
+      UserBridge * n = this->user_db.bridge_tab[ uid ];
       if ( n != NULL && n->is_set( AUTHENTICATED_STATE ) ) {
         if ( any->mono_time < n->sub_recv_mono_time ) {
           if ( any->match.match_sub( h, sub, sublen, n->bloom ) ) {
@@ -920,17 +941,5 @@ SubDB::any_match( const char *sub,  uint16_t sublen,  uint32_t h ) noexcept
     }
     any->mono_time = this->sub_update_mono_time;
   }
-  if ( any->set_count > 0 ) {
-    bool b = false;
-    if ( any->set_count == 1 ||
-         (pos = this->user_db.rand.next() % any->set_count) == 0 ) {
-      b = set.first( uid, any->max_uid );
-    }
-    else {
-      b = set.index( uid, pos, any->max_uid );
-    }
-    if ( b )
-      return this->user_db.bridge_tab[ uid ];
-  }
-  return NULL;
+  return any;
 }

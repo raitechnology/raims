@@ -55,8 +55,8 @@ enum SubFlags {
 
 struct SubRefs {
   static const uint32_t ALL_MASK = ~(uint32_t) 0;
-  uint32_t console_ref  : 1,
-           ipc_refs : 31;
+  uint32_t console_ref : 1,
+           ipc_refs    : 31;
   uint32_t tport_mask;
 
   void init( uint32_t flags,  uint32_t tport_id ) {
@@ -275,6 +275,9 @@ struct Pub {
   void init( bool is_inbox ) {
     this->seqno = ( is_inbox ? -1 : 0 );
   }
+  void copy( const Pub &p ) {
+    this->seqno = p.seqno;
+  }
   bool is_inbox( void ) const {
     return this->seqno < 0;
   }
@@ -283,7 +286,39 @@ struct Pub {
   }
 };
 
-typedef kv::RouteVec<Pub> PubTab;
+typedef kv::RouteVec<Pub> PubT;
+
+struct PubTab {
+  PubT pub1,
+       pub2,
+     * pub,
+     * pub_old;
+  PubTab() {
+    this->pub     = &this->pub1;
+    this->pub_old = &this->pub2;
+  }
+  Pub *upsert( uint32_t h,  const char *sub,  uint16_t sublen,
+               kv::RouteLoc &loc ) {
+    Pub * p = this->pub->upsert( h, sub, sublen, loc ), * p2;
+    if ( ! loc.is_new )
+      return p;
+    kv::RouteLoc loc2;
+    if ( (p2 = this->pub_old->find( h, sub, sublen, loc2 )) != NULL ) {
+      p->copy( *p2 );
+      loc.is_new = false;
+    }
+    return p;
+  }
+  /* limit size of pub sequences */
+  void flip( void ) {
+    PubT * p = this->pub;
+    if ( p->vec_size * sizeof( PubT::VecData ) > 1024 * 1024 ) {
+      this->pub_old->release();
+      this->pub = this->pub_old;
+      this->pub_old = p;
+    }
+  }
+};
 
 struct SeqnoSave {
   uint32_t save[ 4 ];
@@ -346,6 +381,16 @@ struct SubSeqno {
     this->seqno_ht     = NULL;
     this->tport_mask   = mask;
     return SEQNO_UID_FIRST;
+  }
+  void copy( SubSeqno &sub ) {
+    this->last_uid     = sub.last_uid;
+    this->last_seqno   = sub.last_seqno;
+    this->last_time    = sub.last_time;
+    this->start_seqno  = sub.start_seqno;
+    this->update_seqno = sub.update_seqno;
+    this->on_data      = sub.on_data;
+    this->seqno_ht     = sub.seqno_ht; sub.seqno_ht = NULL;
+    this->tport_mask   = sub.tport_mask;
   }
   /* check that seqno is next published by uid (or first) */
   SeqnoStatus update( uint32_t uid,  uint64_t seqno,  uint64_t time,
@@ -410,8 +455,53 @@ struct InboxSub {
   }
 };
 
-typedef kv::RouteVec<SubSeqno> SeqnoTab;
+typedef kv::RouteVec<SubSeqno> SeqnoT;
+
+struct SeqnoTab {
+  SeqnoT tab1,
+         tab2,
+       * tab,
+       * tab_old;
+
+  SeqnoTab() {
+    this->tab     = &this->tab1;
+    this->tab_old = &this->tab2;
+  }
+  SubSeqno *upsert( uint32_t h,  const char *sub,  uint16_t sublen,
+                    kv::RouteLoc &loc ) {
+    SubSeqno * p = this->tab->upsert( h, sub, sublen, loc ), * p2;
+    if ( ! loc.is_new )
+      return p;
+    kv::RouteLoc loc2;
+    if ( (p2 = this->tab_old->find( h, sub, sublen, loc2 )) != NULL ) {
+      p->copy( *p2 );
+      loc.is_new = false;
+    }
+    return p;
+  }
+  void remove( kv::RouteLoc &loc ) {
+    this->tab->remove( loc );
+  }
+  /* limit size of pub sequences */
+  void flip( void ) {
+    SeqnoT * p = this->tab;
+    if ( p->vec_size * sizeof( SeqnoT::VecData ) > 1024 * 1024 ) {
+      kv::RouteLoc loc;
+      for ( SubSeqno *s = this->tab_old->first( loc ); p != NULL;
+            this->tab_old->next( loc ) )
+        s->release();
+      this->tab_old->release();
+      this->tab = this->tab_old;
+      this->tab_old = p;
+    }
+  }
+};
+
 typedef kv::RouteVec<InboxSub> InboxTab;
+
+struct UserDB;
+struct SessionMgr;
+struct UserBridge;
 
 struct AnyMatch {
   uint32_t       max_uid,
@@ -423,6 +513,7 @@ struct AnyMatch {
 
   void init_any( const char *s,  uint16_t sublen,  const uint32_t *pre_seed,
                  uint32_t uid_cnt ) noexcept;
+  UserBridge * get_destination( UserDB &user_db ) noexcept;
   static size_t any_size( uint16_t sublen,  uint32_t uid_cnt ) noexcept;
 };
 
@@ -433,6 +524,11 @@ struct AnyMatchTab {
 
   AnyMatchTab() : ht( 0 ), max_off( 0 ) {
     this->ht = kv::UIntHashTab::resize( NULL );
+  }
+  void reset( void ) noexcept;
+  void gc( void ) {
+    if ( this->max_off * 8 > 1024 * 1024 )
+      this->reset();
   }
   AnyMatch *get_match( const char *sub,  uint16_t sublen,  uint32_t h,
                        const uint32_t *pre_seed,  uint32_t max_uid ) noexcept;
@@ -445,10 +541,6 @@ struct AnyMatchTab {
 
 namespace rai {
 namespace ms {
-
-struct UserDB;
-struct SessionMgr;
-struct UserBridge;
 
 struct SubDB {
   UserDB     & user_db;
@@ -556,8 +648,7 @@ struct SubDB {
                           const MsgHdrDecoder &dec ) noexcept;
   SubOnMsg *match_any_sub( const char *sub,  uint16_t sublen ) noexcept;
 
-  UserBridge *any_match( const char *sub,  uint16_t sublen,
-                         uint32_t h ) noexcept;
+  AnyMatch *any_match( const char *sub,  uint16_t sublen, uint32_t h ) noexcept;
 };
 
 }

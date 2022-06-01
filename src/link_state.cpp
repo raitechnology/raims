@@ -294,7 +294,7 @@ UserDB::push_user_route( UserBridge &n,  UserRoute &u_rte ) noexcept
         if ( ! rte.uid_in_mesh->test_set( n.uid ) ) {
           char buf[ NONCE_B64_LEN + 1 ];
           *rte.mesh_csum ^= n.bridge_id.nonce;
-          /*if ( debug_lnk )*/
+          if ( debug_lnk )
             n.printf( "add to mesh %s [%s]\n", rte.transport.tport.val,
                       rte.mesh_csum->to_base64_str( buf ) );
         }
@@ -305,7 +305,8 @@ UserDB::push_user_route( UserBridge &n,  UserRoute &u_rte ) noexcept
                                        this->link_state_seqno + 1, true );
       }
       if ( list.sys_route_refs++ == 0 ) {
-        printf( "push sys_route %u\n", fd );
+        if ( debug_lnk )
+          printf( "push sys_route %u\n", fd );
         rte.connected_auth.add( fd );
         rte.sub_route.create_bloom_route( fd, &this->auth_bloom );
       }
@@ -332,7 +333,7 @@ UserDB::push_user_route( UserBridge &n,  UserRoute &u_rte ) noexcept
 void
 UserDB::pop_source_route( UserBridge &n ) noexcept
 {
-  /*if ( debug_lnk )*/
+  if ( debug_lnk )
     n.printf( "pop_source_route\n" );
   if ( n.test_clear( IN_ROUTE_LIST_STATE ) ) {
     size_t count = this->transport_tab.count;
@@ -359,8 +360,9 @@ UserDB::pop_user_route( UserBridge &n,  UserRoute &u_rte ) noexcept
         if ( rte.uid_in_mesh->test_clear( n.uid ) ) {
           char buf[ NONCE_B64_LEN + 1 ];
           *rte.mesh_csum ^= n.bridge_id.nonce;
-          n.printf( "rm from mesh %s [%s]\n", rte.transport.tport.val,
-                    rte.mesh_csum->to_base64_str( buf ) );
+          if ( debug_lnk )
+            n.printf( "rm from mesh %s [%s]\n", rte.transport.tport.val,
+                      rte.mesh_csum->to_base64_str( buf ) );
         }
       }
       if ( rte.is_mcast() && rte.ibx_tport != NULL ) {
@@ -375,7 +377,8 @@ UserDB::pop_user_route( UserBridge &n,  UserRoute &u_rte ) noexcept
                                        this->link_state_seqno + 1, false );
       }
       if ( --list.sys_route_refs == 0 ) {
-        printf( "pop sys_route %u\n", fd );
+        if ( debug_lnk )
+          printf( "pop sys_route %u\n", fd );
         rte.connected_auth.remove( fd );
         /*BloomRoute *b = this->auth_bloom.get_bloom_by_fd( fd );
         b->del_bloom_ref( &this->auth_bloom );

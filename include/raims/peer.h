@@ -332,7 +332,8 @@ enum AdjacencyRequest {
   PEER_SYNC_REQ     = 5, /* sync message containing adjacency */
   PEERDB_SYNC_REQ   = 6, /* peer db with link state */
   ADJ_CHG_SYNC_REQ  = 7, /* adjacency change message with link state */
-  MAX_ADJ_REQ       = 8
+  MISSING_SYNC_REQ  = 8, /* missing sub seqno */
+  MAX_ADJ_REQ       = 9
 };
 enum InvalidReason {
   INVALID_NONE          = 0,
@@ -370,7 +371,8 @@ static const char *adjacency_request_str[] = {
   "auth_sync",
   "peer_sync",
   "pdb_sync",
-  "adjc_sync"
+  "adjc_sync",
+  "missing_sync"
 };
 static const char *invalid_reason_str[] = {
   "no_reason",

@@ -247,6 +247,9 @@ SessionMgr::timer_expire( uint64_t tid,  uint64_t ) noexcept
   if ( this->console.log_rotate_time <= cur_time )
     this->console.rotate_log();
   this->console.on_log( this->log );
+  this->sub_db.pub_tab.flip();
+  this->sub_db.seqno_tab.flip();
+  this->sub_db.any_tab.gc();
   return true;
 }
 
@@ -486,16 +489,19 @@ IpcRoute::on_msg( EvPublish &pub ) noexcept
     reply    = dec.mref[ FID_REPLY ].fptr;
     replylen = dec.mref[ FID_REPLY ].fsize;
   }
-  d_sess( "-> ipc_rte: %.*s reply %.*s (len=%u, from %s, fd %d)\n",
-          (int) fpub.subject_len, fpub.subject,
-          (int) replylen, (char *) reply,
-          fpub.msg_len, fpub.rte.name, fpub.src_route );
   SeqnoArgs seq( fpub );
   uint32_t  fmt;
 
   dec.get_ival<uint64_t>( FID_TIME, seq.time );
   dec.get_ival<uint32_t>( FID_FMT, fmt );
   SeqnoStatus status = this->sub_db.match_seqno( seq );
+
+  d_sess( "-> ipc_rte: %.*s seqno %" PRIu64 "(%s) reply %.*s "
+          "(len=%u, from %s, fd %d)\n",
+          (int) fpub.subject_len, fpub.subject, dec.seqno,
+          seqno_status_string( status ),
+          (int) replylen, (char *) reply,
+          fpub.msg_len, fpub.rte.name, fpub.src_route );
 
   if ( status > SEQNO_UID_NEXT ) {
     fpub.status = FRAME_STATUS_DUP_SEQNO;
@@ -571,6 +577,10 @@ ConsoleRoute::on_msg( EvPublish &pub ) noexcept
     p->init( false );
   uint64_t seqno = p->next_seqno();
 
+  d_sess( "-> fwd_cons: %.*s seqno %lu reply %.*s (len=%u, fd %d)\n",
+          (int) pub.subject_len, pub.subject, seqno,
+          (int) pub.reply_len, (char *) pub.reply,
+          pub.msg_len, pub.src_route );
   MsgEst e( pub.subject_len );
   e.seqno ();
 
@@ -690,7 +700,7 @@ SessionMgr::on_msg( EvPublish &pub ) noexcept
     return true;
   }
   if ( debug_msg )
-    this->show_debug_msg( fpub, "int_rte" );
+    this->show_debug_msg( fpub, "sess_rte" );
 
   UserBridge    & n   = *fpub.n;
   MsgHdrDecoder & dec = fpub.dec;
@@ -788,6 +798,7 @@ SessionMgr::on_msg( EvPublish &pub ) noexcept
         n.printf( "%.*s missing sub seqno %" PRIu64 " -> %" PRIu64 " (%s)\n",
                   (int) fpub.subject_len, fpub.subject,
                   n.sub_seqno, dec.seqno, fpub.rte.name );
+        this->user_db.send_adjacency_request( n, MISSING_SYNC_REQ );
       }
       fpub.status = FRAME_STATUS_DUP_SEQNO;
       break;
@@ -1073,43 +1084,54 @@ SessionMgr::publish( PubMcastData &mc ) noexcept
 bool
 SessionMgr::forward_inbox( EvPublish &fwd ) noexcept
 {
-  UserBridge * n = this->sub_db.any_match( fwd.subject, fwd.subject_len,
+  AnyMatch * any = this->sub_db.any_match( fwd.subject, fwd.subject_len,
                                            fwd.subj_hash );
-  if ( n == NULL ) {
+  if ( any->set_count == 0 ) {
     printf( "no match for %.*s\n", (int) fwd.subject_len, fwd.subject );
     return true;
   }
-  InboxBuf  ibx( n->bridge_id );
-  CabaFlags fl( CABA_INBOX );
+  BitSetT<uint64_t> set( any->bits );
+  uint32_t uid, cnt = 0;
 
-  ibx.s( _ANY );
+  set.first( uid, any->max_uid );
+  for (;;) {
+    UserBridge * n = this->user_db.bridge_tab[ uid ];
+    InboxBuf  ibx( n->bridge_id );
+    CabaFlags fl( CABA_INBOX );
 
-  MsgEst e( ibx.len() );
-  e.seqno  ()
-   .subject( fwd.subject_len )
-   .reply  ( fwd.reply_len )
-   .fmt    ()
-   .data   ( fwd.msg_len  );
+    ibx.s( _ANY );
 
-  MsgCat m;
-  m.reserve( e.sz );
+    MsgEst e( ibx.len() );
+    e.seqno  ()
+     .subject( fwd.subject_len )
+     .reply  ( fwd.reply_len )
+     .fmt    ()
+     .data   ( fwd.msg_len  );
 
-  m.open( this->user_db.bridge_id.nonce, ibx.len() )
-   .seqno ( ++n->send_inbox_seqno );
+    MsgCat m;
+    m.reserve( e.sz );
 
-  m.subject( fwd.subject, fwd.subject_len );
-  if ( fwd.reply_len != 0 )
-    m.reply( (const char *) fwd.reply, fwd.reply_len );
-  if ( fwd.msg_enc != 0 )
-    m.fmt( fwd.msg_enc );
-  fl.set_opt( CABA_OPT_ANY );
+    m.open( this->user_db.bridge_id.nonce, ibx.len() )
+     .seqno ( ++n->send_inbox_seqno );
 
-  uint32_t h = ibx.hash();
-  m.data( fwd.msg, fwd.msg_len )
-   .close( e.sz, h, fl );
+    m.subject( fwd.subject, fwd.subject_len );
+    if ( fwd.reply_len != 0 )
+      m.reply( (const char *) fwd.reply, fwd.reply_len );
+    if ( fwd.msg_enc != 0 )
+      m.fmt( fwd.msg_enc );
+    fl.set_opt( CABA_OPT_ANY );
 
-  m.sign( ibx.buf, ibx.len(), *this->user_db.session_key );
-  return this->user_db.forward_to_inbox( *n, ibx, h, m.msg, m.len(), true );
+    uint32_t h = ibx.hash();
+    m.data( fwd.msg, fwd.msg_len )
+     .close( e.sz, h, fl );
+
+    m.sign( ibx.buf, ibx.len(), *this->user_db.session_key );
+    this->user_db.forward_to_inbox( *n, ibx, h, m.msg, m.len(), true );
+    if ( ++cnt == any->set_count )
+      break;
+    set.next( uid, any->max_uid );
+  }
+  return true;
 }
 
 bool
@@ -1129,13 +1151,17 @@ SessionMgr::forward_ipc( TransportRoute &src_rte,  EvPublish &fwd ) noexcept
   }
   if ( p->is_inbox() )
     return this->forward_inbox( fwd );
+  uint64_t seqno = p->next_seqno(),
+           stamp = ( loc.is_new ? this->poll.current_coarse_ns() : 0 );
 
-  d_sess( "-> fwd_ext: %.*s reply %.*s (len=%u, from %s, fd %d)\n",
-          (int) fwd.subject_len, fwd.subject,
+  d_sess( "-> fwd_ipc: %.*s seqno %lu time %lu reply %.*s "
+          "(len=%u, from %s, fd %d)\n",
+          (int) fwd.subject_len, fwd.subject, seqno, stamp,
           (int) fwd.reply_len, (char *) fwd.reply,
           fwd.msg_len, src_rte.name, fwd.src_route );
   MsgEst e( fwd.subject_len );
   e.seqno ()
+   .time  ()
    .reply ( fwd.reply_len )
    .fmt   ()
    .data  ( fwd.msg_len );
@@ -1144,8 +1170,10 @@ SessionMgr::forward_ipc( TransportRoute &src_rte,  EvPublish &fwd ) noexcept
   m.reserve( e.sz );
 
   m.open( this->user_db.bridge_id.nonce, fwd.subject_len )
-   .seqno ( p->next_seqno() );
+   .seqno ( seqno );
 
+  if ( stamp != 0 )
+    m.time( stamp );
   if ( fwd.reply_len != 0 )
     m.reply( (const char *) fwd.reply, fwd.reply_len );
   if ( fwd.msg_enc != 0 )
@@ -1183,7 +1211,8 @@ bool
 SessionMgr::publish_any( PubMcastData &mc ) noexcept
 {
   uint32_t     h = kv_crc_c( mc.sub, mc.sublen, 0 );
-  UserBridge * n = this->sub_db.any_match( mc.sub, mc.sublen, h );
+  AnyMatch * any = this->sub_db.any_match( mc.sub, mc.sublen, h );
+  UserBridge * n = any->get_destination( this->user_db );
 
   if ( n == NULL ) {
     printf( "no match for %.*s\n", (int) mc.sublen, mc.sub );
