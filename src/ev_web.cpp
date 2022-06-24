@@ -382,19 +382,35 @@ WebService::process_get_file( const char *path,  size_t path_len ) noexcept
     cmd_len   = &path[ path_len ] - cmd;
     path_len -= cmd_len + 1;
   }
-  uint32_t count = this->tar_entry_count();
-  for ( uint32_t i = 0; i < count; i++ ) {
-    size_t   off       = entry[ i ].fname_off,
-             fname_len = entry[ i ].fname_len - off;
-    const char * fname = &entry[ i ].fname[ off ];
-    if ( fname_len >= path_len &&
-         ::memcmp( path, fname, path_len ) == 0 ) {
-      if ( fname_len == path_len ||
-           ( path_len + 3 == fname_len &&
-             ::memcmp( &fname[ fname_len - 3 ], ".gz", 3 ) == 0 ) ) {
-        this->process_get( fname, fname_len, cmd, cmd_len, entry[ i ].data,
-                           entry[ i ].size, true );
-        return true;
+  if ( path_len == 0 ) {
+    this->out.init( W_JSON );
+    this->console->on_input( &this->out, cmd, cmd_len );
+    if ( this->out.out_size != 0 ) {
+      this->out.add_http_header( "application/json", 16, this->out.out_size );
+      this->append_iov( this->out );
+      this->out.reset();
+      this->msgs_sent++;
+      return true;
+    }
+    return false;
+    /*if ( this->rpc != NULL && ! this->rpc->complete )
+      return size;*/
+  }
+  else {
+    uint32_t count = this->tar_entry_count();
+    for ( uint32_t i = 0; i < count; i++ ) {
+      size_t   off       = entry[ i ].fname_off,
+               fname_len = entry[ i ].fname_len - off;
+      const char * fname = &entry[ i ].fname[ off ];
+      if ( fname_len >= path_len &&
+           ::memcmp( path, fname, path_len ) == 0 ) {
+        if ( fname_len == path_len ||
+             ( path_len + 3 == fname_len &&
+               ::memcmp( &fname[ fname_len - 3 ], ".gz", 3 ) == 0 ) ) {
+          this->process_get( fname, fname_len, cmd, cmd_len, entry[ i ].data,
+                             entry[ i ].size, true );
+          return true;
+        }
       }
     }
   }
@@ -547,7 +563,7 @@ WebOutput::template_substitute( const char *cmd,  size_t cmd_len,
         const char * var    = &p[ 2 ];
         size_t       varlen = s - &p[ 2 ];
         if ( varlen == sizeof( cmd_str ) && var[ 0 ] == '_' &&
-             ::memcmp( &var[ 1 ], cmd_str, varlen ) == 0 ) {
+             ::memcmp( &var[ 1 ], cmd_str, varlen - 1 ) == 0 ) {
           size += this->append_bytes( cmd, cmd_len );
         }
         else {

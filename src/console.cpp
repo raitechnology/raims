@@ -1478,6 +1478,8 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
   ConsoleCmd cmd = CMD_BAD;
   if ( 0 ) {
   help:;
+    if ( p != NULL && p->is_json )
+      return true;
     this->output_help( p, cmd );
     return this->flush_output( p );
   }
@@ -3624,17 +3626,21 @@ void
 Console::show_running( ConsoleOutput *p,  int which,  const char *name,
                        size_t namelen ) noexcept
 {
-  const bool is_html = ( p != NULL && p->is_html );
+  const bool is_html = ( p != NULL && p->is_html ),
+             is_json = ( p != NULL && p->is_json );
   if ( is_html )
     this->puts( "<pre>" );
-  if ( ( which & PRINT_PARAMETERS ) != 0 ) {
+  if ( ( which & PRINT_PARAMETERS ) != 0 && ! is_json ) {
     ConfigTree::TransportArray listen, connect;
     this->get_active_tports( listen, connect );
     this->tree.print_parameters( *this, which, name, namelen, listen, connect );
   }
   else {
     int did_which;
-    this->tree.print_y( *this, did_which, which, name, namelen );
+    if ( is_json )
+      this->tree.print_js( *this, did_which, which, name, namelen );
+    else
+      this->tree.print_y( *this, did_which, which, name, namelen );
   }
 }
 

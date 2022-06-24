@@ -1266,7 +1266,7 @@ ConfigDB::check_strings( ConfigTree::User &u,  StringTab &str,
   }
   b &= this->check_string( u.pub, str, "user.pub", p );
   if ( ! b ) {
-    p.printf( "  users : [ {\n" );
+    p.printf( "  \"users\" : [ {\n" );
     u.print_js( p, 4 );
     p.printf( "  } ]\n" );
   }
@@ -1308,7 +1308,7 @@ ConfigDB::check_strings( ConfigTree::Service &svc,
   for ( sp = svc.revoke.hd; sp != NULL; sp = sp->next )
     b &= this->check_strings( *sp, str, "service.revoke", p );
   if ( ! b ) {
-    p.printf( "  services : [ {\n" );
+    p.printf( "  \"services\" : [ {\n" );
     svc.print_js( p, 4 );
     p.printf( "  } ]\n" );
   }
@@ -1325,7 +1325,7 @@ ConfigDB::check_strings( ConfigTree::Transport &tport,
   for ( ConfigTree::StringPair *sp = tport.route.hd; sp != NULL; sp = sp->next )
     b &= this->check_strings( *sp, str, "transport.route", p );
   if ( ! b ) {
-    p.printf( "  transports : [ {\n" );
+    p.printf( "  \"transports\" : [ {\n" );
     tport.print_js( p, 4 );
     p.printf( "  } ]\n" );
   }
@@ -1341,7 +1341,7 @@ ConfigDB::check_strings( ConfigTree::Group &grp,  StringTab &str,
   for ( ConfigTree::StringList *sl = grp.users.hd; sl != NULL; sl = sl->next )
     b &= this->check_strings( *sl, str, "group.user", p );
   if ( ! b ) {
-    p.printf( "  groups : [ {\n" );
+    p.printf( "  \"groups\" : [ {\n" );
     grp.print_js( p, 4 );
     p.printf( "  } ]\n" );
   }
@@ -1364,63 +1364,98 @@ ConfigDB::check_strings( ConfigTree::Parameters &pa,  StringTab &str,
 void
 ConfigTree::print_js( ConfigPrinter &p ) const noexcept
 {
+  int which;
+  this->print_js( p, which, PRINT_NORMAL, NULL, 0 );
+}
+
+void
+ConfigTree::print_js( ConfigPrinter &p,  int &did_which,  int which,
+                      const char *name,  size_t namelen ) const noexcept
+{
   const char * nl = "";
   p.printf( "{\n" );
-  const User *u = this->users.hd;
-  if ( u != NULL ) {
-    p.printf( "  users : [ {\n" );
-    u->print_js( p, 6 );
-    for ( u = u->next; u != NULL; u = u->next ) {
-      p.printf( "    }, {\n" );
+  int x = 0;
+  if ( ( which & PRINT_USERS ) != 0 ) {
+    const User *u = this->users.hd;
+    if ( u != NULL ) {
+      x |= PRINT_USERS;
+      p.printf( "  \"users\" : [ {\n" );
       u->print_js( p, 6 );
+      for ( u = u->next; u != NULL; u = u->next ) {
+        if ( namelen == 0 || u->user.equals( name, namelen ) ) {
+          p.printf( "    }, {\n" );
+          u->print_js( p, 6 );
+        }
+      }
+      p.printf( "    }\n  ]" );
+      nl = ",\n";
     }
-    p.printf( "    }\n  ]" );
-    nl = ",\n";
   }
-  const Service *s = this->services.hd;
-  if ( s != NULL ) {
-    p.printf( "%s  services : [ {\n", nl );
-    s->print_js( p, 6 );
-    for ( s = s->next; s != NULL; s = s->next ) {
-      p.printf( "    }, {\n" );
+  if ( ( which & PRINT_SERVICES ) != 0 ) {
+    const Service *s = this->services.hd;
+    if ( s != NULL ) {
+      x |= PRINT_SERVICES;
+      p.printf( "%s  \"services\" : [ {\n", nl );
       s->print_js( p, 6 );
+      for ( s = s->next; s != NULL; s = s->next ) {
+        if ( namelen == 0 || s->svc.equals( name, namelen ) ) {
+          p.printf( "    }, {\n" );
+          s->print_js( p, 6 );
+        }
+      }
+      p.printf( "    }\n  ]" );
+      nl = ",\n";
     }
-    p.printf( "    }\n  ]" );
-    nl = ",\n";
   }
-  const Transport *t = this->transports.hd;
-  if ( t != NULL ) {
-    p.printf( "%s  transports : [ {\n", nl );
-    t->print_js( p, 6 );
-    for ( t = t->next; t != NULL; t = t->next ) {
-      p.printf( "    }, {\n" );
+  if ( ( which & PRINT_TRANSPORTS ) != 0 ) {
+    const Transport *t = this->transports.hd;
+    if ( t != NULL ) {
+      x |= PRINT_TRANSPORTS;
+      p.printf( "%s  \"transports\" : [ {\n", nl );
       t->print_js( p, 6 );
+      for ( t = t->next; t != NULL; t = t->next ) {
+        if ( namelen == 0 || t->tport.equals( name, namelen ) ) {
+          if ( ! t->route.is_empty() ) {
+            p.printf( "    }, {\n" );
+            t->print_js( p, 6 );
+          }
+        }
+      }
+      p.printf( "    }\n  ]" );
+      nl = ",\n";
     }
-    p.printf( "    }\n  ]" );
-    nl = ",\n";
   }
-  const Group *g = this->groups.hd;
-  if ( g != NULL ) {
-    p.printf( "%s  groups : [ {\n", nl );
-    g->print_js( p, 6 );
-    for ( g = g->next; g != NULL; g = g->next ) {
-      p.printf( "    }, {\n" );
+  if ( ( which & PRINT_GROUPS ) != 0 ) {
+    const Group *g = this->groups.hd;
+    if ( g != NULL ) {
+      x |= PRINT_GROUPS;
+      p.printf( "%s  \"groups\" : [ {\n", nl );
       g->print_js( p, 6 );
+      for ( g = g->next; g != NULL; g = g->next ) {
+        if ( namelen == 0 || g->group.equals( name, namelen ) ) {
+          p.printf( "    }, {\n" );
+          g->print_js( p, 6 );
+        }
+      }
+      p.printf( "    }\n  ]" );
+      nl = ",\n";
     }
-    p.printf( "    }\n  ]" );
-    nl = ",\n";
   }
-  const Parameters *pa = this->parameters.hd;
-  if ( pa != NULL ) {
-    p.printf( "%s", nl );
-    for ( ; pa != NULL; pa = pa->next ) {
-      pa->print_js( p, 2, pa->next == NULL ? 0 : ',' );
+  if ( ( which & PRINT_PARAMETERS ) != 0 ) {
+    const Parameters *pa = this->parameters.hd;
+    if ( pa != NULL ) {
+      x |= PRINT_PARAMETERS;
+      p.printf( "%s", nl );
+      for ( ; pa != NULL; pa = pa->next ) {
+        pa->print_js( p, 2, pa->next == NULL ? 0 : ',' );
+      }
     }
-  }
-  else {
-    p.printf( "\n" );
+    else {
+      p.printf( "\n" );
+    }
   }
   p.printf( "}\n" );
+  did_which = x;
 }
 
 void
@@ -1453,9 +1488,12 @@ ConfigTree::print_y( ConfigPrinter &p,  int &did_which,  int which,
     if ( t != NULL || ( which & PRINT_HDR ) ) {
       p.printf( "transports:\n" );
       x |= PRINT_TRANSPORTS;
-      for ( ; t != NULL; t = t->next )
-        if ( namelen == 0 || t->tport.equals( name, namelen ) )
-          t->print_y( p, 4 );
+      for ( ; t != NULL; t = t->next ) {
+        if ( namelen == 0 || t->tport.equals( name, namelen ) ) {
+          if ( ! t->route.is_empty() )
+            t->print_y( p, 4 );
+        }
+      }
     }
   }
   if ( ( which & PRINT_GROUPS ) != 0 ) {
@@ -1588,22 +1626,22 @@ StringVal::print_y( ConfigPrinter &p ) const noexcept
 void
 ConfigTree::User::print_js( ConfigPrinter &p,  int i,  char c ) const noexcept
 {
-  p.printf( "%*suser : ", i, "" ); this->user.print_js( p ); p.printf( ",\n" );
-  p.printf( "%*ssvc : ", i, "" ); this->svc.print_js( p ); p.printf( ",\n" );
-  p.printf( "%*screate : ", i, "" ); this->create.print_js( p ); p.printf( ",\n" );
+  p.printf( "%*s\"user\" : ", i, "" ); this->user.print_js( p ); p.printf( ",\n" );
+  p.printf( "%*s\"svc\" : ", i, "" ); this->svc.print_js( p ); p.printf( ",\n" );
+  p.printf( "%*s\"create\" : ", i, "" ); this->create.print_js( p ); p.printf( ",\n" );
   if ( ! this->expires.is_null() ) {
-    p.printf( "%*sexpires : ", i, "" ); this->expires.print_js( p );
+    p.printf( "%*s\"expires\" : ", i, "" ); this->expires.print_js( p );
     p.printf( ",\n" );
   }
   if ( ! this->revoke.is_null() ) {
-    p.printf( "%*srevoke : ", i, "" ); this->revoke.print_js( p );
+    p.printf( "%*s\"revoke\" : ", i, "" ); this->revoke.print_js( p );
     p.printf( ",\n" );
   }
   if ( ! this->pri.is_null() ) {
-    p.printf( "%*spri : ", i, "" ); this->pri.print_js( p );
+    p.printf( "%*s\"pri\" : ", i, "" ); this->pri.print_js( p );
     p.printf( ",\n" );
   }
-  p.printf( "%*spub : ", i, "" ); this->pub.print_js( p );
+  p.printf( "%*s\"pub\" : ", i, "" ); this->pub.print_js( p );
   if ( c != 0 ) p.printf( "%c", c );
   p.printf( "\n" );
 }
@@ -1690,15 +1728,15 @@ ConfigTree::StringList::print_y( ConfigPrinter &p ) const noexcept
 void
 ConfigTree::Service::print_js( ConfigPrinter &p,  int i ) const noexcept
 {
-  p.printf( "%*ssvc : ", i, "" ); this->svc.print_js( p ); p.printf( ",\n" );
-  p.printf( "%*screate : ", i, "" ); this->create.print_js( p ); p.printf( ",\n" );
+  p.printf( "%*s\"svc\" : ", i, "" ); this->svc.print_js( p ); p.printf( ",\n" );
+  p.printf( "%*s\"create\" : ", i, "" ); this->create.print_js( p ); p.printf( ",\n" );
   if ( ! this->pri.is_null() ) {
-    p.printf( "%*spri : ", i, "" ); this->pri.print_js( p ); p.printf( ",\n" );
+    p.printf( "%*s\"pri\" : ", i, "" ); this->pri.print_js( p ); p.printf( ",\n" );
   }
-  p.printf( "%*spub : ", i, "" ); this->pub.print_js( p ); p.printf( ",\n" );
+  p.printf( "%*s\"pub\" : ", i, "" ); this->pub.print_js( p ); p.printf( ",\n" );
   StringPair *sp = this->users.hd;
   if ( sp != NULL ) {
-    p.printf( "%*susers : {\n%*s  ", i, "", i, "" );
+    p.printf( "%*s\"users\" : {\n%*s  ", i, "", i, "" );
     sp->print_js( p );
     for ( sp = sp->next; sp != NULL; sp = sp->next ) {
       p.printf( ",\n%*s  ", i, "" );
@@ -1708,7 +1746,7 @@ ConfigTree::Service::print_js( ConfigPrinter &p,  int i ) const noexcept
   }
   sp = this->revoke.hd;
   if ( sp != NULL ) {
-    p.printf( "%*srevoke : {\n%*s  ", i, "", i, "" );
+    p.printf( "%*s\"revoke\" : {\n%*s  ", i, "", i, "" );
     sp->print_js( p );
     for ( sp = sp->next; sp != NULL; sp = sp->next ) {
       p.printf( ",\n%*s  ", i, "" );
@@ -1754,11 +1792,12 @@ ConfigTree::Service::print_y( ConfigPrinter &p,  int i ) const noexcept
 void
 ConfigTree::Transport::print_js( ConfigPrinter &p,  int i ) const noexcept
 {
-  p.printf( "%*stport : ", i, "" ); this->tport.print_js( p ); p.printf( ",\n" );
-  p.printf( "%*stype : ", i, "" ); this->type.print_js( p ); p.printf( ",\n" );
+  p.printf( "%*s\"tport\" : ", i, "" ); this->tport.print_js( p ); p.printf( ",\n" );
+  p.printf( "%*s\"type\" : ", i, "" ); this->type.print_js( p );
   StringPair *sp = this->route.hd;
+  p.printf( "%s\n", sp == NULL ? "" : "," );
   if ( sp != NULL ) {
-    p.printf( "%*sroute : {\n%*s  ", i, "", i, "" );
+    p.printf( "%*s\"route\" : {\n%*s  ", i, "", i, "" );
     sp->print_js( p );
     for ( sp = sp->next; sp != NULL; sp = sp->next ) {
       p.printf( ",\n%*s  ", i, "" );
@@ -1791,10 +1830,10 @@ ConfigTree::Transport::print_y( ConfigPrinter &p,  int i ) const noexcept
 void
 ConfigTree::Group::print_js( ConfigPrinter &p,  int i ) const noexcept
 {
-  p.printf( "%*sgroup : ", i, "" ); this->group.print_js( p ); p.printf( ",\n" );
+  p.printf( "%*s\"group\" : ", i, "" ); this->group.print_js( p ); p.printf( ",\n" );
   StringList *sl = this->users.hd;
   if ( sl != NULL ) {
-    p.printf( "%*susers: [ ", i, "" );
+    p.printf( "%*s\"users\" : [ ", i, "" );
     sl->print_js( p );
     for ( sl = sl->next; sl != NULL; sl = sl->next ) {
       p.printf( ", " );
@@ -1827,7 +1866,7 @@ void
 ConfigTree::Parameters::print_js( ConfigPrinter &p,  int i,
                                   char c ) const noexcept
 {
-  p.printf( "%*sparameters : {\n%*s  ", i, "", i, "" );
+  p.printf( "%*s\"parameters\" : {\n%*s  ", i, "", i, "" );
   StringPair *sp = this->parms.hd;
   if ( sp != NULL ) {
     sp->print_js( p );

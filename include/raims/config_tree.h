@@ -228,6 +228,8 @@ struct ConfigTree {
                          const TransportArray &connect ) const noexcept;
   bool save_new( void ) const noexcept;
   void print_js( ConfigPrinter &p ) const noexcept;
+  void print_js( ConfigPrinter &p, int &did_which,  int which = PRINT_NORMAL,
+                 const char *name = NULL,  size_t namelen = 0 ) const noexcept;
   void print_y( ConfigPrinter &p, int &did_which,  int which = PRINT_NORMAL,
                 const char *name = NULL,  size_t namelen = 0 ) const noexcept;
   bool resolve( const char *us,  User *&usrp,  Service *&svcp ) noexcept;
