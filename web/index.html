@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html><head>
+<link rel="icon" href="rai_icon.svg" type="image/svg+xml"/>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF8"/>
+<title>@(user).@(service)</title>
+</head>
+<style>
+body {
+  background: white;
+  margin-top: 4px;
+  margin-bottom: 2px;
+}
+#menu {
+  margin: 0;
+  padding: 4px 0;
+}
+#menu dt {
+  display: inline;
+  margin: 0;
+}
+#menu dt a {
+  color: green;
+  text-decoration: none;
+  font-weight: bold;
+}
+#menu dt a:hover {
+  color: blue;
+}
+#menu dt a:active {
+  color: blue;
+  background-color: grey;
+}
+#menu dt a:visited {
+  text-decoration: none;
+}
+</style>
+<body>
+<dl id="menu">
+<dt><a href="monitor.html">Monitor</a></dt>
+  <dd>Monitor the current state of the network.</dd>
+<dt><a href="console.html">Console</a></dt>
+  <dd>Examine the config and internals of a node.</dd>
+</dl>
+</body>
+</html>

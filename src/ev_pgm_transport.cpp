@@ -19,6 +19,7 @@ EvPgmTransport::EvPgmTransport( EvPoll &p,  TransportRoute &r ) noexcept
       fwd_all_msgs( false )
 {
   static kv_atom_uint64_t pgm_timer_id;
+  this->sock_opts = OPT_NO_CLOSE;
   this->timer_id = ( (uint64_t) this->sock_type << 56 ) |
     kv_sync_add( &pgm_timer_id, (uint64_t) 1 );
 }
@@ -42,7 +43,8 @@ EvPgmTransport::connect( EvPgmTransportParameters &p,
     net = p.network;
   if ( ! this->pgm.start_pgm( net, port, this->fd ) )
     return false;
-  this->PeerData::init_peer( this->fd, NULL, "pgm" );
+  this->PeerData::init_peer( this->fd, this->rte.sub_route.route_id,
+                             NULL, "pgm" );
   char peer[ 256 ];
   ::snprintf( peer, sizeof( peer ), "%s:%u", p.network, p.port );
   this->PeerData::set_peer_address( peer, ::strlen( peer ) );

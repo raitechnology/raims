@@ -92,9 +92,19 @@ struct BMsgBufT {
     }
     return (T &) *this;
   }
-  T &w( uint8_t opt,  uint16_t n ) {  /* uint16 out */
+  T &i2( uint8_t opt,  uint16_t n ) {  /* uint16 out */
     this->emit_u16( CLS_U_SHORT | opt );
     this->emit_u16( n );
+    return (T &) *this;
+  }
+  T &i4( uint8_t opt,  uint32_t n ) {  /* uint16 out */
+    this->emit_u16( CLS_U_INT | opt );
+    this->emit_u32( n );
+    return (T &) *this;
+  }
+  T &i8( uint8_t opt,  uint32_t n ) {  /* uint16 out */
+    this->emit_u16( CLS_U_LONG | opt );
+    this->emit_u64( n );
     return (T &) *this;
   }
   T &y( uint8_t opt,  uint8_t n ) {   /* bool out */
@@ -194,16 +204,10 @@ struct MsgBufDigestT : public BMsgBufT<T> {
     return this->b( FID_PATTERN, in, (uint16_t) in_len ); }
   T &  reply      ( const char *in, size_t in_len ) {
     return this->b( FID_REPLY, in, (uint16_t) in_len ); }
-  T &  wildcard   ( const char *in, size_t in_len ) {
-    return this->b( FID_WILDCARD, in, (uint16_t) in_len ); }
   T &  ucast_url  ( const char *in, size_t in_len ) {
     return this->b( FID_UCAST_URL, in, (uint16_t) in_len ); }
   T &  mesh_url   ( const char *in, size_t in_len ) {
     return this->b( FID_MESH_URL, in, (uint16_t) in_len ); }
-  T &  format     ( const char *in, size_t in_len ) {
-    return this->b( FID_FORMAT, in, (uint16_t) in_len ); }
-  T &  dictionary ( const char *in, size_t in_len ) {
-    return this->b( FID_DICTIONARY, in, (uint16_t) in_len ); }
   T &  tport      ( const char *in, size_t in_len ) {
     return this->b( FID_TPORT, in, (uint16_t) in_len ); }
   T &  user       ( const char *in, size_t in_len ) {
@@ -235,31 +239,43 @@ struct MsgBufDigestT : public BMsgBufT<T> {
   T  & sub_seqno  ( uint64_t n )  { return this->u( FID_SUB_SEQNO, n ); }
   T  & time       ( uint64_t n )  { return this->u( FID_TIME, n ); }
   T  & uptime     ( uint64_t n )  { return this->u( FID_UPTIME, n ); }
+  T  & interval   ( uint32_t n )  { return this->i( FID_INTERVAL, n ); }
+  T  & ref_cnt    ( uint32_t n )  { return this->i( FID_REF_CNT, n ); }
+  T  & token      ( uint64_t n )  { return this->u( FID_TOKEN, n ); }
+  T  & ret        ( uint32_t n )  { return this->i( FID_RET, n ); }
   T  & link_state ( uint64_t n )  { return this->u( FID_LINK_STATE, n ); }
-  T  & auth_seqno ( uint64_t n )  { return this->u( FID_AUTH_SEQNO, n ); }
-  T  & auth_time  ( uint64_t n )  { return this->u( FID_AUTH_TIME, n ); }
   T  & start      ( uint64_t n )  { return this->u( FID_START, n ); }
   T  & end        ( uint64_t n )  { return this->u( FID_END, n ); }
-  T  & ref_seqno  ( uint64_t n )  { return this->u( FID_REF_SEQNO, n ); }
-  T  & token      ( uint64_t n )  { return this->u( FID_TOKEN, n ); }
-
-  T  & interval   ( uint32_t n )  { return this->i( FID_INTERVAL, n ); }
-  T  & ref_count  ( uint32_t n )  { return this->i( FID_REF_COUNT, n ); }
-  T  & ret        ( uint32_t n )  { return this->i( FID_RET, n ); }
-  T  & dict_csum  ( uint32_t n )  { return this->i( FID_DICT_CSUM, n ); }
-  T  & enti_csum  ( uint32_t n )  { return this->i( FID_ENTI_CSUM, n ); }
-  T  & fmt        ( uint32_t n )  { return this->i( FID_FMT, n ); }
   T  & adj_info   ( uint32_t n )  { return this->i( FID_ADJ_INFO, n ); }
+  T  & auth_seqno ( uint64_t n )  { return this->u( FID_AUTH_SEQNO, n ); }
+  T  & auth_time  ( uint64_t n )  { return this->u( FID_AUTH_TIME, n ); }
+  T  & fmt        ( uint32_t n )  { return this->i( FID_FMT, n ); }
   T  & hops       ( uint32_t n )  { return this->i( FID_HOPS, n ); }
+  T  & ref_seqno  ( uint64_t n )  { return this->u( FID_REF_SEQNO, n ); }
   T  & tportid    ( uint32_t n )  { return this->i( FID_TPORTID, n ); }
-  T  & uid_count  ( uint32_t n )  { return this->i( FID_UID_COUNT, n ); }
-  T  & subj_hash  ( uint32_t n )  { return this->i( FID_SUBJ_HASH, n ); }
+  T  & uid        ( uint32_t n )  { return this->i( FID_UID, n ); }
+  T  & uid_cnt    ( uint32_t n )  { return this->i( FID_UID_CNT, n ); }
+  T  & subj_hash  ( uint32_t n )  { return this->i4( FID_SUBJ_HASH, n ); }
+
+  T  & auth_stage ( uint16_t n )  { return this->i2( FID_AUTH_STAGE, n ); }
   T  & link_add   ( uint8_t n )   { return this->y( FID_LINK_ADD, n ); }
-  T  & start_ack  ( uint8_t n )   { return this->y( FID_START_ACK, n ); }
-  T  & stop_ack   ( uint8_t n )   { return this->y( FID_STOP_ACK, n ); }
-  T  & initial    ( uint8_t n )   { return this->y( FID_INITIAL, n ); }
-  T  & database   ( uint16_t n )  { return this->w( FID_DATABASE, n ); }
-  T  & auth_stage ( uint16_t n )  { return this->w( FID_AUTH_STAGE, n ); }
+
+  T  & fd_cnt     ( uint32_t n )  { return this->i( FID_FD_CNT, n ); }
+  T  & ms_tot     ( uint64_t n )  { return this->u( FID_MS_TOT, n ); }
+  T  & mr_tot     ( uint64_t n )  { return this->u( FID_MR_TOT, n ); }
+  T  & bs_tot     ( uint64_t n )  { return this->u( FID_BS_TOT, n ); }
+  T  & br_tot     ( uint64_t n )  { return this->u( FID_BR_TOT, n ); }
+  T  & ms         ( uint64_t n )  { return this->u( FID_MS, n ); }
+  T  & mr         ( uint64_t n )  { return this->u( FID_MR, n ); }
+  T  & bs         ( uint64_t n )  { return this->u( FID_BS, n ); }
+  T  & br         ( uint64_t n )  { return this->u( FID_BR, n ); }
+  T  & sub_cnt    ( uint64_t n )  { return this->u( FID_SUB_CNT, n ); }
+  T  & distance   ( uint64_t n )  { return this->u( FID_DISTANCE, n ); }
+  T  & peer       ( const char *in, size_t in_len ) {
+    return this->b( FID_PEER, in, (uint16_t) in_len ); }
+  T  & latency    ( const char *in, size_t in_len ) {
+    return this->b( FID_LATENCY, in, (uint16_t) in_len ); }
+
   /* insert sub_fid : subject, opt_fid 1 */
   void insert_subject( const char *subject, size_t sublen ) {
     char * sav = this->out;
@@ -336,11 +352,8 @@ struct MsgEst {
   MsgEst & subject    ( size_t l ) { sz += fid_est( FID_SUBJECT, l ); return *this; }
   MsgEst & pattern    ( size_t l ) { sz += fid_est( FID_PATTERN, l ); return *this; }
   MsgEst & reply      ( size_t l ) { sz += fid_est( FID_REPLY, l ); return *this; }
-  MsgEst & wildcard   ( size_t l ) { sz += fid_est( FID_WILDCARD, l ); return *this; }
   MsgEst & ucast_url  ( size_t l ) { sz += fid_est( FID_UCAST_URL, l ); return *this; }
   MsgEst & mesh_url   ( size_t l ) { sz += fid_est( FID_MESH_URL, l ); return *this; }
-  MsgEst & format     ( size_t l ) { sz += fid_est( FID_FORMAT, l ); return *this; }
-  MsgEst & dictionary ( size_t l ) { sz += fid_est( FID_DICTIONARY, l ); return *this; }
   MsgEst & tport      ( size_t l ) { sz += fid_est( FID_TPORT, l ); return *this; }
   MsgEst & user       ( size_t l ) { sz += fid_est( FID_USER, l ); return *this; }
   MsgEst & service    ( size_t l ) { sz += fid_est( FID_SERVICE, l ); return *this; }
@@ -357,38 +370,46 @@ struct MsgEst {
   MsgEst & peer_db    ( size_t l ) { sz += fid_est( FID_PEER_DB, l ); return *this; }
   MsgEst & mesh_db    ( size_t l ) { sz += fid_est( FID_MESH_DB, l ); return *this; }
   MsgEst & adjacency  ( size_t l ) { sz += fid_est( FID_ADJACENCY, l ); return *this; }
-  /*MsgEst & digest     ( void ) { sz += fid_est( FID_DIGEST ); return *this; }*/
   MsgEst & cnonce     ( void ) { sz += fid_est( FID_CNONCE ); return *this; }
 
   MsgEst & seqno      ( void ) { sz += fid_est( FID_SEQNO ); return *this; }
   MsgEst & sub_seqno  ( void ) { sz += fid_est( FID_SUB_SEQNO ); return *this; }
   MsgEst & time       ( void ) { sz += fid_est( FID_TIME ); return *this; }
   MsgEst & uptime     ( void ) { sz += fid_est( FID_UPTIME ); return *this; }
+  MsgEst & interval   ( void ) { sz += fid_est( FID_INTERVAL ); return *this; }
+  MsgEst & ref_cnt    ( void ) { sz += fid_est( FID_REF_CNT ); return *this; }
+  MsgEst & token      ( void ) { sz += fid_est( FID_TOKEN ); return *this; }
+  MsgEst & ret        ( void ) { sz += fid_est( FID_RET ); return *this; }
   MsgEst & link_state ( void ) { sz += fid_est( FID_LINK_STATE ); return *this; }
-  MsgEst & auth_seqno ( void ) { sz += fid_est( FID_AUTH_SEQNO ); return *this; }
-  MsgEst & auth_time  ( void ) { sz += fid_est( FID_AUTH_TIME ); return *this; }
   MsgEst & start      ( void ) { sz += fid_est( FID_START ); return *this; }
   MsgEst & end        ( void ) { sz += fid_est( FID_END ); return *this; }
-  MsgEst & ref_seqno  ( void ) { sz += fid_est( FID_REF_SEQNO ); return *this; }
-  MsgEst & token      ( void ) { sz += fid_est( FID_TOKEN ); return *this; }
-
-  MsgEst & interval   ( void ) { sz += fid_est( FID_INTERVAL ); return *this; }
-  MsgEst & ref_count  ( void ) { sz += fid_est( FID_REF_COUNT ); return *this; }
-  MsgEst & ret        ( void ) { sz += fid_est( FID_RET ); return *this; }
-  MsgEst & dict_csum  ( void ) { sz += fid_est( FID_DICT_CSUM ); return *this; }
-  MsgEst & enti_csum  ( void ) { sz += fid_est( FID_ENTI_CSUM ); return *this; }
-  MsgEst & fmt        ( void ) { sz += fid_est( FID_FMT ); return *this; }
   MsgEst & adj_info   ( void ) { sz += fid_est( FID_ADJ_INFO ); return *this; }
+  MsgEst & auth_seqno ( void ) { sz += fid_est( FID_AUTH_SEQNO ); return *this; }
+  MsgEst & auth_time  ( void ) { sz += fid_est( FID_AUTH_TIME ); return *this; }
+  MsgEst & fmt        ( void ) { sz += fid_est( FID_FMT ); return *this; }
   MsgEst & hops       ( void ) { sz += fid_est( FID_HOPS ); return *this; }
+  MsgEst & ref_seqno  ( void ) { sz += fid_est( FID_REF_SEQNO ); return *this; }
   MsgEst & tportid    ( void ) { sz += fid_est( FID_TPORTID ); return *this; }
-  MsgEst & uid_count  ( void ) { sz += fid_est( FID_UID_COUNT ); return *this; }
+  MsgEst & uid        ( void ) { sz += fid_est( FID_UID ); return *this; }
+  MsgEst & uid_cnt    ( void ) { sz += fid_est( FID_UID_CNT ); return *this; }
   MsgEst & subj_hash  ( void ) { sz += fid_est( FID_SUBJ_HASH ); return *this; }
-  MsgEst & link_add   ( void ) { sz += fid_est( FID_LINK_ADD ); return *this; }
-  MsgEst & start_ack  ( void ) { sz += fid_est( FID_START_ACK ); return *this; }
-  MsgEst & stop_ack   ( void ) { sz += fid_est( FID_STOP_ACK ); return *this; }
-  MsgEst & initial    ( void ) { sz += fid_est( FID_INITIAL ); return *this; }
-  MsgEst & database   ( void ) { sz += fid_est( FID_DATABASE ); return *this; }
+
   MsgEst & auth_stage ( void ) { sz += fid_est( FID_AUTH_STAGE ); return *this; }
+  MsgEst & link_add   ( void ) { sz += fid_est( FID_LINK_ADD ); return *this; }
+
+  MsgEst & fd_cnt     ( void ) { sz += fid_est( FID_FD_CNT ); return *this; }
+  MsgEst & ms_tot     ( void ) { sz += fid_est( FID_MS_TOT ); return *this; }
+  MsgEst & mr_tot     ( void ) { sz += fid_est( FID_MR_TOT ); return *this; }
+  MsgEst & bs_tot     ( void ) { sz += fid_est( FID_BS_TOT ); return *this; }
+  MsgEst & br_tot     ( void ) { sz += fid_est( FID_BR_TOT ); return *this; }
+  MsgEst & ms         ( void ) { sz += fid_est( FID_MS ); return *this; }
+  MsgEst & mr         ( void ) { sz += fid_est( FID_MR ); return *this; }
+  MsgEst & bs         ( void ) { sz += fid_est( FID_BS ); return *this; }
+  MsgEst & br         ( void ) { sz += fid_est( FID_BR ); return *this; }
+  MsgEst & sub_cnt    ( void ) { sz += fid_est( FID_SUB_CNT ); return *this; }
+  MsgEst & distance   ( void ) { sz += fid_est( FID_DISTANCE ); return *this; }
+  MsgEst & peer       ( size_t l ) { sz += fid_est( FID_PEER, l ); return *this; }
+  MsgEst & latency    ( size_t l ) { sz += fid_est( FID_LATENCY, l ); return *this; }
 };
 
 #endif

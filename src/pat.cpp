@@ -197,7 +197,7 @@ SubDB::fwd_psub( PatternArgs &ctx ) noexcept
    .subj_hash ()
    .pattern   ( ctx.patlen )
    .fmt       ()
-   .ref_count ();
+   .ref_cnt   ();
 
   MsgCat m;
   m.reserve( e.sz );
@@ -238,6 +238,9 @@ SubStatus
 PatTab::start( PatternArgs &ctx ) noexcept
 {
   uint32_t hcnt;
+  uint16_t preflen = ctx.cvt.prefixlen;
+  if ( preflen >= MAX_PRE )
+    preflen = MAX_PRE - 1;
   ctx.rt = this->tab.upsert2( ctx.hash, ctx.pat, ctx.patlen, ctx.loc, hcnt );
   if ( ctx.rt == NULL )
     return SUB_ERROR;
@@ -247,12 +250,15 @@ PatTab::start( PatternArgs &ctx ) noexcept
       return SUB_ERROR;
     }
     ctx.sub_coll = ( hcnt > 0 );
+    this->pref_count[ preflen ]++;
     this->list.push( ctx.seqno, ctx.hash, ACTION_PSUB_START );
     return SUB_OK;
   }
   ctx.sub_coll = ( hcnt > 1 );
-  if ( ctx.rt->add( ctx ) )
+  if ( ctx.rt->add( ctx ) ) {
+    this->pref_count[ preflen ]++;
     return SUB_UPDATED;
+  }
   return SUB_EXISTS;
 }
 
@@ -260,13 +266,44 @@ SubStatus
 PatTab::stop( PatternArgs &ctx ) noexcept
 {
   uint32_t hcnt;
+  uint16_t preflen = ctx.cvt.prefixlen;
+  if ( preflen >= MAX_PRE )
+    preflen = MAX_PRE - 1;
   ctx.rt = this->tab.find2( ctx.hash, ctx.pat, ctx.patlen, ctx.loc, hcnt );
   if ( ctx.rt == NULL )
     return SUB_NOT_FOUND;
   ctx.sub_coll = ( hcnt > 1 );
+  this->pref_count[ preflen ]--;
   if ( ! ctx.rt->rem( ctx ) )
     return SUB_UPDATED;
   return SUB_OK;
+}
+
+uint16_t
+PatTab::prefix_hash( const char *sub,  uint16_t sub_len,
+                     uint32_t *hash,  uint8_t *prefix ) noexcept
+{
+  const char * key[ MAX_PRE ];
+  size_t       keylen[ MAX_PRE ]; 
+  uint16_t     x = 0, k = 0;
+
+  for ( uint16_t i = 0; i < MAX_PRE; i++ ) {
+    if ( i > sub_len )
+      break;
+    if ( this->pref_count[ i ] != 0 ) {
+      key[ x ]    = sub;
+      keylen[ x ] = i;
+      hash[ x++ ] = this->seed[ i ];
+    }
+  }
+  if ( x > 0 ) {
+    if ( keylen[ 0 ] == 0 )
+      k++;
+    kv_crc_c_array( (const void **) &key[ k ], &keylen[ k ], &hash[ k ], x-k );
+    for ( k = 0; k < x; k++ )
+      prefix[ k ] = (uint8_t) keylen[ k ];
+  }
+  return x;
 }
 
 void

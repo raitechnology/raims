@@ -17,7 +17,7 @@ namespace ms {
 
 static const uint32_t HB_DEFAULT_INTERVAL = 10; /* seconds */
 /* random ms mod for pending peer add request (65ms) */
-static const uint64_t PEER_RAND_DELAY_NS = 64 * 1024 * 1024;
+static const uint64_t PEER_RAND_DELAY_NS  = 64 * 1024 * 1024;
 
 /* construct a subject for inbox */
 struct ShortSubjectBuf : public MsgBuf {
@@ -171,13 +171,13 @@ struct UserBridge : public UserStateTest<UserBridge> {
                      start_time,          /* start timestamp */
                      ping_send_time,
                      ping_recv_time,
-                     pong_recv_time;      /* ping times */
+                     pong_recv_time,      /* ping times */
+                     stats_seqno;         /* _N.PEER. stats */
   uint32_t           state,               /* UserNonceState bits */
                      uid,                 /* unique id for route */
                      hb_interval,         /* interval of heartbeat */
                      challenge_count,     /* count of challenges */
                      primary_route,       /* route with min hops */
-                     max_route,           /* the extent of user_route_ptr() */
                      unknown_refs,        /* link refs are yet to be resolved */
                      ping_send_count,
                      ping_recv_count,
@@ -187,7 +187,7 @@ struct UserBridge : public UserStateTest<UserBridge> {
                      seqno_not_subscr,
                      auth_count;
   StageAuth          auth[ 2 ];           /* auth handshake state */
-  UserRoute        * u_buf[ 16 ];         /* indexes user_route */
+  UserRoute        * u_buf[ 24 ];         /* indexes user_route */
   void * operator new( size_t, void *ptr ) { return ptr; }
 
   UserBridge( const PeerEntry &pentry,  kv::BloomDB &db,  uint32_t seed )
@@ -196,21 +196,33 @@ struct UserBridge : public UserStateTest<UserBridge> {
     this->uid_csum.zero();
     this->hb_cnonce.zero();
     ::memset( &this->user_route , 0,
-              (char *) (void *) &this->u_buf[ 16 ] -
+              (char *) (void *) &this->u_buf[ 24 ] -
               (char *) (void *) &this->user_route );
     this->hb_interval = HB_DEFAULT_INTERVAL;
   }
-  static const uint32_t USER_ROUTE_BASE = 8;    /* the shift 3 below */
-  static const uint32_t MAX_ROUTE_PTR = 524280; /* u_buf[ 15 ][ 262143 ] max */
+  static const uint32_t USER_ROUTE_SHIFT = 4,
+                        USER_ROUTE_BASE  = ( 1U << USER_ROUTE_SHIFT );
   UserRoute * user_route_ptr( UserDB &me,  uint32_t id ) {
-    uint32_t i = 31 - kv_clzw( ( id >> 3 ) + 1 ),
-             j = id - ( ( ( 1 << i ) - 1 ) << 3 );
-    if ( id < this->max_route ) {
+    uint32_t i = 31 - kv_clzw( ( id >> USER_ROUTE_SHIFT ) + 1 ),
+             j = id - ( ( ( 1 << i ) - 1 ) << USER_ROUTE_SHIFT );
+    if ( this->u_buf[ i ] != NULL ) {
       UserRoute * u_ptr = &this->u_buf[ i ][ j ];
       if ( u_ptr->is_init() )
         return u_ptr;
     }
     return this->init_user_route( me, i, j, id );
+  }
+  void user_route_reset( void ) {
+    for ( uint32_t i = 0; i < 24; i++ ) {
+      if ( this->u_buf[ i ] != NULL ) {
+        uint32_t max_j = USER_ROUTE_BASE << i;
+        for ( uint32_t j = 0; j < max_j; j++ ) {
+          UserRoute * u_ptr = &this->u_buf[ i ][ j ];
+          if ( u_ptr->is_init() )
+            u_ptr->reset();
+        }
+      }
+    }
   }
   UserRoute * init_user_route( UserDB &me,  uint32_t i,  uint32_t j,
                                uint32_t id ) noexcept;

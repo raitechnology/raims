@@ -190,7 +190,9 @@ main( int argc, char *argv[] )
     log.start_ev( poll );
   }
   int status = 0;
-  if ( ti != NULL ) {
+  if ( ! sess.add_ipc_transport( *svc, ip, ma, db ? atoi( db ) : 0 ) )
+    status = -1;
+  if ( status == 0 && ti != NULL ) {
     tport = tree->find_transport( ti, ::strlen( ti ), &conn );
     if ( tport == NULL ) {
       fprintf( stderr, "transport %s not found\n", ti );
@@ -212,8 +214,7 @@ main( int argc, char *argv[] )
     }
   }
   if ( status == 0 ) {
-    if ( ! sess.add_ipc_transport( *svc, ip, ma, db ? atoi( db ) : 0 ) ||
-         ! sess.add_startup_transports( *svc ) )
+    if ( ! sess.add_startup_transports( *svc ) )
       status = -1;
   }
   if ( status == 0 )

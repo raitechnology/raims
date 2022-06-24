@@ -59,19 +59,20 @@ TransportRoute::TransportRoute( kv::EvPoll &p,  SessionMgr &m,
                                 uint32_t id,  uint32_t f ) noexcept
     : EvSocket( p, p.register_type( "transport_route" ) ),
       poll( p ), mgr( m ), user_db( m.user_db ),
-      sub_route( p.sub_route.get_service( svc_name, svc_id ) ),
+      sub_route( p.sub_route.get_service( svc_name, svc_id, id ) ),
       console_rt( NULL ), ipc_rt( NULL ), router_rt( NULL ),
       uid_in_mesh( &this->mesh_connected ),
       mesh_csum( &this->mesh_csum2 ),
       hb_time( 0 ), hb_mono_time( 0 ), hb_seqno( 0 ), reachable_seqno( 0 ),
-      tport_id( id ), hb_count( 0 ), last_hb_count( 0 ),
-      connect_count( 0 ), last_connect_count( 0 ), state( f ),
-      mesh_id( 0 ), listener( 0 ), connect_mgr( *this ), pgm_tport( 0 ),
-      ibx_tport( 0 ), ucast_url_addr( 0 ), mesh_url_addr( 0 ),
-      ucast_url_len( 0 ), mesh_url_len( 0 ), inbox_fd( -1 ),
+      stats_seqno( 0 ), tport_id( id ), hb_count( 0 ),
+      last_hb_count( 0 ), connect_count( 0 ), last_connect_count( 0 ),
+      state( f ), mesh_id( 0 ), listener( 0 ), connect_mgr( *this ),
+      pgm_tport( 0 ), ibx_tport( 0 ), ucast_url_addr( 0 ),
+      mesh_url_addr( 0 ), ucast_url_len( 0 ), mesh_url_len( 0 ), inbox_fd( -1 ),
       mcast_fd( -1 ), mesh_conn_hash( 0 ), oldest_uid( 0 ),
       primary_count( 0 ), ext( 0 ), svc( s ), transport( t )
 {
+  d_tran( "transport.%u(%s, %x) created\n", id, t.tport.val, f );
   this->sock_opts = OPT_NO_POLL;
   /* external tports do not have protocol for link state routing:
    *   _I.inbox, _X.HB, _Z.ADD, _Z.BLM, _Z.ADJ, _S.JOIN, _P.PSUB, etc */
@@ -88,7 +89,6 @@ TransportRoute::TransportRoute( kv::EvPoll &p,  SessionMgr &m,
       this->sub_route.create_bloom_route( m.console_rt.fd, &m.sub_db.console );
     /* extrenal routes do not have system subjects */
   }
-  this->sub_route.route_id = id;
   this->mesh_csum2.zero();
   this->hb_cnonce.zero();
   for ( int i = 0; i < 3; i++ )
@@ -100,7 +100,7 @@ TransportRoute::init( void ) noexcept
 {
   int pfd = this->poll.get_null_fd();
   d_tran( "tport %s fd %d\n", this->sub_route.service_name, pfd );
-  this->PeerData::init_peer( pfd, NULL, "tport" );
+  this->PeerData::init_peer( pfd, this->sub_route.route_id, NULL, "tport" );
   this->set_peer_name( *this, "tport" );
   int status = this->poll.add_sock( this );
   if ( status != 0 )
@@ -412,7 +412,7 @@ SessionMgr::add_mesh_accept( TransportRoute &listen_rte,
     if ( rte->all_set( TPORT_IS_SHUTDOWN | TPORT_IS_MESH ) &&
          rte->mesh_id == conn.rte->mesh_id ) {
       if ( rte->connect_mgr.is_shutdown ) {
-        rte->clear( TPORT_IS_SHUTDOWN | TPORT_IS_CONNECT );
+        rte->clear_all();
         break;
       }
     }
@@ -436,8 +436,9 @@ SessionMgr::add_mesh_accept( TransportRoute &listen_rte,
   char buf[ MAX_TCP_HOST_LEN ];
   make_mesh_url_from_sock( buf, conn );
   rte->mesh_conn_hash = kv_crc_c( buf, ::strlen( buf ), 0 );
-  conn.rte    = rte;
-  conn.notify = rte;
+  conn.rte      = rte;
+  conn.notify   = rte;
+  conn.route_id = rte->sub_route.route_id;
 
   printf( "%s.%u add_mesh_accept %s %x\n",
         rte->transport.tport.val, rte->tport_id, rte->mesh_url_addr,
@@ -451,6 +452,17 @@ SessionMgr::add_mesh_accept( TransportRoute &listen_rte,
     rte->connect_count++;
   d_tran( "%s connect_count %u\n", rte->name, rte->connect_count );
   return true;
+}
+
+void
+TransportRoute::clear_mesh( void ) noexcept
+{
+  this->mesh_url_addr  = NULL;
+  this->mesh_url_len   = 0;
+  this->mesh_id        = 0;
+  this->uid_in_mesh    = &this->mesh_connected;
+  this->mesh_csum      = &this->mesh_csum2;
+  this->mesh_conn_hash = 0;
 }
 
 bool
@@ -470,7 +482,8 @@ SessionMgr::add_tcp_accept( TransportRoute &listen_rte,
     rte = this->user_db.transport_tab.ptr[ id ];
     if ( rte->all_set( TPORT_IS_SHUTDOWN | TPORT_IS_TCP ) ) {
       if ( rte->connect_mgr.is_shutdown ) {
-        rte->clear( TPORT_IS_SHUTDOWN | TPORT_IS_CONNECT );
+        rte->clear_all();
+        rte->clear_mesh();
         break;
       }
     }
@@ -485,8 +498,9 @@ SessionMgr::add_tcp_accept( TransportRoute &listen_rte,
     rte->connect_mgr.release_conn();
   rte->set( TPORT_IS_TCP );
 
-  conn.rte    = rte;
-  conn.notify = rte;
+  conn.rte      = rte;
+  conn.notify   = rte;
+  conn.route_id = rte->sub_route.route_id;
 
   printf( "%s.%u add_tcp_accept\n", rte->transport.tport.val, rte->tport_id );
   if ( id == count ) {
@@ -622,7 +636,7 @@ SessionMgr::add_mesh_connect( TransportRoute &mesh_rte,
                   cnt, rte->connect_count );
           return true;
         }
-        rte->clear( TPORT_IS_SHUTDOWN );
+        rte->clear_all();
         break;
       }
     }
@@ -702,6 +716,7 @@ SessionMgr::add_mesh_connect( TransportRoute &mesh_rte,
       rte->connect_mgr.alloc_conn<EvTcpTransportClient>( this->poll,
                                                          sock_type );
     c->rte = rte;
+    c->route_id = rte->sub_route.route_id;
   }
   rte->connect_mgr.connect_timeout_secs = parm.timeout;
   rte->connect_mgr.set_parm( parm.copy() );
@@ -752,7 +767,7 @@ TransportRoute::on_msg( EvPublish &pub ) noexcept
   }
   UserBridge &n = *fpub.n;
   if ( ( fpub.flags & MSG_FRAME_ACK_CONTROL ) == 0 ) {
-    uint16_t opt = dec.msg->caba.opt_flag();
+    uint16_t opt = dec.msg->caba.get_opt();
     fpub.flags |= MSG_FRAME_ACK_CONTROL;
     if ( ( opt & CABA_OPT_TRACE ) != 0 ) {
       if ( dec.is_set == 0 && dec.decode_msg() != 0 )
@@ -761,7 +776,7 @@ TransportRoute::on_msg( EvPublish &pub ) noexcept
     }
   }
   UserBridge * ptp_bridge;
-  CabaTypeFlag tflag = dec.msg->caba.type_flag();
+  CabaTypeFlag tflag = dec.msg->caba.get_type();
   bool         b     = true;
   if ( tflag == CABA_INBOX ) {
     if ( (ptp_bridge = this->user_db.is_inbox_sub( pub.subject,
@@ -770,8 +785,8 @@ TransportRoute::on_msg( EvPublish &pub ) noexcept
       if ( &rte != this ) {
         d_tran( "transport_route: inbox (%.*s) -> %s\n",
                 (int) pub.subject_len, pub.subject, rte.name );
-        this->msgs_sent++;
-        this->bytes_sent += pub.msg_len;
+        /*this->msgs_sent++;
+        this->bytes_sent += pub.msg_len;*/
         b = this->user_db.forward_to_inbox( *ptp_bridge, pub.subject,
                                       pub.subject_len, pub.subj_hash,
                                       pub.msg, pub.msg_len );
@@ -790,8 +805,8 @@ TransportRoute::on_msg( EvPublish &pub ) noexcept
     if ( forward.first( i, count ) ) {
       do {
         rte = this->user_db.transport_tab.ptr[ i ];
-        this->msgs_sent++;
-        this->bytes_sent += pub.msg_len;
+        /*this->msgs_sent++;
+        this->bytes_sent += pub.msg_len;*/
         b  &= rte->sub_route.forward_except( pub, this->mgr.router_set );
       } while ( forward.next( i, count ) );
     }
@@ -853,8 +868,8 @@ TransportRoute::on_msg( EvPublish &pub ) noexcept
         forward.add( rec->tport_id );
         d_tran( "forward to %s.%u\n",
                 rte->transport.tport.val, rec->tport_id );
-        this->msgs_sent++;
-        this->bytes_sent += pub.msg_len;
+        /*this->msgs_sent++;
+        this->bytes_sent += pub.msg_len;*/
         b &= rte->sub_route.forward_except( pub, this->mgr.router_set );
       }
     }
@@ -1238,6 +1253,7 @@ TransportRoute::create_tcp_connect( ConfigTree::Transport &tport ) noexcept
       this->connect_mgr.alloc_conn<EvTcpTransportClient>( this->poll,
                                                           sock_type );
     c->rte = this;
+    c->route_id = this->sub_route.route_id;
   }
   this->connect_mgr.connect_timeout_secs = parm.timeout;
   this->connect_mgr.set_parm( parm.copy() );
@@ -1287,7 +1303,7 @@ SessionMgr::create_telnet( ConfigTree::Transport &tport ) noexcept
   this->telnet_tport = &tport;
 
   if ( ! l->in_list( IN_ACTIVE_LIST ) ) {
-    if ( l->listen2( parm.host, parm.port, parm.opts, "telnet_listen" ) != 0 )
+    if ( l->listen2( parm.host, parm.port, parm.opts, "telnet_listen", -1 ) != 0 )
       return false;
     l->console = &this->console;
     printf( "%s listening on %s\n", tport.tport.val, l->peer_address.buf );
@@ -1305,6 +1321,10 @@ SessionMgr::create_web( ConfigTree::Transport &tport ) noexcept
   if ( this->web == NULL ) {
     void * p = aligned_malloc( sizeof( WebListen ) );
     this->web = new ( p ) WebListen( this->poll );
+    if ( tport.get_route_str( "http_dir", this->web->http_dir ) &&
+         this->web->http_dir != NULL ) {
+      this->web->http_dir_len = ::strlen( this->web->http_dir );
+    }
   }
   WebListen * l = this->web;
   EvTcpTransportParameters parm;
@@ -1312,7 +1332,7 @@ SessionMgr::create_web( ConfigTree::Transport &tport ) noexcept
   this->web_tport = &tport;
 
   if ( ! l->in_list( IN_ACTIVE_LIST ) ) {
-    if ( l->listen2( parm.host, parm.port, parm.opts, "web_listen" ) != 0 )
+    if ( l->listen2( parm.host, parm.port, parm.opts, "web_listen", -1 ) != 0 )
       return false;
     l->console = &this->console;
     printf( "%s listening on %s\n", tport.tport.val, l->peer_address.buf );

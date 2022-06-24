@@ -29,7 +29,7 @@ UserDB::make_hb( TransportRoute &rte,  const char *sub,  size_t sublen,
    .cnonce    ()
    .sub_seqno ()
    .link_state()
-   .uid_count ()
+   .uid_cnt   ()
    .uid_csum  ()
    .mesh_csum ()
    .ucast_url ( rte.ucast_url_len )
@@ -49,7 +49,7 @@ UserDB::make_hb( TransportRoute &rte,  const char *sub,  size_t sublen,
      .sub_seqno ( this->sub_db.sub_seqno );
     if ( h != hello_h ) {
       m.link_state( this->link_state_seqno )
-       .uid_count ( this->uid_auth_count   )
+       .uid_cnt   ( this->uid_auth_count   )
        .uid_csum  ( this->uid_csum         );
       if ( rte.is_set( TPORT_IS_MESH ) ) {
         Nonce csum = *rte.mesh_csum;
@@ -332,7 +332,7 @@ UserDB::on_heartbeat( const MsgFramePublish &pub,  UserBridge &n,
             this->debug_uids( this->uid_authenticated, csum );
         }
       }
-      if ( dec.test( FID_MESH_CSUM ) ) {
+      if ( dec.test( FID_MESH_CSUM ) && pub.rte.is_mesh() ) {
         Nonce csum, my_csum = *pub.rte.mesh_csum;
         csum.copy_from( dec.mref[ FID_MESH_CSUM ].fptr );
         my_csum ^= this->bridge_id.nonce;

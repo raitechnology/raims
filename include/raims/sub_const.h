@@ -28,6 +28,11 @@ namespace ms {
 #define _PSUB_START     "_P.PSUB"
 #define _PSUB_STOP      "_P.STOP"
 
+/* stats */
+#define _STAT_PORT      "_N.PORT"
+#define _STAT_PEER      "_N.PEER"
+#define _STAT_ADJ       "_N.ADJ"
+
 /* inbox suffix, for point to point rpc */
 #define _AUTH           "auth"
 #define _SUBS           "subs"
@@ -58,7 +63,10 @@ extern const char     X_HELLO[],
                       S_JOIN[],
                       S_LEAVE[],
                       P_PSUB[],
-                      P_PSTOP[];
+                      P_PSTOP[],
+                      N_PORT[],
+                      N_PEER[],
+                      N_ADJ[];
                     /* prefix string size */
 extern const uint16_t X_HELLO_SZ,
                       X_HB_SZ,
@@ -70,7 +78,10 @@ extern const uint16_t X_HELLO_SZ,
                       S_JOIN_SZ,
                       S_LEAVE_SZ,
                       P_PSUB_SZ,
-                      P_PSTOP_SZ;
+                      P_PSTOP_SZ,
+                      N_PORT_SZ,
+                      N_PEER_SZ,
+                      N_ADJ_SZ;
 /* hashes of above */
 extern uint32_t hello_h, hb_h, bye_h, add_h, del_h, blm_h, adj_h,
                 join_h, leave_h, psub_h, pstop_h;
@@ -87,7 +98,10 @@ const char     X_HELLO[]  = _SESSION_HELLO    ,
                S_JOIN[]   = _SUB_JOIN      ".",
                S_LEAVE[]  = _SUB_LEAVE     ".",
                P_PSUB[]   = _PSUB_START    ".",
-               P_PSTOP[]  = _PSUB_STOP     ".";
+               P_PSTOP[]  = _PSUB_STOP     ".",
+               N_PORT[]   = _STAT_PORT     ".",
+               N_PEER[]   = _STAT_PEER     ".",
+               N_ADJ[]    = _STAT_ADJ      ".";
                     /* prefix string size */
 const uint16_t X_HELLO_SZ = (uint16_t) sizeof( X_HELLO ) - 1,
                X_HB_SZ    = (uint16_t) sizeof( X_HB    ) - 1,
@@ -99,7 +113,10 @@ const uint16_t X_HELLO_SZ = (uint16_t) sizeof( X_HELLO ) - 1,
                S_JOIN_SZ  = (uint16_t) sizeof( S_JOIN  ) - 1,
                S_LEAVE_SZ = (uint16_t) sizeof( S_LEAVE ) - 1,
                P_PSUB_SZ  = (uint16_t) sizeof( P_PSUB  ) - 1,
-               P_PSTOP_SZ = (uint16_t) sizeof( P_PSTOP ) - 1;
+               P_PSTOP_SZ = (uint16_t) sizeof( P_PSTOP ) - 1,
+               N_PORT_SZ  = (uint16_t) sizeof( N_PORT  ) - 1,
+               N_PEER_SZ  = (uint16_t) sizeof( N_PEER  ) - 1,
+               N_ADJ_SZ   = (uint16_t) sizeof( N_ADJ   ) - 1;
 
 uint32_t       hello_h, hb_h, bye_h, add_h, del_h, blm_h, adj_h,
                join_h, leave_h, psub_h, pstop_h;

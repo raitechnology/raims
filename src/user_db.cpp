@@ -603,6 +603,8 @@ UserRoute::set_mesh( UserDB &user_db,  const void *p,  size_t len ) noexcept
 {
   if ( len == 0 && this->mesh_url_len == 0 )
     return;
+  if ( ! this->rte.is_mesh() )
+    return;
 
   if ( len == 0 ) {
     /*if ( debug_usr )*/
@@ -1013,16 +1015,12 @@ UserRoute *
 UserBridge::init_user_route( UserDB &me,  uint32_t i,  uint32_t j,
                              uint32_t id ) noexcept
 {
-  if ( id >= MAX_ROUTE_PTR )
-    return NULL;
   if ( this->u_buf[ i ] == NULL ) {
     size_t size = sizeof( UserRoute ) * ( USER_ROUTE_BASE << i );
     void * m = ::malloc( size );
     ::memset( m, 0, size );
     this->u_buf[ i ] = (UserRoute *) (void *) m;
   }
-  if ( id >= this->max_route )
-    this->max_route = id + 1;
   return new ( (void *) &this->u_buf[ i ][ j ] )
              UserRoute( *this, *me.transport_tab.ptr[ id ] );
 }
@@ -1238,9 +1236,7 @@ UserDB::remove_authenticated( UserBridge &n,  ByeReason bye ) noexcept
   if ( ! n.is_set( ZOMBIE_STATE ) )
     this->zombie_ht->upsert_rsz( this->zombie_ht, n.bridge_id.nonce, n.uid );
   n.state = ZOMBIE_STATE;
-
-  for ( uint32_t i = 0; i < n.max_route; i++ )
-    n.user_route_ptr( *this, i )->reset();
+  n.user_route_reset();
 
   if ( ! this->adjacency_change.is_empty() )
     this->send_adjacency_change();

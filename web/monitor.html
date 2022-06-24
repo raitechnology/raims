@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<link rel="icon" href="rai_icon.svg" type="image/svg+xml"/>
+<title>MS Nodes</title>
+<style>
+.node {
+  stroke: #fff;
+  stroke-width: 1.5px;
+  cursor: move;
+}
+.link {
+  stroke: #999;
+  stroke-width: 3px;
+  stroke-opacity: 1;
+}
+.node-label {
+  fill: white;
+  font-family: Verdana;
+  font-size: 18px;
+  text-anchor: middle;
+  cursor: move;
+}
+.graph-title {
+  fill: black;
+  font-family: Verdana;
+  font-size: 18px;
+  text-anchor: middle;
+}
+.line {
+  fill: none;
+  stroke-width: 1.5px;
+}
+#cy {
+  z-index: 999;
+}
+table { border-collapse: collapse; width: 100%; table-layout: fixed; }
+th, td { padding: 0.25rem; text-align: left; border: 1px solid #ccc; }
+</style>
+</head>
+<body>
+<table class="container" id="peer-container">
+<summary>User @(user) peers, click user to show on graph</summary>
+</table>
+<div class="container" id="cy"></div>
+<div class="container" id="graph-container"></div>
+<table class="container" id="port-container">
+<summary>Network transports, published from all peers</summary>
+</table>
+<script src="cytoscape-min-3.21.2.js"></script>
+<script src="d3.min-7.4.4.js"></script>
+<script src="cola.min-3.3.8.js"></script>
+<script src="cytoscape-cola-2.5.1.js"></script>
+<script src="monitor.js"></script>
+<script>
+  window.onload = function() {
+    let ws = new WebSocket(
+      ( ( window.location.protocol == "https:" ) ? "wss://" : "ws://" ) +
+        window.location.host, "rai" );
+    on_startup( ws );
+  };
+</script>
+</body>
+</html>

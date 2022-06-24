@@ -28,7 +28,8 @@ EvTcpTransportListen::EvTcpTransportListen( EvPoll &p,
 int
 EvTcpTransportListen::listen( const char *ip,  int port,  int opts ) noexcept
 {
-  int res = this->kv::EvTcpListen::listen2( ip, port, opts, "tcp_listen" );
+  int res = this->kv::EvTcpListen::listen2( ip, port, opts, "tcp_listen",
+                                            this->rte.sub_route.route_id );
   if ( res == 0 )
     this->rte.set_peer_name( *this, "list" );
   return res;
@@ -53,13 +54,13 @@ EvTcpTransportListen::accept( void ) noexcept
 void
 EvTcpTransportListen::release( void ) noexcept
 {
+  if ( this->notify != NULL )
+    this->notify->on_shutdown( *this, NULL, 0 );
 }
 
 void
 EvTcpTransportListen::process_close( void ) noexcept
 {
-  if ( this->notify != NULL )
-    this->notify->on_shutdown( *this, NULL, 0 );
 }
 
 bool
@@ -70,7 +71,8 @@ EvTcpTransportClient::connect( EvTcpTransportParameters &p,
     return false;
   this->is_connect = true;
   this->EvConnection::release_buffers();
-  if ( EvTcpConnection::connect( *this, p.host, p.port, p.opts ) != 0 )
+  if ( EvTcpConnection::connect2( *this, p.host, p.port, p.opts,
+                          "ev_tcp_tport", this->rte->sub_route.route_id ) != 0 )
     return false;
   this->notify = n;
   this->start();
@@ -134,8 +136,8 @@ EvTcpTransport::dispatch_msg( void ) noexcept
   MsgFramePublish pub( sub, sublen, this->msg_in.msg, this->fd, h,
                        (uint8_t) CABA_TYPE_ID, *this->rte,
                        this->rte->sub_route );
-  d_tcp( "ev_tcp(%s) dispatch( %.*s )\n", this->rte->name,
-         (int) pub.subject_len, pub.subject );
+  d_tcp( "< ev_tcp(%s) dispatch %.*s (%lu)\n", this->rte->name,
+         (int) pub.subject_len, pub.subject, this->msgs_recv + 1 );
   this->msgs_recv++;
   /*if ( *this->tport_count == 1 )
     return this->rte->sub_route.forward_not_fd2( pub, this->fd, this->not_fd2 );*/
@@ -151,20 +153,20 @@ EvTcpTransport::release( void ) noexcept
   }
   this->msg_in.release();
   this->EvConnection::release_buffers();
+  if ( this->notify != NULL )
+    this->notify->on_shutdown( *this, NULL, 0 );
 }
 
 void
 EvTcpTransport::process_close( void ) noexcept
 {
-  if ( this->notify != NULL )
-    this->notify->on_shutdown( *this, NULL, 0 );
 }
 
 bool
 EvTcpTransport::fwd_msg( EvPublish &pub ) noexcept
 {
-  d_tcp( "> ev_tcp(%s) fwd %.*s\n", this->rte->name,
-          (int) pub.subject_len, pub.subject );
+  d_tcp( "> ev_tcp(%s) fwd %.*s (%lu)\n", this->rte->name,
+          (int) pub.subject_len, pub.subject, this->msgs_sent + 1 );
   char * buf = this->alloc( pub.msg_len );
   ::memcpy( buf, pub.msg, pub.msg_len );
   this->sz += pub.msg_len;

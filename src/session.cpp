@@ -90,13 +90,13 @@ SessionMgr::init_sock( void ) noexcept
 
   char buf[ 256 ];
   int  len;
-  this->ipc_rt.PeerData::init_peer( efd, NULL, "ipc" );
+  this->ipc_rt.PeerData::init_peer( efd, -1, NULL, "ipc" );
   len = ::snprintf( buf, sizeof( buf ), "%s.ipc", this->svc.svc.val );
   this->ipc_rt.PeerData::set_name( buf, len );
-  this->console_rt.PeerData::init_peer( ifd, NULL, "console" );
+  this->console_rt.PeerData::init_peer( ifd, -1, NULL, "console" );
   len = ::snprintf( buf, sizeof( buf ), "%s.console", this->svc.svc.val );
   this->console_rt.PeerData::set_name( buf, len );
-  this->PeerData::init_peer( pfd, NULL, "session" );
+  this->PeerData::init_peer( pfd, -1, NULL, "session" );
   len = ::snprintf( buf, sizeof( buf ), "%s.session", this->svc.svc.val );
   this->PeerData::set_name( buf, len );
 
@@ -217,8 +217,13 @@ SessionMgr::add_wildcard_rte( const char *prefix,  size_t pref_len,
 void
 SessionMgr::start( void ) noexcept
 {
+  uint64_t cur_mono = this->poll.timer.current_monotonic_time_ns(),
+           cur_time = this->poll.timer.current_time_ns();
   this->user_db.hello_hb();
   this->timer_id = ++this->next_timer;
+  this->stats.mono_time  = cur_mono;
+  this->stats.mono_time -= cur_time % ( STATS_INTERVAL * SEC_TO_NS );
+  this->stats.mono_time += STATS_INTERVAL * SEC_TO_NS;
   uint64_t ival = this->user_db.hb_interval * SEC_TO_NS;
   this->user_db.hb_ival_ns = ival;
   this->user_db.hb_ival_mask = ival;
@@ -250,6 +255,13 @@ SessionMgr::timer_expire( uint64_t tid,  uint64_t ) noexcept
   this->sub_db.pub_tab.flip();
   this->sub_db.seqno_tab.flip();
   this->sub_db.any_tab.gc();
+
+  if ( cur_mono < this->stats.mono_time )
+    return true;
+  do {
+    this->stats.mono_time += STATS_INTERVAL * SEC_TO_NS;
+  } while ( this->stats.mono_time < cur_mono );
+  this->publish_stats( cur_time );
   return true;
 }
 
@@ -315,10 +327,13 @@ SessionMgr::show_debug_msg( const MsgFramePublish &fpub,
                           fpub.subject[ 1 ] != 'X' );
   if ( show_msg && debug_msgr && fpub.n != NULL ) {
     UserBridge & n = *fpub.n;
-    n.printf( "### %.*s (len=%u, flags=%s, type=%s, from %s, in %s, fd %d)\n",
+    n.printf(
+ "### %.*s (len=%u, v=%u, f=%s, o=%u, type=%s from %s, in %s, fd %d)\n",
               (int) fpub.subject_len, fpub.subject,
               fpub.msg_len,
+              fpub.dec.msg->caba.get_ver(),
               fpub.dec.msg->caba.type_str(),
+              fpub.dec.msg->caba.get_opt(),
               publish_type_to_string( fpub.dec.type ),
               fpub.rte.name, where, fpub.src_route );
     MDOutput mout( MD_OUTPUT_OPAQUE_TO_B64 );
@@ -340,14 +355,14 @@ SessionMgr::parse_msg_hdr( MsgFramePublish &fpub,  bool is_ipc ) noexcept
     return fpub.status = FRAME_STATUS_BAD_MSG;
 
   PublishType  type  = MCAST_SUBJECT;
-  CabaTypeFlag tflag = dec.msg->caba.type_flag();
+  CabaTypeFlag tflag = dec.msg->caba.get_type();
   if ( tflag != CABA_MCAST ) {
     if ( is_ipc )
       return FRAME_STATUS_MY_MSG;
     uint8_t i;
     /* an inbox subject */
     if ( tflag == CABA_INBOX ) {
-      if ( ( dec.msg->caba.opt_flag() & CABA_OPT_ANY ) == 0 ) {
+      if ( ( dec.msg->caba.get_opt() & CABA_OPT_ANY ) == 0 ) {
         /* match _I.Nonce. + hash( _I.Nonce. ) */
         for ( i = 0; i < fpub.prefix_cnt; i++ ) {
           if ( fpub.hash[ i ] == this->ibx.hash &&
@@ -468,7 +483,7 @@ IpcRoute::on_msg( EvPublish &pub ) noexcept
     return true;
   }
   if ( ( fpub.flags & MSG_FRAME_ACK_CONTROL ) == 0 ) {
-    uint16_t opt = dec.msg->caba.opt_flag();
+    uint16_t opt = dec.msg->caba.get_opt();
     fpub.flags |= MSG_FRAME_ACK_CONTROL;
     if ( opt != CABA_OPT_NONE ) {
       if ( ( opt & CABA_OPT_ACK ) != 0 )
@@ -497,11 +512,11 @@ IpcRoute::on_msg( EvPublish &pub ) noexcept
   SeqnoStatus status = this->sub_db.match_seqno( seq );
 
   d_sess( "-> ipc_rte: %.*s seqno %" PRIu64 "(%s) reply %.*s "
-          "(len=%u, from %s, fd %d)\n",
+          "(len=%u, from %s, fd %d, msg_enc %x)\n",
           (int) fpub.subject_len, fpub.subject, dec.seqno,
           seqno_status_string( status ),
           (int) replylen, (char *) reply,
-          fpub.msg_len, fpub.rte.name, fpub.src_route );
+          fpub.msg_len, fpub.rte.name, fpub.src_route, fmt );
 
   if ( status > SEQNO_UID_NEXT ) {
     fpub.status = FRAME_STATUS_DUP_SEQNO;
@@ -516,6 +531,10 @@ IpcRoute::on_msg( EvPublish &pub ) noexcept
       n.seqno_not_subscr++;
     return true;
   }
+  /*MDMsgMem mem;
+  if ( fmt == CABA_TYPE_ID ) {
+    fmt = fpub.dec.msg->caba_to_rvmsg( mem, data, datalen );
+  }*/
   bool b = true;
   size_t i, count = this->user_db.transport_tab.count;
   if ( seq.tport_mask == SubRefs::ALL_MASK ) {
@@ -568,59 +587,74 @@ IpcRoute::on_msg( EvPublish &pub ) noexcept
 bool
 ConsoleRoute::on_msg( EvPublish &pub ) noexcept
 {
-  RouteLoc loc;
-  Pub * p = this->sub_db.pub_tab.upsert( pub.subj_hash, pub.subject,
-                                         pub.subject_len, loc );
-  if ( p == NULL )
-    return false;
-  if ( loc.is_new )
-    p->init( false );
-  uint64_t seqno = p->next_seqno();
+  this->fwd_console( pub, false );
+  return true;
+}
 
-  d_sess( "-> fwd_cons: %.*s seqno %lu reply %.*s (len=%u, fd %d)\n",
-          (int) pub.subject_len, pub.subject, seqno,
-          (int) pub.reply_len, (char *) pub.reply,
-          pub.msg_len, pub.src_route );
-  MsgEst e( pub.subject_len );
-  e.seqno ();
-
-  MsgCat m;
-  m.reserve( e.sz );
-
-  m.open( this->user_db.bridge_id.nonce, pub.subject_len )
-   .seqno ( seqno );
-  m.close( e.sz, pub.subj_hash, CABA_MCAST );
-
-  m.sign( pub.subject, pub.subject_len, *this->user_db.session_key );
+uint32_t
+ConsoleRoute::fwd_console( EvPublish &pub,  bool is_caba ) noexcept
+{
   TransportRoute & rte = *this->user_db.ipc_transport;
+  MDMsgMem     mem;
+  CabaMsg    * msg     = NULL;
+  const void * data    = NULL;
+  size_t       datalen = 0,
+               end;
+  if ( is_caba ) {
+    end = pub.msg_len;
+    if ( CabaMsg::unpack2( (uint8_t *) pub.msg, 0, end, &mem, msg ) != 0 )
+      return 0;
+  }
+  else {
+    RouteLoc loc;
+    Pub * p = this->sub_db.pub_tab.upsert( pub.subj_hash, pub.subject,
+                                           pub.subject_len, loc );
+    if ( p == NULL )
+      return 0;
+    if ( loc.is_new )
+      p->init( false );
+    uint64_t seqno = p->next_seqno();
 
-  CabaMsg * msg;
-  MDMsgMem  mem;
-  size_t    end = m.len();
-  CabaMsg::unpack2( (uint8_t *) m.msg, 0, end, &mem, msg );
+    MsgEst e( pub.subject_len );
+    e.seqno ();
+
+    MsgCat m;
+    m.reserve( e.sz );
+
+    m.open( this->user_db.bridge_id.nonce, pub.subject_len )
+     .seqno ( seqno );
+    m.close( e.sz, pub.subj_hash, CABA_MCAST );
+
+    m.sign( pub.subject, pub.subject_len, *this->user_db.session_key );
+
+    end = m.len();
+    CabaMsg::unpack2( (uint8_t *) m.msg, 0, end, &mem, msg );
+    data    = pub.msg;
+    datalen = pub.msg_len;
+  }
   MsgFramePublish fpub( pub, msg, rte );
   fpub.dec.decode_msg();
   fpub.dec.get_ival<uint64_t>( FID_SEQNO, fpub.dec.seqno );
   SeqnoArgs seq( fpub );
   SeqnoStatus status = this->sub_db.match_seqno( seq );
 
-  if ( status > SEQNO_UID_NEXT ) {
-    printf( "uid status %d\n", status );
-  }
-  if ( seq.cb != NULL ) {
-    fpub.flags |= MSG_FRAME_CONSOLE_CONTROL;
-    SubMsgData val( fpub, NULL, pub.msg, pub.msg_len );
+  if ( status <= SEQNO_UID_NEXT ) {
+    if ( seq.cb != NULL ) {
+      fpub.flags |= MSG_FRAME_CONSOLE_CONTROL;
+      SubMsgData val( fpub, NULL, data, datalen );
 
-    val.seqno      = seqno;
-    val.time       = 0;
-    val.fmt        = pub.msg_enc;
-    val.last_seqno = seq.last_seqno;
-    val.last_time  = seq.last_time;
-    val.token      = 0;
-    val.reply      = 0;
-    seq.cb->on_data( val );
+      val.seqno      = fpub.dec.seqno;
+      val.time       = 0;
+      val.fmt        = pub.msg_enc;
+      val.last_seqno = seq.last_seqno;
+      val.last_time  = seq.last_time;
+      val.token      = 0;
+      val.reply      = 0;
+      seq.cb->on_data( val );
+      return 1;
+    }
   }
-  return true;
+  return 0;
 }
 
 bool
@@ -759,7 +793,7 @@ SessionMgr::on_msg( EvPublish &pub ) noexcept
     return true;
   }
   if ( ( fpub.flags & MSG_FRAME_ACK_CONTROL ) == 0 ) {
-    uint16_t opt = dec.msg->caba.opt_flag();
+    uint16_t opt = dec.msg->caba.get_opt();
     fpub.flags |= MSG_FRAME_ACK_CONTROL;
     if ( opt != CABA_OPT_NONE ) {
       if ( ( opt & CABA_OPT_ACK ) != 0 )
@@ -1155,10 +1189,10 @@ SessionMgr::forward_ipc( TransportRoute &src_rte,  EvPublish &fwd ) noexcept
            stamp = ( loc.is_new ? this->poll.current_coarse_ns() : 0 );
 
   d_sess( "-> fwd_ipc: %.*s seqno %lu time %lu reply %.*s "
-          "(len=%u, from %s, fd %d)\n",
+          "(len=%u, from %s, fd %d, enc %x)\n",
           (int) fwd.subject_len, fwd.subject, seqno, stamp,
           (int) fwd.reply_len, (char *) fwd.reply,
-          fwd.msg_len, src_rte.name, fwd.src_route );
+          fwd.msg_len, src_rte.name, fwd.src_route, fwd.msg_enc );
   MsgEst e( fwd.subject_len );
   e.seqno ()
    .time  ()

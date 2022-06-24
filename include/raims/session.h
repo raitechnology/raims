@@ -5,6 +5,7 @@
 #include <raims/sub_const.h>
 #include <raims/console.h>
 #include <raims/event_rec.h>
+#include <raims/stats.h>
 
 extern "C" {
 const char *ms_get_version( void );
@@ -181,6 +182,7 @@ struct ConsoleRoute : public kv::EvSocket {
   ConsoleRoute( kv::EvPoll &p,  SessionMgr &m ) noexcept;
   /* EvSocket */
   virtual bool on_msg( kv::EvPublish &pub ) noexcept;
+  uint32_t fwd_console( kv::EvPublish &pub,  bool is_caba ) noexcept;
   virtual void write( void ) noexcept;
   virtual void read( void ) noexcept;
   virtual void process( void ) noexcept;
@@ -210,6 +212,7 @@ struct SessionMgr : public kv::EvSocket {
   WebListen             * web;
   ConfigTree::Transport * telnet_tport,
                         * web_tport;
+  SessionStats            stats;
   uint8_t                 tcp_accept_sock_type, /* free list sock types */
                           tcp_connect_sock_type;
 
@@ -256,6 +259,9 @@ struct SessionMgr : public kv::EvSocket {
   void show_debug_msg( const MsgFramePublish &fpub,
                        const char *where ) noexcept;
   /* publish data on a subject */
+  void publish_stats( uint64_t cur_time ) noexcept;
+  void fwd_stat_msg( SubjectVar &s,  MsgCat &m,  uint32_t h,
+                     uint32_t &rcount,  uint32_t &ipc_count ) noexcept;
   bool publish( PubMcastData &mc ) noexcept;
   bool publish_any( PubMcastData &mc ) noexcept;
   bool publish_to( PubPtpData &ptp ) noexcept;

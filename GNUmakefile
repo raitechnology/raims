@@ -307,7 +307,7 @@ libraims_files := config user transport ev_tcp_transport ev_pgm_transport \
                  pgm_sock ev_inbox_transport ev_telnet ev_web ev_rv_transport \
 		 ev_nats_transport ev_redis_transport msg session heartbeat \
 		 user_db auth peer link_state sub pat crypt poly1305 ec25519 \
-		 ed25519 sha512 aes gen_config console
+		 ed25519 sha512 aes gen_config console stats
 libraims_files := $(libraims_files)
 libraims_cfile := $(addprefix src/, $(addsuffix .cpp, $(libraims_files)))
 libraims_objs  := $(addprefix $(objd)/, $(addsuffix .o, $(libraims_files)))
@@ -324,16 +324,16 @@ $(libd)/libraims.so: $(libraims_dbjs) $(dlnk_dep)
 all_libs    += $(libd)/libraims.a $(libd)/libraims.so
 all_depends += $(libraims_deps)
 
-#gen_user_files := gen_user
-#gen_user_objs  := $(addprefix $(objd)/, $(addsuffix .o, $(gen_user_files)))
-#gen_user_deps  := $(addprefix $(dependd)/, $(addsuffix .d, $(gen_user_files)))
-#gen_user_libs  :=
-#gen_user_lnk   := $(lnk_lib)
-#
-#$(bind)/gen_user: $(gen_user_objs) $(gen_user_libs) $(lnk_dep)
-#
-#all_exes    += $(bind)/gen_user
-#all_depends += $(gen_user_deps)
+web_files := $(wildcard web/*)
+include/raims/ev_web_tar.h: $(web_files)
+	echo "static const uint8_t ev_web_tar_data[] = {" > $@
+	tar cf - $(web_files) | \
+	xxd -g 1 | \
+	cut --output-delimiter ',0x' -b 10,11-12,14-15,17-18,20-21,23-24,26-27,29-30,32-33,35-36,38-39,41-42,44-45,47-48,50-51,53-54,56-57 | \
+	tail -c +3 >> $@
+	echo "};" >> $@
+
+gen_files += include/raims/ev_web_tar.h
 
 ms_gen_key_files := gen_key
 ms_gen_key_cfile := src/gen_key.cpp
@@ -481,7 +481,7 @@ all_dirs := $(bind) $(libd) $(objd) $(dependd)
 
 # the default targets
 .PHONY: all
-all: $(all_libs) $(all_dlls) $(all_exes) cmake
+all: $(gen_files) $(all_libs) $(all_dlls) $(all_exes) cmake
 
 .PHONY: cmake
 cmake: CMakeLists.txt

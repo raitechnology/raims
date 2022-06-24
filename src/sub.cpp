@@ -98,7 +98,7 @@ SubDB::update_bloom( SubArgs &ctx ) noexcept
 /* my subscripion started */
 uint64_t
 SubDB::console_sub_start( const char *sub,  uint16_t sublen,
-                           SubOnMsg *cb ) noexcept
+                          SubOnMsg *cb ) noexcept
 {
   SubArgs ctx( sub, sublen, true, cb, this->sub_seqno + 1, CONSOLE_SUB, 0 );
   return this->sub_start( ctx );

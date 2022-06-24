@@ -10,6 +10,7 @@ struct StateTest {
   bool     all_set( uint32_t fl ) const { return (((T *) this)->state & fl) == fl; }
   void     set( uint32_t fl )           { ((T *) this)->state |= fl; }
   void     clear( uint32_t fl )         { ((T *) this)->state &= ~fl; }
+  void     clear_all( void )            { ((T *) this)->state = 0; }
 
   uint32_t test_clear( uint32_t fl ) {
     uint32_t old = ((T *) this)->state;

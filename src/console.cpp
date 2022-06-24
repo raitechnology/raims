@@ -1011,6 +1011,8 @@ TabPrint::width( UserDB &user_db,  char *buf ) noexcept
       /* fall through */
     case PRINT_INT:
       return (uint32_t) uint32_digits( this->len );
+    case PRINT_SINT:
+      return (uint32_t) int32_digits( (int32_t) this->len );
     case PRINT_SHORT_HEX:
       return 4 + 2;
     case PRINT_LONG_HEX:
@@ -1157,6 +1159,10 @@ TabPrint::string( char *buf ) noexcept
       /* fall through */
     case PRINT_INT:
       sz = uint32_to_string( this->len, buf );
+      buf[ sz ] = '\0';
+      return buf;
+    case PRINT_SINT:
+      sz = int32_to_string( (int32_t) this->len, buf );
       buf[ sz ] = '\0';
       return buf;
     case PRINT_SHORT_HEX:
@@ -1315,6 +1321,7 @@ Console::print_table( ConsoleOutput *p,  const char **hdr,
                       uint32_t ncols ) noexcept
 {
   const bool is_html = ( p != NULL && p->is_html );
+  const bool is_json = ( p != NULL && p->is_json );
   uint32_t     i, j,
                tabsz = (uint32_t) this->table.count;
   TabPrint   * tab   = this->table.ptr;
@@ -1341,6 +1348,41 @@ Console::print_table( ConsoleOutput *p,  const char **hdr,
       this->puts( "</tr>" );
     }
     this->puts( "</tbody></table>\n" );
+    return;
+  }
+  if ( is_json ) {
+    this->putchar( '[' );
+    for ( i = 0; i < tabsz; i += ncols ) {
+      this->putchar( '{' );
+      for ( j = 0; j < ncols; j++ ) {
+        this->putchar( '\"' );
+        this->puts( hdr[ j ] );
+        this->putchar( '\"' );
+        this->putchar( ':' );
+        switch ( tab[ i + j ].typ ) {
+          case PRINT_INT:
+          case PRINT_SINT:
+          case PRINT_LONG:
+            this->puts( tab[ i + j ].string( buf ) );
+            break;
+          default:
+            if ( tab[ i + j ].type() == PRINT_DIST )
+              tab[ i + j ].width( u, buf );
+            this->putchar( '\"' );
+            this->puts( tab[ i + j ].string( buf ) );
+            this->putchar( '\"' );
+            break;
+        }
+        if ( j < ncols - 1 ) {
+          this->putchar( ',' ); this->putchar( ' ' );
+        }
+      }
+      this->putchar( '}' );
+      if ( i < tabsz - ncols ) {
+        this->putchar( ',' ); this->putchar( '\n' );
+      }
+    }
+    this->putchar( ']' );
     return;
   }
   if ( ncols <= 16 ) {
@@ -1529,6 +1571,8 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
     case CMD_SHOW_PORTS:     this->show_ports( p, arg, len ); break;
     case CMD_SHOW_STATUS:    this->show_status( p, arg, len ); break;
     case CMD_SHOW_ADJACENCY: this->show_adjacency( p ); break;
+    case CMD_SHOW_LINKS:     this->show_links( p );     break;
+    case CMD_SHOW_NODES:     this->show_nodes( p );     break;
     case CMD_SHOW_ROUTES:    this->show_routes( p );    break;
     case CMD_SHOW_URLS:      this->show_urls( p );      break;
     case CMD_SHOW_TPORTS:    this->show_tports( p, arg, len ); break;
@@ -1628,50 +1672,105 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
     case CMD_MPING:     this->mcast_ping( p );          break;
 
     case CMD_SUB_START: /* sub */
+    case CMD_SUB_STOP: {/* unsub */
       if ( len == 0 )
         goto help;
-      this->printf( "start(%.*s) seqno = %" PRIu64 "\n", (int) len, arg,
-        this->sub_db.console_sub_start( arg, (uint16_t) len, this ) );
+      ConsoleSubStart * sub = NULL;
+      for (;;) {
+        sub = this->find_rpc<ConsoleSubStart>( sub, SUB_START );
+        if ( sub == NULL || sub->matches( arg, len ) )
+          break;
+      }
+      if ( sub == NULL ) {
+        if ( cmd == CMD_SUB_START ) {
+          sub = this->create_rpc<ConsoleSubStart>( p, SUB_START );
+          sub->set_sub( arg, len );
+          sub->start_seqno =
+            this->sub_db.console_sub_start( arg, len, sub );
+          this->printf( "start(%.*s) seqno = %" PRIu64 "\n", (int) sub->sublen,
+            sub->sub, sub->start_seqno );
+        }
+        else {
+          this->printf( "start(%.*s) not found\n", (int) len, arg );
+        }
+      }
+      else {
+        if ( cmd == CMD_SUB_STOP ) {
+          if ( sub->out.remove( p ) ) {
+            if ( sub->out.count == 0 ) {
+              this->printf( "stop(%.*s) seqno = %" PRIu64 "\n", (int) len, arg,
+                this->sub_db.console_sub_stop( arg, (uint16_t) len ) );
+              sub->complete = true;
+            }
+            else {
+              this->printf( "stop(%.*s) rem from existing\n", (int) len, arg );
+            }
+          }
+          else {
+            this->printf( "stop(%.*s) not found\n", (int) len, arg );
+          }
+        }
+        else {
+          if ( sub->out.add( p ) )
+            this->printf( "sub(%.*s) added to existing\n", (int) len, arg );
+          else
+            this->printf( "sub(%.*s) exists\n", (int) len, arg );
+        }
+      }
       break;
-    case CMD_SUB_STOP: /* unsub */
-      if ( len == 0 )
-        goto help;
-      this->printf( "stop(%.*s) seqno = %" PRIu64 "\n", 
-        (int) len, arg, this->sub_db.console_sub_stop( arg, (uint16_t) len ) );
-      break;
+    }
     case CMD_PSUB_START: /* psub */
-      if ( len == 0 )
-        goto help;
-      this->printf( "pstart(%.*s) seqno = %" PRIu64 "\n", 
-        (int) len, arg,
-        this->sub_db.console_psub_start( arg, (uint16_t) len,
-                                         RV_PATTERN_FMT, this ) );
-      break;
-    case CMD_PSUB_STOP: /* pstop */
-      if ( len == 0 )
-        goto help;
-      this->printf( "pstop(%.*s) seqno = %" PRIu64 "\n", 
-        (int) len, arg,
-        this->sub_db.console_psub_stop( arg, (uint16_t) len,
-                                        RV_PATTERN_FMT ) );
-      break;
     case CMD_GSUB_START: /* gsub */
+    case CMD_PSUB_STOP:  /* pstop */
+    case CMD_GSUB_STOP: {/* gstop */
       if ( len == 0 )
         goto help;
-      this->printf( "gstart(%.*s) seqno = %" PRIu64 "\n", 
-        (int) len, arg,
-        this->sub_db.console_psub_start( arg, (uint16_t) len,
-                                         GLOB_PATTERN_FMT, this ) );
+      kv::PatternFmt fmt = ( cmd == CMD_PSUB_START || cmd == CMD_PSUB_STOP )
+                           ? RV_PATTERN_FMT : GLOB_PATTERN_FMT;
+      ConsolePSubStart * sub = NULL;
+      for (;;) {
+        sub = this->find_rpc<ConsolePSubStart>( sub, PSUB_START );
+        if ( sub == NULL || sub->matches( arg, len, fmt ) )
+          break;
+      }
+      if ( sub == NULL ) {
+        if ( cmd == CMD_PSUB_START || cmd == CMD_GSUB_START ) {
+          sub = this->create_rpc<ConsolePSubStart>( p, PSUB_START );
+          sub->set_psub( arg, len, fmt );
+          sub->start_seqno =
+            this->sub_db.console_psub_start( arg, len, fmt, sub );
+          this->printf( "pstart(%.*s) seqno = %" PRIu64 "\n",
+            (int) sub->psublen, sub->psub, sub->start_seqno );
+        }
+        else {
+          this->printf( "pstart(%.*s) not found\n", (int) len, arg );
+        }
+      }
+      else {
+        if ( cmd == CMD_PSUB_STOP || cmd == CMD_GSUB_STOP ) {
+          if ( sub->out.remove( p ) ) {
+            if ( sub->out.count == 0 ) {
+              this->printf( "pstop(%.*s) seqno = %" PRIu64 "\n", (int) len, arg,
+                this->sub_db.console_psub_stop( arg, len, fmt ) );
+              sub->complete = true;
+            }
+            else {
+              this->printf( "pstop(%.*s) rem from existing\n", (int) len, arg );
+            }
+          }
+          else {
+            this->printf( "pstop(%.*s) not found\n", (int) len, arg );
+          }
+        }
+        else {
+          if ( sub->out.add( p ) )
+            this->printf( "psub(%.*s) added to existing\n", (int) len, arg );
+          else
+            this->printf( "psub(%.*s) exists\n", (int) len, arg );
+        }
+      }
       break;
-    case CMD_GSUB_STOP: /* gstop */
-      if ( len == 0 )
-        goto help;
-      this->printf( "gstop(%.*s) seqno = %" PRIu64 "\n", 
-        (int) len, arg,
-        this->sub_db.console_psub_stop( arg, (uint16_t) len,
-                                        GLOB_PATTERN_FMT ) );
-      break;
-
+    }
     case CMD_RPC:
     case CMD_ANY:
     case CMD_PUBLISH:
@@ -1711,6 +1810,24 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
     }
   }
   return this->flush_output( p );
+}
+
+void
+Console::stop_rpc( ConsoleOutput *p,  ConsoleRPC *rpc ) noexcept
+{
+  if ( rpc->out.remove( p ) && rpc->out.count == 0 ) {
+    if ( rpc->type == SUB_START ) {
+      this->sub_db.console_sub_stop( ((ConsoleSubStart *) rpc)->sub,
+                                     ((ConsoleSubStart *) rpc)->sublen );
+      rpc->complete = true;
+    }
+    else if ( rpc->type == PSUB_START ) {
+      this->sub_db.console_psub_stop( ((ConsolePSubStart *) rpc)->psub,
+                                      ((ConsolePSubStart *) rpc)->psublen,
+                                      ((ConsolePSubStart *) rpc)->pat_fmt );
+      rpc->complete = true;
+    }
+  }
 }
 
 enum {
@@ -2100,8 +2217,11 @@ Console::on_ping( ConsolePing &ping ) noexcept
   }
   this->table.count = i;
   static const char *hdr[ ncols ] = { "user", "dist", "lat", "tport" };
-  this->print_table( ping.out, hdr, ncols );
-  this->flush_output( ping.out );
+  for ( size_t n = 0; n < ping.out.count; n++ ) {
+    ConsoleOutput * p = ping.out.ptr[ n ];
+    this->print_table( p, hdr, ncols );
+    this->flush_output( p );
+  }
 }
 
 void
@@ -2168,8 +2288,11 @@ Console::on_subs( ConsoleSubs &subs ) noexcept
 
   this->table.count = i;
   static const char *hdr[ ncols ] = { "user", "subject" };
-  this->print_table( subs.out, hdr, ncols );
-  this->flush_output( subs.out );
+  for ( size_t n = 0; n < subs.out.count; n++ ) {
+    ConsoleOutput * p = subs.out.ptr[ n ];
+    this->print_table( p, hdr, ncols );
+    this->flush_output( p );
+  }
 }
 
 void
@@ -2867,6 +2990,101 @@ Console::show_adjacency( ConsoleOutput *p ) noexcept
 }
 
 void
+Console::show_links( ConsoleOutput *p ) noexcept
+{
+  static const size_t cols = 4;
+  TabPrint * tab = NULL;
+  size_t     count, i = 0;
+  uint32_t   uid;
+
+  this->table.count = 0;
+  this->tmp.count = 0;
+  count = this->user_db.transport_tab.count;
+  for ( size_t t = 0; t < count; t++ ) {
+    TransportRoute *rte = this->user_db.transport_tab.ptr[ t ];
+    /* print users on the tport */
+    for ( bool ok = rte->uid_connected.first( uid ); ok;
+          ok = rte->uid_connected.next( uid ) ) {
+      UserBridge * n = this->user_db.bridge_tab[ uid ];
+      if ( n == NULL || ! n->is_set( AUTHENTICATED_STATE ) )
+        continue;
+
+      tab = this->table.make( this->table.count + cols );
+      this->table.count += cols;
+      tab[ i++ ].set_int( 0 );
+      tab[ i++ ].set_int( uid );
+      tab[ i++ ].set( this->user_db.user.user );
+      tab[ i++ ].set( rte->transport.tport, (uint32_t) t, PRINT_ID );
+    }
+  }
+  for ( uid = 1; uid < this->user_db.next_uid; uid++ ) {
+    UserBridge * n = this->user_db.bridge_tab[ uid ];
+    if ( n == NULL || ! n->is_set( AUTHENTICATED_STATE ) )
+      continue;
+    count = n->adjacency.count;
+    /* for each tport populated */
+    for ( uint32_t j = 0; j < count; j++ ) {
+      AdjacencySpace *set = n->adjacency[ j ];
+      uint32_t b;
+      if ( set == NULL )
+        continue;
+      /* for each user on the port */
+      for ( bool ok = set->first( b ); ok; ok = set->next( b ) ) {
+        tab = this->table.make( this->table.count + cols );
+        this->table.count += cols;
+        tab[ i++ ].set_int( uid );
+        tab[ i++ ].set_int( b );
+        tab[ i++ ].set( n->peer.user );
+        if ( set->tport.len > 0 )
+          tab[ i++ ].set( set->tport, j, PRINT_ID );
+        else
+          tab[ i++ ].set_int( j );
+      }
+    }
+  }
+  const char *hdr[ cols ] = { "source", "target", "src_user", "src_tport" };
+  this->print_table( p, hdr, cols );
+}
+
+void
+Console::show_nodes( ConsoleOutput *p ) noexcept
+{
+  static const size_t cols = 3;
+  TabPrint * tab = NULL;
+  size_t     count, i = 0;
+  StringVal  user;
+  uint32_t   uid;
+
+  this->table.count = 0;
+  this->tmp.count = 0;
+  count = this->user_db.transport_tab.count;
+  tab = this->table.make( this->table.count + cols );
+  this->table.count += cols;
+  tab[ i++ ].set( this->user_db.user.user );
+  tab[ i++ ].set_int( 0 );
+  tab[ i++ ].set_int( count );
+
+  for ( uid = 1; uid < this->user_db.next_uid; uid++ ) {
+    UserBridge * n = this->user_db.bridge_tab[ uid ];
+    if ( n == NULL || ! n->is_set( AUTHENTICATED_STATE ) ) {
+      user.zero();
+      count = 0;
+    }
+    else {
+      user  = n->peer.user;
+      count = n->adjacency.count;
+    }
+    tab = this->table.make( this->table.count + cols );
+    this->table.count += cols;
+    tab[ i++ ].set( user );
+    tab[ i++ ].set_int( uid );
+    tab[ i++ ].set_int( count );
+  }
+  const char *hdr[ cols ] = { "user", "uid", "tports" };
+  this->print_table( p, hdr, cols );
+}
+
+void
 Console::show_routes( ConsoleOutput *p ) noexcept
 {
   static const uint32_t ncols = 6;
@@ -3258,7 +3476,7 @@ Console::show_primary( ConsoleOutput *p ) noexcept
 void
 Console::show_fds( ConsoleOutput *p ) noexcept
 {
-  static const uint32_t ncols = 13;
+  static const uint32_t ncols = 14;
   EvPoll     & poll = this->mgr.poll;
   TabPrint   * tab;
   const char * address;
@@ -3276,6 +3494,7 @@ Console::show_fds( ConsoleOutput *p ) noexcept
       tab = this->table.make( this->table.count + ncols );
       this->table.count += ncols;
       tab[ i++ ].set_int( (uint32_t) fd );
+      tab[ i++ ].set_int( s->route_id, PRINT_SINT );
       if ( sumb != 0 || is_connection )
         tab[ i++ ].set_long( s->bytes_sent );
       else
@@ -3327,7 +3546,7 @@ Console::show_fds( ConsoleOutput *p ) noexcept
   }
 
   static const char *hdr[ ncols ] =
-    { "fd", "bs", "br", "ms", "mr", "ac", "rq", "wq", "fl",
+    { "fd", "rid", "bs", "br", "ms", "mr", "ac", "rq", "wq", "fl",
       "type", "kind", "name", "address" };
   this->print_table( p, hdr, ncols );
 }
@@ -3420,13 +3639,59 @@ Console::show_running( ConsoleOutput *p,  int which,  const char *name,
 }
 
 int
-Console::puts( const char *s ) noexcept
+ConsoleOutBuf::puts( const char *s ) noexcept
 {
   size_t n = ::strlen( s );
-  char * p = this->out.make( this->out.count + n );
-  ::memcpy( &p[ this->out.count ], s, n );
-  this->out.count += n;
-  return (int) n;
+  char * p = this->make( this->count + n );
+  ::memcpy( &p[ this->count ], s, n );
+  this->count += n;
+  return n;
+}
+
+int
+Console::puts( const char *s ) noexcept
+{
+  return this->out.puts( s );
+}
+
+void
+ConsoleOutBuf::putchar( char c ) noexcept
+{
+  char * p = this->make( this->count + 1 );
+  p[ this->count ] = c;
+  this->count += 1;
+}
+
+void
+Console::putchar( char c ) noexcept
+{
+  return this->out.putchar( c );
+}
+
+int
+ConsoleOutBuf::printf( const char *fmt, ... ) noexcept
+{
+  va_list args;
+  va_start( args, fmt );
+  int n = this->vprintf( fmt, args );
+  va_end( args );
+  return n;
+}
+
+int
+ConsoleOutBuf::vprintf( const char *fmt, va_list args ) noexcept
+{
+  int n, len = 1024;
+  for (;;) {
+    char * p = this->make( this->count + len );
+    n = ::vsnprintf( &p[ this->count ], len, fmt, args );
+    if ( n < len ) {
+      this->count += n;
+      break;
+    }
+    len += 1024;
+  }
+  return n;
 }
 
 int
@@ -3434,17 +3699,7 @@ Console::printf( const char *fmt, ... ) noexcept
 {
   va_list args;
   va_start( args, fmt );
-  int n, len = 1024;
-
-  for (;;) {
-    char * p = this->out.make( this->out.count + len );
-    n = ::vsnprintf( &p[ this->out.count ], len, fmt, args );
-    if ( n < len ) {
-      this->out.count += n;
-      break;
-    }
-    len += 1024;
-  }
+  int n = this->out.vprintf( fmt, args );
   va_end( args );
   return n;
 }
@@ -3464,6 +3719,106 @@ Console::print_msg( MDMsg &msg ) noexcept
   else {
     msg.print( this );
   }
+}
+
+void
+Console::print_json( MDMsg &msg ) noexcept
+{
+  MDFieldIter * iter;
+  MDReference mref, fref;
+  MDName name;
+  char * fname, * str;
+  const char * comma = "", * q;
+  size_t fnamelen, len;
+  int status;
+
+  if ( msg.get_field_iter( iter ) == 0 ) {
+    this->printf( "{" );
+    if ( iter->first() == 0 ) {
+      do {
+        if ( iter->get_name( name ) == 0 &&
+             iter->get_reference( mref ) == 0 ) {
+          fref.set( (void *) name.fname, name.fnamelen, MD_STRING );
+          if ( msg.get_escaped_string( fref, "\"", fname, fnamelen ) == 0 ) {
+            q = "";
+            if ( mref.ftype == MD_STRING || mref.ftype == MD_OPAQUE ||
+                 mref.ftype == MD_PARTIAL ) {
+              if ( mref.fsize == 0 ) {
+                static char null_char;
+                q      = "\"";
+                str    = &null_char;
+                len    = 0;
+                status = 0;
+              }
+              else {
+                status = msg.get_escaped_string( mref, "\"", str, len );
+              }
+            }
+            else {
+              status = msg.get_string( mref, str, len );
+              if ( mref.ftype != MD_UINT && mref.ftype != MD_INT &&
+                   mref.ftype != MD_BOOLEAN && mref.ftype != MD_DECIMAL &&
+                   mref.ftype != MD_REAL )
+                q = "\"";
+            }
+            if ( status == 0 ) {
+              this->printf( "%s%.*s: %s%.*s%s", comma, (int) fnamelen, fname,
+                                                    q, (int) len, str, q );
+              comma = ", ";
+            }
+          }
+        }
+      } while ( iter->next() == 0 );
+    }
+    this->printf( "}\n" );
+  }
+  else {
+    msg.print( this );
+  }
+}
+
+bool
+ConsoleOutArray::add( ConsoleOutput *p ) noexcept
+{
+  for ( size_t i = 0; i < this->count; i++ )
+    if ( this->ptr[ i ] == p )
+      return false;
+  this->operator[]( this->count ) = p;
+  if ( p != NULL )
+    p->rpc = this->rpc;
+  return true;
+}
+
+bool
+ConsoleOutArray::replace( ConsoleOutput *p,  ConsoleOutput *p2 ) noexcept
+{
+  for ( size_t i = 0; i < this->count; i++ ) {
+    if ( this->ptr[ i ] == p ) {
+      this->ptr[ i ] = p2;
+      if ( p2 != NULL )
+        p2->rpc = this->rpc;
+      if ( p != NULL )
+        p->rpc = NULL;
+      return true;
+    }
+  }
+  return false;
+}
+
+bool
+ConsoleOutArray::remove( ConsoleOutput *p ) noexcept
+{
+  for ( size_t i = 0; i < this->count; i++ ) {
+    if ( this->ptr[ i ] == p ) {
+      for ( size_t j = i + 1; j < this->count; )
+        this->ptr[ i++ ] = this->ptr[ j++ ];
+      this->count = i;
+      if ( p != NULL )
+        p->rpc = NULL;
+      return true;
+    }
+  }
+  return false;
 }
 
 void
@@ -3538,7 +3893,69 @@ ConsoleSubs::on_data( const SubMsgData &val ) noexcept
 }
 
 void
+ConsoleSubStart::on_data( const SubMsgData &val ) noexcept
+{
+  for ( size_t i = 0; i < this->out.count; i++ ) {
+    ConsoleOutput * p = this->out.ptr[ i ];
+    if ( p->is_json )
+      this->console.print_json_data( p, val );
+    else
+      this->console.print_data( p, val );
+  }
+}
+
+void
+ConsolePSubStart::on_data( const SubMsgData &val ) noexcept
+{
+  for ( size_t i = 0; i < this->out.count; i++ ) {
+    ConsoleOutput * p = this->out.ptr[ i ];
+    if ( p->is_json )
+      this->console.print_json_data( p, val );
+    else
+      this->console.print_data( p, val );
+  }
+}
+
+void
+Console::print_json_data( ConsoleOutput *p,  const SubMsgData &val ) noexcept
+{
+  size_t       sublen = val.pub.subject_len;
+  const char * sub    = val.pub.subject;
+  MDMsg      * m      = NULL;
+  MDMsgMem     mem;
+
+  if ( val.datalen > 0 ) {
+    if ( val.fmt != 0 )
+      m = MDMsg::unpack( (void *) val.data, 0, val.datalen, val.fmt,
+                         MsgFrameDecoder::msg_dict, &mem );
+    else
+      m = MDMsg::unpack( (void *) val.data, 0, val.datalen, MD_STRING,
+                         NULL, &mem );
+  }
+  else {
+    void * data    = NULL;
+    size_t datalen = 0;
+    int fmt = val.pub.dec.msg->caba_to_rvmsg( mem, data, datalen );
+    m = MDMsg::unpack( data, 0, datalen, fmt, NULL, &mem );
+  }
+  if ( m != NULL ) {
+    if ( this->out.count > 0 )
+      this->flush_output( NULL );
+    this->printf( "{\"%.*s\": ", (int) sublen, sub );
+    this->print_json( *m );
+    this->printf( "}\n" );
+    this->flush_output( p );
+  }
+}
+
+void
 Console::on_data( const SubMsgData &val ) noexcept
+{
+  this->print_data( NULL, val );
+}
+
+void
+Console::print_data( ConsoleOutput *p,  const SubMsgData &val ) noexcept
 {
   size_t       sublen = val.pub.subject_len;
   const char * sub    = val.pub.subject;
@@ -3584,6 +4001,6 @@ Console::on_data( const SubMsgData &val ) noexcept
 
     this->print_msg( *val.pub.dec.msg );
   }
-  this->flush_output( NULL );
+  this->flush_output( p );
 }
 

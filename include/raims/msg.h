@@ -10,14 +10,14 @@
 namespace rai {
 namespace ms {
 /*
-bytes 0 -> 3 are type, opt, message size
+bytes 0 -> 3 are ver(3), type(2), opt(3), message size
  1               8               16              24              32   
 |-+-+-+-+-+-+-+-|-+-+-+-+-+-+-+-|-+-+-+-+-+-+-+-|-+-+-+-+-+-+-+-|
-|0 0 1|0 0 0 0|0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 0 0 0 0|
- ^...^ ^.... ^ ^...............................................^
-   |      |                         |     
-   |      opt(0)                27 bit size(160)
-   type(1)
+|0 0 0|0 1|0 0 0|0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 0 0 0 0|
+ ^...^ ^.^ ^.. ^ ^.............................................^
+   |    |    |                         |     
+ ver(0) |   opt(0)                24 bit size(160)
+       type(1)
 bytes 4 -> 7 are the routing key hash
  1               8               16              24              32   
 +-+-+-+-+-+-+-+-|-+-+-+-+-+-+-+-|-+-+-+-+-+-+-+-|-+-+-+-+-+-+-+-|
@@ -74,10 +74,13 @@ enum CabaOptFlag {
   CABA_OPT_ANY   = 4  /* any of many */
 };
                       /* <type:2><opt:3><length bits:27> */
-static const int      CABA_TYPE_BITS   = 2,
+static const int      CABA_VER_BITS    = 3,
+                      CABA_TYPE_BITS   = 2,
                       CABA_OPT_BITS    = 3,
-                      CABA_LENGTH_BITS = 32 - (CABA_TYPE_BITS + CABA_OPT_BITS);
-static const uint16_t CABA_TYPE_MASK   = ( (uint16_t) 1 << CABA_TYPE_BITS ) - 1,
+                      CABA_LENGTH_BITS = 32 -
+                        (CABA_VER_BITS + CABA_TYPE_BITS + CABA_OPT_BITS);
+static const uint16_t CABA_VER_MASK    = ( (uint16_t) 1 << CABA_VER_BITS ) - 1,
+                      CABA_TYPE_MASK   = ( (uint16_t) 1 << CABA_TYPE_BITS ) - 1,
                       CABA_OPT_MASK    = ( (uint16_t) 1 << CABA_OPT_BITS ) - 1;
 static const uint32_t CABA_LENGTH_MASK = ( (uint32_t) 1 << CABA_LENGTH_BITS )-1;
 
@@ -97,24 +100,44 @@ static inline bool caba_rtr_alert( const char *sub ) {
   return ( mask & ( 1U << ( sub[ 1 ] - 'M' ) ) ) != 0;
 }
 
+static const uint16_t CABA_MSG_VERSION = 1;
+
 struct CabaFlags {
-  uint16_t flags; /* low bits <type>, high bits <opt> */
-  CabaFlags( CabaTypeFlag t ) : flags( t ) {}
-  CabaTypeFlag type_flag( void ) const { /* mcast, ibx, rtr_alert, hb */
-    return (CabaTypeFlag) ( this->flags & CABA_TYPE_MASK );
+  /* ver(3), type(2), opt(3 ) */
+  static const int FLAGS_VER_SHIFT  = CABA_TYPE_BITS + CABA_OPT_BITS,
+                   FLAGS_TYPE_SHIFT = CABA_OPT_BITS,
+                   FLAGS_OPT_SHIFT  = 0;
+  uint16_t flags; /* low bits <type>, high bits <opt>, <ver> */
+  CabaFlags( CabaTypeFlag t )
+    : flags( ( (uint16_t) CABA_MSG_VERSION << FLAGS_VER_SHIFT ) |
+             ( (uint16_t) t << FLAGS_TYPE_SHIFT ) ) {}
+
+  uint16_t get_ver( void ) const {
+    uint16_t tmp = ( this->flags & ( CABA_VER_MASK << FLAGS_VER_SHIFT ) );
+    return tmp >> FLAGS_VER_SHIFT;
   }
-  uint16_t opt_flag( void ) const {
-    return ( this->flags >> CABA_TYPE_BITS ) & CABA_OPT_MASK;
+  CabaTypeFlag get_type( void ) const { /* mcast, ibx, rtr_alert, hb */
+    uint16_t tmp = ( this->flags & ( CABA_TYPE_MASK << FLAGS_TYPE_SHIFT ) );
+    return (CabaTypeFlag) ( tmp >> FLAGS_TYPE_SHIFT );
+  }
+  uint16_t get_opt( void ) const {
+    uint16_t tmp = ( this->flags & ( CABA_OPT_MASK << FLAGS_OPT_SHIFT ) );
+    return tmp >> FLAGS_OPT_SHIFT;
   }
   const char *type_str( void ) const {
-    return caba_type_flag_str( this->type_flag() );
+    return caba_type_flag_str( this->get_type() );
+  }
+  void set_ver( uint16_t ver ) {
+    uint16_t tmp = ( this->flags & ~( CABA_VER_MASK << FLAGS_VER_SHIFT ) );
+    this->flags = tmp | ( ver << FLAGS_VER_SHIFT );
   }
   void set_type( CabaTypeFlag fl ) {
-    this->flags = ( this->flags & ~CABA_TYPE_MASK ) | (uint16_t) fl;
+    uint16_t tmp = ( this->flags & ~( CABA_TYPE_MASK << FLAGS_TYPE_SHIFT ) );
+    this->flags = tmp | ( (uint16_t) fl << FLAGS_TYPE_SHIFT );
   }
-  void set_opt( uint16_t fl ) {
-    this->flags = ( this->flags & ~( CABA_OPT_MASK << CABA_TYPE_BITS ) ) |
-                  ( (uint16_t) fl << CABA_TYPE_BITS );
+  void set_opt( uint16_t opt ) {
+    uint16_t tmp = ( this->flags & ~( CABA_OPT_MASK << FLAGS_OPT_SHIFT ) );
+    this->flags = tmp | ( (uint16_t) opt << FLAGS_OPT_SHIFT );
   }
 };
 
@@ -141,6 +164,8 @@ struct CabaMsg : public md::TibSassMsg {
   CabaMsg *submsg( void *bb,  size_t len ) noexcept;
   static void init_auto_unpack( void ) noexcept;
   bool verify( const HashDigest &key ) const noexcept;
+  uint32_t caba_to_rvmsg( md::MDMsgMem &mem,  void *&data,
+                          size_t &datalen ) noexcept;
 };
 
 struct MsgFrameDecoder {
@@ -164,71 +189,75 @@ struct MsgFrameDecoder {
 
 /* msg fields */
 enum MsgFid {
-  FID_SUB          =  0 , /* publish subject or inbox */
-  FID_DATA         =  1 , /* opaque data */
+  FID_SUB            =  0 , /* publish subject or inbox */
+  FID_DATA           =  1 , /* opaque data */
 
-  FID_SESSION      =  2 , /* Hmac.Nonce field */
-  FID_BRIDGE       =  3 , /* Bridge id nonce */
-  FID_USER_HMAC    =  4 , /* User hmac */
-  FID_DIGEST       =  5 , /* message digest, signed by auth key */
-  FID_AUTH_KEY     =  6 , /* authentication key response to challenge */
-  FID_SESS_KEY     =  7 , /* session key = hmac + bridge */
-  FID_PEER_DB      =  8 , /* sync peer db */
-  FID_MESH_DB      =  9 , /* mesh urls */
-  FID_CNONCE       = 10 , /* challenge nonce */
-  FID_SYNC_BRIDGE  = 11 , /* request target of sync request */
-  FID_UID_CSUM     = 12 , /* bridge checksum of all nodes */
-  FID_MESH_CSUM    = 13 , /* route checksum of all mesh nodes */
-  FID_MESH_FILTER  = 14 , /* filter mesh db requests */
-  FID_ADJACENCY    = 15 , /* adjacency links map */
-  FID_BLOOM        = 16 , /* bloom sub map */
+  FID_SESSION        =  2 , /* Hmac.Nonce field */
+  FID_BRIDGE         =  3 , /* Bridge id nonce */
+  FID_USER_HMAC      =  4 , /* User hmac */
+  FID_DIGEST         =  5 , /* message digest, signed by auth key */
+  FID_AUTH_KEY       =  6 , /* authentication key response to challenge */
+  FID_SESS_KEY       =  7 , /* session key = hmac + bridge */
+  FID_PEER_DB        =  8 , /* sync peer db */
+  FID_MESH_DB        =  9 , /* mesh urls */
+  FID_CNONCE         = 10 , /* challenge nonce */
+  FID_SYNC_BRIDGE    = 11 , /* request target of sync request */
+  FID_UID_CSUM       = 12 , /* bridge checksum of all nodes */
+  FID_MESH_CSUM      = 13 , /* route checksum of all mesh nodes */
+  FID_MESH_FILTER    = 14 , /* filter mesh db requests */
+  FID_ADJACENCY      = 15 , /* adjacency links map */
+  FID_BLOOM          = 16 , /* bloom sub map */
 
-  FID_SEQNO        = 17 , /* integer fields */
-  FID_SUB_SEQNO    = 18 , /* subscription seqno */
-  FID_TIME         = 19 , /* time of message */
-  FID_UPTIME       = 20 , /* how long node is up */
-  FID_INTERVAL     = 21 , /* heartbeat interval */
-  FID_REF_COUNT    = 22 , /* count of sub refs */
-  FID_TOKEN        = 23 , /* token passed through by rpc */
-  FID_RET          = 24 , /* return inbox number */
-  FID_LINK_STATE   = 25 , /* link state seqno */
-  FID_START        = 26 , /* start seqno of subs request */
-  FID_END          = 27 , /* end seqno of subs request */
-  FID_ADJ_INFO     = 28 , /* why peer requested adjacency */
-  FID_AUTH_SEQNO   = 29 , /* seqno of message used by auth */
-  FID_AUTH_TIME    = 30 , /* time of message used by auth */
-  FID_FMT          = 31 , /* msg format of data, wildcard format */
-  FID_HOPS         = 32 , /* whether directly attached to same tport */
-  FID_REF_SEQNO    = 33 , /* ack or trace reference seqno */
-  FID_TPORTID      = 34 , /* which transport adjacency belongs to */
-  FID_UID          = 35 , /* uid reference */
-  FID_UID_COUNT    = 36 , /* how many peers, sent with hello */
-  FID_SUBJ_HASH    = 37 , /* hash of subject */
+  FID_SEQNO          = 17 , /* integer fields */
+  FID_SUB_SEQNO      = 18 , /* subscription seqno */
+  FID_TIME           = 19 , /* time of message */
+  FID_UPTIME         = 20 , /* how long node is up */
+  FID_INTERVAL       = 21 , /* heartbeat interval */
+  FID_REF_CNT        = 22 , /* count of sub refs */
+  FID_TOKEN          = 23 , /* token passed through by rpc */
+  FID_RET            = 24 , /* return inbox number */
+  FID_LINK_STATE     = 25 , /* link state seqno */
+  FID_START          = 26 , /* start seqno of subs request */
+  FID_END            = 27 , /* end seqno of subs request */
+  FID_ADJ_INFO       = 28 , /* why peer requested adjacency */
+  FID_AUTH_SEQNO     = 29 , /* seqno of message used by auth */
+  FID_AUTH_TIME      = 30 , /* time of message used by auth */
+  FID_FMT            = 31 , /* msg format of data, wildcard format */
+  FID_HOPS           = 32 , /* whether directly attached to same tport */
+  FID_REF_SEQNO      = 33 , /* ack or trace reference seqno */
+  FID_TPORTID        = 34 , /* which transport adjacency belongs to */
+  FID_UID            = 35 , /* uid reference */
+  FID_UID_CNT        = 36 , /* how many peers, sent with hello */
+  FID_SUBJ_HASH      = 37 , /* hash of subject */
 
-  FID_SUBJECT      = 38 , /* subject of subscription */
-  FID_PATTERN      = 39 , /* pattern subject wildcard */
-  FID_REPLY        = 40 , /* publish reply */
-  FID_WILDCARD     = 41 , /* XXX */
-  FID_UCAST_URL    = 42 , /* unicast route for inbox data */
-  FID_MESH_URL     = 43 , /* mesh route for interconnecting uids */
-  FID_FORMAT       = 44 , /* XXX */
-  FID_DICTIONARY   = 45 , /* XXX */
-  FID_TPORT        = 46 , /* tport name */
+  FID_SUBJECT        = 38 , /* subject of subscription */
+  FID_PATTERN        = 39 , /* pattern subject wildcard */
+  FID_REPLY          = 40 , /* publish reply */
+  FID_UCAST_URL      = 41 , /* unicast route for inbox data */
+  FID_MESH_URL       = 42 , /* mesh route for interconnecting uids */
+  FID_TPORT          = 43 , /* tport name */
 
-  FID_USER         = 47 , /* name of user */
-  FID_SERVICE      = 48 , /* service of user to add */
-  FID_CREATE       = 49 , /* create time of user to add */
-  FID_EXPIRES      = 50 , /* expire time of user to add */
+  FID_USER           = 44 , /* name of user */
+  FID_SERVICE        = 45 , /* service of user to add */
+  FID_CREATE         = 46 , /* create time of user to add */
+  FID_EXPIRES        = 47 , /* expire time of user to add */
 
-  FID_DICT_CSUM    = 51 , /* XXX */
-  FID_ENTI_CSUM    = 52 , /* XXX */
+  FID_AUTH_STAGE     = 48 , /* what stage of authentication */
+  FID_LINK_ADD       = 49 , /* whether to add or delete link in adjacency */
 
-  FID_LINK_ADD     = 53 , /* whether to add or delete link in adjacency */
-  FID_START_ACK    = 54 , /* XXX */
-  FID_STOP_ACK     = 55 , /* XXX */
-  FID_INITIAL      = 56 , /* XXX */
-  FID_DATABASE     = 57 , /* XXX */
-  FID_AUTH_STAGE   = 58   /* what stage of authentication */
+  FID_FD_CNT         = 50 , /* tport stats */
+  FID_MS_TOT         = 51 ,
+  FID_MR_TOT         = 52 ,
+  FID_BS_TOT         = 53 ,
+  FID_BR_TOT         = 54 ,
+  FID_MS             = 55 ,
+  FID_MR             = 56 ,
+  FID_BS             = 57 ,
+  FID_BR             = 58 ,
+  FID_SUB_CNT        = 59 ,
+  FID_DISTANCE       = 60 ,
+  FID_PEER           = 61 ,
+  FID_LATENCY        = 62
 };
 static const int FID_TYPE_SHIFT = 8,
                  FID_MAX        = 1 << FID_TYPE_SHIFT; /* 64 */
@@ -596,6 +625,8 @@ struct MsgCat : public md::MDMsgMem, public MsgBufDigestT<MsgCat> {
       this->reserve_error( rsz );
   }
   void reserve_error( size_t rsz ) noexcept;
+  uint32_t caba_to_rvmsg( MDMsgMem &mem,  void *&data,
+                          size_t &datalen ) noexcept;
 };
 struct SubMsgBuf : public MsgBufDigestT<SubMsgBuf> {
   SubMsgBuf( MsgCat &msg ) : MsgBufDigestT( msg.out ) {}
@@ -604,86 +635,92 @@ struct SubMsgBuf : public MsgBufDigestT<SubMsgBuf> {
     msg.out = this->out;
   }
 };
-
 /* define fields and dictionary */
 #ifdef INCLUDE_MSG_CONST
 
 struct FidTypeName {
   MsgFid       fid;
-  int          type_mask;
+  uint16_t     type_mask;
+  uint8_t      cvt_fld,
+               name_len;
   const char * type_name;
 };
 
+enum { XCL, /* exclude */ LIT, /* literal */ BIN, /* base64 */ TIM  /* time */};
+
 static FidTypeName fid_type_name[] = {
-{ FID_SUB         , SHORT_STRING                     , "sub" },
-{ FID_DATA        , LONG_OPAQUE                      , "data" },
+{ FID_SUB         , SHORT_STRING                , XCL , 0 ,"sub"             },
+{ FID_DATA        , LONG_OPAQUE                 , XCL , 0 ,"data"            },
 
-{ FID_SESSION     , OPAQUE_32                        , "session" },
-{ FID_BRIDGE      , OPAQUE_16                        , "bridge" },
-{ FID_USER_HMAC   , OPAQUE_16                        , "user_hmac" },
-{ FID_DIGEST      , OPAQUE_16                        , "digest" },
-{ FID_AUTH_KEY    , OPAQUE_64                        , "auth_key" },
-{ FID_SESS_KEY    , OPAQUE_64                        , "sess_key" },
-{ FID_PEER_DB     , LONG_OPAQUE                      , "peer_db" },
-{ FID_MESH_DB     , LONG_OPAQUE                      , "mesh_db" },
-{ FID_CNONCE      , OPAQUE_16                        , "cnonce" },
-{ FID_SYNC_BRIDGE , OPAQUE_16                        , "sync_bridge" },
-{ FID_UID_CSUM    , OPAQUE_16                        , "uid_csum" },
-{ FID_MESH_CSUM   , OPAQUE_16                        , "mesh_csum" },
-{ FID_MESH_FILTER , LONG_OPAQUE                      , "mesh_filter" },
-{ FID_ADJACENCY   , LONG_OPAQUE                      , "adjacency" },
-{ FID_BLOOM       , LONG_OPAQUE                      , "bloom" },
+{ FID_SESSION     , OPAQUE_32                   , XCL , 0 ,"session"         },
+{ FID_BRIDGE      , OPAQUE_16                   , XCL , 0 ,"bridge"          },
+{ FID_USER_HMAC   , OPAQUE_16                   , XCL , 0 ,"user_hmac"       },
+{ FID_DIGEST      , OPAQUE_16                   , XCL , 0 ,"digest"          },
+{ FID_AUTH_KEY    , OPAQUE_64                   , XCL , 0 ,"auth_key"        },
+{ FID_SESS_KEY    , OPAQUE_64                   , XCL , 0 ,"sess_key"        },
+{ FID_PEER_DB     , LONG_OPAQUE                 , XCL , 0 ,"peer_db"         },
+{ FID_MESH_DB     , LONG_OPAQUE                 , XCL , 0 ,"mesh_db"         },
+{ FID_CNONCE      , OPAQUE_16                   , XCL , 0 ,"cnonce"          },
+{ FID_SYNC_BRIDGE , OPAQUE_16                   , XCL , 0 ,"sync_bridge"     },
+{ FID_UID_CSUM    , OPAQUE_16                   , XCL , 0 ,"uid_csum"        },
+{ FID_MESH_CSUM   , OPAQUE_16                   , XCL , 0 ,"mesh_csum"       },
+{ FID_MESH_FILTER , LONG_OPAQUE                 , XCL , 0 ,"mesh_filter"     },
+{ FID_ADJACENCY   , LONG_OPAQUE                 , XCL , 0 ,"adjacency"       },
+{ FID_BLOOM       , LONG_OPAQUE                 , XCL , 0 ,"bloom"           },
 
-{ FID_SEQNO       , U_SHORT | U_INT | U_LONG         , "seqno" },
-{ FID_SUB_SEQNO   , U_SHORT | U_INT | U_LONG         , "sub_seqno" },
-{ FID_TIME        , U_SHORT | U_INT | U_LONG         , "time" },
-{ FID_UPTIME      , U_SHORT | U_INT | U_LONG         , "uptime" },
-{ FID_INTERVAL    , U_SHORT | U_INT                  , "interval" },
-{ FID_REF_COUNT   , U_SHORT | U_INT                  , "ref_count" },
-{ FID_TOKEN       , U_SHORT | U_INT | U_LONG         , "token" },
-{ FID_RET         , U_SHORT | U_INT                  , "ret" },
-{ FID_LINK_STATE  , U_SHORT | U_INT | U_LONG         , "link_state" },
-{ FID_START       , U_SHORT | U_INT | U_LONG         , "start" },
-{ FID_END         , U_SHORT | U_INT | U_LONG         , "end" },
-{ FID_ADJ_INFO    , U_SHORT | U_INT                  , "adj_info" },
-{ FID_AUTH_SEQNO  , U_SHORT | U_INT | U_LONG         , "auth_seqno" },
-{ FID_AUTH_TIME   , U_SHORT | U_INT | U_LONG         , "auth_time" },
-{ FID_FMT         , U_SHORT | U_INT | U_LONG         , "fmt" },
-{ FID_HOPS        , U_SHORT | U_INT                  , "hops" },
-{ FID_REF_SEQNO   , U_SHORT | U_INT | U_LONG         , "ref_seqno" },
-{ FID_TPORTID     , U_SHORT | U_INT                  , "tportid" },
-{ FID_UID         , U_SHORT | U_INT                  , "uid" },
-{ FID_UID_COUNT   , U_SHORT | U_INT                  , "uid_count" },
-{ FID_SUBJ_HASH   , U_INT                            , "subj_hash" },
+{ FID_SEQNO       , U_SHORT | U_INT | U_LONG    , XCL , 0 ,"seqno"           },
+{ FID_SUB_SEQNO   , U_SHORT | U_INT | U_LONG    , XCL , 0 ,"sub_seqno"       },
+{ FID_TIME        , U_SHORT | U_INT | U_LONG    , TIM , 0 ,"time"            },
+{ FID_UPTIME      , U_SHORT | U_INT | U_LONG    , XCL , 0 ,"uptime"          },
+{ FID_INTERVAL    , U_SHORT | U_INT             , XCL , 0 ,"interval"        },
+{ FID_REF_CNT     , U_SHORT | U_INT             , LIT , 0 ,"ref_cnt"         },
+{ FID_TOKEN       , U_SHORT | U_INT | U_LONG    , XCL , 0 ,"token"           },
+{ FID_RET         , U_SHORT | U_INT             , XCL , 0 ,"ret"             },
+{ FID_LINK_STATE  , U_SHORT | U_INT | U_LONG    , XCL , 0 ,"link_state"      },
+{ FID_START       , U_SHORT | U_INT | U_LONG    , XCL , 0 ,"start"           },
+{ FID_END         , U_SHORT | U_INT | U_LONG    , XCL , 0 ,"end"             },
+{ FID_ADJ_INFO    , U_SHORT | U_INT             , XCL , 0 ,"adj_info"        },
+{ FID_AUTH_SEQNO  , U_SHORT | U_INT | U_LONG    , XCL , 0 ,"auth_seqno"      },
+{ FID_AUTH_TIME   , U_SHORT | U_INT | U_LONG    , XCL , 0 ,"auth_time"       },
+{ FID_FMT         , U_SHORT | U_INT | U_LONG    , XCL , 0 ,"fmt"             },
+{ FID_HOPS        , U_SHORT | U_INT             , XCL , 0 ,"hops"            },
+{ FID_REF_SEQNO   , U_SHORT | U_INT | U_LONG    , XCL , 0 ,"ref_seqno"       },
+{ FID_TPORTID     , U_SHORT | U_INT             , LIT , 0 ,"tportid"         },
+{ FID_UID         , U_SHORT | U_INT             , LIT , 0 ,"uid"             },
+{ FID_UID_CNT     , U_SHORT | U_INT             , LIT , 0 ,"uid_cnt"         },
+{ FID_SUBJ_HASH   , U_INT                       , XCL , 0 ,"subj_hash"       },
 
-{ FID_SUBJECT     , SHORT_STRING                     , "subject" },
-{ FID_PATTERN     , SHORT_STRING                     , "pattern" },
-{ FID_REPLY       , SHORT_STRING                     , "reply" },
-{ FID_WILDCARD    , SHORT_STRING                     , "wildcard" },
-{ FID_UCAST_URL   , SHORT_STRING                     , "ucast_url" },
-{ FID_MESH_URL    , SHORT_STRING                     , "mesh_url" },
-{ FID_FORMAT      , SHORT_STRING                     , "format" },
-{ FID_DICTIONARY  , SHORT_STRING                     , "dictionary" },
-{ FID_TPORT       , SHORT_STRING                     , "tport" },
+{ FID_SUBJECT     , SHORT_STRING                , XCL , 0 ,"subject"         },
+{ FID_PATTERN     , SHORT_STRING                , XCL , 0 ,"pattern"         },
+{ FID_REPLY       , SHORT_STRING                , XCL , 0 ,"reply"           },
+{ FID_UCAST_URL   , SHORT_STRING                , XCL , 0 ,"ucast_url"       },
+{ FID_MESH_URL    , SHORT_STRING                , XCL , 0 ,"mesh_url"        },
+{ FID_TPORT       , SHORT_STRING                , LIT , 0 ,"tport"           },
 
-{ FID_USER        , SHORT_STRING                     , "user" },
-{ FID_SERVICE     , SHORT_STRING                     , "service" },
-{ FID_CREATE      , SHORT_STRING                     , "create" },
-{ FID_EXPIRES     , SHORT_STRING                     , "expires" },
+{ FID_USER        , SHORT_STRING                , LIT , 0 ,"user"            },
+{ FID_SERVICE     , SHORT_STRING                , XCL , 0 ,"service"         },
+{ FID_CREATE      , SHORT_STRING                , XCL , 0 ,"create"          },
+{ FID_EXPIRES     , SHORT_STRING                , XCL , 0 ,"expires"         },
 
-{ FID_DICT_CSUM   , U_SHORT | U_INT                  , "dict_csum" },
-{ FID_ENTI_CSUM   , U_SHORT | U_INT                  , "enti_csum" },
+{ FID_AUTH_STAGE  , U_SHORT                     , XCL , 0 ,"auth_stage"      },
+{ FID_LINK_ADD    , BOOL_1                      , XCL , 0 ,"link_add"        },
 
-{ FID_LINK_ADD    , BOOL_1                           , "ack" },
-{ FID_START_ACK   , BOOL_1                           , "link_add" },
-{ FID_STOP_ACK    , BOOL_1                           , "stop_ack" },
-{ FID_INITIAL     , BOOL_1                           , "initial" },
-{ FID_DATABASE    , U_SHORT                          , "database" },
-{ FID_AUTH_STAGE  , U_SHORT                          , "auth_stage" }
+{ FID_FD_CNT      , U_SHORT | U_INT             , LIT , 0 ,"fd_cnt"          },
+{ FID_MS_TOT      , U_SHORT | U_INT | U_LONG    , LIT , 0 ,"ms_tot"          },
+{ FID_MR_TOT      , U_SHORT | U_INT | U_LONG    , LIT , 0 ,"mr_tot"          },
+{ FID_BS_TOT      , U_SHORT | U_INT | U_LONG    , LIT , 0 ,"bs_tot"          },
+{ FID_BR_TOT      , U_SHORT | U_INT | U_LONG    , LIT , 0 ,"br_tot"          },
+{ FID_MS          , U_SHORT | U_INT | U_LONG    , LIT , 0 ,"ms"              },
+{ FID_MR          , U_SHORT | U_INT | U_LONG    , LIT , 0 ,"mr"              },
+{ FID_BS          , U_SHORT | U_INT | U_LONG    , LIT , 0 ,"bs"              },
+{ FID_BR          , U_SHORT | U_INT | U_LONG    , LIT , 0 ,"br"              },
+{ FID_SUB_CNT     , U_SHORT | U_INT | U_LONG    , LIT , 0 ,"sub_cnt"         },
+{ FID_DISTANCE    , U_SHORT | U_INT | U_LONG    , LIT , 0 ,"distance"        },
+{ FID_PEER        , SHORT_STRING                , LIT , 0 ,"peer"            },
+{ FID_LATENCY     , SHORT_STRING                , LIT , 0 ,"latency"         }
 };
 
 #endif
-
 }
 }
 

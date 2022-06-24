@@ -70,9 +70,13 @@ struct PatTab {
 
   SubList        & list;
   const uint32_t * seed; /* prefix seeds */
+  uint32_t         pref_count[ kv::MAX_PRE ];
 
-  PatTab( SubList &l,  const uint32_t *s ) : list( l ), seed( s ) {}
-
+  PatTab( SubList &l,  const uint32_t *s ) : list( l ), seed( s ) {
+    ::memset( this->pref_count, 0, sizeof( this->pref_count ) );
+  }
+  uint16_t prefix_hash( const char *sub,  uint16_t sub_len,
+                        uint32_t *hash,  uint8_t *prefix ) noexcept;
   SubStatus start( PatternArgs &ctx ) noexcept;
   SubStatus stop( PatternArgs &ctx ) noexcept;
   void remove( PatternArgs &ctx ) noexcept;

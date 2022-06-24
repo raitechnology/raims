@@ -6,6 +6,7 @@
 #include <inttypes.h>
 #include <raimd/md_dict.h>
 #include <raimd/cfile.h>
+#include <raimd/rv_msg.h>
 #define INCLUDE_MSG_CONST
 #include <raims/msg.h>
 
@@ -50,6 +51,8 @@ CabaMsg::get_type_id( void ) noexcept
 void
 CabaMsg::init_auto_unpack( void ) noexcept
 {
+  if ( MsgFrameDecoder::msg_dict == NULL )
+    MsgFrameDecoder::msg_dict = MsgFrameDecoder::build_msg_dict();
   cabamsg_match.off         = 8;
   cabamsg_match.len         = 2; /* cnt of buf[] */
   cabamsg_match.hint_size   = 1; /* cnt of hint[] */
@@ -164,8 +167,6 @@ CabaMsg::verify( const HashDigest &key ) const noexcept
 
 MsgFrameDecoder::MsgFrameDecoder()
 {
-  if ( msg_dict == NULL )
-    msg_dict = MsgFrameDecoder::build_msg_dict();
   this->init();
 }
 
@@ -183,6 +184,64 @@ MsgFrameDecoder::unpack( const void *msgbuf,  size_t &msglen ) noexcept
     return status;
   }
   return 0;
+}
+
+uint32_t
+CabaMsg::caba_to_rvmsg( MDMsgMem &mem,  void *&data,
+                        size_t &datalen ) noexcept
+{
+  MDFieldIter * iter;
+  MDName        name;
+  MDReference   mref;
+  size_t        buflen = ( this->msg_end - this->msg_off ) * 16;
+  void        * buf    = mem.make( buflen );
+  RvMsgWriter   rvmsg( buf, buflen );
+  int           status = 0;
+  if ( this->get_field_iter( iter ) == 0 ) {
+    if ( iter->first() == 0 ) {
+      do {
+        if ( iter->get_name( name ) == 0 ) {
+          FidTypeName &t = fid_type_name[ fid_value( name.fid ) ];
+          if ( t.cvt_fld == XCL )
+            continue;
+          size_t flen = (size_t) t.name_len + 1;
+          if ( iter->get_reference( mref ) == 0 ) {
+            if ( t.cvt_fld == LIT ) {
+              status = rvmsg.append_ref( t.type_name, flen, mref );
+            }
+            else if ( t.cvt_fld == BIN ) {
+              char   buf[ KV_BASE64_SIZE( 64 ) ];
+              size_t len = bin_to_base64( mref.fptr, mref.fsize, buf, false );
+              status = rvmsg.append_string( t.type_name, flen, buf, len );
+            }
+            else if ( t.cvt_fld == TIM ) {
+              char   buf[ 2 + 1 + 2 + 1 + 2 + 1 ];
+              MDStamp stamp;
+              if ( stamp.get_stamp( mref ) == 0 ) {
+                uint64_t secs   = stamp.seconds();
+                uint32_t hr     = ( secs / 60 / 60 ) % 24,
+                         min    = ( secs / 60 ) % 60,
+                         sec    = secs % 60;
+                uint32_to_string( hr, buf, 2 );
+                uint32_to_string( min, &buf[ 3 ], 2 );
+                uint32_to_string( sec, &buf[ 6 ], 2 );
+                buf[ 2 ] = buf[ 5 ] = ':';
+                buf[ 8 ] = '\0';
+                status = rvmsg.append_string( t.type_name, flen, buf, 8 );
+              }
+            }
+            if ( status != 0 ) {
+              fprintf( stderr, "caba_to_rvmsg failed\n" );
+              return CABA_TYPE_ID;
+            }
+          }
+        }
+      } while ( iter->next() == 0 );
+    }
+  }
+  datalen = rvmsg.update_hdr();
+  data    = buf;
+  return RVMSG_TYPE_ID;
 }
 
 void
@@ -205,6 +264,20 @@ MsgCat::print( void ) noexcept
   if ( m != NULL ) {
     m->print( &mout );
   }
+}
+
+uint32_t
+MsgCat::caba_to_rvmsg( MDMsgMem &mem,  void *&data,
+                        size_t &datalen ) noexcept
+{
+  MDMsgMem tmp;
+  MDMsg  * m;
+
+  m = CabaMsg::unpack( this->msg, 0, this->len(), 0, MsgFrameDecoder::msg_dict,
+                       &tmp );
+  if ( m != NULL )
+    return ((CabaMsg *) m)->caba_to_rvmsg( mem, data, datalen );
+  return CABA_TYPE_ID;
 }
 
 void
@@ -332,6 +405,11 @@ MsgFrameDecoder::build_msg_dict( void ) noexcept
   FidTypeName * fid_type_name_end = &fid_type_name[ last_idx ];
 
   for ( FidTypeName * t = fid_type_name; t < fid_type_name_end; t++ ) {
+    if ( t != &fid_type_name[ t->fid ] ) {
+      fprintf( stderr, "fid incorrect place: %u\n", t->fid );
+      exit( 1 );
+    }
+    t->name_len = (uint8_t) ::strlen( t->type_name );
     if ( ( t->type_mask & BOOL_1 ) != 0 ) {
       fmt = "%s_b { CLASS_ID %d; DATA_SIZE 1; DATA_TYPE boolean; }\n";
       fid = t->fid | ( BOOL_CLASS << FID_TYPE_SHIFT );

@@ -142,7 +142,8 @@ struct TransportRoute : public kv::EvSocket, public kv::EvConnectionNotify,
   uint64_t                hb_time,        /* last hb time usecs */
                           hb_mono_time,   /* last hb time monotonic usecs */
                           hb_seqno,       /* last hb seqno */
-                          reachable_seqno;/* adjacency seqno of reachable */
+                          reachable_seqno,/* adjacency seqno of reachable */
+                          stats_seqno;
   StageAuth               auth[ 3 ];      /* history of last 3 hb */
   uint32_t                tport_id,       /* index in transport_tab[] */
                           hb_count,       /* count of new hb recvd */
@@ -194,6 +195,7 @@ struct TransportRoute : public kv::EvSocket, public kv::EvConnectionNotify,
   void create_listener_mesh_url( void ) noexcept;
   bool create_transport( ConfigTree::Transport &tport ) noexcept;
 
+  void clear_mesh( void ) noexcept;
   bool add_mesh_connect( const char *mesh_url,  uint32_t mesh_hash ) noexcept;
 
   EvTcpTransportListen *create_tcp_listener(
