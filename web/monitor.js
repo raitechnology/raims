@@ -13,7 +13,7 @@ var nodes_width   = 0,
     nodes_height  = 0,
     cy            = null,
     graph_svg     = null,
-    margin        = {top: 20, right: 40, bottom: 20, left: 40},
+    margin        = {top: 20, right: 50, bottom: 20, left: 50},
     graph_width   = 0,
     graph_height  = 0,
     graph_secs    = 180,
@@ -426,7 +426,7 @@ function on_interval( me ) {
     }
   }
   clock++;
-  if ( max_shifted && clock % 5 == 0 ) {
+  if ( ( max_shifted && clock % 5 == 0 ) || ( clock % 30 == 0 ) ) {
     let new_max_total = 20;
     for ( let prop in user_rate ) {
       let rate = user_rate[ prop ];
@@ -460,8 +460,6 @@ function init_port_table( name, msg ) {
 function update_port_table( key, msg ) {
   if ( port == null )
     [ port, port_body ] = init_port_table( "port-container", msg );
-
-  update_msg_rate( msg );
 
   let table = port,
       body  = port_body;
@@ -582,7 +580,10 @@ function update_peer_table( key, msg ) {
 var ws = null, timer = null;
 
 function on_msg( key, msg ) {
-  if ( key.startsWith( "_N.PORT." ) ) {
+  if ( key.startsWith( "_N.ALL." ) ) {
+    update_msg_rate( msg );
+  }
+  else if ( key.startsWith( "_N.PORT." ) ) {
     update_port_table( key, msg );
   }
   else if ( key.startsWith( "_N.PEER." ) ) { 
@@ -618,6 +619,7 @@ function on_startup( webs ) {
   };
   ws.onopen = function( event ) {
     ws.send( "template { \"T\": { \"nodes\": @{show nodes}, \"links\": @{show links} } }" );
+    ws.send( "psub _N.ALL.>" );
     ws.send( "psub _N.PORT.>" );
     ws.send( "psub _N.PEER.@(user).>" );
     ws.send( "sub _N.ADJ.@(user)" );

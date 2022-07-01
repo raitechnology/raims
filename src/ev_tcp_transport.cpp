@@ -61,6 +61,8 @@ EvTcpTransportListen::release( void ) noexcept
 void
 EvTcpTransportListen::process_close( void ) noexcept
 {
+  this->client_stats( this->rte.sub_route.peer_stats );
+  this->EvSocket::process_close();
 }
 
 bool
@@ -160,6 +162,8 @@ EvTcpTransport::release( void ) noexcept
 void
 EvTcpTransport::process_close( void ) noexcept
 {
+  this->client_stats( this->rte->sub_route.peer_stats );
+  this->EvSocket::process_close();
 }
 
 bool

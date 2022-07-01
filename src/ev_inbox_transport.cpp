@@ -143,6 +143,8 @@ void
 EvInboxTransport::process_close( void ) noexcept
 {
   d_ibx( "close inbox\n" );
+  this->client_stats( this->rte.sub_route.peer_stats );
+  this->EvSocket::process_close();
 }
 
 void

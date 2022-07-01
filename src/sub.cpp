@@ -843,9 +843,10 @@ AnyMatch::init_any( const char *s,  uint16_t sublen,  const uint32_t *pre_seed,
   this->max_uid   = uid_cnt;
   this->set_count = 0;
   this->mono_time = 0;
-  this->sub       = ptr;
+  this->sub_off   = (uint16_t) ( ptr - (char *) (void *) this );
+  this->sub_len   = sublen;
   ptr            += ( ( (size_t) sublen + 8 ) & ~(size_t) 7 );
-  this->bits      = (uint64_t *) (void *) ptr;
+  this->bits_off  = (uint32_t) ( ptr - (char *) (void *) this );
   ::memset( ptr, 0, uid_cnt / 8 );
   this->match.init_match( sublen, pre_seed );
 }
@@ -877,7 +878,7 @@ AnyMatchTab::get_match( const char *sub,  uint16_t sublen,  uint32_t h,
   uint32_t   off;
   if ( this->ht->find( h, pos, off ) ) {
     any = (AnyMatch *) (void *) &this->tab.ptr[ off ];
-    if ( ::memcmp( any->sub, sub, sublen ) == 0 && any->sub[ sublen ] == '\0' &&
+    if ( any->sub_len == sublen && ::memcmp( any->sub(), sub, sublen ) == 0 &&
          any->max_uid >= max_uid )
       return any;
     this->reset();
@@ -897,7 +898,7 @@ UserBridge *
 AnyMatch::get_destination( UserDB &user_db ) noexcept
 {
   if ( this->set_count > 0 ) {
-    BitSetT<uint64_t> set( this->bits );
+    BitSetT<uint64_t> set( this->bits() );
     bool b = false;
     uint32_t uid, pos = 0;
     if ( this->set_count > 1 )
@@ -919,7 +920,7 @@ SubDB::any_match( const char *sub,  uint16_t sublen,  uint32_t h ) noexcept
   AnyMatch   * any;
   any = this->any_tab.get_match( sub, sublen, h, this->pat_tab.seed, max_uid );
   if ( any->mono_time < this->sub_update_mono_time ) {
-    BitSetT<uint64_t> set( any->bits );
+    BitSetT<uint64_t> set( any->bits() );
     for ( uint32_t uid = 1; uid < max_uid; uid++ ) {
       UserBridge * n = this->user_db.bridge_tab[ uid ];
       if ( n != NULL && n->is_set( AUTHENTICATED_STATE ) ) {

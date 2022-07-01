@@ -763,6 +763,7 @@ TelnetService::release( void ) noexcept
 void
 TelnetService::process_close( void ) noexcept
 {
+  this->EvSocket::process_close();
 }
 
 #if 0

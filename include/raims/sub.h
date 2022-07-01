@@ -504,17 +504,24 @@ struct SessionMgr;
 struct UserBridge;
 
 struct AnyMatch {
+  uint64_t       mono_time;
   uint32_t       max_uid,
                  set_count;
-  const char   * sub;
-  uint64_t     * bits,
-                 mono_time;
+  uint16_t       sub_off,
+                 sub_len;
+  uint32_t       bits_off;
   kv::BloomMatch match;
 
   void init_any( const char *s,  uint16_t sublen,  const uint32_t *pre_seed,
                  uint32_t uid_cnt ) noexcept;
   UserBridge * get_destination( UserDB &user_db ) noexcept;
   static size_t any_size( uint16_t sublen,  uint32_t uid_cnt ) noexcept;
+  const char *sub( void ) {
+    return &((char *) (void *) this)[ this->sub_off ];
+  }
+  uint64_t *bits( void ) {
+    return (uint64_t *) &((char *) (void *) this)[ this->bits_off ];
+  }
 };
 
 struct AnyMatchTab {

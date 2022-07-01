@@ -31,6 +31,8 @@ SessionMgr::publish_stats( uint64_t cur_time ) noexcept
     ( this->stats.n_port_rcount != 0 || this->stats.n_port_ipc_rcount != 0 );
   bool n_peer_subscribed =
     ( this->stats.n_peer_rcount != 0 || this->stats.n_peer_ipc_rcount != 0 );
+  bool n_all_subscribed =
+    ( this->stats.n_all_rcount != 0 || this->stats.n_all_ipc_rcount != 0 );
 
   uint64_t cache_seqno = this->user_db.peer_dist.cache_seqno;
   bool cache_synced = ( cache_seqno == this->user_db.peer_dist.update_seqno );
@@ -165,113 +167,155 @@ SessionMgr::publish_stats( uint64_t cur_time ) noexcept
     }
   }
 
-  uint32_t n_port_rcount    = 0,
-           n_port_ipc_count = 0,
-           n_port_pub_count = 0;
-  uint32_t tport_count = this->user_db.transport_tab.count;
+  uint32_t  n_port_rcount    = 0,
+            n_port_ipc_count = 0,
+            n_port_pub_count = 0;
+  PortStats all_total,
+            all_rate;
+  uint32_t  tport_count = this->user_db.transport_tab.count,
+            all_ref     = 0;
+  all_total = 0;
+  all_rate  = 0;
   for ( uint32_t tport_id = 0; tport_id < tport_count; tport_id++ ) {
     TransportRoute * rte = this->user_db.transport_tab.ptr[ tport_id ];
-    uint64_t bs_tot  = 0, br_tot  = 0, ms_tot  = 0, mr_tot  = 0,
-             bs_rate = 0, br_rate = 0, ms_rate = 0, mr_rate = 0;
-    uint32_t ref = 0;
-    rte->stats_seqno++;
+
+    PortStats total, rate;
+    uint32_t  ref = 0;
+    total = 0;
+    rate  = 0;
+    total.sum( rte->sub_route.peer_stats.bytes_sent,
+               rte->sub_route.peer_stats.bytes_recv,
+               rte->sub_route.peer_stats.msgs_sent,
+               rte->sub_route.peer_stats.msgs_recv );
     for ( uint32_t n = 0; n <= this->poll.maxfd; n++ ) {
       EvSocket *s = this->poll.sock[ n ];
       if ( s != NULL && s->sock_base > EV_LISTEN_BASE ) {
         if ( s->route_id == rte->sub_route.route_id ) {
-          bs_tot += s->bytes_sent;
-          br_tot += s->bytes_recv;
-          ms_tot += s->msgs_sent;
-          mr_tot += s->msgs_recv;
+          total.sum( s->bytes_sent, s->bytes_recv,
+                     s->msgs_sent, s->msgs_recv );
           ref++;
         }
       }
     }
-    if ( ref > 0 ) {
-      StatsLast &last = this->stats.last[ tport_id ];
-      bs_rate = bs_tot - last.bytes_sent;
-      br_rate = br_tot - last.bytes_recv;
-      ms_rate = ms_tot - last.msgs_sent;
-      mr_rate = mr_tot - last.msgs_recv;
-      last.bytes_sent = bs_tot;
-      last.bytes_recv = br_tot;
-      last.msgs_sent  = ms_tot;
-      last.msgs_recv  = mr_tot;
-    }
+    PortStats & last = this->stats.last[ tport_id ];
+    rate.diff( total, last );
+    all_total.sum( total );
+    if ( ! rate.is_zero() ) {
+      last = total;
 
-    if ( ( sub_updated || n_port_subscribed || adj_changed ) && ref > 0 ) {
-      uint32_t uid;
-      n_port_pub_count++;
-      SubjectVar s( N_PORT, N_PORT_SZ, this->user.user.val,
-                    this->user.user.len );
-      s.s( "." ).s( rte->transport.tport.val ).s( "." ).i( tport_id );
-      h = s.hash();
-      peer = NULL;
-      if ( rte->uid_connected.first( uid ) ) {
-        if ( uid != 0 ) {
-          peer = this->user_db.bridge_tab[ uid ];
-          if ( peer != NULL && ! peer->is_set( AUTHENTICATED_STATE ) )
-            peer = NULL;
-        }
+      if ( sub_updated || n_port_subscribed || adj_changed ) {
+        n_port_pub_count++;
+        SubjectVar s( N_PORT, N_PORT_SZ, this->user.user.val,
+                      this->user.user.len );
+        s.s( "." ).s( rte->transport.tport.val ).s( "." ).i( tport_id );
+        this->fwd_port_stat_msg( s, rte, rate, total, cur_time, ref,
+                                 rte->uid_connected.count(),
+                                 n_port_rcount, n_port_ipc_count );
       }
-      if ( peer != NULL ) {
-        peer_len = peer->peer.user.len;
-        peer_val = peer->peer.user.val;
-      }
-      else {
-        peer_len = 0;
-        peer_val = NULL;
-      }
-      MsgEst e( s.len() );
-      e.seqno   ()
-       .time    ()
-       .fmt     ()
-       .user    ( this->user.user.len )
-       .peer    ( peer_len )
-       .tport   ( rte->transport.tport.len )
-       .tportid ()
-       .fd_cnt  ()
-       .uid_cnt ()
-       .bs      ()
-       .br      ()
-       .ms      ()
-       .mr      ()
-       .bs_tot  ()
-       .br_tot  ()
-       .ms_tot  ()
-       .mr_tot  ();
-
-      MsgCat m;
-      m.reserve( e.sz );
-
-      m.open    ( this->user_db.bridge_id.nonce, s.len() )
-       .seqno   ( rte->stats_seqno )
-       .time    ( cur_time )
-       .fmt     ( CABA_TYPE_ID )
-       .user    ( this->user.user.val, this->user.user.len )
-       .peer    ( peer_val, peer_len )
-       .tport   ( rte->transport.tport.val, rte->transport.tport.len )
-       .tportid ( tport_id )
-       .fd_cnt  ( ref )
-       .uid_cnt ( rte->uid_connected.count() )
-       .bs      ( bs_rate )
-       .br      ( br_rate )
-       .ms      ( ms_rate )
-       .mr      ( mr_rate )
-       .bs_tot  ( bs_tot )
-       .br_tot  ( br_tot )
-       .ms_tot  ( ms_tot )
-       .mr_tot  ( mr_tot );
-      m.close( e.sz, h, CABA_MCAST );
-      m.sign( s.msg, s.len(), *this->user_db.session_key );
-
-      this->fwd_stat_msg( s, m, h, n_port_rcount, n_port_ipc_count );
     }
   }
   if ( n_port_pub_count > 0 ) {
     this->stats.n_port_ipc_rcount = n_port_ipc_count;
     this->stats.n_port_rcount     = n_port_rcount;
   }
+  PortStats &last = this->stats.last_total;
+  all_rate.diff( all_total, last );
+  if ( ! all_rate.is_zero() ) {
+    uint32_t rcount = 0, ipc_count = 0;
+    last = all_total;
+
+    if ( sub_updated || n_all_subscribed || adj_changed ) {
+      SubjectVar s( N_ALL, N_ALL_SZ, this->user.user.val,
+                    this->user.user.len );
+      this->fwd_port_stat_msg( s, NULL, all_rate, all_total, cur_time, all_ref,
+                               this->user_db.uid_auth_count, rcount, ipc_count);
+      this->stats.n_all_rcount     = rcount;
+      this->stats.n_all_ipc_rcount = ipc_count;
+    }
+  }
+}
+
+void
+SessionMgr::fwd_port_stat_msg( SubjectVar &s,  TransportRoute *rte,
+                               PortStats &rate,  PortStats &total,
+                               uint64_t cur_time,  uint32_t fd_cnt,
+                               uint32_t uid_cnt,  uint32_t &rcount,
+                               uint32_t &ipc_count ) noexcept
+{
+  UserBridge * peer      = NULL;
+  const char * peer_val  = NULL,
+             * tport_val = NULL;
+  uint32_t     uid, h = s.hash(),
+               peer_len    = 0,
+               tport_len   = 0,
+               tport_id    = 0;
+  uint64_t     stats_seqno = 0;
+
+  if ( rte != NULL ) {
+    if ( rte->uid_connected.first( uid ) ) {
+      if ( uid != 0 ) {
+        peer = this->user_db.bridge_tab[ uid ];
+        if ( peer != NULL && ! peer->is_set( AUTHENTICATED_STATE ) )
+          peer = NULL;
+      }
+    }
+    tport_val   = rte->transport.tport.val;
+    tport_len   = rte->transport.tport.len;
+    tport_id    = rte->tport_id;
+    stats_seqno = ++rte->stats_seqno;
+  }
+  else {
+    stats_seqno = ++this->stats.stats_seqno;
+  }
+  if ( peer != NULL ) {
+    peer_len = peer->peer.user.len;
+    peer_val = peer->peer.user.val;
+  }
+
+  MsgEst e( s.len() );
+  e.seqno   ()
+   .time    ()
+   .fmt     ()
+   .user    ( this->user.user.len )
+   .peer    ( peer_len )
+   .tport   ( tport_len )
+   .tportid ()
+   .fd_cnt  ()
+   .uid_cnt ()
+   .bs      ()
+   .br      ()
+   .ms      ()
+   .mr      ()
+   .bs_tot  ()
+   .br_tot  ()
+   .ms_tot  ()
+   .mr_tot  ();
+
+  MsgCat m;
+  m.reserve( e.sz );
+
+  m.open    ( this->user_db.bridge_id.nonce, s.len() )
+   .seqno   ( stats_seqno )
+   .time    ( cur_time )
+   .fmt     ( CABA_TYPE_ID )
+   .user    ( this->user.user.val, this->user.user.len )
+   .peer    ( peer_val, peer_len )
+   .tport   ( tport_val, tport_len )
+   .tportid ( tport_id )
+   .fd_cnt  ( fd_cnt )
+   .uid_cnt ( uid_cnt )
+   .bs      ( rate.bs )
+   .br      ( rate.br )
+   .ms      ( rate.ms )
+   .mr      ( rate.mr )
+   .bs_tot  ( total.bs )
+   .br_tot  ( total.br )
+   .ms_tot  ( total.ms )
+   .mr_tot  ( total.mr );
+  m.close( e.sz, h, CABA_MCAST );
+  m.sign( s.msg, s.len(), *this->user_db.session_key );
+
+  this->fwd_stat_msg( s, m, h, rcount, ipc_count );
 }
 
 void

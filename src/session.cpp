@@ -1124,11 +1124,16 @@ SessionMgr::forward_inbox( EvPublish &fwd ) noexcept
     printf( "no match for %.*s\n", (int) fwd.subject_len, fwd.subject );
     return true;
   }
-  BitSetT<uint64_t> set( any->bits );
+  BitSetT<uint64_t> set( any->bits() );
   uint32_t uid, cnt = 0;
 
   set.first( uid, any->max_uid );
   for (;;) {
+    if ( uid >= this->user_db.next_uid ||
+         this->user_db.bridge_tab[ uid ] == NULL ) {
+      fprintf( stderr, "bad uid %u\n", uid );
+      break;
+    }
     UserBridge * n = this->user_db.bridge_tab[ uid ];
     InboxBuf  ibx( n->bridge_id );
     CabaFlags fl( CABA_INBOX );

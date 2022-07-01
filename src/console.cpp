@@ -246,6 +246,11 @@ ConsoleOutput::on_quit( void ) noexcept
 }
 
 void
+ConsoleOutput::on_remove( void ) noexcept
+{
+}
+
+void
 Console::log_output( int stream,  uint64_t stamp,  size_t len,
                      const char *buf ) noexcept
 {
@@ -442,26 +447,94 @@ Console::flush_log( Logger &log ) noexcept
     Sleep( 1 );
 #endif
 }
-#if 0
-static size_t
-scan_arg( const char *buf,  const char *end,  const char *&sub ) noexcept
+
+JsonOutput *
+JsonOutput::create( const char *path,  size_t pathlen ) noexcept
 {
-  while ( buf < end && *buf == ' ' )
-    buf++;
-  const char * s = (const char *) ::memchr( buf, ' ', end - buf );
-  if ( s == NULL ) {
-    sub = NULL;
-    return 0;
-  }
-  while ( s < end && *s == ' ' )
-    s++;
-  sub = s;
-  const char *e = (const char *) ::memchr( s, ' ', end - s );
-  if ( e == NULL )
-    e = end;
-  return e - s;
+  char fn[ 1024 ];
+  int  fnlen = ::snprintf( fn, sizeof( fn ), "%.*s", (int) pathlen, path );
+  int  fd    = os_open( fn, O_APPEND | O_WRONLY | O_CREAT, 0666 );
+  if ( fd < 0 )
+    return NULL;
+  void       * p   = ::malloc( sizeof( JsonOutput ) + fnlen + 1 );
+  JsonOutput * out = new ( p ) JsonOutput( fd );
+
+  ::memcpy( (void *) &out[ 1 ], fn, fnlen );
+  out->path = (char *) (void *) &out[ 1 ];
+  out->path[ fnlen ] = '\0';
+  out->pathlen = fnlen;
+
+  return out;
 }
-#endif
+
+bool
+JsonOutput::open( void ) noexcept
+{
+  int fd = os_open( this->path, O_APPEND | O_WRONLY | O_CREAT, 0666 );
+  if ( fd < 0 )
+    return false;
+  this->fd = fd;
+  return true;
+}
+
+bool
+JsonOutput::on_output( const char *buf,  size_t buflen ) noexcept
+{
+  if ( os_write( this->fd, buf, buflen ) != (ssize_t) buflen ) {
+    ::perror( this->path );
+    os_close( this->fd );
+    this->fd = -1;
+  }
+  return true;
+}
+
+void
+JsonOutput::on_remove( void ) noexcept
+{
+  if ( this->fd != -1 ) {
+    os_close( this->fd );
+    this->fd = -1;
+  }
+}
+
+JsonOutput *
+JsonOutArray::open( const char *path,  size_t pathlen ) noexcept
+{
+  JsonOutput *out = NULL;
+  for ( size_t i = 0; i < this->count; i++ ) {
+    if ( pathlen == this->ptr[ i ]->pathlen &&
+         ::memcmp( path, this->ptr[ i ]->path, pathlen ) == 0 ) {
+      if ( this->ptr[ i ]->rpc == NULL ) {
+        out = this->ptr[ i ];
+        break;
+      }
+    }
+  }
+  if ( out == NULL ) {
+    out = JsonOutput::create( path, pathlen );
+    if ( out == NULL )
+      return NULL;
+  }
+  else {
+    if ( ! out->open() )
+      return NULL;
+  }
+  this->operator[]( this->count ) = out;
+  return out;
+}
+
+JsonOutput *
+JsonOutArray::find( const char *path,  size_t pathlen ) noexcept
+{
+  for ( size_t i = 0; i < this->count; i++ ) {
+    if ( pathlen == this->ptr[ i ]->pathlen &&
+         ::memcmp( path, this->ptr[ i ]->path, pathlen ) == 0 ) {
+      if ( this->ptr[ i ]->rpc != NULL )
+        return this->ptr[ i ];
+    }
+  }
+  return NULL;
+}
 
 static void
 make_valid( ValidCmds &valid,
@@ -1383,6 +1456,7 @@ Console::print_table( ConsoleOutput *p,  const char **hdr,
       }
     }
     this->putchar( ']' );
+    this->putchar( '\n' );
     return;
   }
   if ( ncols <= 16 ) {
@@ -1483,16 +1557,44 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
     this->output_help( p, cmd );
     return this->flush_output( p );
   }
-  const char * args[ MAXARGS ]; /* all args */
-  size_t       arglen[ MAXARGS ], argc;
-  const char * arg;   /* arg after command */
-  size_t       len;   /* len of arg */
+  const char    * args[ MAXARGS ]; /* all args */
+  size_t          arglen[ MAXARGS ], argc;
+  const char    * arg;   /* arg after command */
+  size_t          len;   /* len of arg */
+  ConsoleOutput * sub_output = p;
+
   cmd = (ConsoleCmd)
     this->parse_command( buf, &buf[ buflen ], arg, len, args, arglen, argc );
   /* empty line, skip it */
   if ( cmd == CMD_EMPTY )
     return this->flush_output( p );
 
+  if ( cmd >= CMD_SUB_START && argc == 3 ) {
+    switch ( cmd ) {
+      case CMD_SUB_START:
+      case CMD_PSUB_START:
+      case CMD_GSUB_START:
+        sub_output = this->json_files.open( args[ 2 ], arglen[ 2 ] );
+        if ( sub_output == NULL ) {
+          this->printf( "output \"%.*s\" file open error %d\n",
+                        (int) arglen[ 2 ], args[ 2 ], errno );
+          return true;
+        }
+        break;
+      case CMD_SUB_STOP:
+      case CMD_PSUB_STOP:
+      case CMD_GSUB_STOP:
+        sub_output = this->json_files.find( args[ 2 ], arglen[ 2 ] );
+        if ( sub_output == NULL ) {
+          this->printf( "output \"%.*s\" not found\n",
+                        (int) arglen[ 2 ], args[ 2 ] );
+          return true;
+        }
+        break;
+      default:
+        break;
+    }
+  }
   switch ( cmd ) {
     default:
       goto help;
@@ -1685,7 +1787,7 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
       }
       if ( sub == NULL ) {
         if ( cmd == CMD_SUB_START ) {
-          sub = this->create_rpc<ConsoleSubStart>( p, SUB_START );
+          sub = this->create_rpc<ConsoleSubStart>( sub_output, SUB_START );
           sub->set_sub( arg, len );
           sub->start_seqno =
             this->sub_db.console_sub_start( arg, len, sub );
@@ -1698,7 +1800,7 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
       }
       else {
         if ( cmd == CMD_SUB_STOP ) {
-          if ( sub->out.remove( p ) ) {
+          if ( sub->out.remove( sub_output ) ) {
             if ( sub->out.count == 0 ) {
               this->printf( "stop(%.*s) seqno = %" PRIu64 "\n", (int) len, arg,
                 this->sub_db.console_sub_stop( arg, (uint16_t) len ) );
@@ -1713,7 +1815,7 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
           }
         }
         else {
-          if ( sub->out.add( p ) )
+          if ( sub->out.add( sub_output ) )
             this->printf( "sub(%.*s) added to existing\n", (int) len, arg );
           else
             this->printf( "sub(%.*s) exists\n", (int) len, arg );
@@ -1737,7 +1839,7 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
       }
       if ( sub == NULL ) {
         if ( cmd == CMD_PSUB_START || cmd == CMD_GSUB_START ) {
-          sub = this->create_rpc<ConsolePSubStart>( p, PSUB_START );
+          sub = this->create_rpc<ConsolePSubStart>( sub_output, PSUB_START );
           sub->set_psub( arg, len, fmt );
           sub->start_seqno =
             this->sub_db.console_psub_start( arg, len, fmt, sub );
@@ -1750,7 +1852,7 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
       }
       else {
         if ( cmd == CMD_PSUB_STOP || cmd == CMD_GSUB_STOP ) {
-          if ( sub->out.remove( p ) ) {
+          if ( sub->out.remove( sub_output ) ) {
             if ( sub->out.count == 0 ) {
               this->printf( "pstop(%.*s) seqno = %" PRIu64 "\n", (int) len, arg,
                 this->sub_db.console_psub_stop( arg, len, fmt ) );
@@ -1765,7 +1867,7 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
           }
         }
         else {
-          if ( sub->out.add( p ) )
+          if ( sub->out.add( sub_output ) )
             this->printf( "psub(%.*s) added to existing\n", (int) len, arg );
           else
             this->printf( "psub(%.*s) exists\n", (int) len, arg );
@@ -3630,17 +3732,22 @@ Console::show_running( ConsoleOutput *p,  int which,  const char *name,
              is_json = ( p != NULL && p->is_json );
   if ( is_html )
     this->puts( "<pre>" );
-  if ( ( which & PRINT_PARAMETERS ) != 0 && ! is_json ) {
+  if ( ( which & PRINT_PARAMETERS ) != 0 ) {
     ConfigTree::TransportArray listen, connect;
     this->get_active_tports( listen, connect );
-    this->tree.print_parameters( *this, which, name, namelen, listen, connect );
+    if ( ! is_json )
+      this->tree.print_parameters_y( *this, which, name, namelen, listen,
+                                     connect );
+    else
+      this->tree.print_parameters_js( *this, which, name, namelen, listen,
+                                      connect );
   }
   else {
     int did_which;
-    if ( is_json )
-      this->tree.print_js( *this, did_which, which, name, namelen );
-    else
+    if ( ! is_json )
       this->tree.print_y( *this, did_which, which, name, namelen );
+    else
+      this->tree.print_js( *this, which, name, namelen );
   }
 }
 
@@ -3803,8 +3910,10 @@ ConsoleOutArray::replace( ConsoleOutput *p,  ConsoleOutput *p2 ) noexcept
       this->ptr[ i ] = p2;
       if ( p2 != NULL )
         p2->rpc = this->rpc;
-      if ( p != NULL )
+      if ( p != NULL ) {
         p->rpc = NULL;
+        p->on_remove();
+      }
       return true;
     }
   }
@@ -3819,8 +3928,10 @@ ConsoleOutArray::remove( ConsoleOutput *p ) noexcept
       for ( size_t j = i + 1; j < this->count; )
         this->ptr[ i++ ] = this->ptr[ j++ ];
       this->count = i;
-      if ( p != NULL )
+      if ( p != NULL ) {
         p->rpc = NULL;
+        p->on_remove();
+      }
       return true;
     }
   }

@@ -47,6 +47,8 @@ struct ConfigTree {
     void print_js( ConfigPrinter &p ) const noexcept;
     void print_y( ConfigPrinter &p ) const noexcept;
     const StringPair *print_ylist( ConfigPrinter &p, int i ) const noexcept;
+    const StringPair *print_jslist( ConfigPrinter &p, int i,
+                                    const char *&nl ) const noexcept;
   };
   struct PairList : public kv::SLinkList<StringPair> {
     StringPair *get_pair( const char *name,  size_t len ) {
@@ -116,7 +118,6 @@ struct ConfigTree {
               revoke,      /* revoke time */
               pri,         /* pri base64 */
               pub;         /* pub base64 */
-    /*Service * service;     * service user belongs to */
     uint32_t  user_id;     /* count 0 -> user_cnt */
                    /*entitle_cnt;*/ /* count of entitle[] */
     User() : next( 0 ), /*service( 0 ),*/ user_id( 0 ) {}
@@ -143,13 +144,10 @@ struct ConfigTree {
               pub;        /* rsa public key */
     PairList  users,      /* users signed */
               revoke;     /* users reovked */
-    //User   ** user;       /* users belonging to service */
     uint32_t  service_id; /* count 0 -> service_cnt */
-              //user_cnt;   /* count of user[] */
     Service() : next( 0 ), /*user( 0 ),*/ service_id( 0 )/*, user_cnt( 0 )*/{}
     void print_js( ConfigPrinter &p,  int i ) const noexcept;
     void print_y( ConfigPrinter &p,  int i ) const noexcept;
-    /*User * find_user( const char *usr,  size_t len ) noexcept;*/
   };
   /* transports : { tport : name, type : t, route : { f:v } } */
   struct Transport {
@@ -222,13 +220,17 @@ struct ConfigTree {
   int save_tport( const ConfigTree::Transport &tport ) const noexcept;
   int save_parameters( const TransportArray &listen,
                        const TransportArray &connect ) const noexcept;
-  void print_parameters( ConfigPrinter &p,
-                         int which,  const char *name,  size_t namelen,
-                         const TransportArray &listen,
-                         const TransportArray &connect ) const noexcept;
+  void print_parameters_y( ConfigPrinter &p,
+                           int which,  const char *name,  size_t namelen,
+                           const TransportArray &listen,
+                           const TransportArray &connect ) const noexcept;
+  void print_parameters_js( ConfigPrinter &p,
+                            int which,  const char *name,  size_t namelen,
+                            const TransportArray &listen,
+                            const TransportArray &connect ) const noexcept;
   bool save_new( void ) const noexcept;
   void print_js( ConfigPrinter &p ) const noexcept;
-  void print_js( ConfigPrinter &p, int &did_which,  int which = PRINT_NORMAL,
+  void print_js( ConfigPrinter &p, int which,
                  const char *name = NULL,  size_t namelen = 0 ) const noexcept;
   void print_y( ConfigPrinter &p, int &did_which,  int which = PRINT_NORMAL,
                 const char *name = NULL,  size_t namelen = 0 ) const noexcept;

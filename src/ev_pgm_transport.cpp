@@ -248,7 +248,9 @@ void
 EvPgmTransport::process_close( void ) noexcept
 {
   d_pgm( "pgm close\n" );
+  this->client_stats( this->rte.sub_route.peer_stats );
   this->pgm.close_pgm();
+  this->EvSocket::process_close();
 }
 
 void

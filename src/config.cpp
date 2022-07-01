@@ -418,20 +418,20 @@ ConfigTree::save_parameters( const TransportArray &listen,
   if ( out.open( "param", mt ) != 0 )
     return -1;
   which = PRINT_PARAMETERS | PRINT_HDR;
-  this->print_parameters( out, which, NULL, 0, mta, mta );
+  this->print_parameters_y( out, which, NULL, 0, mta, mta );
 
   if ( out2.open( "startup", mt ) != 0 )
     return -1;
   which = PRINT_STARTUP | PRINT_HDR;
-  this->print_parameters( out2, which, NULL, 0, listen, connect );
+  this->print_parameters_y( out2, which, NULL, 0, listen, connect );
   return 0;
 }
 
 void
-ConfigTree::print_parameters( ConfigPrinter &p, int which,
-                              const char *name,  size_t namelen,
-                              const TransportArray &listen,
-                              const TransportArray &connect ) const noexcept
+ConfigTree::print_parameters_y( ConfigPrinter &p, int which,
+                                const char *name,  size_t namelen,
+                                const TransportArray &listen,
+                                const TransportArray &connect ) const noexcept
 {
   size_t n;
   int i = ( ( which & PRINT_HDR ) != 0 ? 2 : 0 );
@@ -1364,13 +1364,22 @@ ConfigDB::check_strings( ConfigTree::Parameters &pa,  StringTab &str,
 void
 ConfigTree::print_js( ConfigPrinter &p ) const noexcept
 {
-  int which;
-  this->print_js( p, which, PRINT_NORMAL, NULL, 0 );
+  this->print_js( p, PRINT_NORMAL, NULL, 0 );
 }
 
 void
-ConfigTree::print_js( ConfigPrinter &p,  int &did_which,  int which,
+ConfigTree::print_js( ConfigPrinter &p,  int which,
                       const char *name,  size_t namelen ) const noexcept
+{
+  TransportArray listen, connect;
+  this->print_parameters_js( p, which, name, namelen, listen, connect );
+}
+
+void
+ConfigTree::print_parameters_js( ConfigPrinter &p, int which,
+                                 const char *name,  size_t namelen,
+                                 const TransportArray &listen,
+                                 const TransportArray &connect ) const noexcept
 {
   const char * nl = "";
   p.printf( "{\n" );
@@ -1444,18 +1453,83 @@ ConfigTree::print_js( ConfigPrinter &p,  int &did_which,  int which,
   if ( ( which & PRINT_PARAMETERS ) != 0 ) {
     const Parameters *pa = this->parameters.hd;
     if ( pa != NULL ) {
+      p.printf( "%s  \"parameters\" : {\n", nl );
       x |= PRINT_PARAMETERS;
-      p.printf( "%s", nl );
+      nl = "";
       for ( ; pa != NULL; pa = pa->next ) {
-        pa->print_js( p, 2, pa->next == NULL ? 0 : ',' );
+        const StringPair *sp = pa->parms.hd;
+        for ( ; sp != NULL; ) {
+          bool matched = false;
+          if ( namelen == 0 || sp->name.equals( name, namelen ) ) {
+            bool is_startup = ( sp->name.equals( "listen" ) ||
+                                sp->name.equals( "connect" ) );
+            if ( is_startup && ( which & PRINT_STARTUP ) != 0 )
+              matched = true;
+          }
+          if ( matched )
+            sp = sp->print_jslist( p, 4, nl );
+          else
+            sp = sp->next;
+        }
       }
+      if ( ( which & PRINT_STARTUP ) == 0 ) {
+        size_t i;
+        if ( listen.count != 0 ) {
+          p.printf( "%s    \"listen\" : [\n", nl );
+          p.printf( "      \"%s\"", listen.ptr[ 0 ]->tport.val );
+          for ( i = 1; i < listen.count; i++ )
+            p.printf( ",\n      \"%s\"", listen.ptr[ i ]->tport.val );
+          p.printf( "\n    ]" );
+          nl = ",\n";
+        }
+        if ( connect.count != 0 ) {
+          p.printf( "%s    \"connect\" : [\n", nl );
+          p.printf( "      \"%s\"", connect.ptr[ 0 ]->tport.val );
+          for ( i = 1; i < connect.count; i++ )
+            p.printf( ",\n      \"%s\"", connect.ptr[ i ]->tport.val );
+          p.printf( "\n    ]" );
+          nl = ",\n";
+        }
+      }
+      p.printf( "%s  }\n", nl[ 0 ] == 0 ? "" : "\n" );
     }
     else {
       p.printf( "\n" );
     }
   }
   p.printf( "}\n" );
-  did_which = x;
+}
+
+const ConfigTree::StringPair *
+ConfigTree::StringPair::print_jslist( ConfigPrinter &p,  int i,
+                                      const char *&nl ) const noexcept
+{
+  const StringPair * end = this;
+  for ( ; ; end = end->next ) {
+    if ( end->next == NULL ||
+         ! end->next->name.equals( this->name ) )
+      break;
+  }
+  if ( this == end ) {
+    p.printf( "%s%*s", nl, i, "" );
+    this->print_js( p );
+    nl = ",\n";
+  }
+  else {
+    p.printf( "%s%*s", nl, i, "" );
+    this->name.print_js( p );
+    p.printf( ": {\n" );
+    nl = "";
+    for ( const StringPair *sp = this; ; sp = sp->next ) {
+      p.printf( "%s%*s", nl, i, "" );
+      sp->value.print_js( p );
+      if ( sp == end )
+        break;
+      nl = ",\n";
+    }
+    p.printf( "%*s}", i, "" );
+  }
+  return end->next;
 }
 
 void

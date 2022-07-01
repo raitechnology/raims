@@ -304,6 +304,7 @@ WebService::process_shutdown( void ) noexcept
 void
 WebService::process_close( void ) noexcept
 {
+  this->EvSocket::process_close();
 }
 
 void

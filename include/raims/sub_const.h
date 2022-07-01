@@ -32,6 +32,7 @@ namespace ms {
 #define _STAT_PORT      "_N.PORT"
 #define _STAT_PEER      "_N.PEER"
 #define _STAT_ADJ       "_N.ADJ"
+#define _STAT_ALL       "_N.ALL"
 
 /* inbox suffix, for point to point rpc */
 #define _AUTH           "auth"
@@ -54,34 +55,36 @@ namespace ms {
 #define _ANY            "any"
 
 extern const char     X_HELLO[],
-                      X_HB[],
-                      X_BYE[],
-                      Z_ADD[],
-                      Z_DEL[],
-                      Z_BLM[],
-                      Z_ADJ[],
-                      S_JOIN[],
+                      X_HB[]   ,
+                      X_BYE[]  ,
+                      Z_ADD[]  ,
+                      Z_DEL[]  ,
+                      Z_BLM[]  ,
+                      Z_ADJ[]  ,
+                      S_JOIN[] ,
                       S_LEAVE[],
-                      P_PSUB[],
+                      P_PSUB[] ,
                       P_PSTOP[],
-                      N_PORT[],
-                      N_PEER[],
-                      N_ADJ[];
+                      N_PORT[] ,
+                      N_PEER[] ,
+                      N_ADJ[]  ,
+                      N_ALL[]  ;
                     /* prefix string size */
 extern const uint16_t X_HELLO_SZ,
-                      X_HB_SZ,
-                      X_BYE_SZ,
-                      Z_ADD_SZ,
-                      Z_DEL_SZ,
-                      Z_BLM_SZ,
-                      Z_ADJ_SZ,
-                      S_JOIN_SZ,
+                      X_HB_SZ   ,
+                      X_BYE_SZ  ,
+                      Z_ADD_SZ  ,
+                      Z_DEL_SZ  ,
+                      Z_BLM_SZ  ,
+                      Z_ADJ_SZ  ,
+                      S_JOIN_SZ ,
                       S_LEAVE_SZ,
-                      P_PSUB_SZ,
+                      P_PSUB_SZ ,
                       P_PSTOP_SZ,
-                      N_PORT_SZ,
-                      N_PEER_SZ,
-                      N_ADJ_SZ;
+                      N_PORT_SZ ,
+                      N_PEER_SZ ,
+                      N_ADJ_SZ  ,
+                      N_ALL_SZ  ;
 /* hashes of above */
 extern uint32_t hello_h, hb_h, bye_h, add_h, del_h, blm_h, adj_h,
                 join_h, leave_h, psub_h, pstop_h;
@@ -95,13 +98,14 @@ const char     X_HELLO[]  = _SESSION_HELLO    ,
                Z_DEL[]    = _PEER_DEL         ,
                Z_BLM[]    = _BLOOM_FILTER     ,
                Z_ADJ[]    = _ADJACENCY        ,
-               S_JOIN[]   = _SUB_JOIN      ".",
-               S_LEAVE[]  = _SUB_LEAVE     ".",
-               P_PSUB[]   = _PSUB_START    ".",
-               P_PSTOP[]  = _PSUB_STOP     ".",
-               N_PORT[]   = _STAT_PORT     ".",
-               N_PEER[]   = _STAT_PEER     ".",
-               N_ADJ[]    = _STAT_ADJ      ".";
+               S_JOIN[]   = _SUB_JOIN     "." ,
+               S_LEAVE[]  = _SUB_LEAVE    "." ,
+               P_PSUB[]   = _PSUB_START   "." ,
+               P_PSTOP[]  = _PSUB_STOP    "." ,
+               N_PORT[]   = _STAT_PORT    "." ,
+               N_PEER[]   = _STAT_PEER    "." ,
+               N_ADJ[]    = _STAT_ADJ     "." ,
+               N_ALL[]    = _STAT_ALL     "." ;
                     /* prefix string size */
 const uint16_t X_HELLO_SZ = (uint16_t) sizeof( X_HELLO ) - 1,
                X_HB_SZ    = (uint16_t) sizeof( X_HB    ) - 1,
@@ -116,7 +120,8 @@ const uint16_t X_HELLO_SZ = (uint16_t) sizeof( X_HELLO ) - 1,
                P_PSTOP_SZ = (uint16_t) sizeof( P_PSTOP ) - 1,
                N_PORT_SZ  = (uint16_t) sizeof( N_PORT  ) - 1,
                N_PEER_SZ  = (uint16_t) sizeof( N_PEER  ) - 1,
-               N_ADJ_SZ   = (uint16_t) sizeof( N_ADJ   ) - 1;
+               N_ADJ_SZ   = (uint16_t) sizeof( N_ADJ   ) - 1,
+               N_ALL_SZ   = (uint16_t) sizeof( N_ALL   ) - 1;
 
 uint32_t       hello_h, hb_h, bye_h, add_h, del_h, blm_h, adj_h,
                join_h, leave_h, psub_h, pstop_h;

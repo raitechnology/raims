@@ -32,6 +32,7 @@ struct ConsoleOutput {
   virtual bool on_output( const char *buf,  size_t buflen ) noexcept;
   virtual void on_prompt( const char *prompt ) noexcept;
   virtual void on_quit( void ) noexcept;
+  virtual void on_remove( void ) noexcept;
 };
 
 struct ConsoleOutputList : public kv::DLinkList< ConsoleOutput > {};
@@ -41,6 +42,25 @@ struct ConsoleOutArray   : public kv::ArrayCount< ConsoleOutput *, 2 > {
   bool add( ConsoleOutput *p ) noexcept;
   bool replace( ConsoleOutput *p,  ConsoleOutput *p2 ) noexcept;
   bool remove( ConsoleOutput *p ) noexcept;
+};
+
+struct JsonOutput : public ConsoleOutput {
+  char   * path;
+  uint32_t pathlen;
+  int      fd;
+  void * operator new( size_t, void *ptr ) { return ptr; }
+  JsonOutput( int fildes )
+    : ConsoleOutput( false, true ), path( 0 ), pathlen( 0 ), fd( fildes ) {}
+  static JsonOutput *create( const char *path,  size_t pathlen ) noexcept;
+  bool open( void ) noexcept;
+  virtual bool on_output( const char *buf,  size_t buflen ) noexcept;
+  virtual void on_remove( void ) noexcept;
+};
+
+struct JsonOutArray : public kv::ArrayCount< JsonOutput *, 2 > {
+  JsonOutArray() {}
+  JsonOutput * open( const char *path,  size_t pathlen ) noexcept;
+  JsonOutput * find( const char *path,  size_t pathlen ) noexcept;
 };
 
 struct SessionMgr;
@@ -399,6 +419,7 @@ struct Console : public md::MDOutput, public SubOnMsg, public ConfigPrinter {
   ConsoleOutBuf     log;
   ConsoleOutBuf     tmp;
   kv::ArrayCount< TabPrint, 64 > table;
+  JsonOutArray      json_files;
   size_t            max_log,
                     log_index,
                     log_ptr;
@@ -577,12 +598,12 @@ enum ConsoleCmd {
   CMD_CONFIGURE_TPORT  = 34, /* configure transport T      */
   CMD_CONFIGURE_PARAM  = 35, /* configure parameter P V    */
   CMD_SAVE             = 36, /* save                       */
-  CMD_SUB_START        = 37, /* sub subject                */
-  CMD_SUB_STOP         = 38, /* unsub subject              */
-  CMD_PSUB_START       = 39, /* psub rv-wildcard           */
-  CMD_PSUB_STOP        = 40, /* punsub rv-wildcard         */
-  CMD_GSUB_START       = 41, /* gsub glob-wildcard         */
-  CMD_GSUB_STOP        = 42, /* gunsub glob-wildcard       */
+  CMD_SUB_START        = 37, /* sub subject [file]         */
+  CMD_SUB_STOP         = 38, /* unsub subject [file]       */
+  CMD_PSUB_START       = 39, /* psub rv-wildcard [file]    */
+  CMD_PSUB_STOP        = 40, /* punsub rv-wildcard [file]  */
+  CMD_GSUB_START       = 41, /* gsub glob-wildcard [file]  */
+  CMD_GSUB_STOP        = 42, /* gunsub glob-wildcard [file]*/
   CMD_PUBLISH          = 43, /* pub subject msg            */
   CMD_TRACE            = 44, /* trace subject msg          */
   CMD_PUB_ACK          = 45, /* ack subject msg            */
@@ -641,12 +662,12 @@ static const ConsoleCmdType command_type[] = {
   { CMD_SHUTDOWN        , TPORT_ARG  }, /* shutdown <tport> */
   { CMD_CONFIGURE_TPORT , TPORT_ARG  }, /* configure transport <tport> */
   { CMD_CONFIGURE_PARAM , PARM_ARG   }, /* configure parameter <parm> */
-  { CMD_SUB_START       , SUB_ARG    }, /* subscribe <subject> */
-  { CMD_SUB_STOP        , SUB_ARG    }, /* unsubscribe <subject> */
-  { CMD_PSUB_START      , SUB_ARG    }, /* psubscribe <rv-pattern> */
-  { CMD_PSUB_STOP       , SUB_ARG    }, /* punsubscribe <rv-pattern> */
-  { CMD_GSUB_START      , SUB_ARG    }, /* gsubscribe <glob-pattern> */
-  { CMD_GSUB_STOP       , SUB_ARG    }, /* gunsubscribe <glob-pattern> */
+  { CMD_SUB_START       , SUB_ARG    }, /* subscribe <subject> [file] */
+  { CMD_SUB_STOP        , SUB_ARG    }, /* unsubscribe <subject> [file] */
+  { CMD_PSUB_START      , SUB_ARG    }, /* psubscribe <rv-pattern> [file] */
+  { CMD_PSUB_STOP       , SUB_ARG    }, /* punsubscribe <rv-pattern> [file] */
+  { CMD_GSUB_START      , SUB_ARG    }, /* gsubscribe <glob-pattern> [file] */
+  { CMD_GSUB_STOP       , SUB_ARG    }, /* gunsubscribe <glob-pattern> [file] */
   { CMD_PUBLISH         , PUB_ARG    }, /* pub <subject> message */
   { CMD_TRACE           , PUB_ARG    }, /* trace <subject> message */
   { CMD_PUB_ACK         , PUB_ARG    }, /* ack <subject> message */
@@ -779,12 +800,12 @@ static const ConsoleCmdString help_cmd[] = {
   { CMD_SHOW_RUN_USERS   , "show running user","[U]",      "Show users running config, U or all"     },
   { CMD_SHOW_RUN_GROUPS  , "show running group","[G]",     "Show groups running config, G or all"    },
   { CMD_SHOW_RUN_PARAM   , "show running parameter","[P]", "Show parameters running config, P or all"},
-  { CMD_SUB_START        , "sub","[S]",          "Subscribe subject S"                               },
-  { CMD_SUB_STOP         , "unsub","[S]",        "Unsubscribe subject S"                             },
-  { CMD_PSUB_START       , "psub","[W]",         "Subscribe rv-wildcard W"                           },
-  { CMD_PSUB_STOP        , "punsub","[W]",       "Unsubscribe rv-wildcard W"                         },
-  { CMD_GSUB_START       , "gsub","[W]",         "Subscribe glob-wildcard W"                         },
-  { CMD_GSUB_STOP        , "gunsub","[W]",       "Unsubscribe glob-wildcard W"                       },
+  { CMD_SUB_START        , "sub","[S] [F]",      "Subscribe subject S, output to file F"             },
+  { CMD_SUB_STOP         , "unsub","[S] [F]",    "Unsubscribe subject S, stop output file F"         },
+  { CMD_PSUB_START       , "psub","[W] [F]",     "Subscribe rv-wildcard W, output to file F"         },
+  { CMD_PSUB_STOP        , "punsub","[W] [F]",   "Unsubscribe rv-wildcard W, stop output file F"     },
+  { CMD_GSUB_START       , "gsub","[W] [F]",     "Subscribe glob-wildcard W, output to file F"       },
+  { CMD_GSUB_STOP        , "gunsub","[W] [F]",   "Unsubscribe glob-wildcard W, stop output file F"   },
   { CMD_PUBLISH          , "pub","[S] [M]",      "Publish msg string M to subject S"                 },
   { CMD_TRACE            , "trace","[S] [M]",    "Publish msg string M to subject S, with reply"     },
   { CMD_PUB_ACK          , "ack","[S] [M]",      "Publish msg string M to subject S, with ack"       },

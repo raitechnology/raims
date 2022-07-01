@@ -260,6 +260,10 @@ struct SessionMgr : public kv::EvSocket {
                        const char *where ) noexcept;
   /* publish data on a subject */
   void publish_stats( uint64_t cur_time ) noexcept;
+  void fwd_port_stat_msg( SubjectVar &s,  TransportRoute *rte,  PortStats &rate,
+                          PortStats &total,  uint64_t cur_time, uint32_t fd_cnt,
+                          uint32_t uid_cnt,  uint32_t &rcount,
+                          uint32_t &ipc_count ) noexcept;
   void fwd_stat_msg( SubjectVar &s,  MsgCat &m,  uint32_t h,
                      uint32_t &rcount,  uint32_t &ipc_count ) noexcept;
   bool publish( PubMcastData &mc ) noexcept;

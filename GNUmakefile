@@ -328,8 +328,8 @@ web_files := $(wildcard web/*)
 include/raims/ev_web_tar.h: $(web_files)
 	echo "static const uint8_t ev_web_tar_data[] = {" > $@
 	tar cf - $(web_files) | \
-	xxd -g 1 | \
-	cut --output-delimiter ',0x' -b 10,11-12,14-15,17-18,20-21,23-24,26-27,29-30,32-33,35-36,38-39,41-42,44-45,47-48,50-51,53-54,56-57 | \
+	od -v -t x1 | \
+	cut --output-delimiter ',0x' -b 8,9-10,12-13,15-16,18-19,21-22,24-25,27-28,30-31,33-34,36-37,39-40,42-43,45-46,48-49,51-52,54-55 | \
 	tail -c +3 >> $@
 	echo "};" >> $@
 
