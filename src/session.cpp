@@ -1173,6 +1173,36 @@ SessionMgr::forward_inbox( EvPublish &fwd ) noexcept
   return true;
 }
 
+static bool
+is_ipc_inbox( const char *subject,  size_t subject_len )
+{
+  static const char    inbox[] = "_INBOX.";
+  static const size_t  inbox_len = sizeof( inbox ) - 1;
+
+  if ( subject_len > inbox_len && subject[ 0 ] == '_' ) {
+    /* check for _1234._INBOX. */
+    if ( subject[ 1 ] >= '0' && subject[ 1 ] <= '9' ) {
+      for ( size_t i = 2; i < subject_len - inbox_len; i++ ) {
+        if ( subject[ i ] >= '0' && subject[ i ] <= '9' )
+          continue;
+        if ( subject[ i++ ] != '.' )
+          return false;
+        if ( subject_len > i + inbox_len ) {
+          if ( ::memcmp( &subject[ i ], inbox, inbox_len ) == 0 )
+            return true;
+        }
+        return false;
+      }
+    }
+    /* check for _INBOX. */
+    else if ( subject[ 1 ] == 'I' ) {
+      if ( ::memcmp( &subject[ 2 ], &inbox[ 2 ], inbox_len - 2 ) == 0 )
+        return true;
+    }
+  }
+  return false;
+}
+
 bool
 SessionMgr::forward_ipc( TransportRoute &src_rte,  EvPublish &fwd ) noexcept
 {
@@ -1183,10 +1213,7 @@ SessionMgr::forward_ipc( TransportRoute &src_rte,  EvPublish &fwd ) noexcept
   if ( p == NULL )
     return NULL;
   if ( loc.is_new ) {
-    static const char inbox[] = "_INBOX.";
-    bool is_inbox = ( fwd.subject_len > sizeof( inbox ) - 1 &&
-                     ::memcmp( fwd.subject, inbox, sizeof( inbox ) - 1 ) == 0 );
-    p->init( is_inbox );
+    p->init( is_ipc_inbox( fwd.subject, fwd.subject_len ) );
   }
   if ( p->is_inbox() )
     return this->forward_inbox( fwd );

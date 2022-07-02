@@ -1205,6 +1205,9 @@ TransportRoute::create_rv_listener( ConfigTree::Transport &tport ) noexcept
   EvRvTransportListen * l =
     new ( aligned_malloc( sizeof( EvRvTransportListen ) ) )
     EvRvTransportListen( this->poll, *this );
+  bool pref;
+  if ( tport.get_route_bool( "use_service_prefix", pref ) )
+    l->has_service_prefix = pref;
   this->start_listener( l, tport );
   if ( l == NULL )
     return false;

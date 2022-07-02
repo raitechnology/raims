@@ -57,7 +57,7 @@ get_rv_transport( EvRvTransportListen &listen,  RvHost &host ) noexcept
   ConfigTree::Transport * t;
   ConfigTree & tree = listen.rte.mgr.tree;
   StringTab  & stab = listen.rte.user_db.string_tab;
-  char rv_svc[ RvHost::MAX_SERVICE_LEN + 8 ];
+  char rv_svc[ MAX_RV_SERVICE_LEN + 8 ];
   int  svc_len;
 
   if ( host.service_len == 0 ) {
