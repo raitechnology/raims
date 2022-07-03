@@ -355,9 +355,18 @@ Console::flush_output( ConsoleOutput *p ) noexcept
         b &= o->on_output( this->out.ptr, len );
       }
     }
+#if 0
+    {
+      static int test_fd;
+      if ( test_fd == 0 )
+        test_fd = os_open( "test.txt", O_APPEND | O_WRONLY | O_CREAT, 0666 );
+      os_write( test_fd, this->out.ptr, len );
+    }
+#endif
     this->out.count = 0;
   }
-  if ( this->log_index < this->log.count ) {
+  if ( ( p == NULL || ! ( p->is_html | p->is_json ) ) &&
+       this->log_index < this->log.count ) {
     const char * lptr = &this->log.ptr[ this->log_index ];
     size_t       lsz  = this->log.count - this->log_index;
     if ( this->log_fd >= 0 ) {
