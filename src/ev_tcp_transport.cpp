@@ -67,13 +67,13 @@ EvTcpTransportListen::process_close( void ) noexcept
 
 bool
 EvTcpTransportClient::connect( EvTcpTransportParameters &p,
-                               EvConnectionNotify *n ) noexcept
+                               EvConnectionNotify *n,  int index ) noexcept
 {
   if ( this->fd != -1 )
     return false;
   this->is_connect = true;
   this->EvConnection::release_buffers();
-  if ( EvTcpConnection::connect2( *this, p.host, p.port, p.opts,
+  if ( EvTcpConnection::connect2( *this, p.host[ index ], p.port[ index ], p.opts,
                           "ev_tcp_tport", this->rte->sub_route.route_id ) != 0 )
     return false;
   this->notify = n;
@@ -141,8 +141,6 @@ EvTcpTransport::dispatch_msg( void ) noexcept
   d_tcp( "< ev_tcp(%s) dispatch %.*s (%lu)\n", this->rte->name,
          (int) pub.subject_len, pub.subject, this->msgs_recv + 1 );
   this->msgs_recv++;
-  /*if ( *this->tport_count == 1 )
-    return this->rte->sub_route.forward_not_fd2( pub, this->fd, this->not_fd2 );*/
   return this->rte->sub_route.forward_not_fd( pub, this->fd );
 }
 

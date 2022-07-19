@@ -5,6 +5,7 @@
 #define __STDC_FORMAT_MACROS
 #include <inttypes.h>
 #define DECLARE_SUB_CONST
+#define INCLUDE_FRAME_CONST
 #include <raims/session.h>
 #include <raims/transport.h>
 
@@ -42,7 +43,7 @@ SessionMgr::SessionMgr( EvPoll &p,  Logger &l,  ConfigTree &c,
              tree( c ), user( u ), svc( s ), next_timer( 1 ), timer_id( 0 ),
              user_db( p, u, s, this->sub_db, st, this->events ),
              sub_db( p, this->user_db, *this ),
-             sys_bloom( 0, "sys", p.g_bloom_db ),
+             sys_bloom( 0, "(sys)", p.g_bloom_db ),
              console( *this ), log( l ), telnet( 0 ), web( 0 ),
              telnet_tport( 0 ), web_tport( 0 )
 {
@@ -297,16 +298,9 @@ MsgFramePublish::print( const char *what ) const noexcept
 const char *
 MsgFramePublish::status_string( void ) const noexcept
 {
-  switch ( this->status ) {
-    default:
-    case FRAME_STATUS_UNKNOWN:   return "unknown";
-    case FRAME_STATUS_OK:        return "ok";
-    case FRAME_STATUS_DUP_SEQNO: return "dup_seqno";
-    case FRAME_STATUS_NO_AUTH:   return "no_auth";
-    case FRAME_STATUS_NO_USER:   return "no_user";
-    case FRAME_STATUS_BAD_MSG:   return "bad_msg";
-    case FRAME_STATUS_MY_MSG:    return "my_msg";
-  }
+  if ( this->status < FRAME_STATUS_MAX )
+    return frame_status_str[ this->status ];
+  return frame_status_str[ 0 ];
 }
 
 void
@@ -344,7 +338,7 @@ SessionMgr::show_debug_msg( const MsgFramePublish &fpub,
     mout.print_hex( fpub.msg, fpub.msg_len );
   }
 }
-
+/* decode the message header and find the sending peer */
 MsgFrameStatus
 SessionMgr::parse_msg_hdr( MsgFramePublish &fpub,  bool is_ipc ) noexcept
 {
@@ -431,7 +425,7 @@ SessionMgr::parse_msg_hdr( MsgFramePublish &fpub,  bool is_ipc ) noexcept
     return FRAME_STATUS_MY_MSG;*/
   return fpub.status;
 }
-
+/* forward a message published by my ipc to the network, add a subject seqno */
 bool
 IpcRoute::on_msg( EvPublish &pub ) noexcept
 {
@@ -537,11 +531,14 @@ IpcRoute::on_msg( EvPublish &pub ) noexcept
   }*/
   bool b = true;
   size_t i, count = this->user_db.transport_tab.count;
-  if ( seq.tport_mask == SubRefs::ALL_MASK ) {
-    for ( i = 0; i < count; i++ ) {
-      TransportRoute *rte = this->user_db.transport_tab.ptr[ i ];
-      if ( &fpub.rte != rte ) {
-        if ( rte->is_set( TPORT_IS_IPC ) ) {
+  if ( seq.tport_mask != SubRefs::ALL_MASK ) {
+    uint32_t mask = seq.tport_mask; /* ipc tports (currently only one) */
+    for ( i = 0; mask != 0; i++ ) {
+      bool is_set = ( mask & 1 ) != 0;
+      mask >>= 1;
+      if ( is_set ) {
+        TransportRoute *rte = this->user_db.transport_tab.ptr[ i ];
+        if ( &fpub.rte != rte && rte->is_set( TPORT_IS_IPC ) ) {
           EvPublish pub( fpub.subject, fpub.subject_len, reply, replylen,
                          data, datalen, rte->sub_route, this->fd,
                          fpub.subj_hash, fmt, 'p' );
@@ -551,20 +548,13 @@ IpcRoute::on_msg( EvPublish &pub ) noexcept
     }
   }
   else {
-    uint32_t mask = seq.tport_mask;
-    for ( i = 0; mask != 0; i++ ) {
-      bool is_set = ( mask & 1 ) != 0;
-      mask >>= 1;
-      if ( is_set ) {
-        TransportRoute *rte = this->user_db.transport_tab.ptr[ i ];
-        if ( &fpub.rte != rte ) {
-          if ( rte->is_set( TPORT_IS_IPC ) ) {
-            EvPublish pub( fpub.subject, fpub.subject_len, reply, replylen,
-                           data, datalen, rte->sub_route, this->fd,
-                           fpub.subj_hash, fmt, 'p' );
-            b &= rte->sub_route.forward_except( pub, this->mgr.router_set );
-          }
-        }
+    for ( i = 0; i < count; i++ ) {
+      TransportRoute *rte = this->user_db.transport_tab.ptr[ i ];
+      if ( &fpub.rte != rte && rte->is_set( TPORT_IS_IPC ) ) {
+        EvPublish pub( fpub.subject, fpub.subject_len, reply, replylen,
+                       data, datalen, rte->sub_route, this->fd,
+                       fpub.subj_hash, fmt, 'p' );
+        b &= rte->sub_route.forward_except( pub, this->mgr.router_set );
       }
     }
   }
@@ -583,7 +573,7 @@ IpcRoute::on_msg( EvPublish &pub ) noexcept
   }
   return b;
 }
-
+/* forward console subscribed subject from local ipc */
 bool
 ConsoleRoute::on_msg( EvPublish &pub ) noexcept
 {
@@ -656,7 +646,8 @@ ConsoleRoute::fwd_console( EvPublish &pub,  bool is_caba ) noexcept
   }
   return 0;
 }
-
+/* decapsulate a message published to my inbox subscribed by an ipc route,
+ * usually an _INBOX subject */
 bool
 IpcRoute::on_inbox( const MsgFramePublish &fpub,  UserBridge &,
                     MsgHdrDecoder &dec ) noexcept
@@ -688,17 +679,15 @@ IpcRoute::on_inbox( const MsgFramePublish &fpub,  UserBridge &,
   size_t i, count = this->user_db.transport_tab.count;
   for ( i = 0; i < count; i++ ) {
     TransportRoute *rte = this->user_db.transport_tab.ptr[ i ];
-    if ( &fpub.rte != rte ) {
-      if ( rte->is_set( TPORT_IS_IPC ) ) {
-        EvPublish pub( subject, subjlen, reply, replylen,
-                       data, datalen, rte->sub_route, this->fd, h, fmt, 'p' );
-        b &= rte->sub_route.forward_except( pub, this->mgr.router_set );
-      }
+    if ( &fpub.rte != rte && rte->is_set( TPORT_IS_IPC ) ) {
+      EvPublish pub( subject, subjlen, reply, replylen,
+                     data, datalen, rte->sub_route, this->fd, h, fmt, 'p' );
+      b &= rte->sub_route.forward_except( pub, this->mgr.router_set );
     }
   }
   return true;
 }
-
+/* system subjects from peers to maintain the network */
 bool
 SessionMgr::on_msg( EvPublish &pub ) noexcept
 {
@@ -745,31 +734,40 @@ SessionMgr::on_msg( EvPublish &pub ) noexcept
 
   if ( (( (uint64_t) 1 << type ) & session_type) != 0 ) {
     if ( fpub.status == FRAME_STATUS_NO_AUTH ) {
-      const HashDigest * key = &n.peer_key;
-      if ( type == U_SESSION_HELLO || type == U_SESSION_HB )
-        key = &n.peer.hello_key;
-      /* inbox auth has key exchange encrypted, that is used to verify msg */
-      if ( type == U_INBOX_AUTH || dec.msg->verify( *key ) )
-      /*|| m.verify( *key, fpub.hmac )*/
-        fpub.status = FRAME_STATUS_OK;
-      else if ( debug_sess ) {
-        n.printf( "hello failed %.*s\n", (int) fpub.subject_len, fpub.subject );
+      if ( type != U_INBOX_AUTH ) {
+        if ( n.is_set( AUTHENTICATED_STATE ) ) {
+          /* verify with peer key */
+          if ( dec.msg->verify( n.peer_key ) )
+            fpub.status = FRAME_STATUS_OK;
+        }
+        else {
+          /* before authenticated, allow hb to be signed by hello key */
+          if ( dec.msg->verify_hb( n.peer.hello_key ) )
+            fpub.status = FRAME_STATUS_HB_NO_AUTH;
+        }
+      }
+      else {
+        /* inbox auth has key exchange encrypted, that is used to verify msg */
+        fpub.status = FRAME_STATUS_INBOX_AUTH;
       }
     }
-    if ( fpub.status == FRAME_STATUS_OK ) {
-      if ( type != U_SESSION_BYE ) {
-        if ( ! n.is_set( INBOX_ROUTE_STATE ) ) 
-          this->user_db.add_inbox_route( n, NULL ); /* need an inbox */
-      }
-      /* authorize user by verifying the ECDH key exchange */
-      if ( type == U_INBOX_AUTH )
-        return this->user_db.on_inbox_auth( fpub, n, dec );
-      /* maybe authorize if needed by starting ECDH exchange */
-      if ( type == U_SESSION_HELLO || type == U_SESSION_HB )
-        return this->user_db.on_heartbeat( fpub, n, dec );
-      /* ciao frog */
+    if ( type != U_SESSION_BYE && fpub.status != FRAME_STATUS_NO_AUTH ) {
+      if ( ! n.is_set( INBOX_ROUTE_STATE ) ) 
+        this->user_db.add_inbox_route( n, NULL ); /* need an inbox */
+    }
+    /* authorize user by verifying the ECDH key exchange */
+    if ( type == U_INBOX_AUTH && fpub.status == FRAME_STATUS_INBOX_AUTH )
+      return this->user_db.on_inbox_auth( fpub, n, dec );
+
+    /* maybe authorize if needed by starting ECDH exchange */
+    if ( ( type == U_SESSION_HELLO || type == U_SESSION_HB ) &&
+         ( fpub.status == FRAME_STATUS_OK ||
+           fpub.status == FRAME_STATUS_HB_NO_AUTH ) )
+      return this->user_db.on_heartbeat( fpub, n, dec );
+
+    /* ciao frog */
+    if ( type == U_SESSION_BYE && fpub.status == FRAME_STATUS_OK )
       return this->user_db.on_bye( fpub, n, dec );
-    }
   }
   else if ( fpub.status == FRAME_STATUS_NO_AUTH ) {
     /* move from FRAME_STATUS_NO_AUTH -> FRAME_STATUS_OK */
@@ -1019,7 +1017,7 @@ SessionMgr::on_msg( EvPublish &pub ) noexcept
   }
   return true;
 }
-
+/* publish a mcast message, usually from console */
 bool
 SessionMgr::publish( PubMcastData &mc ) noexcept
 {
@@ -1061,6 +1059,15 @@ SessionMgr::publish( PubMcastData &mc ) noexcept
     mc.seqno = p->next_seqno();
   }
 
+  uint8_t  path_select = 0;
+  uint16_t option      = mc.option;
+  option &= ~( ( COST_PATH_COUNT - 1 ) << CABA_OPT_MC_SHIFT );
+  if ( fl.get_type() == CABA_MCAST ) {
+    path_select = ( h >> ( 32 - CABA_OPT_MC_BITS ) ) % COST_PATH_COUNT;
+    option |= path_select << CABA_OPT_MC_SHIFT;
+  }
+  fl.set_opt( option );
+
   MsgEst e( mc.sublen );
   e.seqno ()
    .ret   ()
@@ -1085,36 +1092,56 @@ SessionMgr::publish( PubMcastData &mc ) noexcept
     m.fmt( mc.fmt );
   if ( mc.datalen != 0 )
     m.data( mc.data, mc.datalen );
-  if ( mc.option != 0 )
-    fl.set_opt( mc.option );
   m.close( e.sz, h, fl );
 
   m.sign( mc.sub, mc.sublen, *this->user_db.session_key );
-  bool b = true;
-  if ( dest_bridge_id == NULL ) {
-    size_t count = this->user_db.transport_tab.count;
-    for ( size_t i = 0; i < count; i++ ) {
-      TransportRoute *rte = this->user_db.transport_tab.ptr[ i ];
-      if ( rte->connect_count > 0 ) {
-        EvPublish pub( mc.sub, mc.sublen, NULL, 0, m.msg, m.len(),
-                       rte->sub_route, this->fd, h, CABA_TYPE_ID, 'p' );
-        b &= rte->sub_route.forward_except( pub, this->router_set );
-      }
-      else if ( rte->is_set( TPORT_IS_IPC ) ) {
-        EvPublish pub( mc.sub, mc.sublen, NULL, 0, mc.data, mc.datalen,
-                       rte->sub_route, this->fd, h, 
-                       ( mc.fmt ? mc.fmt : (uint32_t) MD_STRING ), 'p' );
-        b &= rte->sub_route.forward_except( pub, this->router_set );
-      }
-    }
+
+  if ( dest_bridge_id != NULL )
+    return this->user_db.forward_to_inbox( *dest_bridge_id, mc.sub, mc.sublen,
+                                           h, m.msg, m.len() );
+
+  ForwardCache   & forward = this->user_db.forward_path[ path_select ];
+  TransportRoute * rte;
+  uint32_t         tport_id;
+  bool             b = true;
+
+  this->user_db.peer_dist.update_forward_cache( forward, 0, path_select );
+  if ( forward.first( tport_id ) ) {
+    do {
+      rte = this->user_db.transport_tab.ptr[ tport_id ];
+      EvPublish pub( mc.sub, mc.sublen, NULL, 0, m.msg, m.len(),
+                     rte->sub_route, this->fd, h, CABA_TYPE_ID, 'p' );
+      pub.shard = path_select;
+      b &= rte->sub_route.forward_except( pub, this->router_set );
+    } while ( forward.next( tport_id ) );
   }
-  else {
-    b = this->user_db.forward_to_inbox( *dest_bridge_id, mc.sub, mc.sublen, h,
-                                        m.msg, m.len() );
+  if ( (rte = this->user_db.ipc_transport) != NULL ) {
+    EvPublish pub( mc.sub, mc.sublen, NULL, 0, mc.data, mc.datalen,
+                   rte->sub_route, this->fd, h, 
+                   ( mc.fmt ? mc.fmt : (uint32_t) MD_STRING ), 'p' );
+    b &= rte->sub_route.forward_except( pub, this->router_set );
   }
   return b;
+#if 0
+  size_t count = this->user_db.transport_tab.count;
+  for ( size_t i = 0; i < count; i++ ) {
+    TransportRoute *rte = this->user_db.transport_tab.ptr[ i ];
+    if ( rte->connect_count > 0 ) {
+      EvPublish pub( mc.sub, mc.sublen, NULL, 0, m.msg, m.len(),
+                     rte->sub_route, this->fd, h, CABA_TYPE_ID, 'p' );
+      b &= rte->sub_route.forward_except( pub, this->router_set );
+    }
+    else if ( rte->is_set( TPORT_IS_IPC ) ) {
+      EvPublish pub( mc.sub, mc.sublen, NULL, 0, mc.data, mc.datalen,
+                     rte->sub_route, this->fd, h, 
+                     ( mc.fmt ? mc.fmt : (uint32_t) MD_STRING ), 'p' );
+      b &= rte->sub_route.forward_except( pub, this->router_set );
+    }
+  }
+  return b;
+#endif
 }
-
+/* find a peer target for an _INBOX endpoint, and send it direct to the peer */
 bool
 SessionMgr::forward_inbox( EvPublish &fwd ) noexcept
 {
@@ -1172,7 +1199,7 @@ SessionMgr::forward_inbox( EvPublish &fwd ) noexcept
   }
   return true;
 }
-
+/* match _INBOX and _7500._INBOX, these are inbox endpoints */
 static bool
 is_ipc_inbox( const char *subject,  size_t subject_len )
 {
@@ -1202,54 +1229,88 @@ is_ipc_inbox( const char *subject,  size_t subject_len )
   }
   return false;
 }
-
+/* forward a message from local ipc to peers, add subject sequence number */
 bool
-SessionMgr::forward_ipc( TransportRoute &src_rte,  EvPublish &fwd ) noexcept
+SessionMgr::forward_ipc( TransportRoute &src_rte,  EvPublish &pub ) noexcept
 {
   CabaFlags fl( CABA_MCAST );
   RouteLoc loc;
-  Pub * p = this->sub_db.pub_tab.upsert( fwd.subj_hash, fwd.subject,
-                                         fwd.subject_len, loc );
+  Pub * p = this->sub_db.pub_tab.upsert( pub.subj_hash, pub.subject,
+                                         pub.subject_len, loc );
   if ( p == NULL )
     return NULL;
   if ( loc.is_new ) {
-    p->init( is_ipc_inbox( fwd.subject, fwd.subject_len ) );
+    p->init( is_ipc_inbox( pub.subject, pub.subject_len ) );
   }
   if ( p->is_inbox() )
-    return this->forward_inbox( fwd );
+    return this->forward_inbox( pub );
   uint64_t seqno = p->next_seqno(),
            stamp = ( loc.is_new ? this->poll.current_coarse_ns() : 0 );
 
   d_sess( "-> fwd_ipc: %.*s seqno %lu time %lu reply %.*s "
           "(len=%u, from %s, fd %d, enc %x)\n",
-          (int) fwd.subject_len, fwd.subject, seqno, stamp,
-          (int) fwd.reply_len, (char *) fwd.reply,
-          fwd.msg_len, src_rte.name, fwd.src_route, fwd.msg_enc );
-  MsgEst e( fwd.subject_len );
+          (int) pub.subject_len, pub.subject, seqno, stamp,
+          (int) pub.reply_len, (char *) pub.reply,
+          pub.msg_len, src_rte.name, pub.src_route, pub.msg_enc );
+
+  uint8_t path_select =
+    ( pub.subj_hash >> ( 32 - CABA_OPT_MC_BITS ) ) % COST_PATH_COUNT;
+  fl.set_opt( path_select << CABA_OPT_MC_SHIFT );
+
+  MsgEst e( pub.subject_len );
   e.seqno ()
    .time  ()
-   .reply ( fwd.reply_len )
+   .reply ( pub.reply_len )
    .fmt   ()
-   .data  ( fwd.msg_len );
+   .data  ( pub.msg_len );
 
   MsgCat m;
   m.reserve( e.sz );
 
-  m.open( this->user_db.bridge_id.nonce, fwd.subject_len )
+  m.open( this->user_db.bridge_id.nonce, pub.subject_len )
    .seqno ( seqno );
 
   if ( stamp != 0 )
     m.time( stamp );
-  if ( fwd.reply_len != 0 )
-    m.reply( (const char *) fwd.reply, fwd.reply_len );
-  if ( fwd.msg_enc != 0 )
-    m.fmt( fwd.msg_enc );
-  if ( fwd.msg_len != 0 )
-    m.data( fwd.msg, fwd.msg_len );
-  m.close( e.sz, fwd.subj_hash, fl );
+  if ( pub.reply_len != 0 )
+    m.reply( (const char *) pub.reply, pub.reply_len );
+  if ( pub.msg_enc != 0 )
+    m.fmt( pub.msg_enc );
+  if ( pub.msg_len != 0 )
+    m.data( pub.msg, pub.msg_len );
+  m.close( e.sz, pub.subj_hash, fl );
 
-  m.sign( fwd.subject, fwd.subject_len, *this->user_db.session_key );
+  m.sign( pub.subject, pub.subject_len, *this->user_db.session_key );
 
+  ForwardCache   & forward = this->user_db.forward_path[ path_select ];
+  TransportRoute * rte;
+  uint32_t         tport_id;
+  bool             b = true;
+
+  this->user_db.peer_dist.update_forward_cache( forward, 0, path_select );
+  if ( forward.first( tport_id ) ) {
+    do {
+      rte = this->user_db.transport_tab.ptr[ tport_id ];
+      if ( &src_rte != rte ) {
+        EvPublish evp( pub.subject, pub.subject_len, NULL, 0, m.msg, m.len(),
+                       rte->sub_route, this->fd, pub.subj_hash,
+                       CABA_TYPE_ID, 'p' );
+        evp.shard = path_select;
+        b &= rte->sub_route.forward_except( evp, this->router_set );
+      }
+    } while ( forward.next( tport_id ) );
+  }
+  if ( (rte = this->user_db.ipc_transport) != NULL ) {
+    if ( &src_rte != rte ) {
+      EvPublish evp( pub.subject, pub.subject_len, NULL, 0,
+                     pub.msg, pub.msg_len,
+                     rte->sub_route, this->fd, pub.subj_hash, 
+                     pub.msg_enc, 'p' );
+      b &= rte->sub_route.forward_except( evp, this->router_set );
+    }
+  }
+  return b;
+#if 0
   bool b = true;
   size_t count = this->user_db.transport_tab.count;
   for ( size_t i = 0; i < count; i++ ) {
@@ -1271,8 +1332,9 @@ SessionMgr::forward_ipc( TransportRoute &src_rte,  EvPublish &fwd ) noexcept
     }
   }
   return b;
+#endif
 }
-
+/* forward a message to any peer, chosen randomly */
 bool
 SessionMgr::publish_any( PubMcastData &mc ) noexcept
 {
@@ -1288,7 +1350,7 @@ SessionMgr::publish_any( PubMcastData &mc ) noexcept
   ptp.option |= CABA_OPT_ANY;
   return this->publish_to( ptp );
 }
-
+/* forward to a peer using its inbox address, envelopes subject */
 bool
 SessionMgr::publish_to( PubPtpData &ptp ) noexcept
 {
@@ -1334,10 +1396,15 @@ SessionMgr::publish_to( PubPtpData &ptp ) noexcept
    .close( e.sz, h, fl );
 
   m.sign( ibx.buf, ibx.len(), *this->user_db.session_key );
+
+  d_sess( "-> publish_to : sub %.*s seqno %lu inbox %.*s\n",
+          (int) ptp.sublen, ptp.sub, ptp.seqno,
+          (int) ibx.len(), (char *) ibx.buf );
+
   return this->user_db.forward_to_inbox( ptp.peer, ibx, h,
                                          m.msg, m.len(), true );
 }
-
+/* if a message has the ACK flag set, ack back to sender */
 void
 SessionMgr::send_ack( const MsgFramePublish &pub,  UserBridge &n,
                       const MsgHdrDecoder &dec,  const char *suf ) noexcept
@@ -1345,13 +1412,14 @@ SessionMgr::send_ack( const MsgFramePublish &pub,  UserBridge &n,
   char     ret_buf[ 16 ];
   InboxBuf ibx( n.bridge_id, dec.get_return( ret_buf, suf ) );
   uint64_t time_val, token;
-  uint32_t hops;
+  uint32_t d;
+  uint8_t  path_select;
 
   MsgEst e( ibx.len() );
   e.seqno    ()
    .time     ()
    .token    ()
-   .hops     ()
+   .cost     ()
    .tportid  ()
    .subject  ( pub.subject_len )
    .ref_seqno();
@@ -1359,9 +1427,9 @@ SessionMgr::send_ack( const MsgFramePublish &pub,  UserBridge &n,
   dec.get_ival<uint64_t>( FID_TOKEN, token );
   if ( ! dec.get_ival<uint64_t>( FID_TIME, time_val ) || time_val == 0 )
     time_val = current_realtime_ns();
-  hops = this->user_db.peer_dist.calc_transport_cache( n.uid,
-                                                       pub.rte.tport_id,
-                                                       pub.rte );
+  path_select = ( dec.msg->caba.get_opt() & CABA_OPT_MC_ONE ) ? 1 : 0;
+  d = this->user_db.peer_dist.calc_transport_cache( n.uid, pub.rte.tport_id,
+                                                    path_select );
   MsgCat m;
   m.reserve( e.sz );
   m.open( this->user_db.bridge_id.nonce, ibx.len() )
@@ -1369,7 +1437,7 @@ SessionMgr::send_ack( const MsgFramePublish &pub,  UserBridge &n,
    .time     ( time_val );
   if ( token != 0 )
     m.token( token );
-  m.hops     ( hops )
+  m.cost     ( d )
    .tportid  ( pub.rte.tport_id )
    .subject  ( pub.subject, pub.subject_len )
    .ref_seqno( dec.seqno );
@@ -1379,7 +1447,7 @@ SessionMgr::send_ack( const MsgFramePublish &pub,  UserBridge &n,
 
   this->user_db.forward_to_inbox( n, ibx, h, m.msg, m.len(), false );
 }
-
+/* event loop */
 bool
 SessionMgr::loop( void ) noexcept
 {

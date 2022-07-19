@@ -15,9 +15,9 @@ SubDB::SubDB( EvPoll &p,  UserDB &udb,  SessionMgr &smg ) noexcept
      : user_db( udb ), mgr( smg ), my_src_fd( -1 ), next_inbox( 0 ),
        sub_seqno( 0 ), sub_update_mono_time( 0 ), sub_tab( this->sub_list ),
        pat_tab( this->sub_list, p.sub_route.pre_seed ),
-       bloom( (uint32_t) udb.rand.next(), "node", p.g_bloom_db ),
-       console( (uint32_t) udb.rand.next(), "console", p.g_bloom_db ),
-       ipc( (uint32_t) udb.rand.next(), "ipc", p.g_bloom_db )
+       bloom( (uint32_t) udb.rand.next(), "(node)", p.g_bloom_db ),
+       console( (uint32_t) udb.rand.next(), "(console)", p.g_bloom_db ),
+       ipc( (uint32_t) udb.rand.next(), "(ipc)", p.g_bloom_db )
 {
 }
 

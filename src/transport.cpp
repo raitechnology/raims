@@ -60,10 +60,9 @@ TransportRoute::TransportRoute( kv::EvPoll &p,  SessionMgr &m,
     : EvSocket( p, p.register_type( "transport_route" ) ),
       poll( p ), mgr( m ), user_db( m.user_db ),
       sub_route( p.sub_route.get_service( svc_name, svc_id, id ) ),
-      console_rt( NULL ), ipc_rt( NULL ), router_rt( NULL ),
       uid_in_mesh( &this->mesh_connected ),
       mesh_csum( &this->mesh_csum2 ),
-      hb_time( 0 ), hb_mono_time( 0 ), hb_seqno( 0 ), reachable_seqno( 0 ),
+      hb_time( 0 ), hb_mono_time( 0 ), hb_seqno( 0 ),
       stats_seqno( 0 ), tport_id( id ), hb_count( 0 ),
       last_hb_count( 0 ), connect_count( 0 ), last_connect_count( 0 ),
       state( f ), mesh_id( 0 ), listener( 0 ), connect_mgr( *this ),
@@ -72,21 +71,46 @@ TransportRoute::TransportRoute( kv::EvPoll &p,  SessionMgr &m,
       mcast_fd( -1 ), mesh_conn_hash( 0 ), oldest_uid( 0 ),
       primary_count( 0 ), ext( 0 ), svc( s ), transport( t )
 {
-  d_tran( "transport.%u(%s, %x) created\n", id, t.tport.val, f );
+  uint8_t i;
+  this->uid_connected.tport    = t.tport;
+  this->uid_connected.tport_id = id;
+  for ( i = 0; i < COST_PATH_COUNT; i++ )
+    this->router_rt[ i ] = NULL;
+  /* parse config that has cost, cost2 ... */
+  ConfigTree::StringPair * el[ COST_PATH_COUNT ] = {
+    t.route.get_pair( "cost", 4 ), t.route.get_pair( "cost2", 5 ),
+    t.route.get_pair( "cost3", 5 ), t.route.get_pair( "cost4", 5 )
+  };
+  /* parse config that uses array of cost */
+  if ( el[ 0 ] != NULL ) {
+    for ( i = 0; i < 3; i++ ) {
+      if ( el[ i ]->next == NULL ) break;
+      if ( ! el[ i ]->next->name.equals( "cost", 4 ) ) break;
+      el[ i + 1 ] = el[ i ]->next;
+    }
+    this->uid_connected.is_advertised = true;
+  }
+  int cost, j = 0;
+  for ( i = 0; i < COST_PATH_COUNT; i++ ) {
+    if ( el[ i ] == NULL || ! el[ i ]->value.get_int( cost ) || cost <= 0 )
+      cost = ( i == 0 ? COST_DEFAULT : this->uid_connected.cost[ j++ ] );
+    this->uid_connected.cost[ i ] = cost;
+  }
+  d_tran( "transport.%u(%s, %x, %u,%u,%u,%u) created\n", id, t.tport.val, f,
+           this->uid_connected.cost[ 0 ], this->uid_connected.cost[ 1 ],
+           this->uid_connected.cost[ 2 ], this->uid_connected.cost[ 3 ] );
   this->sock_opts = OPT_NO_POLL;
   /* external tports do not have protocol for link state routing:
    *   _I.inbox, _X.HB, _Z.ADD, _Z.BLM, _Z.ADJ, _S.JOIN, _P.PSUB, etc */
   /* console_rt causes msgs to flow from tport -> session management */
   if ( ! this->is_set( TPORT_IS_IPC ) ) {
-    this->console_rt =
-      this->sub_route.create_bloom_route( m.fd, &m.sub_db.console );
-    this->console_rt->add_bloom_ref( &m.sys_bloom );
-    this->ipc_rt =
-      this->sub_route.create_bloom_route( m.ipc_rt.fd, &m.sub_db.ipc );
+    BloomRoute *rt;
+    rt = this->sub_route.create_bloom_route( m.fd, &m.sub_db.console, 0 );
+    rt->add_bloom_ref( &m.sys_bloom );
+    this->sub_route.create_bloom_route( m.ipc_rt.fd, &m.sub_db.ipc, 0 );
   }
   else {
-    this->console_rt =
-      this->sub_route.create_bloom_route( m.console_rt.fd, &m.sub_db.console );
+    this->sub_route.create_bloom_route( m.console_rt.fd, &m.sub_db.console, 0 );
     /* extrenal routes do not have system subjects */
   }
   this->mesh_csum2.zero();
@@ -107,8 +131,8 @@ TransportRoute::init( void ) noexcept
     return status;
   this->mgr.router_set.add( pfd );
   /* router_rt tport causes msgs to flow from tport -> routable user subs */
-  this->router_rt =
-    this->sub_route.create_bloom_route( pfd, NULL /*&this->mgr.router_bloom*/ );
+  for ( uint8_t i = 0; i < COST_PATH_COUNT; i++ )
+    this->router_rt[ i ] = this->sub_route.create_bloom_route( pfd, NULL, i );
   return 0;
 }
 
@@ -118,9 +142,56 @@ TransportRoute::set_peer_name( PeerData &pd,  const char *suff ) noexcept
   ConfigTree::Transport & tport = this->transport;
   ConfigTree::Service   & svc   = this->svc;
   char buf[ 256 ];
-  int len = ::snprintf( buf, sizeof( buf ), "%s.%s.%s",
-                        svc.svc.val, tport.tport.val, suff );
+  int len = ::snprintf( buf, sizeof( buf ), "%s.%s.%s.%u",
+                        svc.svc.val, tport.tport.val, suff, this->tport_id );
   pd.set_name( buf, len );
+}
+
+void
+TransportRoute::update_cost( UserBridge &n,
+                             uint32_t cost[ COST_PATH_COUNT ] ) noexcept
+{
+  uint8_t i;
+  for ( i = 0; i < COST_PATH_COUNT; i++ ) {
+    if ( cost[ i ] != this->uid_connected.cost[ i ] ) {
+      if ( this->uid_connected.is_advertised ) {
+        n.printe( "conflicting cost[%u] advertised %u != %u on %s\n",
+                   i, cost[ i ], this->uid_connected.cost[ i ], this->name );
+      }
+      break;
+    }
+  }
+  if ( i == COST_PATH_COUNT )
+    return;
+
+  if ( this->uid_connected.is_advertised ) {
+    for ( i = 0; i < COST_PATH_COUNT; i++ ) {
+      if ( this->uid_connected.cost[ i ] > cost[ i ] )
+        cost[ i ] = this->uid_connected.cost[ i ];
+    }
+  }
+  for ( i = 0; i < COST_PATH_COUNT; i++ )
+    this->uid_connected.cost[ i ] = cost[ i ];
+
+  this->user_db.peer_dist.invalidate( ADVERTISED_COST_INV );
+  this->user_db.adjacency_change.append( n.bridge_id.nonce, n.uid,
+             this->tport_id, this->user_db.link_state_seqno + 1, true );
+
+  if ( this->is_set( TPORT_IS_MESH ) ) {
+    uint32_t count = (uint32_t) this->user_db.transport_tab.count;
+    for ( uint32_t id = 0; id < count; id++ ) {
+      if ( id == this->tport_id )
+        continue;
+      TransportRoute *rte = this->user_db.transport_tab.ptr[ id ];
+      if ( ! rte->is_set( TPORT_IS_SHUTDOWN ) ) {
+        if ( rte->is_set( TPORT_IS_MESH ) &&
+             rte->mesh_id == this->mesh_id ) {
+          for ( i = 0; i < COST_PATH_COUNT; i++ )
+            rte->uid_connected.cost[ i ] = cost[ i ];
+        }
+      }
+    }
+  }
 }
 
 bool
@@ -426,23 +497,28 @@ SessionMgr::add_mesh_accept( TransportRoute &listen_rte,
   }
   if ( rte->connect_mgr.conn != NULL )
     rte->connect_mgr.release_conn();
+
   rte->mesh_url_addr = listen_rte.mesh_url_addr;
   rte->mesh_url_len  = listen_rte.mesh_url_len;
   rte->mesh_id       = listen_rte.mesh_id;
   rte->uid_in_mesh   = listen_rte.uid_in_mesh;
   rte->mesh_csum     = listen_rte.mesh_csum;
+  for ( uint8_t i = 0; i < COST_PATH_COUNT; i++ )
+    rte->uid_connected.cost[ i ] = listen_rte.uid_connected.cost[ i ];
+
   rte->set( TPORT_IS_MESH );
 
-  char buf[ MAX_TCP_HOST_LEN ];
+  /*char buf[ MAX_TCP_HOST_LEN ];
   make_mesh_url_from_sock( buf, conn );
-  rte->mesh_conn_hash = kv_crc_c( buf, ::strlen( buf ), 0 );
+  rte->mesh_conn_hash = kv_crc_c( buf, ::strlen( buf ), 0 );*/
+  rte->mesh_conn_hash = 0;
   conn.rte      = rte;
   conn.notify   = rte;
   conn.route_id = rte->sub_route.route_id;
 
-  printf( "%s.%u add_mesh_accept %s %x\n",
+  printf( "%s.%u add_mesh_accept %s from %s\n",
         rte->transport.tport.val, rte->tport_id, rte->mesh_url_addr,
-        rte->mesh_conn_hash );
+        conn.peer_address.buf );
   if ( id == count ) {
     this->user_db.transport_tab[ id ] = rte;
     this->user_db.add_transport( *rte );
@@ -496,6 +572,9 @@ SessionMgr::add_tcp_accept( TransportRoute &listen_rte,
   }
   if ( rte->connect_mgr.conn != NULL )
     rte->connect_mgr.release_conn();
+
+  for ( uint8_t i = 0; i < COST_PATH_COUNT; i++ )
+    rte->uid_connected.cost[ i ] = listen_rte.uid_connected.cost[ i ];
   rte->set( TPORT_IS_TCP );
 
   conn.rte      = rte;
@@ -519,28 +598,50 @@ parse_tcp_param( EvTcpTransportParameters &parm,  const char *name,
                  ConfigTree::Transport &tport,  bool reuseport,
                  bool nb_connect ) noexcept
 {
-  char tmp[ MAX_TCP_HOST_LEN ];
-  size_t len = sizeof( tmp );
-  const char *val = NULL;
-  tmp[ 0 ] = '\0';
-  tport.get_route_str( name, val ); /* listen or connect */
-  if ( (parm.port = tport.get_host_port( val, tmp, len )) == 0 )
-    tport.get_route_int( "port", parm.port );
+  char tmp[ MAX_TCP_HOSTS ][ MAX_TCP_HOST_LEN ];
+  size_t len[ MAX_TCP_HOSTS ];
+  size_t nlen = ::strlen( name );
+  const char *host[ MAX_TCP_HOSTS ];
+  int port[ MAX_TCP_HOSTS ], port2 = 0;
+  char n[ MAX_TCP_HOSTS - 1 ][ 16 ];
+  size_t i;
+
+  for ( i = 0; i < MAX_TCP_HOSTS - 1; i++ ) /* connect2, connect3, connect4 */
+    ::snprintf( n[ i ], sizeof( n[ i ] ), "%s%d", name, (int) i + 2 );
+
+  ConfigTree::StringPair * el[ MAX_TCP_HOSTS ];
+  el[ 0 ] = tport.route.get_pair( name, nlen );
+  for ( i = 1; i < MAX_TCP_HOSTS; i++ )
+    el[ i ] = tport.route.get_pair( n[ i - 1 ], nlen+1 );
+
+  /* parse config that uses array of cost */
+  if ( el[ 0 ] != NULL ) {
+    for ( i = 0; i < MAX_TCP_HOSTS - 1; i++ ) {
+      if ( el[ i ]->next == NULL ) break;
+      if ( ! el[ i ]->next->name.equals( name, nlen ) ) break;
+      el[ i + 1 ] = el[ i ]->next;
+    }
+  }
+
+  tport.get_route_int( "port", port2 );
+  for ( i = 0; i < MAX_TCP_HOSTS; i++ ) {
+    host[ i ] = ( el[ i ] == NULL ? NULL : el[ i ]->value.val );
+    tmp[ i ][ 0 ] = '\0';
+    len[ i ] = sizeof( tmp[ i ] );
+    port[ i ] = tport.get_host_port( host[ i ], tmp[ i ], len[ i ] );
+    if ( port[ i ] == 0 )
+      port[ i ] = port2;
+    if ( tport.is_wildcard( tmp[ i ] ) ) {
+      host[ i ] = NULL;
+      tmp[ i ][ 0 ] = '\0';
+    }
+  }
+  parm.set_host_port( host, port );
+
   if ( ! tport.get_route_int( "timeout", parm.timeout ) )
     parm.timeout = 15;
   if ( ! tport.get_route_bool( "edge", parm.edge ) )
     parm.edge = false;
-  if ( ! tport.get_route_bool( "preferred", parm.preferred ) )
-    parm.preferred = false;
-  if ( tport.is_wildcard( tmp ) ) {
-    parm.host = NULL;
-    parm.buf[ 0 ] = '\0';
-  }
-  else {
-    ::memcpy( parm.buf, tmp, len );
-    parm.buf[ len ] = '\0';
-    parm.host = parm.buf;
-  }
   if ( reuseport )
     parm.opts |= kv::OPT_REUSEPORT;
   else
@@ -551,170 +652,155 @@ parse_tcp_param( EvTcpTransportParameters &parm,  const char *name,
     parm.opts &= ~kv::OPT_CONNECT_NB;
 }
 
-static size_t
-make_mesh_url_from_tport( char buf[ MAX_TCP_HOST_LEN ],
-                          ConfigTree::Transport &tport,
-                          bool is_connect ) noexcept
-{
-  EvTcpTransportParameters parm;
-  size_t i = 6, j = 0;
-  ::memcpy( buf, "tcp://", 6 );
-  if ( is_connect )
-    parse_tcp_param( parm, "connect", tport, false, true );
-  else
-    parse_tcp_param( parm, "listen", tport, true, false );
-  if ( parm.host == NULL ) {
-    ::memcpy( &buf[ 6 ], "127.0.0.1", 9 );
-    i = 15;
-  }
-  else {
-    for ( j = 0; parm.host[ j ] != '\0'; j++ ) {
-      if ( i < MAX_TCP_HOST_LEN - 1 )
-        buf[ i++ ] = parm.host[ j ];
-    }
-  }
-  char pbuf[ 24 ];
-  if ( parm.port != 0 ) {
-    uint32_to_string( parm.port, pbuf );
-  }
-  else {
-    ::strcpy( pbuf, "28989" );
-  }
-  if ( i < MAX_TCP_HOST_LEN - 1 )
-    buf[ i++ ] = ':';
-  for ( j = 0; pbuf[ j ] != '\0'; j++ ) {
-    if ( i < MAX_TCP_HOST_LEN - 1 )
-      buf[ i++ ] = pbuf[ j ];
-  }
-  buf[ i ] = '\0';
-  d_tran( "mesh_url_from_tport( \"%s\" )\n", buf );
-  return i;
-}
-
 bool
 TransportRoute::add_mesh_connect( const char *mesh_url,
                                   uint32_t mesh_hash ) noexcept
 {
-  return this->mgr.add_mesh_connect( *this, mesh_url, mesh_hash );
+  if ( mesh_url == NULL )
+    return this->mgr.add_mesh_connect( *this );
+  return this->mgr.add_mesh_connect( *this, &mesh_url, &mesh_hash, 1 );
 }
 
 bool
-SessionMgr::add_mesh_connect( TransportRoute &mesh_rte,
-                              const char *mesh_url,
-                              uint32_t mesh_hash ) noexcept
+SessionMgr::add_mesh_connect( TransportRoute &mesh_rte ) noexcept
+{
+  EvTcpTransportParameters parm;
+  char     url_buf[ MAX_TCP_HOSTS ][ MAX_TCP_HOST_LEN ];
+  size_t   url_buf_sz[ MAX_TCP_HOSTS ], i, j;
+  uint32_t url_hash[ MAX_TCP_HOSTS ];
+
+  parse_tcp_param( parm, "connect", mesh_rte.transport, false, true );
+
+  for ( i = 0; i < MAX_TCP_HOSTS; i++ ) {
+    char   * url    = url_buf[ i ];
+    size_t & url_sz = url_buf_sz[ i ];
+    char     pbuf[ 24 ];
+    ::memcpy( url, "tcp://", 6 );
+    if ( parm.host[ i ] == NULL ) {
+      if ( i > 0 )
+        break;
+      url_sz = EvTcpTransportParameters::copy_host_buf( url, 6, "127.0.0.1" );
+    }
+    else {
+      url_sz = EvTcpTransportParameters::copy_host_buf( url, 6, parm.host[ i ]);
+    }
+    if ( parm.port[ i ] != 0 ) {
+      j = uint32_to_string( parm.port[ i ], pbuf );
+      pbuf[ j ] = '\0';
+    }
+    else {
+      ::strcpy( pbuf, "28989" );
+    }
+    if ( url_sz < MAX_TCP_HOST_LEN - 1 )
+      url[ url_sz++ ] = ':';
+    for ( j = 0; pbuf[ j ] != '\0'; j++ ) {
+      if ( url_sz < MAX_TCP_HOST_LEN - 1 )
+        url[ url_sz++ ] = pbuf[ j ];
+    }
+    url[ url_sz ] = '\0';
+    url_hash[ i ] = kv_crc_c( url_buf[ i ], url_buf_sz[ i ], 0 );
+  }
+
+  const char *mesh_url[ MAX_TCP_HOSTS ];
+  for ( j = 0; j < i; j++ )
+    mesh_url[ j ] = url_buf[ j ];
+  return this->add_mesh_connect( mesh_rte, mesh_url, url_hash, i );
+}
+
+TransportRoute *
+SessionMgr::find_mesh_conn( TransportRoute &mesh_rte,  
+                            uint32_t mesh_hash ) noexcept
+{
+  uint32_t count = (uint32_t) this->user_db.transport_tab.count;
+  for ( uint32_t tport_id = 0; tport_id < count; tport_id++ ) {
+    TransportRoute *rte = this->user_db.transport_tab.ptr[ tport_id ];
+    if ( rte != &mesh_rte && rte->mesh_id == mesh_rte.mesh_id &&
+         ! rte->is_set( TPORT_IS_SHUTDOWN ) ) {
+      d_tran( "find_mesh %x (%x)%s\n", rte->mesh_conn_hash, mesh_hash,
+               rte->mesh_conn_hash == mesh_hash ? " found" : "" );
+      if ( rte->mesh_conn_hash == mesh_hash )
+        return rte;
+    }
+  }
+  return NULL;
+}
+
+bool
+SessionMgr::add_mesh_connect( TransportRoute &mesh_rte,  const char **mesh_url,
+                              uint32_t *mesh_hash, uint32_t url_count ) noexcept
 {
   TransportRoute * rte;
-  char url_buf[ MAX_TCP_HOST_LEN ];
+  uint32_t         tport_id,
+                   count, i;
 
   if ( mesh_rte.mesh_id == NULL )
     return true;
+  printf( "%s.%u add_mesh_connect",
+        mesh_rte.transport.tport.val, mesh_rte.tport_id );
+  for ( i = 0; i < url_count; i++ )
+    printf( " %s (%x)", mesh_url[ i ], mesh_hash[ i ] );
+  printf( "\n" );
 
-  if ( mesh_url == NULL ) {
-    size_t sz = make_mesh_url_from_tport( url_buf, mesh_rte.transport, true );
-    mesh_url  = url_buf;
-    mesh_hash = kv_crc_c( url_buf, sz, 0 );
+  for ( i = 0; i < url_count; i++ ) {
+    rte = this->find_mesh_conn( mesh_rte, mesh_hash[ i ] );
+    if ( rte != NULL ) {
+      printf( "already connected (%s)\n", mesh_url[ i ] );
+      return true;
+    }
   }
-
-  uint32_t id,
-           count = (uint32_t) this->user_db.transport_tab.count;
-
-  printf( "%s.%u add_mesh_connect %s: %x\n",
-        mesh_rte.transport.tport.val, mesh_rte.tport_id, mesh_url, mesh_hash );
-  for ( id = 0; id < count; id++ ) {
-    rte = this->user_db.transport_tab.ptr[ id ];
-    if ( rte->mesh_id == mesh_rte.mesh_id ) {
-      if ( rte->mesh_conn_hash == mesh_hash ) {
-        if ( ! rte->is_set( TPORT_IS_SHUTDOWN ) ) {
-          EvTcpTransportClient *conn =
-            (EvTcpTransportClient *) rte->connect_mgr.conn;
-          uint32_t cnt = rte->connect_count;
-          if ( conn != NULL && conn->fd >= 0 ) {
-            if ( ! rte->connected.test_set( conn->fd ) )
-              rte->connect_count++;
-          }
-          printf( "already connected (%s) count %u -> %u\n", mesh_url,
-                  cnt, rte->connect_count );
-          return true;
-        }
-        rte->clear_all();
+  count = (uint32_t) this->user_db.transport_tab.count;
+  for ( tport_id = 0; tport_id < count; tport_id++ ) {
+    rte = this->user_db.transport_tab.ptr[ tport_id ];
+    if ( rte->all_set( TPORT_IS_SHUTDOWN | TPORT_IS_MESH ) &&
+         rte->mesh_id == mesh_rte.mesh_id ) {
+      if ( rte->connect_mgr.is_shutdown ) {
+        rte->clear( TPORT_IS_SHUTDOWN );
         break;
       }
     }
   }
-  if ( id == count ) {
-    for ( id = 0; id < count; id++ ) {
-      rte = this->user_db.transport_tab.ptr[ id ];
-      if ( rte->all_set( TPORT_IS_SHUTDOWN | TPORT_IS_MESH ) &&
-           rte->mesh_id == mesh_rte.mesh_id ) {
-        if ( rte->connect_mgr.is_shutdown ) {
-          rte->clear( TPORT_IS_SHUTDOWN );
-          break;
-        }
-      }
-    }
-    if ( id == count ) {
-      void * p = aligned_malloc( sizeof( TransportRoute ) );
-      ConfigTree::Service &s = mesh_rte.svc;
-      ConfigTree::Transport &t = mesh_rte.transport;
-      const char * svc_name = mesh_rte.mesh_id->sub_route.service_name;
-      d_tran( "add transport %s\n", svc_name );
-      rte = new ( p ) TransportRoute( this->poll, *this, s, t, svc_name,
-                                      id, id, 0 );
-      if ( rte->init() != 0 )
-        return false;
-    }
+  if ( tport_id == count ) {
+    void * p = aligned_malloc( sizeof( TransportRoute ) );
+    ConfigTree::Service &s = mesh_rte.svc;
+    ConfigTree::Transport &t = mesh_rte.transport;
+    const char * svc_name = mesh_rte.mesh_id->sub_route.service_name;
+    d_tran( "add transport %s\n", svc_name );
+    rte = new ( p ) TransportRoute( this->poll, *this, s, t, svc_name,
+                                    tport_id, tport_id, 0 );
+    if ( rte->init() != 0 )
+      return false;
   }
+
   rte->mesh_url_addr  = mesh_rte.mesh_url_addr;
   rte->mesh_url_len   = mesh_rte.mesh_url_len;
   rte->mesh_id        = mesh_rte.mesh_id;
   rte->uid_in_mesh    = mesh_rte.uid_in_mesh;
   rte->mesh_csum      = mesh_rte.mesh_csum;
-  rte->mesh_conn_hash = mesh_hash;
+  rte->mesh_conn_hash = mesh_hash[ 0 ];
+  for ( uint8_t i = 0; i < COST_PATH_COUNT; i++ )
+    rte->uid_connected.cost[ i ] = mesh_rte.uid_connected.cost[ i ];
+
   rte->set( TPORT_IS_MESH | TPORT_IS_CONNECT );
-  this->user_db.transport_tab[ id ] = rte;
+  this->user_db.transport_tab[ tport_id ] = rte;
   this->user_db.add_transport( *rte );
-#if 0
-  EvTcpTransportClient *conn;
-  uint8_t sock_type = this->tcp_connect_sock_type;
-  conn = this->poll.get_free_list<EvTcpTransportClient>( sock_type );
-  conn->rte = rte;
 
   EvTcpTransportParameters parm;
-  char host_buf[ 256 ];
-  size_t len = sizeof( host_buf );
-  parm.port = ConfigTree::Transport::get_host_port( mesh_url, host_buf, len );
-  parm.host = host_buf;
 
-  EvTcpTransportParameters &p = conn->parm;
-  if ( len > 0 ) {
-    p.host = conn->host_buf;
-    ::memcpy( conn->host_buf, parm.host, len + 1 );
+  for ( i = 0; i < url_count; i++ ) {
+    char tcp_buf[ MAX_TCP_HOST_LEN ];
+    size_t len = sizeof( tcp_buf );
+    int port;
+    port = ConfigTree::Transport::get_host_port( mesh_url[ i ], tcp_buf, len );
+    parm.set_host_port( tcp_buf, port, mesh_hash[ i ], i );
   }
-  else {
-    p.host = NULL;
-  }
-  p.port = parm.port;
 
-  if ( ! conn->connect( rte ) ) {
-    this->poll.push_free_list( conn );
-    rte->set( TPORT_IS_SHUTDOWN );
-    return false;
-  }
-  return true;
-#endif
-  EvTcpTransportParameters parm;
-  size_t len = sizeof( parm.buf );
-  parm.port = ConfigTree::Transport::get_host_port( mesh_url, parm.buf, len );
-  if ( len > 0 )
-    parm.host = parm.buf;
   if ( ! mesh_rte.transport.get_route_int( "timeout", parm.timeout ) )
     parm.timeout = 15;
 
   if ( rte->connect_mgr.conn == NULL ) {
-    uint8_t sock_type = this->tcp_connect_sock_type;
+    uint8_t type = this->tcp_connect_sock_type;
     EvTcpTransportClient *c =
-      rte->connect_mgr.alloc_conn<EvTcpTransportClient>( this->poll,
-                                                         sock_type );
+      rte->connect_mgr.alloc_conn<EvTcpTransportClient>( this->poll, type );
     c->rte = rte;
     c->route_id = rte->sub_route.route_id;
   }
@@ -765,12 +851,13 @@ TransportRoute::on_msg( EvPublish &pub ) noexcept
       return true;
     }
   }
-  UserBridge &n = *fpub.n;
+  UserBridge & n   = *fpub.n;
+  uint16_t     opt = dec.msg->caba.get_opt();
+  d_tran( "transport_route src %s.%u\n", n.peer.user.val, n.uid );
   if ( ( fpub.flags & MSG_FRAME_ACK_CONTROL ) == 0 ) {
-    uint16_t opt = dec.msg->caba.get_opt();
     fpub.flags |= MSG_FRAME_ACK_CONTROL;
     if ( ( opt & CABA_OPT_TRACE ) != 0 ) {
-      if ( dec.is_set == 0 && dec.decode_msg() != 0 )
+      if ( ! dec.test( FID_SUB ) && dec.decode_msg() != 0 )
         return true;
       this->mgr.send_ack( fpub, n, dec, _TRACE );
     }
@@ -795,87 +882,20 @@ TransportRoute::on_msg( EvPublish &pub ) noexcept
     }
   }
   /* cache of the multicast tree for messages originating at n */
-  ReversePathForward & forward  = n.reverse_path_cache;
-  uint32_t             i,
-                       count = (uint32_t) this->user_db.transport_tab.count;
-  TransportRoute     * rte;
-  AdjDistance        & peer_dist = this->user_db.peer_dist;
-  /* if forward is valid, send to the ports calculated below */
-  if ( peer_dist.is_valid( forward.adjacency_cache_seqno ) ) {
-    if ( forward.first( i, count ) ) {
-      do {
-        rte = this->user_db.transport_tab.ptr[ i ];
-        /*this->msgs_sent++;
-        this->bytes_sent += pub.msg_len;*/
-        b  &= rte->sub_route.forward_except( pub, this->mgr.router_set );
-      } while ( forward.next( i, count ) );
-    }
-    return b;
-  }
-  /* recalculate forward vector */
-  forward.clear( count, peer_dist.cache_seqno );
+  uint8_t path_select = ( opt >> CABA_OPT_MC_SHIFT ) % COST_PATH_COUNT;
+  if ( path_select > 0 && n.bloom_rt[ path_select ] == NULL )
+    path_select = 0;
 
-  uint32_t         min_dist    = peer_dist.max_uid,
-                   my_dist     = min_dist;/*,
-                 * dist        = peer_dist.tport_dist;*/
-  TransportRoute * min_rte     = this;
-  bool             matched_min = false;
-  /* check that this route is the min distance to avoid loops */
-  for ( i = 0; i < count; i++ ) {
-    rte = this->user_db.transport_tab.ptr[ i ];
-    uint32_t d = peer_dist.calc_transport_cache2( n.uid, i, *rte );
-    if ( d < min_dist ) {
-      min_dist    = d;
-      min_rte     = rte;
-      matched_min = false;
-    }
-    else if ( d == min_dist ) {
-      if ( rte == this )
-        matched_min = true; /* if multiple paths with min dist */
-    }
-    if ( rte == this )
-      my_dist = d;
-    /*dist[ i ] = d;*/
-  }
-  /* another route was closer */
-  if ( min_rte != this && ! matched_min ) {
-    d_tran( "tport=%s(d=%u): faster=%s(d=%u) (%.*s)\n",
-             this->name, my_dist, min_rte->name, min_dist,
-             (int) pub.subject_len, pub.subject );
-    return b;
-  }
-  /* calculate routes at a distance */
-  if ( peer_dist.calc_dist_peers( n.uid, my_dist + 1 ) != 0 ) {
-    /* for each route, forward when I match */
-    count = peer_dist.uid_next.idx;
-    for ( i = 0; i < count; i++ ) {
-      PeerUidSet * rec = peer_dist.uid_next.ptr[ i ];
-      if ( rec->src_uid == UserDB::MY_UID )
-        rte = this->user_db.transport_tab.ptr[ rec->tport_id ];
-      else
-        rte = NULL;
-
-      if ( debug_tran /*|| pub.subj_hash == 0x27d61d90*/ ) {
-        char buf[ 120 ];
-        printf( "next(%s.%u,port=%s.%u,cnt=%u): %s\n",
-           ( rec->src_uid==0 ? "me" :
-             this->user_db.bridge_tab[ rec->src_uid ]->peer.user.val ),
-           rec->src_uid, ( rte ? rte->transport.tport.val : "" ),
-           rec->tport_id, rec->dest_count,
-           peer_dist.uid_set_names( *rec, buf, sizeof( buf ) ) );
-      }
-      if ( rte != NULL ) {
-        forward.add( rec->tport_id );
-        d_tran( "forward to %s.%u\n",
-                rte->transport.tport.val, rec->tport_id );
-        /*this->msgs_sent++;
-        this->bytes_sent += pub.msg_len;*/
-        b &= rte->sub_route.forward_except( pub, this->mgr.router_set );
-      }
-    }
-  }
-  else {
-    d_tran( "no uid peers\n" );
+  ForwardCache   & forward = n.forward_path[ path_select ];
+  TransportRoute * rte;
+  uint32_t         tport_id;
+  pub.shard = path_select;
+  this->user_db.peer_dist.update_forward_cache( forward, n.uid, path_select );
+  if ( forward.first( tport_id ) ) {
+    do {
+      rte = this->user_db.transport_tab.ptr[ tport_id ];
+      b  &= rte->sub_route.forward_except( pub, this->mgr.router_set );
+    } while ( forward.next( tport_id ) );
   }
   return b;
 }
@@ -889,19 +909,29 @@ TransportRoute::connected_names( char *buf,  size_t buflen ) noexcept
 const char *
 TransportRoute::reachable_names( char *buf,  size_t buflen ) noexcept
 {
-  if ( this->reachable_seqno != this->user_db.peer_dist.update_seqno )
-    this->user_db.peer_dist.calc_reachable( *this );
-  return this->user_db.uid_names( this->reachable, buf, buflen );
+  this->user_db.peer_dist.calc_reachable( *this );
+  return this->user_db.uid_names( this->user_db.peer_dist.reachable,
+                                  this->user_db.peer_dist.max_uid,
+                                  buf, buflen );
 }
 
 const char *
 UserDB::uid_names( const BitSpace &uids,  char *buf,
                    size_t buflen ) noexcept
 {
+  UIntBitSet bits( uids.ptr );
+  return this->uid_names( bits, uids.bit_size(), buf, buflen );
+}
+
+const char *
+UserDB::uid_names( const UIntBitSet &uids,  uint32_t max_uid,
+                   char *buf,  size_t buflen ) noexcept
+{
   uint32_t uid;
   size_t   off = 0;
   buf[ 0 ] = '\0';
-  for ( bool ok = uids.first( uid ); ok; ok = uids.next( uid ) ) {
+  for ( bool ok = uids.first( uid, max_uid ); ok;
+        ok = uids.next( uid, max_uid ) ) {
     if ( this->bridge_tab.ptr[ uid ] == NULL )
       continue;
     const UserBridge &n = *this->bridge_tab.ptr[ uid ];
@@ -929,8 +959,9 @@ TransportRoute::port_status( char *buf,  size_t buflen ) noexcept
 void
 TransportRoute::on_connect( kv::EvSocket &conn ) noexcept
 {
-  printf( "connected %s %s using %s fd %u\n", conn.peer_address.buf,
-          conn.type_string(), this->sub_route.service_name, conn.fd );
+  printf( "%s connected %s %s using %s fd %u\n", this->transport.tport.val,
+          conn.peer_address.buf, conn.type_string(),
+          this->sub_route.service_name, conn.fd );
   uint32_t connect_type = 0;
   this->clear( TPORT_IS_SHUTDOWN );
   if ( ! this->is_mcast() ) {
@@ -971,6 +1002,8 @@ TransportRoute::on_shutdown( EvSocket &conn,  const char *err,
   char errbuf[ 256 ];
   if ( &conn == (EvSocket *) this->listener )
     s = "listener stopped";
+  else if ( errlen >= 15 && ::memcmp( err, "already connect", 15 ) == 0 )
+    s = "stopped trying";
   if ( errlen == 0 ) {
     errlen = conn.print_sock_error( errbuf, sizeof( errbuf ) );
     if ( errlen > 0 )
@@ -1167,11 +1200,11 @@ TransportRoute::start_listener( EvTcpListen *l,
   EvTcpTransportParameters parm;
   parse_tcp_param( parm, "listen", tport, true, false );
 
-  int status = l->listen( parm.host, parm.port, parm.opts );
+  int status = l->listen( parm.host[ 0 ], parm.port[ 0 ], parm.opts );
   if ( status != 0 ) {
-    printf( "listen %s:%u failed\n",
-            ConfigTree::Transport::is_wildcard( parm.host ) ? "*" : parm.host,
-            parm.port );
+    printf( "%s.%u listen %s:%u failed\n", tport.tport.val, this->tport_id,
+            ConfigTree::Transport::is_wildcard( parm.host[ 0 ] ) ? "*" :
+            parm.host[ 0 ], parm.port[ 0 ] );
     this->mgr.events.on_shutdown( this->tport_id, false );
     this->clear( TPORT_IS_LISTEN );
     this->set( TPORT_IS_SHUTDOWN );
@@ -1184,7 +1217,8 @@ TransportRoute::start_listener( EvTcpListen *l,
   else
     this->clear( TPORT_IS_EDGE );
   this->clear( TPORT_IS_SHUTDOWN );
-  printf( "listening on %s%s\n", l->peer_address.buf,
+  printf( "%s.%u listening on %s%s\n", tport.tport.val, this->tport_id,
+          l->peer_address.buf,
           this->is_set( TPORT_IS_EDGE ) ? " edge is true" : "" );
   return true;
 }
@@ -1251,10 +1285,9 @@ TransportRoute::create_tcp_connect( ConfigTree::Transport &tport ) noexcept
   parse_tcp_param( parm, "connect", tport, false, true );
 
   if ( this->connect_mgr.conn == NULL ) {
-    uint8_t sock_type = this->mgr.tcp_connect_sock_type;
+    uint8_t type = this->mgr.tcp_connect_sock_type;
     EvTcpTransportClient *c =
-      this->connect_mgr.alloc_conn<EvTcpTransportClient>( this->poll,
-                                                          sock_type );
+      this->connect_mgr.alloc_conn<EvTcpTransportClient>( this->poll, type );
     c->rte = this;
     c->route_id = this->sub_route.route_id;
   }
@@ -1306,7 +1339,8 @@ SessionMgr::create_telnet( ConfigTree::Transport &tport ) noexcept
   this->telnet_tport = &tport;
 
   if ( ! l->in_list( IN_ACTIVE_LIST ) ) {
-    if ( l->listen2( parm.host, parm.port, parm.opts, "telnet_listen", -1 ) != 0 )
+    if ( l->listen2( parm.host[ 0 ], parm.port[ 0 ], parm.opts,
+                     "telnet_listen", -1 ) != 0 )
       return false;
     l->console = &this->console;
     printf( "%s listening on %s\n", tport.tport.val, l->peer_address.buf );
@@ -1335,7 +1369,8 @@ SessionMgr::create_web( ConfigTree::Transport &tport ) noexcept
   this->web_tport = &tport;
 
   if ( ! l->in_list( IN_ACTIVE_LIST ) ) {
-    if ( l->listen2( parm.host, parm.port, parm.opts, "web_listen", -1 ) != 0 )
+    if ( l->listen2( parm.host[ 0 ], parm.port[ 0 ], parm.opts, "web_listen",
+                     -1 ) != 0 )
       return false;
     l->console = &this->console;
     printf( "%s listening on %s\n", tport.tport.val, l->peer_address.buf );
@@ -1393,8 +1428,6 @@ parse_pgm_param( EvPgmTransportParameters &parm,  const char *name,
     parm.rxw_sqns = ival;
   if ( tport.get_route_int( "mcast_loop", ival ) )
     parm.mcast_loop = ival;
-  if ( ! tport.get_route_bool( "preferred", parm.preferred ) )
-    parm.preferred = false;
 }
 
 bool
@@ -1416,10 +1449,6 @@ TransportRoute::create_pgm( int kind,  ConfigTree::Transport &tport ) noexcept
     return false;
   this->pgm_tport = l;
   this->state    |= kind;
-  if ( parm.preferred )
-    this->state |= TPORT_IS_PREFERRED;
-  else
-    this->state &= ~TPORT_IS_PREFERRED;
 
   EvInboxTransport * s;
   if ( this->ibx_tport != NULL )
@@ -1493,6 +1522,11 @@ ConnectionMgr::setup_reconnect( void ) noexcept
     return true;
 
   this->is_reconnecting = true;
+  if ( this->connect_count < MAX_TCP_HOSTS &&
+       this->parameters->host[ this->connect_count ] != NULL ) {
+    this->rte.poll.timer.add_timer_millis( *this, 100, 0, 0 );
+    return true;
+  }
   double now    = current_monotonic_time_s(),
          period = 60;
   if ( this->connect_timeout_secs > 0 )
@@ -1524,21 +1558,35 @@ ConnectionMgr::setup_reconnect( void ) noexcept
 bool
 ConnectionMgr::do_connect( void ) noexcept
 {
-  if ( this->rte.transport.type.equals( "tcp" ) ||
-       this->rte.transport.type.equals( "mesh" ) ) {
-    EvTcpTransportClient     & client = *(EvTcpTransportClient *) this->conn;
-    EvTcpTransportParameters & parm   = *(EvTcpTransportParameters *)
-                                        this->parameters;
-    this->is_shutdown = false;
-    if ( ! client.connect( parm, this ) ) {
-      this->connect_failed( client );
-      this->is_shutdown = true;
-    }
-    else {
-      return true;
+  EvTcpTransportClient     & client = *this->conn;
+  EvTcpTransportParameters & parm   = *this->parameters;
+  this->is_shutdown = false;
+  size_t index;
+  for ( index = 0; index < MAX_TCP_HOSTS; index++ ) {
+    if ( parm.hash[ index ] != 0 ) {
+      if ( this->rte.mgr.find_mesh_conn( this->rte, parm.hash[ index ] ) ) {
+        const char s[] = "already connected to mesh";
+        this->rte.on_shutdown( client, s, sizeof( s ) - 1 );
+        this->is_shutdown = true;
+        return false;
+      }
     }
   }
-  return false;
+  for (;;) {
+    index = this->connect_count++ % MAX_TCP_HOSTS;
+    if ( index == 0 || parm.host[ index ] != NULL )
+      break;
+  }
+  d_tran( "do_connect index %u host %s:%d (%x)\n",
+          (uint32_t) index, parm.host[ index ],
+          parm.port[ index ], parm.hash[ index ] );
+  /* non-blocking connect should always succeed unless socket error */
+  if ( ! client.connect( parm, this, index ) ) {
+    this->connect_failed( client );
+    this->is_shutdown = true;
+    return false;
+  }
+  return true;
 }
 
 bool

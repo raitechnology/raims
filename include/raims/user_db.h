@@ -47,9 +47,6 @@ struct McastBuf : public ShortSubjectBuf {
   McastBuf() { this->s( "_M." ); }
 };
 
-/* uid -> user nonce hash */
-typedef kv::IntHashTabT<uint32_t,uint32_t> UidHT;
-
 enum UserNonceState {
   CHALLENGE_STATE         =      1, /* challenge sent, this is timed for retry */
   AUTHENTICATED_STATE     =      2, /* challenge recvd and auth succeeded */
@@ -144,7 +141,9 @@ struct UserBridge : public UserStateTest<UserBridge> {
   HashDigest         peer_key;            /* peer session key */
   const PeerEntry  & peer;                /* configuration entry */
   UserNonce          bridge_id;           /* the user hmac and nonce */
-  ReversePathForward reverse_path_cache;  /* tports where to fwd mcast msgs */
+  ForwardCache       forward_path[ COST_PATH_COUNT ]; /* which tports to fwd */
+  kv::BloomRoute   * bloom_rt[ COST_PATH_COUNT ];
+  UidSrcPath         src_path[ COST_PATH_COUNT ];
   kv::BloomRef       bloom;               /* the subs by this user */
   AdjacencyTab       adjacency;           /* what nonce routes are adjacent */
   Nonce              uid_csum,            /* current xor of adjacency */
@@ -192,6 +191,7 @@ struct UserBridge : public UserStateTest<UserBridge> {
 
   UserBridge( const PeerEntry &pentry,  kv::BloomDB &db,  uint32_t seed )
       : peer( pentry ), bloom( seed, pentry.user.val, db ) {
+    ::memset( this->bloom_rt, 0, sizeof( this->bloom_rt ) );
     this->peer_key.zero();
     this->uid_csum.zero();
     this->hb_cnonce.zero();
@@ -330,18 +330,22 @@ struct MeshRoute {
   const char      * mesh_url;
   uint32_t          mesh_url_len,
                     url_hash;
+  uint64_t          conn_mono_time,
+                    start_mono_time;
+  bool              is_connected;
   void * operator new( size_t, void *ptr ) { return ptr; }
   void operator delete( void *ptr ) { ::free( ptr ); }
   MeshRoute( TransportRoute &r,  const char *url,  uint32_t len,
              uint32_t h,  const Nonce &n )
-    : next( 0 ), back( 0 ), rte( r ), mesh_url( url ), mesh_url_len( len ),
-      url_hash( h ) { this->b_nonce = n; }
+    : next( 0 ), back( 0 ), rte( r ), b_nonce( n ), mesh_url( url ),
+      mesh_url_len( len ), url_hash( h ), conn_mono_time( 0 ),
+      start_mono_time( 0 ), is_connected( false ) {}
 };
 
-struct DirectList : public kv::DLinkList< MeshRoute > {
+struct MeshDirectList : public kv::DLinkList< MeshRoute > {
   uint64_t last_process_mono;
-  DirectList() : last_process_mono( 0 ) {}
-  void update( UserRoute *u ) noexcept;
+  MeshDirectList() : last_process_mono( 0 ) {}
+  /*void update( UserRoute *u ) noexcept;*/
   void update( TransportRoute &rte,  const char *url,  uint32_t len,
                uint32_t h,  const Nonce &b_nonce ) noexcept;
 };
@@ -366,16 +370,19 @@ struct SubDB;
 struct StringTab;
 struct UserDB {
   static const uint32_t MY_UID = 0;      /* bridge_tab[ 0 ] reserved for me */
-  TransportTab         transport_tab;
-  TransportRoute     * ipc_transport;
+  /* my transports */
+  TransportTab         transport_tab;    /* transport array */
+  ForwardCache         forward_path[ COST_PATH_COUNT ];/* which tports to fwd */
+  TransportRoute     * ipc_transport;    /* transport[ 0 ], internal routes */
+
   /* my identity */
   ConfigTree::User    & user;            /* my user */
   ConfigTree::Service & svc;             /* my service */
-  SubDB               & sub_db;
-  StringTab           & string_tab;      /* string constants */
-  EventRecord         & events;
-  uint64_t              start_mono_time,
-                        start_time;
+  SubDB               & sub_db;          /* my subscriptions */
+  StringTab           & string_tab;      /* string const (config, user, tport)*/
+  EventRecord         & events;          /* event recorder, what happened when*/
+  uint64_t              start_mono_time, /* monotonic stamp */
+                        start_time;      /* set on initialization, used widely*/
   /* my instance */
   UserNonce             bridge_id;       /* user hmac + session nonce */
   HashDigest          * session_key,     /* session key */
@@ -386,7 +393,6 @@ struct UserDB {
   /* indexes of node instances */
   NodeHashTab         * node_ht,         /* nonce -> uid */
                       * zombie_ht;       /* timed out nodes */
-  UidHT               * uid_tab;         /* uid -> src route */
   UserBridgeTab         bridge_tab;      /* route array bridge_tab[ uid ] */
 
   /* index of node identities */
@@ -405,29 +411,39 @@ struct UserDB {
   UserPendingQueue      pending_queue;   /* retry user/peer resolve */
   AdjPendingList        adjacency_unknown; /* adjacency recv not resolved */
   AdjChangeList         adjacency_change;  /* adjacency send pending */
-  DirectList            direct_pending;
-  /* cache of peer keys */
-  PeerKeyHashTab      * peer_key_ht;      /* index cache by src uid, dest uid */
-  PeerKeyCache        * peer_keys;        /* cache of peer keys encrypted */
+  MeshDirectList        mesh_pending;    /* mesh connect pending */
 
-  kv::BitSpace          uid_authenticated, /* uids authenticated */
-                        random_walk;
-  kv::BloomRef          auth_bloom;
-  uint32_t              hb_interval,
+  /* cache of peer keys */
+  PeerKeyHashTab      * peer_key_ht;     /* index cache by src uid, dest uid */
+  PeerKeyCache        * peer_keys;       /* cache of peer keys encrypted */
+
+  /* uid bits */
+  kv::BitSpace          uid_authenticated; /* uids authenticated */
+  /* system subjects after auth */
+  kv::BloomRef          peer_bloom;      /* allow after auth (_S.JOIN, _X.HB) */
+
+  /* counters, seqnos */
+  uint32_t              hb_interval,     /* seconds between _X.HB publish */
                         next_uid,        /* next_uid available */
                         free_uid_count,  /* num uids freed */
                         my_src_fd,       /* my src fd */
                         uid_auth_count,  /* total trusted nodes */
-                        uid_hb_count;    /* total hb / distance zero nones */
+                        uid_hb_count,    /* total hb / distance zero nones */
+                        uid_ping_count,
+                        next_ping_uid;
   uint64_t              send_peer_seqno, /* a unique seqno for peer multicast */
                         link_state_seqno, /* seqno of adjacency updates */
                         mcast_seqno,      /* seqno of mcast subjects */
                         hb_ival_ns,      /* heartbeat interval */
                         hb_ival_mask,    /* ping ival = pow2 hb_ival * 1.5 */
-                        next_ping_mono;  /* when next ping is sent */
+                        next_ping_mono,  /* when next ping is sent */
+                        last_auth_mono;
   kv::rand::xoroshiro128plus rand;       /* used to generate bloom seeds */
 
+  /* memory buffers for keys and peer nodes */
   kv::SLinkList<UserAllocBuf> buf_list;  /* secure buf alloc for nodes, keys */
+
+  /* adjacency calculations working space */
   AdjDistance           peer_dist;       /* calc distance between nodes */
   ServiceBuf            my_svc;          /* pub key for service */
 
@@ -460,6 +476,7 @@ struct UserDB {
 
   bool init( const CryptPass &pwd,  uint32_t my_fd, ConfigTree &tree ) noexcept;
 
+  /* inbox forwarding */
   bool forward_to( UserBridge &n,  const char *sub,
                    size_t sublen,  uint32_t h,  const void *msg,
                    size_t msg_len,  UserRoute &u_rte ) noexcept;
@@ -500,6 +517,7 @@ struct UserDB {
   bool recv_pong_result( const MsgFramePublish &pub,  UserBridge &n,
                          const MsgHdrDecoder &dec ) noexcept;
   /* auth.cpp */
+  bool compare_version( UserBridge &n, MsgHdrDecoder &dec ) noexcept;
   bool on_inbox_auth( const MsgFramePublish &pub,  UserBridge &n,
                       MsgHdrDecoder &dec ) noexcept;
   bool on_bye( const MsgFramePublish &pub,  UserBridge &n,
@@ -508,7 +526,7 @@ struct UserDB {
                     const MsgHdrDecoder &dec, AuthStage stage ) const noexcept;
   bool send_challenge( UserBridge &n,  AuthStage stage ) noexcept;
   bool send_trusted( const MsgFramePublish &pub,  UserBridge &n,
-                     const MsgHdrDecoder &dec ) noexcept;
+                     MsgHdrDecoder &dec ) noexcept;
   bool recv_trusted( const MsgFramePublish &pub,  UserBridge &n,
                      MsgHdrDecoder &dec ) noexcept;
   /* user_db.cpp */
@@ -527,13 +545,14 @@ struct UserDB {
                          const MsgHdrDecoder &dec ) noexcept;
   void set_ucast_url( UserRoute &u_rte, const MsgHdrDecoder &dec ) noexcept;
   void set_mesh_url( UserRoute &u_rte, const MsgHdrDecoder &dec ) noexcept;
-  void find_user_primary_routes( void ) noexcept;
-  void process_direct_pending( uint64_t curr_mono ) noexcept;
+  void find_adjacent_routes( void ) noexcept;
+  void process_mesh_pending( uint64_t curr_mono ) noexcept;
   UserBridge * closest_peer_route( TransportRoute &rte,  UserBridge &n,
-                                   uint32_t &dist ) noexcept;
+                                   uint32_t &cost ) noexcept;
   uint32_t new_uid( void ) noexcept;
   uint32_t random_uid_walk( void ) noexcept;
   void retire_source( TransportRoute &rte,  uint32_t fd ) noexcept;
+  void add_bloom_routes( UserBridge &n,  TransportRoute &rte ) noexcept;
   void add_transport( TransportRoute &rte ) noexcept;
   void add_inbox_route( UserBridge &n,  UserRoute *primary ) noexcept;
   void remove_inbox_route( UserBridge &n ) noexcept;
@@ -542,7 +561,6 @@ struct UserDB {
   void remove_authenticated( UserBridge &n,  ByeReason bye ) noexcept;
 
   /* link_state.cpp */
-  void process_unknown_adjacency( uint64_t current_mono_time ) noexcept;
   void save_unauthorized_adjacency( MsgFramePublish &fpub ) noexcept;
   void print_adjacency( const char *s,  UserBridge &n ) noexcept;
   void add_unknown_adjacency( UserBridge &n ) noexcept;
@@ -566,6 +584,66 @@ struct UserDB {
   bool recv_adjacency_result( const MsgFramePublish &pub,  UserBridge &n,
                               MsgHdrDecoder &dec ) noexcept;
   /* peer.cpp */
+  /* sync info about peer n to send to inbox of dest */
+  void make_peer_sync_msg( UserBridge &dest,  UserBridge &n,
+                           const char *sub,  size_t sublen,  uint32_t h,
+                           MsgCat &m,  uint32_t hops,  bool in_mesh ) noexcept;
+  bool recv_sync_request( const MsgFramePublish &pub,  UserBridge &n,
+                          const MsgHdrDecoder &dec ) noexcept;
+
+  /* use src.sesion_key, src.nonce, dest.nonce to create another private key */
+  void get_peer_key2( uint32_t src_uid,  const Nonce &dest_nonce,
+                      HashDigest &hash ) noexcept;
+  void get_peer_key( uint32_t src_uid,  uint32_t dest_id,
+                     HashDigest &hash ) noexcept;
+  /* decode peer data from a sync message */
+  bool decode_peer_msg( UserBridge &from_n,  const MsgHdrDecoder &dec,
+                        UserNonce &sync_bridge_id,  HashDigest &ha1,
+                        UserBridge *&user_n,  UserBuf *user,
+                        uint64_t &start ) noexcept;
+  /* create a peer bridge from a sync message */
+  UserBridge * make_peer_session( const MsgFramePublish &pub,
+                                  UserBridge &from_n,
+                                  const MsgHdrDecoder &dec,
+                                  UserBridge *user_n ) noexcept;
+
+  /* recv a list of peers, bridge ids and user names */
+  bool recv_peer_db( const MsgFramePublish &pub,  UserBridge &n,
+                     MsgHdrDecoder &dec,  AuthStage stage ) noexcept;
+  bool make_peer_db_msg( UserBridge &n,  const char *sub,  size_t sublen,
+                         uint32_t h,  MsgCat &m ) noexcept;
+  /* send peer db to inbox of peer */
+  void send_peer_db( UserBridge &n ) noexcept;
+
+  /* recv _Z.ADD, _I.Nonce.ADD_RTE messages for new peers */
+  bool recv_peer_add( const MsgFramePublish &pub,  UserBridge &n,
+                      MsgHdrDecoder &dec,  AuthStage stage ) noexcept;
+  bool recv_add_route( const MsgFramePublish &pub,  UserBridge &n,
+                       MsgHdrDecoder &dec ) noexcept;
+  bool recv_sync_result( const MsgFramePublish &pub,  UserBridge &n,
+                         MsgHdrDecoder &dec ) noexcept;
+  /* send _Z.ADD message to add peers except source */
+  void send_peer_add( UserBridge &n,
+                      const TransportRoute *except_rte = NULL ) noexcept;
+  /* send _Z.DEL message to del peers */
+  void send_peer_del( UserBridge &n ) noexcept;
+  bool recv_peer_del( const MsgFramePublish &pub,  UserBridge &n,
+                      const MsgHdrDecoder &dec ) noexcept;
+
+  /* recv and construct mesh db */
+  bool recv_mesh_db( const MsgFramePublish &pub,  UserBridge &n,
+                     MsgHdrDecoder &dec ) noexcept;
+  size_t mesh_db_size( TransportRoute &rte,  MeshDBFilter &filter ) noexcept;
+  void mesh_db_submsg( TransportRoute &rte,  MeshDBFilter &filter,
+                       MsgCat &m ) noexcept;
+  bool recv_mesh_request( const MsgFramePublish &pub,  UserBridge &n,
+                          MsgHdrDecoder &dec ) noexcept;
+  bool recv_mesh_result( const MsgFramePublish &pub,  UserBridge &n,
+                         MsgHdrDecoder &dec ) noexcept;
+  bool send_mesh_request( UserBridge &n,  MsgHdrDecoder &dec ) noexcept;
+
+  /* try to resolve unknown peers and adjacency */
+  void process_unknown_adjacency( uint64_t current_mono_time ) noexcept;
   UserPendingRoute * find_pending_peer( const Nonce &b_nonce,
                                         const PendingUid &puid ) noexcept;
   bool start_pending_peer( const Nonce &b_nonce,  UserBridge &n,
@@ -576,66 +654,8 @@ struct UserDB {
   void process_pending_peer( uint64_t current_mono_time ) noexcept;
   bool request_pending_peer( UserPendingRoute &p,
                              uint64_t current_mono_time ) noexcept;
-  /*bool request_nonce_peer( UserBridge &n,  Nonce &nonce ) noexcept;*/
   void remove_pending_peer( const Nonce *b_nonce,  uint64_t pseqno ) noexcept;
 
-  void get_peer_key2( uint32_t src_uid,  const Nonce &dest_nonce,
-                      HashDigest &hash ) noexcept;
-  void get_peer_key( uint32_t src_uid,  uint32_t dest_id,
-                     HashDigest &hash ) noexcept;
-  /*void make_peer_msg( UserBridge &n,  const char *sub,  size_t sublen,  
-                      MsgCat &m,  int peer_msg_type,  uint64_t &seqno,
-                      uint32_t hops,  bool in_mesh ) noexcept;*/
-  bool decode_peer_msg( UserBridge &from_n,  const MsgHdrDecoder &dec,
-                        UserNonce &sync_bridge_id,  HashDigest &ha1,
-                        UserBridge *&user_n,  UserBuf *user,
-                        /*uint8_t *pub_der,  size_t &pub_sz,*/
-                        uint64_t &start ) noexcept;
-  UserBridge * make_peer_session( const MsgFramePublish &pub,
-                                  UserBridge &from_n,
-                                  const MsgHdrDecoder &dec,
-                                  UserBridge *user_n ) noexcept;
-  bool recv_peer_db( const MsgFramePublish &pub,  UserBridge &n,
-                     MsgHdrDecoder &dec,  AuthStage stage ) noexcept;
-  bool recv_peer_add( const MsgFramePublish &pub,  UserBridge &n,
-                      MsgHdrDecoder &dec,  AuthStage stage ) noexcept;
-  bool recv_peer_del( const MsgFramePublish &pub,  UserBridge &n,
-                      const MsgHdrDecoder &dec ) noexcept;
-  void make_peer_add_msg( UserBridge &n,  const char *sub,  size_t sublen,
-                          uint32_t h,  MsgCat &m,  uint32_t hops,
-                          bool in_mesh ) noexcept;
-  void send_peer_add( UserBridge &n ) noexcept;
-  void forward_peer_add( UserBridge &n,
-                         const TransportRoute &except_rte ) noexcept;
-  void get_peer_hops( TransportRoute &rte,  UserBridge &n,
-                      UserBridge &n2,  uint32_t &hops,
-                      bool &in_mesh ) noexcept;
-  bool make_peer_db_msg( UserBridge &n,  const char *sub,  size_t sublen,
-                         uint32_t h,  MsgCat &m ) noexcept;
-  void send_peer_db( UserBridge &n ) noexcept;
-  void make_peer_del_msg( UserBridge &n,  const char *sub,  size_t sublen,
-                          uint32_t h,  MsgCat &m ) noexcept;
-  void send_peer_del( UserBridge &n ) noexcept;
-  bool recv_mesh_db( const MsgFramePublish &pub,  UserBridge &n,
-                     MsgHdrDecoder &dec ) noexcept;
-  size_t mesh_db_size( TransportRoute &rte,  uint32_t except_uid,
-                       const MsgHdrDecoder &dec ) noexcept;
-  void mesh_db_submsg( TransportRoute &rte,  uint32_t except_uid,
-                       const MsgHdrDecoder &dec,  MsgCat &m ) noexcept;
-  bool recv_mesh_request( const MsgFramePublish &pub,  UserBridge &n,
-                          const MsgHdrDecoder &dec ) noexcept;
-  bool recv_mesh_result( const MsgFramePublish &pub,  UserBridge &n,
-                         MsgHdrDecoder &dec ) noexcept;
-  bool send_mesh_request( UserBridge &n,  MsgHdrDecoder &dec ) noexcept;
-  void make_peer_sync_msg( UserBridge &dest,  UserBridge &n,
-                           const char *sub,  size_t sublen,  uint32_t h,
-                           MsgCat &m,  uint32_t hops,  bool in_mesh ) noexcept;
-  bool recv_sync_request( const MsgFramePublish &pub,  UserBridge &n,
-                          const MsgHdrDecoder &dec ) noexcept;
-  bool recv_add_route( const MsgFramePublish &pub,  UserBridge &n,
-                       MsgHdrDecoder &dec ) noexcept;
-  bool recv_sync_result( const MsgFramePublish &pub,  UserBridge &n,
-                         MsgHdrDecoder &dec ) noexcept;
   /* _I.<nonce b64>. */
   static const size_t INBOX_PREFIX_SIZE = sizeof( _INBOX "." ) - 1;
   static const size_t INBOX_BASE_SIZE   = INBOX_PREFIX_SIZE + NONCE_B64_LEN + 1;
@@ -658,6 +678,8 @@ struct UserDB {
   void debug_uids( kv::BitSpace &uids,  Nonce &csum ) noexcept;
   const char * uid_names( const kv::BitSpace &uids,  char *buf,
                           size_t buflen ) noexcept;
+  const char * uid_names( const kv::UIntBitSet &uids,  uint32_t max_uid,
+                          char *buf,  size_t buflen ) noexcept;
 };
 
 }

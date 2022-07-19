@@ -306,8 +306,8 @@ session_defines := -DMS_VER=$(ver_build)
 libraims_files := config user transport ev_tcp_transport ev_pgm_transport \
                  pgm_sock ev_inbox_transport ev_telnet ev_web ev_rv_transport \
 		 ev_nats_transport ev_redis_transport msg session heartbeat \
-		 user_db auth peer link_state sub pat crypt poly1305 ec25519 \
-		 ed25519 sha512 aes gen_config console stats
+		 user_db auth peer link_state adjacency sub pat crypt poly1305 \
+		 ec25519 ed25519 sha512 aes gen_config console stats
 libraims_files := $(libraims_files)
 libraims_cfile := $(addprefix src/, $(addsuffix .cpp, $(libraims_files)))
 libraims_objs  := $(addprefix $(objd)/, $(addsuffix .o, $(libraims_files)))
@@ -442,16 +442,16 @@ $(bind)/aestest: $(aestest_objs) $(aestest_libs) $(lnk_dep)
 all_exes    += $(bind)/aestest
 all_depends += $(aestest_deps)
 
-#rsatest_files := rsatest
-#rsatest_objs  := $(addprefix $(objd)/, $(addsuffix .o, $(rsatest_files)))
-#rsatest_deps  := $(addprefix $(dependd)/, $(addsuffix .d, $(rsatest_files)))
-#rsatest_libs  :=
-#rsatest_lnk   := $(lnk_lib)
+test_adj_files := test_adj
+test_adj_objs  := $(addprefix $(objd)/, $(addsuffix .o, $(test_adj_files)))
+test_adj_deps  := $(addprefix $(dependd)/, $(addsuffix .d, $(test_adj_files)))
+test_adj_libs  :=
+test_adj_lnk   := $(lnk_lib)
 
-#$(bind)/rsatest: $(rsatest_objs) $(rsatest_libs) $(lnk_dep)
+$(bind)/test_adj: $(test_adj_objs) $(test_adj_libs) $(lnk_dep)
 
-#all_exes    += $(bind)/rsatest
-#all_depends += $(rsatest_deps)
+all_exes    += $(bind)/test_adj
+all_depends += $(test_adj_deps)
 
 parse_config_files := parse_config
 parse_config_cfile := test/parse_config.cpp

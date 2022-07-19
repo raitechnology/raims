@@ -49,6 +49,8 @@ struct ConfigTree {
     const StringPair *print_ylist( ConfigPrinter &p, int i ) const noexcept;
     const StringPair *print_jslist( ConfigPrinter &p, int i,
                                     const char *&nl ) const noexcept;
+    const StringPair *print_jsarr( ConfigPrinter &p, int i,
+                                   const char *&nl ) const noexcept;
   };
   struct PairList : public kv::SLinkList<StringPair> {
     StringPair *get_pair( const char *name,  size_t len ) {
@@ -60,38 +62,30 @@ struct ConfigTree {
     }
     bool get_val( const char *name,  size_t len,  const char *&val ) {
       StringPair *p = this->get_pair( name, len );
-      if ( p != NULL )
+      if ( p != NULL ) {
         val = p->value.val;
-      else
-        val = NULL;
-      return p != NULL;
+        return true;
+      }
+      val = NULL;
+      return false;
     }
     bool get_val( const char *name,  const char *&val ) {
       return this->get_val( name, ::strlen( name ), val );
     }
     bool get_int( const char *name,  size_t len,  int &val ) {
-      const char *s;
-      if ( this->get_val( name, len, s ) ) {
-        if ( s[ 0 ] >= '0' && s[ 0 ] <= '9' ) {
-          val = atoi( s );
-          return true;
-        }
-      }
-      val = 0;
-      return false;
+      StringPair *p = this->get_pair( name, len );
+      if ( p == NULL )
+        return false;
+      return p->value.get_int( val );
     }
     bool get_int( const char *name,  int &val ) {
       return this->get_int( name, ::strlen( name ), val );
     }
     bool get_bool( const char *name,  size_t len,  bool &val ) {
-      const char *s;
-      if ( this->get_val( name, len, s ) ) {
-        val = ( s[ 0 ] == '1' || s[ 0 ] == 't' || s[ 0 ] == 'T' ||
-                s[ 0 ] == 'y' || s[ 0 ] == 'Y' );
-        return true;
-      }
-      val = false;
-      return false;
+      StringPair *p = this->get_pair( name, len );
+      if ( p == NULL )
+        return false;
+      return p->value.get_bool( val );
     }
     bool get_bool( const char *name,  bool &val ) {
       return this->get_bool( name, ::strlen( name ), val );

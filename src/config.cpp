@@ -886,6 +886,8 @@ ConfigDB::config_pair( const char *where,  MDMsg &msg,  const MDName &name,
   size_t len;
   int    status;
 
+  if ( mref.ftype == MD_NODATA ) /* ignore null values */
+    return 0;
   ConfigTree::StringPair *pair = this->make<ConfigTree::StringPair>();
   list.push_tl( pair );
 
@@ -1863,20 +1865,51 @@ ConfigTree::Service::print_y( ConfigPrinter &p,  int i ) const noexcept
   }
 }
 
+const ConfigTree::StringPair *
+ConfigTree::StringPair::print_jsarr( ConfigPrinter &p,  int i,
+                                     const char *&nl ) const noexcept
+{
+  const StringPair * end = this;
+  for ( ; ; end = end->next ) {
+    if ( end->next == NULL ||
+         ! end->next->name.equals( this->name ) )
+      break;
+  }
+  if ( this == end ) {
+    p.printf( "%s%*s", nl, i, "" );
+    this->print_js( p );
+    nl = ",\n";
+  }
+  else {
+    p.printf( "%s%*s", nl, i, "" );
+    this->name.print_js( p );
+    p.printf( ": [\n" );
+    nl = "";
+    for ( const StringPair *sp = this; ; sp = sp->next ) {
+      p.printf( "%s%*s", nl, i + 2, "" );
+      sp->value.print_js( p );
+      if ( sp == end )
+        break;
+      nl = ",\n";
+    }
+    p.printf( " ]" );
+  }
+  return end->next;
+}
+
 void
 ConfigTree::Transport::print_js( ConfigPrinter &p,  int i ) const noexcept
 {
   p.printf( "%*s\"tport\" : ", i, "" ); this->tport.print_js( p ); p.printf( ",\n" );
   p.printf( "%*s\"type\" : ", i, "" ); this->type.print_js( p );
-  StringPair *sp = this->route.hd;
+  const StringPair *sp = this->route.hd;
   p.printf( "%s\n", sp == NULL ? "" : "," );
   if ( sp != NULL ) {
-    p.printf( "%*s\"route\" : {\n%*s  ", i, "", i, "" );
-    sp->print_js( p );
-    for ( sp = sp->next; sp != NULL; sp = sp->next ) {
-      p.printf( ",\n%*s  ", i, "" );
-      sp->print_js( p );
-    }
+    const char *nl = "";
+    p.printf( "%*s\"route\" : {\n", i, "" );
+    do {
+      sp = sp->print_jsarr( p, i + 2, nl );
+    } while ( sp != NULL );
     p.printf( "\n%*s}\n", i, "" );
   }
 }
@@ -1890,13 +1923,14 @@ ConfigTree::Transport::print_y( ConfigPrinter &p,  int i ) const noexcept
     p.printf( "tport: " );
   this->tport.print_y( p ); p.printf( "\n" );
   p.printf( "%*stype: ", i, "" ); this->type.print_y( p ); p.printf( "\n" );
-  StringPair *sp = this->route.hd;
+  const StringPair *sp = this->route.hd;
   if ( sp != NULL ) {
     p.printf( "%*sroute:\n", i, "" );
-    for ( ; sp != NULL; sp = sp->next ) {
-      p.printf( "%*s  ", i, "" );
-      sp->print_y( p );
-      p.printf( "\n" );
+    while ( sp != NULL ) {
+      /*p.printf( "%*s  ", i, "" );*/
+      sp = sp->print_ylist( p, i + 2 );
+      /*sp->print_y( p );*/
+      /*p.printf( "\n" );*/
     }
   }
 }

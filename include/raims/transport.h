@@ -6,6 +6,8 @@
 #include <raims/config_tree.h>
 #include <raims/crypt.h>
 #include <raims/auth.h>
+#include <raims/adjacency.h>
+#include <raims/peer.h>
 #include <raims/state_test.h>
 #include <raims/debug.h>
 
@@ -15,9 +17,9 @@ namespace ms {
 struct SessionMgr;
 struct UserDB;
 struct TransportRoute;
-struct TcpConnectionMgr;
-struct PeerUidSet;
 struct EvPgmTransport;
+struct EvTcpTransportClient;
+struct EvTcpTransportParameters;
 struct EvInboxTransport;
 struct EvTcpTransportListen;
 struct EvRvTransportListen;
@@ -25,22 +27,24 @@ struct EvNatsTransportListen;
 
 struct ConnectionMgr : public kv::EvConnectionNotify,
                        public kv::EvTimerCallback {
-  TransportRoute      & rte;
-  kv::EvConnection    * conn;
-  void                * parameters;
-  double                reconnect_time, /* when reconnect started */
-                        connect_time;
-  uint32_t              connect_timeout_secs; /* how long to try */
-  uint16_t              reconnect_timeout_secs; /* next connect try */
-  bool                  is_reconnecting, /* if connect in progress */
-                        is_shutdown; /* if should stop reconnecting */
+  TransportRoute           & rte;
+  EvTcpTransportClient     * conn;
+  EvTcpTransportParameters * parameters;
+  double                     reconnect_time, /* when reconnect started */
+                             connect_time;
+  uint32_t                   connect_timeout_secs, /* how long to try */
+                             connect_count;
+  uint16_t                   reconnect_timeout_secs; /* next connect try */
+  bool                       is_reconnecting, /* if connect in progress */
+                             is_shutdown; /* if should stop reconnecting */
 
   void * operator new( size_t, void *ptr ) { return ptr; }
   void operator delete( void *ptr ) { ::free( ptr ); }
 
   ConnectionMgr( TransportRoute &r )
     : rte( r ), conn( 0 ), parameters( 0 ), reconnect_time( 0 ),
-      connect_time( 0 ), connect_timeout_secs( 0 ), reconnect_timeout_secs( 1 ),
+      connect_time( 0 ), connect_timeout_secs( 0 ), connect_count( 0 ),
+      reconnect_timeout_secs( 1 ),
       is_reconnecting( false ), is_shutdown( true ) {}
 
   template<class T>
@@ -55,10 +59,11 @@ struct ConnectionMgr : public kv::EvConnectionNotify,
     this->conn = NULL;
   }
 
-  void set_parm( void *parm ) {
+  void set_parm( EvTcpTransportParameters *parm ) {
     if ( this->parameters != NULL )
-      ::free( this->parameters );
+      ::free( (void *) this->parameters );
     this->parameters = parm;
+    this->connect_count = 0;
   }
   void restart( void ) {
     this->is_shutdown = false;
@@ -86,8 +91,7 @@ enum TransportRouteState {
   TPORT_IS_TCP       = 32,
   TPORT_IS_EDGE      = 64,
   TPORT_IS_IPC       = 128,
-  TPORT_IS_SHUTDOWN  = 256,
-  TPORT_IS_PREFERRED = 512
+  TPORT_IS_SHUTDOWN  = 256
 };
 
 struct IpcRte {
@@ -127,22 +131,18 @@ struct TransportRoute : public kv::EvSocket, public kv::EvConnectionNotify,
   SessionMgr            & mgr;            /* session of transport */
   UserDB                & user_db;        /* session of transport */
   kv::RoutePublish      & sub_route;      /* bus for transport */
-  kv::BloomRoute        * console_rt,     /* local and system subs */
-                        * ipc_rt,         /* ipc subs attached to local */
-                        * router_rt;      /* remote subs to other users */
+  kv::BloomRoute        * router_rt[ COST_PATH_COUNT ]; /* router 4 subs */
   kv::BitSpace            connected,      /* which fds are connected */
                           connected_auth, /* which fds are authenticated */
-                          uid_connected,  /* which uids are connected */
                           mesh_connected, /* shared with uid_in_mesh */
-                          reachable,      /* uids reachable */
                         * uid_in_mesh;    /* all tports point to one mesh */
+  AdjacencySpace          uid_connected;  /* which uids are connected */
   Nonce                 * mesh_csum,
                           mesh_csum2,     /* mesh csum of nodes connected */
                           hb_cnonce;      /* the last cnonce used for hb */
   uint64_t                hb_time,        /* last hb time usecs */
                           hb_mono_time,   /* last hb time monotonic usecs */
                           hb_seqno,       /* last hb seqno */
-                          reachable_seqno,/* adjacency seqno of reachable */
                           stats_seqno;
   StageAuth               auth[ 3 ];      /* history of last 3 hb */
   uint32_t                tport_id,       /* index in transport_tab[] */
@@ -182,6 +182,8 @@ struct TransportRoute : public kv::EvSocket, public kv::EvConnectionNotify,
   bool is_edge( void )  const { return this->is_set( TPORT_IS_EDGE ) != 0; }
 
   int init( void ) noexcept;
+  void set_peer_name( kv::PeerData &pd,  const char *suff ) noexcept;
+  void update_cost( UserBridge &n,  uint32_t cost[ COST_PATH_COUNT ] ) noexcept;
   const char * connected_names( char *buf,  size_t buflen ) noexcept;
   const char * reachable_names( char *buf,  size_t buflen ) noexcept;
   size_t port_status( char *buf, size_t buflen ) noexcept;
@@ -213,7 +215,6 @@ struct TransportRoute : public kv::EvSocket, public kv::EvConnectionNotify,
 
   EvTcpTransportListen *create_mesh_listener(
                                         ConfigTree::Transport &tport ) noexcept;
-  /*TcpConnectionMgr *create_mesh_connect( void ) noexcept;*/
   EvTcpTransportListen *create_mesh_rendezvous( 
                                         ConfigTree::Transport &tport ) noexcept;
   bool create_pgm( int kind,  ConfigTree::Transport &tport ) noexcept;
@@ -235,13 +236,7 @@ struct TransportRoute : public kv::EvSocket, public kv::EvConnectionNotify,
   /* a disconnect */
   virtual void on_shutdown( kv::EvSocket &conn,  const char *,
                             size_t ) noexcept;
-  void set_peer_name( kv::PeerData &pd,  const char *suff ) noexcept;
 };
-
-/*struct TransportList : public kv::SLinkList<TransportRoute> {
-  uint32_t tport_count;
-  TransportList() : tport_count( 0 ) {}
-};*/
 
 struct TransportTab : public kv::ArrayCount<TransportRoute *, 4> {
   TransportRoute *find_transport( ConfigTree::Transport *t ) {
@@ -255,34 +250,6 @@ struct TransportTab : public kv::ArrayCount<TransportRoute *, 4> {
   }
 };
 
-#if 0
-template <class Protocol>
-struct ConnectionMgr : public Protocol, public ReconnectMgr,
-                       public kv::EvTimerCallback {
-  void * operator new( size_t, void *ptr ) { return ptr; }
-  void operator delete( void *ptr ) { ::free( ptr ); }
-
-  ConnectionMgr( kv::EvPoll &p,  uint8_t type )
-    : Protocol( p, type ), ReconnectMgr( p, *this ) {}
-
-  bool do_connect( void ) {
-    if ( ! this->Protocol::connect( this ) ) {
-      this->ReconnectMgr::connect_failed( *this );
-      return false;
-    }
-    return true;
-  }
-  virtual bool timer_cb( uint64_t, uint64_t ) noexcept {
-    if ( this->ReconnectMgr::is_reconnecting ) {
-      this->ReconnectMgr::is_reconnecting = false;
-      if ( ! this->ReconnectMgr::is_shutdown &&
-           ! this->ReconnectMgr::poll.quit )
-        this->do_connect();
-    }
-    return false;
-  }
-};
-#endif
 }
 }
 

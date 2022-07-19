@@ -485,7 +485,7 @@ function update_port_table( key, msg ) {
   }
 }
 
-const peer_fields = ["time", "user", "sub_cnt", "latency", "distance",
+const peer_fields = ["time", "user", "sub_cnt", "latency", "cost",
                      "bs", "br", "ms", "mr" ];
 
 function init_peer_table( name, msg ) {

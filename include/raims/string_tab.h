@@ -40,6 +40,21 @@ struct StringVal {
   void print_js( ConfigPrinter &p ) const noexcept;
   void print_y( ConfigPrinter &p ) const noexcept;
   void zero( void ) { this->val = NULL; this->id = 0; this->len = 0; }
+  bool get_int( int &ival ) const {
+    if ( this->val[ 0 ] >= '0' && this->val[ 0 ] <= '9' ) {
+      ival = atoi( this->val );
+      return true;
+    }
+    ival = 0;
+    return false;
+  }
+  bool get_bool( bool &bval ) const {
+    const char *s = this->val;
+    bval = ( s[ 0 ] == '1' || s[ 0 ] == 't' || s[ 0 ] == 'T' ||
+             s[ 0 ] == 'y' || s[ 0 ] == 'Y' );
+    return bval || s[ 0 ] == '0' || s[ 0 ] == 'f' || s[ 0 ] == 'F' ||
+                   s[ 0 ] == 'n' || s[ 0 ] == 'N';
+  }
 };
 
 /* combines references to strings to the same ptr and assigns a unique

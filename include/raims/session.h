@@ -234,8 +234,11 @@ struct SessionMgr : public kv::EvSocket {
                         EvTcpTransport &conn ) noexcept;
   bool add_tcp_accept( TransportRoute &listen_rte,
                        EvTcpTransport &conn ) noexcept;
-  bool add_mesh_connect( TransportRoute &mesh_rte,  const char *mesh_url,
-                         uint32_t mesh_hash ) noexcept;
+  bool add_mesh_connect( TransportRoute &mesh_rte ) noexcept;
+  TransportRoute * find_mesh_conn( TransportRoute &mesh_rte,
+                                   uint32_t mesh_hash ) noexcept;
+  bool add_mesh_connect( TransportRoute &mesh_rte,  const char **mesh_url,
+                         uint32_t *mesh_hash,  uint32_t url_count ) noexcept;
   int init_session( const CryptPass &pwd ) noexcept;
   void add_rte( const char *sub, size_t sub_len, uint32_t hash,
                 PublishType type ) noexcept;
@@ -272,7 +275,7 @@ struct SessionMgr : public kv::EvSocket {
   void send_ack( const MsgFramePublish &pub,  UserBridge &,
                  const MsgHdrDecoder &dec,  const char *suf ) noexcept;
   bool forward_inbox( kv::EvPublish &pub ) noexcept;
-  bool forward_ipc( TransportRoute &src_rte, kv::EvPublish &pub ) noexcept;
+  bool forward_ipc( TransportRoute &src_rte, kv::EvPublish &mc ) noexcept;
   bool create_telnet( ConfigTree::Transport &t ) noexcept;
   bool create_web( ConfigTree::Transport &t ) noexcept;
   uint32_t shutdown_telnet( void ) noexcept;

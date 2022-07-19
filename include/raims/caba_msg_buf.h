@@ -148,7 +148,7 @@ struct MsgBufDigestT : public BMsgBufT<T> {
   uint32_t * hdr;
   char     * dig, * sub;
   MsgBufDigestT( void *m ) : BMsgBufT<T>( m ), hdr( 0 ), dig( 0 ), sub( 0 ) {}
-  T &  open       ( const Nonce &bridge,  size_t sublen ) {
+  T  & open       ( const Nonce &bridge,  size_t sublen ) {
     this->hdr  = (uint32_t *) (void *) this->out;
     this->out += 8;
     this->n( FID_BRIDGE, bridge );
@@ -161,7 +161,7 @@ struct MsgBufDigestT : public BMsgBufT<T> {
       this->out++;
     return (T &) *this;
   }
-  T &  open_submsg( void ) {
+  T  & open_submsg( void ) {
     this->hdr  = (uint32_t *) (void *) this->out;
     this->out += /*fid:sz*/ 6;
     return (T &) *this;
@@ -187,37 +187,39 @@ struct MsgBufDigestT : public BMsgBufT<T> {
     this->emit_u32( (uint32_t) ( sz - 6 ) );
     this->out = sav;
   }
-  T &  session    ( const HmacDigest &hmac,  const Nonce &bridge ) {
+  T  & session    ( const HmacDigest &hmac,  const Nonce &bridge ) {
     return this->x( FID_SESSION, hmac, bridge ); }
-  T &  bridge2    ( const Nonce &bridge ) {
+  T  & bridge2    ( const Nonce &bridge ) {
     return this->n( FID_BRIDGE, bridge ); }
-  T &  user_hmac  ( const HmacDigest &hmac ) {
+  T  & user_hmac  ( const HmacDigest &hmac ) {
     return this->h( FID_USER_HMAC, hmac ); }
-  T &  auth_key   ( const HashDigest &key ) {
+  T  & auth_key   ( const HashDigest &key ) {
     return this->k( FID_AUTH_KEY, key ); }
-  T &  sess_key   ( const HashDigest &key ) {
+  T  & sess_key   ( const HashDigest &key ) {
     return this->k( FID_SESS_KEY, key ); }
 
-  T &  subject    ( const char *in, size_t in_len ) {
+  T  & subject    ( const char *in, size_t in_len ) {
     return this->b( FID_SUBJECT, in, (uint16_t) in_len ); }
-  T &  pattern    ( const char *in, size_t in_len ) {
+  T  & pattern    ( const char *in, size_t in_len ) {
     return this->b( FID_PATTERN, in, (uint16_t) in_len ); }
-  T &  reply      ( const char *in, size_t in_len ) {
+  T  & reply      ( const char *in, size_t in_len ) {
     return this->b( FID_REPLY, in, (uint16_t) in_len ); }
-  T &  ucast_url  ( const char *in, size_t in_len ) {
+  T  & ucast_url  ( const char *in, size_t in_len ) {
     return this->b( FID_UCAST_URL, in, (uint16_t) in_len ); }
-  T &  mesh_url   ( const char *in, size_t in_len ) {
+  T  & mesh_url   ( const char *in, size_t in_len ) {
     return this->b( FID_MESH_URL, in, (uint16_t) in_len ); }
-  T &  tport      ( const char *in, size_t in_len ) {
+  T  & tport      ( const char *in, size_t in_len ) {
     return this->b( FID_TPORT, in, (uint16_t) in_len ); }
-  T &  user       ( const char *in, size_t in_len ) {
+  T  & user       ( const char *in, size_t in_len ) {
     return this->b( FID_USER, in, (uint16_t) in_len ); }
-  T &  service    ( const char *in, size_t in_len ) {
+  T  & service    ( const char *in, size_t in_len ) {
     return this->b( FID_SERVICE, in, (uint16_t) in_len ); }
-  T &  create     ( const char *in, size_t in_len ) {
+  T  & create     ( const char *in, size_t in_len ) {
     return this->b( FID_CREATE, in, (uint16_t) in_len ); }
-  T &  expires    ( const char *in, size_t in_len ) {
+  T  & expires    ( const char *in, size_t in_len ) {
     return this->b( FID_EXPIRES, in, (uint16_t) in_len ); }
+  T  & version    ( const char *in, size_t in_len ) {
+    return this->b( FID_VERSION, in, (uint16_t) in_len ); }
 
   T  & sync_bridge( const Nonce &bridge ) {
     return this->n( FID_SYNC_BRIDGE, bridge ); }
@@ -270,11 +272,15 @@ struct MsgBufDigestT : public BMsgBufT<T> {
   T  & bs         ( uint64_t n )  { return this->u( FID_BS, n ); }
   T  & br         ( uint64_t n )  { return this->u( FID_BR, n ); }
   T  & sub_cnt    ( uint64_t n )  { return this->u( FID_SUB_CNT, n ); }
-  T  & distance   ( uint64_t n )  { return this->u( FID_DISTANCE, n ); }
+  T  & cost       ( uint32_t n )  { return this->i( FID_COST, n ); }
+  T  & cost2      ( uint32_t n )  { return this->i( FID_COST2, n ); }
+  T  & cost3      ( uint32_t n )  { return this->i( FID_COST3, n ); }
+  T  & cost4      ( uint32_t n )  { return this->i( FID_COST4, n ); }
   T  & peer       ( const char *in, size_t in_len ) {
     return this->b( FID_PEER, in, (uint16_t) in_len ); }
   T  & latency    ( const char *in, size_t in_len ) {
     return this->b( FID_LATENCY, in, (uint16_t) in_len ); }
+  void pk_digest  ( void )        { this->out += 2 + HMAC_SIZE; }
 
   /* insert sub_fid : subject, opt_fid 1 */
   void insert_subject( const char *subject, size_t sublen ) {
@@ -286,15 +292,32 @@ struct MsgBufDigestT : public BMsgBufT<T> {
   void insert_digest( const HashDigest &ha1 ) {
     MeowHmacDigest hmac;
     hmac.calc_2( ha1, /* msg -> digest */
-                      this->msg, this->dig - this->msg,
-                      /* digest -> end, skip over digest */
-                      &this->dig[ HMAC_SIZE ],
-                      this->out - &this->dig[ HMAC_SIZE ] );
+                 this->msg, this->dig - this->msg,
+                 /* digest -> end, skip over digest */
+                 &this->dig[ HMAC_SIZE ],
+                 this->out - &this->dig[ HMAC_SIZE ] );
     ::memcpy( this->dig, hmac.dig, HMAC_SIZE );
+  }
+  void insert_pk_digest( const HashDigest &pk_ha1 ) {
+    MeowHmacDigest hmac;
+    this->out -= 2 + HMAC_SIZE;
+    hmac.calc_2( pk_ha1, /* msg -> digest */
+                 this->msg, this->dig - this->msg,
+                 /* digest -> end, skip over digest */
+                 &this->dig[ HMAC_SIZE ],
+                 this->out - &this->dig[ HMAC_SIZE ] );
+    this->h( FID_PK_DIGEST, hmac );
   }
   /* sign the message */
   void sign( const char *sub,  size_t sublen,  const HashDigest &ha1 ) {
     this->insert_subject( sub, sublen );
+    this->insert_digest( ha1 );
+  }
+  /* sign a hb message */
+  void sign_hb( const char *sub,  size_t sublen,  const HashDigest &ha1,
+                const HashDigest &pk_ha1 ) {
+    this->insert_subject( sub, sublen );
+    this->insert_pk_digest( pk_ha1 );
     this->insert_digest( ha1 );
   }
   void sign_debug( const char *sub,  size_t sublen,  const HashDigest &ha1 ) {
@@ -325,7 +348,8 @@ static inline size_t fid_est( uint32_t fid ) {
   switch ( fid ) {
     case FID_SESSION:     return 2 + HMAC_SIZE + NONCE_SIZE;
     case FID_DIGEST:
-    case FID_USER_HMAC:   return 2 + HMAC_SIZE;
+    case FID_USER_HMAC:
+    case FID_PK_DIGEST:   return 2 + HMAC_SIZE;
     case FID_BRIDGE:
     case FID_CNONCE:
     case FID_SYNC_BRIDGE:
@@ -359,6 +383,7 @@ struct MsgEst {
   MsgEst & service    ( size_t l ) { sz += fid_est( FID_SERVICE, l ); return *this; }
   MsgEst & create     ( size_t l ) { sz += fid_est( FID_CREATE, l ); return *this; }
   MsgEst & expires    ( size_t l ) { sz += fid_est( FID_EXPIRES, l ); return *this; }
+  MsgEst & version    ( size_t l ) { sz += fid_est( FID_VERSION, l ); return *this; }
 
   MsgEst & sync_bridge( void ) { sz += fid_est( FID_SYNC_BRIDGE ); return *this; }
   MsgEst & uid_csum   ( void ) { sz += fid_est( FID_UID_CSUM ); return *this; }
@@ -407,9 +432,14 @@ struct MsgEst {
   MsgEst & bs         ( void ) { sz += fid_est( FID_BS ); return *this; }
   MsgEst & br         ( void ) { sz += fid_est( FID_BR ); return *this; }
   MsgEst & sub_cnt    ( void ) { sz += fid_est( FID_SUB_CNT ); return *this; }
-  MsgEst & distance   ( void ) { sz += fid_est( FID_DISTANCE ); return *this; }
+  MsgEst & cost       ( void ) { sz += fid_est( FID_COST ); return *this; }
+  MsgEst & cost2      ( void ) { sz += fid_est( FID_COST2 ); return *this; }
+  MsgEst & cost3      ( void ) { sz += fid_est( FID_COST3 ); return *this; }
+  MsgEst & cost4      ( void ) { sz += fid_est( FID_COST4 ); return *this; }
   MsgEst & peer       ( size_t l ) { sz += fid_est( FID_PEER, l ); return *this; }
   MsgEst & latency    ( size_t l ) { sz += fid_est( FID_LATENCY, l ); return *this; }
+
+  MsgEst & pk_digest  ( void ) { sz += fid_est( FID_PK_DIGEST ); return *this; }
 };
 
 #endif

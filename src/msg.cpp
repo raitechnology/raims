@@ -92,14 +92,16 @@ CabaMsg::unpack2( uint8_t *bb,  size_t off,  size_t &end,  MDMsgMem *m,
                   CabaMsg *&msg ) noexcept
 {
   uint32_t len   = get_u32<MD_BIG>( &bb[ off ] ),
-           hash  = get_u32<MD_BIG>( &bb[ off + 4 ] ),
-           flags = len >> CABA_LENGTH_BITS;
+           hash  = get_u32<MD_BIG>( &bb[ off + 4 ] );
+  uint16_t flags = len >> CABA_LENGTH_BITS;
 
   len &= CABA_LENGTH_MASK;
   if ( len == 0 ) {
     len  = hash;
     hash = 0;
   }
+  if ( CabaFlags::get_ver( flags ) != CABA_MSG_VERSION )
+    return Err::BAD_MAGIC_NUMBER;
   if ( off + len + 8 > end )
     return Err::BAD_BOUNDS;
   end = off + len + 8;
@@ -163,6 +165,24 @@ CabaMsg::verify( const HashDigest &key ) const noexcept
     /* digest -> end */ &buf[ off + digest_off + HMAC_SIZE ],
                         end - ( off + digest_off + HMAC_SIZE ) );
   return ( hmac == hmac2 );
+}
+
+bool
+CabaMsg::verify_hb( const HashDigest &key ) const noexcept
+{
+  size_t          off = this->msg_off,
+                  end = this->msg_end - ( HMAC_SIZE + 2 );
+  const uint8_t * buf = (uint8_t *) this->msg_buf;
+  static const size_t digest_off = 8 + 2 + NONCE_SIZE + 2;
+  MeowHmacDigest hmac, hmac2;
+  if ( this->msg_end < 48 + HMAC_SIZE + 2 )
+    return false;
+  hmac.copy_from( &buf[ end + 2 ] );
+  hmac2.calc_2( key,
+    /* msg -> digest */ &buf[ off ], digest_off,
+    /* digest -> end */ &buf[ off + digest_off + HMAC_SIZE ],
+                        end - ( off + digest_off + HMAC_SIZE ) );
+  return hmac == hmac2;
 }
 
 MsgFrameDecoder::MsgFrameDecoder()
@@ -281,13 +301,20 @@ MsgCat::caba_to_rvmsg( MDMsgMem &mem,  void *&data,
 }
 
 void
+MsgCat::print_hex( void ) noexcept
+{
+  MDOutput mout;
+  mout.print_hex( this->msg, this->len() );
+  md::MDHexDump::print_hex( this->msg, this->out - this->msg );
+}
+
+void
 MsgCat::reserve_error( size_t rsz ) noexcept
 {
   fprintf( stderr, "reserve size %" PRIu64
                    "is less then message len %" PRIu64 "\n",
            rsz, this->len() );
-  MDOutput mout;
-  mout.print_hex( this->msg, this->len() );
+  this->print_hex();
 }
 
 bool
@@ -332,9 +359,7 @@ MsgHdrDecoder::decode_msg( void ) noexcept
   MDReference & sub_ref = this->mref[ FID_SUB ];
   sub_ref.set( (uint8_t *) this->msg->sub, this->msg->sublen, MD_STRING );
 
-  this->is_set = MsgFldSet::bit( FID_BRIDGE ) |
-                 MsgFldSet::bit( FID_DIGEST ) |
-                 MsgFldSet::bit( FID_SUB );
+  this->set( FID_BRIDGE ).set( FID_DIGEST ).set( FID_SUB );
 
   while ( off + 2 < end ) {
     uint8_t     * field    = &buf[ off ];

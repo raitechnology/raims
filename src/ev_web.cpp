@@ -397,21 +397,34 @@ WebService::process_get_file( const char *path,  size_t path_len ) noexcept
     /*if ( this->rpc != NULL && ! this->rpc->complete )
       return size;*/
   }
-  else {
-    uint32_t count = this->tar_entry_count();
-    for ( uint32_t i = 0; i < count; i++ ) {
-      size_t   off       = entry[ i ].fname_off,
-               fname_len = entry[ i ].fname_len - off;
-      const char * fname = &entry[ i ].fname[ off ];
-      if ( fname_len >= path_len &&
-           ::memcmp( path, fname, path_len ) == 0 ) {
-        if ( fname_len == path_len ||
-             ( path_len + 3 == fname_len &&
-               ::memcmp( &fname[ fname_len - 3 ], ".gz", 3 ) == 0 ) ) {
-          this->process_get( fname, fname_len, cmd, cmd_len, entry[ i ].data,
-                             entry[ i ].size, true );
-          return true;
-        }
+  int num = 0;
+  if ( this->http_dir_len != 0 ) {
+    char path2[ 1024 ];
+    ::snprintf( path2, sizeof( path2 ), "%.*s%.*s",
+                (int) this->http_dir_len, this->http_dir,
+                (int) path_len, path );
+    MapFile map( path2 );
+
+    if ( map.open() ) {
+      this->process_get( path, path_len, cmd, cmd_len, map.map,
+                         map.map_size, false );
+      return true;
+    }
+    num = errno;
+  }
+  uint32_t count = this->tar_entry_count();
+  for ( uint32_t i = 0; i < count; i++ ) {
+    size_t   off       = entry[ i ].fname_off,
+             fname_len = entry[ i ].fname_len - off;
+    const char * fname = &entry[ i ].fname[ off ];
+    if ( fname_len >= path_len &&
+         ::memcmp( path, fname, path_len ) == 0 ) {
+      if ( fname_len == path_len ||
+           ( path_len + 3 == fname_len &&
+             ::memcmp( &fname[ fname_len - 3 ], ".gz", 3 ) == 0 ) ) {
+        this->process_get( fname, fname_len, cmd, cmd_len, entry[ i ].data,
+                           entry[ i ].size, true );
+        return true;
       }
     }
   }
@@ -420,18 +433,6 @@ WebService::process_get_file( const char *path,  size_t path_len ) noexcept
              (int) path_len, path );
     return false;
   }
-  char path2[ 1024 ];
-  ::snprintf( path2, sizeof( path2 ), "%.*s%.*s",
-              (int) this->http_dir_len, this->http_dir,
-              (int) path_len, path );
-  MapFile map( path2 );
-
-  if ( map.open() ) {
-    this->process_get( path, path_len, cmd, cmd_len, map.map,
-                       map.map_size, false );
-    return true;
-  }
-  int num = errno;
   fprintf( stderr, "web service file get: \"%.*s\": %d/%s\n",
            (int) path_len, path, num, strerror( num ) );
   return false;

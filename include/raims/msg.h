@@ -13,11 +13,11 @@ namespace ms {
 bytes 0 -> 3 are ver(3), type(2), opt(3), message size
  1               8               16              24              32   
 |-+-+-+-+-+-+-+-|-+-+-+-+-+-+-+-|-+-+-+-+-+-+-+-|-+-+-+-+-+-+-+-|
-|0 0 0|0 1|0 0 0|0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 0 0 0 0|
- ^...^ ^.^ ^.. ^ ^.............................................^
-   |    |    |                         |     
- ver(0) |   opt(0)                24 bit size(160)
-       type(1)
+|1|0 0|0 0 0 0 0|0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 0 0 0 0|
+ ^ ^.^ ^.......^ ^.............................................^
+ |    \    |                         |     
+ver(1)|   opt(0)                24 bit size(160)
+     type(0)
 bytes 4 -> 7 are the routing key hash
  1               8               16              24              32   
 +-+-+-+-+-+-+-+-|-+-+-+-+-+-+-+-|-+-+-+-+-+-+-+-|-+-+-+-+-+-+-+-|
@@ -68,21 +68,26 @@ enum CabaTypeFlag {
   CABA_HEARTBEAT = 3, /* heartbeat (_X) */
 };
 enum CabaOptFlag {
-  CABA_OPT_NONE  = 0,
-  CABA_OPT_ACK   = 1, /* recver ack messages */
-  CABA_OPT_TRACE = 2, /* routers trace messages */
-  CABA_OPT_ANY   = 4  /* any of many */
+  CABA_OPT_NONE      = 0,
+  CABA_OPT_ACK       = 1,  /* recver ack messages */
+  CABA_OPT_TRACE     = 2,  /* routers trace messages */
+  CABA_OPT_ANY       = 4,  /* any of many */
+  CABA_OPT_MC_ONE    = 8,  /* secondary mcast route */
+  CABA_OPT_MC_TWO    = 16, /* third mcast route */
+  CABA_OPT_MC_THREE  = 24  /* fourth mcast route (1+2) */
 };
-                      /* <type:2><opt:3><length bits:27> */
-static const int      CABA_VER_BITS    = 3,
-                      CABA_TYPE_BITS   = 2,
-                      CABA_OPT_BITS    = 3,
-                      CABA_LENGTH_BITS = 32 -
-                        (CABA_VER_BITS + CABA_TYPE_BITS + CABA_OPT_BITS);
-static const uint16_t CABA_VER_MASK    = ( (uint16_t) 1 << CABA_VER_BITS ) - 1,
-                      CABA_TYPE_MASK   = ( (uint16_t) 1 << CABA_TYPE_BITS ) - 1,
-                      CABA_OPT_MASK    = ( (uint16_t) 1 << CABA_OPT_BITS ) - 1;
-static const uint32_t CABA_LENGTH_MASK = ( (uint32_t) 1 << CABA_LENGTH_BITS )-1;
+                      /* <ver:1><type:2><opt:5><length bits:24> */
+static const int      CABA_VER_BITS     = 1,
+                      CABA_TYPE_BITS    = 2,
+                      CABA_OPT_BITS     = 5,
+                      CABA_LENGTH_BITS  = 32 -
+                        (CABA_VER_BITS + CABA_TYPE_BITS + CABA_OPT_BITS),
+                      CABA_OPT_MC_SHIFT = 3, /* 1 << 3 == 8 (CABA_OPT_MC_ONE) */
+                      CABA_OPT_MC_BITS  = 2; /* 0, 1, 2, 3 */
+static const uint16_t CABA_VER_MASK     = ( (uint16_t) 1 << CABA_VER_BITS ) - 1,
+                      CABA_TYPE_MASK    = ( (uint16_t) 1 << CABA_TYPE_BITS ) - 1,
+                      CABA_OPT_MASK     = ( (uint16_t) 1 << CABA_OPT_BITS ) - 1;
+static const uint32_t CABA_LENGTH_MASK  = ( (uint32_t) 1 << CABA_LENGTH_BITS )-1;
 
 static inline const char *caba_type_flag_str( CabaTypeFlag fl ) {
   if ( fl == CABA_INBOX ) return "inbox";
@@ -103,7 +108,7 @@ static inline bool caba_rtr_alert( const char *sub ) {
 static const uint16_t CABA_MSG_VERSION = 1;
 
 struct CabaFlags {
-  /* ver(3), type(2), opt(3 ) */
+  /* ver(2), type(2), opt(4) */
   static const int FLAGS_VER_SHIFT  = CABA_TYPE_BITS + CABA_OPT_BITS,
                    FLAGS_TYPE_SHIFT = CABA_OPT_BITS,
                    FLAGS_OPT_SHIFT  = 0;
@@ -112,18 +117,22 @@ struct CabaFlags {
     : flags( ( (uint16_t) CABA_MSG_VERSION << FLAGS_VER_SHIFT ) |
              ( (uint16_t) t << FLAGS_TYPE_SHIFT ) ) {}
 
-  uint16_t get_ver( void ) const {
-    uint16_t tmp = ( this->flags & ( CABA_VER_MASK << FLAGS_VER_SHIFT ) );
+  static uint16_t get_ver( uint16_t fl ) {
+    uint16_t tmp = ( fl & ( CABA_VER_MASK << FLAGS_VER_SHIFT ) );
     return tmp >> FLAGS_VER_SHIFT;
   }
-  CabaTypeFlag get_type( void ) const { /* mcast, ibx, rtr_alert, hb */
-    uint16_t tmp = ( this->flags & ( CABA_TYPE_MASK << FLAGS_TYPE_SHIFT ) );
+  static CabaTypeFlag get_type( uint16_t fl ) {
+    uint16_t tmp = ( fl & ( CABA_TYPE_MASK << FLAGS_TYPE_SHIFT ) );
     return (CabaTypeFlag) ( tmp >> FLAGS_TYPE_SHIFT );
   }
-  uint16_t get_opt( void ) const {
-    uint16_t tmp = ( this->flags & ( CABA_OPT_MASK << FLAGS_OPT_SHIFT ) );
+  static uint16_t get_opt( uint16_t fl ) {
+    uint16_t tmp = ( fl & ( CABA_OPT_MASK << FLAGS_OPT_SHIFT ) );
     return tmp >> FLAGS_OPT_SHIFT;
   }
+
+  uint16_t get_ver( void ) const      { return get_ver( this->flags ); }
+  CabaTypeFlag get_type( void ) const { return get_type( this->flags ); }
+  uint16_t get_opt( void ) const      { return get_opt( this->flags ); }
   const char *type_str( void ) const {
     return caba_type_flag_str( this->get_type() );
   }
@@ -164,8 +173,10 @@ struct CabaMsg : public md::TibSassMsg {
   CabaMsg *submsg( void *bb,  size_t len ) noexcept;
   static void init_auto_unpack( void ) noexcept;
   bool verify( const HashDigest &key ) const noexcept;
+  bool verify_hb( const HashDigest &key ) const noexcept;
   uint32_t caba_to_rvmsg( md::MDMsgMem &mem,  void *&data,
                           size_t &datalen ) noexcept;
+  void print_hex( void ) const { md::MDOutput mout; mout.print_hex( this ); }
 };
 
 struct MsgFrameDecoder {
@@ -241,26 +252,32 @@ enum MsgFid {
   FID_SERVICE        = 45 , /* service of user to add */
   FID_CREATE         = 46 , /* create time of user to add */
   FID_EXPIRES        = 47 , /* expire time of user to add */
+  FID_VERSION        = 48 , /* build version */
 
-  FID_AUTH_STAGE     = 48 , /* what stage of authentication */
-  FID_LINK_ADD       = 49 , /* whether to add or delete link in adjacency */
+  FID_AUTH_STAGE     = 49 , /* what stage of authentication */
+  FID_LINK_ADD       = 50 , /* whether to add or delete link in adjacency */
 
-  FID_FD_CNT         = 50 , /* tport stats */
-  FID_MS_TOT         = 51 ,
-  FID_MR_TOT         = 52 ,
-  FID_BS_TOT         = 53 ,
-  FID_BR_TOT         = 54 ,
-  FID_MS             = 55 ,
-  FID_MR             = 56 ,
-  FID_BS             = 57 ,
-  FID_BR             = 58 ,
-  FID_SUB_CNT        = 59 ,
-  FID_DISTANCE       = 60 ,
-  FID_PEER           = 61 ,
-  FID_LATENCY        = 62
+  FID_FD_CNT         = 51 , /* tport stats */
+  FID_MS_TOT         = 52 ,
+  FID_MR_TOT         = 53 ,
+  FID_BS_TOT         = 54 ,
+  FID_BR_TOT         = 55 ,
+  FID_MS             = 56 ,
+  FID_MR             = 57 ,
+  FID_BS             = 58 ,
+  FID_BR             = 59 ,
+  FID_SUB_CNT        = 60 ,
+  FID_COST           = 61 , /* cost of link */
+  FID_COST2          = 62 , /* cost of secondary link */
+  FID_COST3          = 63 , /* cost of third link */
+  FID_COST4          = 64 , /* cost of fourth link */
+  FID_PEER           = 65 ,
+  FID_LATENCY        = 66 ,
+
+  FID_PK_DIGEST      = 67   /* public key digest, in hb before auth */
 };
 static const int FID_TYPE_SHIFT = 8,
-                 FID_MAX        = 1 << FID_TYPE_SHIFT; /* 64 */
+                 FID_MAX        = 1 << FID_TYPE_SHIFT; /* 256 */
 
 inline uint16_t fid_value( uint16_t fid ) {
   return fid & ( FID_MAX - 1 );
@@ -401,31 +418,31 @@ static_assert( UNKNOWN_SUBJECT + 1 == ( sizeof( publish_type_str ) / sizeof( pub
 const char *publish_type_to_string( PublishType t ) noexcept;
 
 struct MsgFldSet {
-  uint64_t is_set;          /* a bit for each FID indexed */
-
-  MsgFldSet() : is_set( 0 ) {}
-
   /* does not tolerate repeated fields, last one wins */
-  static uint64_t bit( int opt ) { return (uint64_t) 1 << opt; }
-  void set( int opt )            { this->is_set |= bit( opt ); }
-  bool test( int opt ) const     { return ( this->is_set & bit( opt ) ) != 0; }
-  bool btst( uint64_t bits ) const { return ( this->is_set & bits ) == bits; }
+  uint64_t is_set[ FID_MAX / 64 ];     /* a bit for each FID indexed */
+
+  MsgFldSet() { ::memset( this->is_set, 0, sizeof( this->is_set ) ); }
+
+  static uint64_t idx( int opt ) { return opt / 64 ; }
+  static uint64_t bit( int opt ) { return (uint64_t) 1 << ( opt % 64 ); }
+  uint64_t &ref( int opt )       { return this->is_set[ idx( opt ) ]; }
+  uint64_t con( int opt ) const  { return this->is_set[ idx( opt ) ]; }
+  MsgFldSet &set( int opt )  { this->ref( opt ) |= bit( opt ); return *this; }
+  bool test( int opt ) const { return ( this->con( opt ) & bit( opt ) ) != 0; }
   bool test_2( int opt,  int opt2 ) const {
-    return this->btst( bit( opt ) | bit( opt2 ) );
+    return this->test( opt ) & this->test( opt2 );
   }
   bool test_3( int opt,  int opt2,  int opt3 ) const {
-    return this->btst( bit( opt ) | bit( opt2 ) | bit( opt3 ) );
+    return this->test_2( opt, opt2 ) & this->test( opt3 );
   }
   bool test_4( int opt,  int opt2,  int opt3,  int opt4 ) const {
-    return this->btst( bit( opt ) | bit( opt2 ) | bit( opt3 ) | bit( opt4 ) );
+    return this->test_3( opt, opt2, opt3 ) & this->test( opt4 );
   }
   bool test_5( int opt, int opt2, int opt3, int opt4,int opt5 ) const {
-    return this->btst( bit( opt ) | bit( opt2 ) | bit( opt3 ) | bit( opt4 ) |
-                       bit( opt5 ) );
+    return this->test_4( opt, opt2, opt3, opt4 ) & this->test( opt5 );
   }
   bool test_6( int opt, int opt2, int opt3, int opt4,int opt5, int opt6 ) const{
-    return this->btst( bit( opt ) | bit( opt2 ) | bit( opt3 ) | bit( opt4 ) |
-                       bit( opt5 ) | bit( opt6 ) );
+    return this->test_5( opt, opt2, opt3, opt4, opt5 ) & this->test( opt6 );
   }
 };
 
@@ -513,14 +530,31 @@ struct MsgHdrDecoder : public MsgFldSet {
 };
 
 enum MsgFrameStatus {
-  FRAME_STATUS_UNKNOWN   = 0,
-  FRAME_STATUS_OK        = 1,
-  FRAME_STATUS_DUP_SEQNO = 2,
-  FRAME_STATUS_NO_AUTH   = 3,
-  FRAME_STATUS_NO_USER   = 4,
-  FRAME_STATUS_BAD_MSG   = 5,
-  FRAME_STATUS_MY_MSG    = 6
+  FRAME_STATUS_UNKNOWN    = 0,
+  FRAME_STATUS_OK         = 1,
+  FRAME_STATUS_DUP_SEQNO  = 2,
+  FRAME_STATUS_NO_AUTH    = 3,
+  FRAME_STATUS_NO_USER    = 4,
+  FRAME_STATUS_BAD_MSG    = 5,
+  FRAME_STATUS_MY_MSG     = 6,
+  FRAME_STATUS_HB_NO_AUTH = 7,
+  FRAME_STATUS_INBOX_AUTH = 8,
+  FRAME_STATUS_MAX        = 9
 };
+#ifdef INCLUDE_FRAME_CONST
+static const char *frame_status_str[] = {
+  "unknown",
+  "ok",
+  "dup_seqno",
+  "no_auth",
+  "no_user",
+  "bad_msg",
+  "my_msg",
+  "hb_no_auth",
+  "inbox_auth"
+};
+static_assert( FRAME_STATUS_MAX == ( sizeof( frame_status_str ) / sizeof( frame_status_str[ 0 ] ) ), "frame_status" );
+#endif
 
 enum MsgFrameFlags {
   MSG_FRAME_ACK_CONTROL     = 1, /* if ack / trace was handled */
@@ -618,12 +652,13 @@ struct MsgCat : public md::MDMsgMem, public MsgBufDigestT<MsgCat> {
     this->reuse();
     this->out = this->msg = (char *) this->make( len );
   }
-  void print( void ) noexcept;
   void close( size_t rsz,  uint32_t h,  CabaFlags fl ) {
     this->MsgBufDigestT<MsgCat>::close_msg( h, fl );
     if ( rsz < this->len() )
       this->reserve_error( rsz );
   }
+  void print( void ) noexcept;
+  void print_hex( void ) noexcept;
   void reserve_error( size_t rsz ) noexcept;
   uint32_t caba_to_rvmsg( MDMsgMem &mem,  void *&data,
                           size_t &datalen ) noexcept;
@@ -701,6 +736,7 @@ static FidTypeName fid_type_name[] = {
 { FID_SERVICE     , SHORT_STRING                , XCL , 0 ,"service"         },
 { FID_CREATE      , SHORT_STRING                , XCL , 0 ,"create"          },
 { FID_EXPIRES     , SHORT_STRING                , XCL , 0 ,"expires"         },
+{ FID_VERSION     , SHORT_STRING                , XCL , 0 ,"version"         },
 
 { FID_AUTH_STAGE  , U_SHORT                     , XCL , 0 ,"auth_stage"      },
 { FID_LINK_ADD    , BOOL_1                      , XCL , 0 ,"link_add"        },
@@ -715,9 +751,14 @@ static FidTypeName fid_type_name[] = {
 { FID_BS          , U_SHORT | U_INT | U_LONG    , LIT , 0 ,"bs"              },
 { FID_BR          , U_SHORT | U_INT | U_LONG    , LIT , 0 ,"br"              },
 { FID_SUB_CNT     , U_SHORT | U_INT | U_LONG    , LIT , 0 ,"sub_cnt"         },
-{ FID_DISTANCE    , U_SHORT | U_INT | U_LONG    , LIT , 0 ,"distance"        },
+{ FID_COST        , U_SHORT | U_INT             , LIT , 0 ,"cost"            },
+{ FID_COST2       , U_SHORT | U_INT             , LIT , 0 ,"cost2"           },
+{ FID_COST3       , U_SHORT | U_INT             , LIT , 0 ,"cost3"           },
+{ FID_COST4       , U_SHORT | U_INT             , LIT , 0 ,"cost4"           },
 { FID_PEER        , SHORT_STRING                , LIT , 0 ,"peer"            },
-{ FID_LATENCY     , SHORT_STRING                , LIT , 0 ,"latency"         }
+{ FID_LATENCY     , SHORT_STRING                , LIT , 0 ,"latency"         },
+
+{ FID_PK_DIGEST   , OPAQUE_16                   , XCL , 0 ,"pk_digest"       }
 };
 
 #endif

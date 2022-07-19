@@ -67,7 +67,33 @@ StageAuth::copy_from_hb( const MsgHdrDecoder &dec,
   return false;
 }
 
-/* direct _INBOX.Nonce.auth message */
+bool
+UserDB::compare_version( UserBridge &n, MsgHdrDecoder &dec ) noexcept
+{
+  static const char * ver_str;
+  static size_t       ver_len;
+
+  if ( ver_len == 0 ) {
+    ver_str = ms_get_version();
+    ver_len = ::strlen( ver_str );
+  }
+  if ( ! dec.test( FID_VERSION ) ) {
+    n.printf( "version not present\n" );
+    return false;
+  }
+  else {
+    size_t fsize = dec.mref[ FID_VERSION ].fsize;
+    void * fptr  = dec.mref[ FID_VERSION ].fptr;
+    if ( fsize != ver_len || ::memcmp( fptr, ver_str, ver_len ) != 0 ) {
+      n.printf( "version diff: %.*s != %.*s\n", (int) fsize,
+                (char *) fptr, (int) ver_len, ver_str );
+      return false;
+    }
+  }
+  n.printf( "version matches %.*s\n", (int) ver_len, ver_str );
+  return true;
+}
+/* direct _I.Nonce.auth message */
 bool
 UserDB::on_inbox_auth( const MsgFramePublish &pub,  UserBridge &n,
                        MsgHdrDecoder &dec ) noexcept
@@ -85,6 +111,8 @@ UserDB::on_inbox_auth( const MsgFramePublish &pub,  UserBridge &n,
     return true;
 
   stage = (AuthStage) stage_num;
+  if ( stage == 1 )
+    this->compare_version( n, dec );
   if ( stage != AUTH_TRUST ) {
     if ( ! dec.test_3( FID_CNONCE, FID_AUTH_TIME, FID_AUTH_SEQNO ) )
       return true;
@@ -164,6 +192,14 @@ UserDB::on_inbox_auth( const MsgFramePublish &pub,  UserBridge &n,
     this->recv_trusted( pub, n, dec );
   }
   if ( n.is_set( AUTHENTICATED_STATE ) ) {
+    uint32_t cost[ COST_PATH_COUNT ] = { COST_DEFAULT, COST_DEFAULT,
+                                         COST_DEFAULT, COST_DEFAULT };
+    if ( dec.get_ival<uint32_t>( FID_COST, cost[ 0 ] ) ) {
+      dec.get_ival<uint32_t>( FID_COST2, cost[ 1 ] );
+      dec.get_ival<uint32_t>( FID_COST3, cost[ 2 ] );
+      dec.get_ival<uint32_t>( FID_COST4, cost[ 3 ] );
+      n.user_route->rte.update_cost( n, cost );
+    }
     if ( ! n.test_set( SENT_ZADD_STATE ) ) {
       this->send_peer_add( n );    /* broadcast _Z.ADD with new peer */
       n.user_route->set( SENT_ZADD_STATE );
@@ -171,6 +207,7 @@ UserDB::on_inbox_auth( const MsgFramePublish &pub,  UserBridge &n,
       if ( ! this->adjacency_change.is_empty() )
         this->send_adjacency_change(); /* broadcast _Z.ADJ with adjacency */
     }
+
     if ( dec.test( FID_LINK_STATE ) ) {
       uint64_t link_state,
                sub_seqno;
@@ -201,10 +238,13 @@ UserDB::send_challenge( UserBridge &n,  AuthStage stage ) noexcept
     n.printf( "send stage %u verify(%lu,%lu,0x%08lx)\n", stage,
               n.auth[ 0 ].seqno, n.auth[ 0 ].time,
               n.auth[ 0 ].cnonce.nonce[ 0 ] );
+  const char * ver_str = ms_get_version();
+  size_t       ver_len = ::strlen( ver_str );
 
   MsgEst e( ibx.len() );
   e.user_hmac  ()
    .seqno      ()
+   .version    ( ver_len )
    .time       ()
    .uptime     ()
    .interval   ()
@@ -217,7 +257,11 @@ UserDB::send_challenge( UserBridge &n,  AuthStage stage ) noexcept
    .auth_stage ()
    .start      ()
    .ucast_url  ( rte.ucast_url_len )
-   .mesh_url   ( rte.mesh_url_len );
+   .mesh_url   ( rte.mesh_url_len )
+   .cost       ()
+   .cost2      ()
+   .cost3      ()
+   .cost4      ();
 
   MsgCat m;
   m.reserve( e.sz );
@@ -243,12 +287,19 @@ UserDB::send_challenge( UserBridge &n,  AuthStage stage ) noexcept
    .auth_key   ( encrypted_ha1      )
    .cnonce     ( n.auth[ 1 ].cnonce )
    .auth_stage ( stage              )
-   .start      ( this->start_time   );
+   .start      ( this->start_time   )
+   .version    ( ver_str, ver_len   );
 
   if ( rte.ucast_url_len != 0 )
     m.ucast_url( rte.ucast_url_addr, rte.ucast_url_len );
   if ( rte.mesh_url_len != 0 )
     m.mesh_url( rte.mesh_url_addr, rte.mesh_url_len );
+  if ( rte.uid_connected.is_advertised ) {
+    m.cost( rte.uid_connected.cost[ 0 ] );
+    m.cost2( rte.uid_connected.cost[ 1 ] );
+    m.cost3( rte.uid_connected.cost[ 2 ] );
+    m.cost4( rte.uid_connected.cost[ 3 ] );
+  }
   uint32_t h = ibx.hash();
   m.close( e.sz, h, CABA_INBOX );
 
@@ -293,14 +344,16 @@ UserDB::recv_challenge( const MsgFramePublish &pub,  UserBridge &n,
 /* notify peer that it is trusted */
 bool
 UserDB::send_trusted( const MsgFramePublish &pub,  UserBridge &n,
-                      const MsgHdrDecoder &dec ) noexcept
+                      MsgHdrDecoder &dec ) noexcept
 {
   InboxBuf ibx( n.bridge_id, _AUTH );
-  bool     in_mesh     = pub.rte.uid_in_mesh->is_member( n.uid );
-  size_t   mesh_db_len = 0;
+  TransportRoute & rte = n.user_route->rte;
+  bool         in_mesh     = pub.rte.uid_in_mesh->is_member( n.uid );
+  size_t       mesh_db_len = 0;
+  MeshDBFilter filter( n.uid, dec );
 
   if ( in_mesh )
-    mesh_db_len = this->mesh_db_size( pub.rte, n.uid, dec );
+    mesh_db_len = this->mesh_db_size( pub.rte, filter );
 
   this->events.send_trust( n.uid, n.user_route->rte.tport_id, in_mesh );
   uint64_t uptime = current_monotonic_time_ns() - this->start_mono_time;
@@ -314,6 +367,10 @@ UserDB::send_trusted( const MsgFramePublish &pub,  UserBridge &n,
    .link_state()
    .auth_stage()
    .start     ()
+   .cost      ()
+   .cost2     ()
+   .cost3     ()
+   .cost4     ()
    .mesh_db   ( mesh_db_len );
 
   MsgCat m;
@@ -328,8 +385,14 @@ UserDB::send_trusted( const MsgFramePublish &pub,  UserBridge &n,
    .link_state( this->link_state_seqno )
    .auth_stage( AUTH_TRUST         )
    .start     ( this->start_time   );
+  if ( rte.uid_connected.is_advertised ) {
+    m.cost( rte.uid_connected.cost[ 0 ] );
+    m.cost2( rte.uid_connected.cost[ 1 ] );
+    m.cost3( rte.uid_connected.cost[ 2 ] );
+    m.cost4( rte.uid_connected.cost[ 3 ] );
+  }
   if ( mesh_db_len != 0 )
-    this->mesh_db_submsg( pub.rte, n.uid, dec, m );
+    this->mesh_db_submsg( pub.rte, filter, m );
   uint32_t h = ibx.hash();
   m.close( e.sz, h, CABA_INBOX );
 

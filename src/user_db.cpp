@@ -18,8 +18,8 @@ UserDB::UserDB( EvPoll &p,  ConfigTree::User &u,
                 StringTab &st,  EventRecord &ev ) noexcept
   : ipc_transport( 0 ), user( u ), svc( s ), sub_db( sdb ),
     string_tab( st ), events( ev ), session_key( 0 ), hello_key( 0 ),
-    cnonce( 0 ), node_ht( 0 ), zombie_ht( 0 ), uid_tab( 0 ), peer_ht( 0 ),
-    peer_key_ht( 0 ), peer_keys( 0 ), auth_bloom( 0, "auth", p.g_bloom_db ),
+    cnonce( 0 ), node_ht( 0 ), zombie_ht( 0 ), peer_ht( 0 ),
+    peer_key_ht( 0 ), peer_keys( 0 ), peer_bloom( 0, "(peer)", p.g_bloom_db ),
     hb_interval( HB_DEFAULT_INTERVAL ), next_uid( 0 ), free_uid_count( 0 ),
     my_src_fd( -1 ), uid_auth_count( 0 ), uid_hb_count( 0 ),
     send_peer_seqno( 0 ), link_state_seqno( 0 ), mcast_seqno( 0 ),
@@ -57,13 +57,12 @@ UserDB::init( const CryptPass &pwd,  uint32_t my_fd,
   /* session key is private key used to authenticate messages for bridge_id */
   this->session_key->make_session_rand(); /* random session key */
 
-  this->uid_csum.zero(); /* the xor of all peers authenticated */
+  /* the xor of all peers authenticated */
+  this->uid_csum         = this->bridge_id.nonce;
   /* index nonce -> bridge_id instance active */
   this->node_ht          = NodeHashTab::resize( NULL );
   /* index nonce -> bridge_id instance which is not reachable */
   this->zombie_ht        = NodeHashTab::resize( NULL );
-  /* index hash( uid ) -> uid */
-  this->uid_tab          = UidHT::resize( NULL );
   /* index user hmac -> peer data */
   this->peer_ht          = NodeHashTab::resize( NULL );
   /* index hash (src_uid, dest_uid) -> encrypted peer key */
@@ -72,12 +71,15 @@ UserDB::init( const CryptPass &pwd,  uint32_t my_fd,
   this->free_uid_count   = 0; /* after uid freed, this count updated */
   this->uid_auth_count   = 0; /* how many peers are trusted */
   this->uid_hb_count     = 0; /* how many peers are trusted */
+  this->uid_ping_count   = 0; /* ping counter */
+  this->next_ping_uid    = 0; /* next pinged uid */
   this->send_peer_seqno  = 0; /* sequence num of peer add/del msgs */
   this->link_state_seqno = 0; /* sequence num of link state msgs */
   this->mcast_seqno      = 0; /* sequence num of mcast msgs */
   this->hb_ival_ns       = 0; /* hb interval in nanos */
   this->hb_ival_mask     = 0; /* hb interval mask, pow2 - 1 > hv_ival_ns */
   this->next_ping_mono   = 0; /* when the next random ping timer expires */
+  this->last_auth_mono   = this->start_mono_time;
 
   this->new_uid(); /* alloc uid 0 for me prevent loops */
   this->my_src_fd = my_fd;
@@ -126,15 +128,15 @@ UserDB::init( const CryptPass &pwd,  uint32_t my_fd,
       i++;
     }
   }
-  this->auth_bloom.add( hello_h );
-  this->auth_bloom.add( hb_h ); 
-  this->auth_bloom.add( bye_h );
-  this->auth_bloom.add( blm_h );
-  this->auth_bloom.add( adj_h );
-  this->auth_bloom.add_route( S_JOIN_SZ, join_h );
-  this->auth_bloom.add_route( S_LEAVE_SZ, leave_h );
-  this->auth_bloom.add_route( P_PSUB_SZ, psub_h );
-  this->auth_bloom.add_route( P_PSTOP_SZ, pstop_h );
+  this->peer_bloom.add( hello_h );
+  this->peer_bloom.add( hb_h ); 
+  this->peer_bloom.add( bye_h );
+  this->peer_bloom.add( blm_h );
+  this->peer_bloom.add( adj_h );
+  this->peer_bloom.add_route( S_JOIN_SZ, join_h );
+  this->peer_bloom.add_route( S_LEAVE_SZ, leave_h );
+  this->peer_bloom.add_route( P_PSUB_SZ, psub_h );
+  this->peer_bloom.add_route( P_PSTOP_SZ, pstop_h );
   return b;
 }
 
@@ -150,8 +152,8 @@ UserDB::forward_to( UserBridge &n,  const char *sub,
                 (int) sublen, sub );
     if ( u_rte.rte.is_mcast() && ! u_rte.is_set( UCAST_URL_STATE ) ) {
       n.printf( "inbox has no url\n" );
-      uint32_t hops;
-      UserBridge *m = this->closest_peer_route( u_rte.rte, n, hops );
+      uint32_t tmp_cost;
+      UserBridge *m = this->closest_peer_route( u_rte.rte, n, tmp_cost );
       if ( m != NULL ) {
         UserRoute *u_peer = m->user_route_ptr( *this, u_rte.rte.tport_id );
         if ( u_peer->is_valid() &&
@@ -240,10 +242,6 @@ UserDB::release( void ) noexcept
     delete this->zombie_ht;
     this->zombie_ht = NULL;
   }
-  if ( this->uid_tab != NULL ) {
-    delete this->uid_tab;
-    this->uid_tab = NULL;
-  }
   if ( this->bridge_tab.size != 0 ) {
     this->bridge_tab.clear();
   }
@@ -260,7 +258,6 @@ UserDB::release( void ) noexcept
   this->ping_queue.reset();
   this->pending_queue.reset();
   this->uid_authenticated.reset();
-  this->random_walk.reset();
   this->bridge_id.zero();
   this->session_key = NULL;
   this->cnonce      = NULL;
@@ -372,11 +369,11 @@ UserDB::check_user_timeout( uint64_t current_mono_time,
     run_peer_inc = true;
   }
   if ( run_peer_inc ) {
-    bool b = this->peer_dist.find_inconsistent2( n, m );
+    bool b = this->peer_dist.find_inconsistent( n, m );
     if ( b ) {
       if ( n != NULL && m != NULL ) {
         if ( ! n->is_set( PING_STATE ) ) {
-          d_usr( "find_inconsistent2 from %s(%u) to %s(%u)\n", 
+          d_usr( "find_inconsistent from %s(%u) to %s(%u)\n", 
                    n->peer.user.val, n->uid, m->peer.user.val, m->uid );
           this->send_adjacency_request2( *n, *m, DIJKSTRA_SYNC_REQ );
         }
@@ -390,7 +387,7 @@ UserDB::check_user_timeout( uint64_t current_mono_time,
         ns = n->start_mono_time + hb_timeout_ns; /* if hb and still orphaned */
 
         if ( this->adjacency_unknown.is_empty() && ns < current_mono_time ) {
-          d_usr( "find_inconsistent2 orphaned %s(%u)\n", 
+          d_usr( "find_inconsistent orphaned %s(%u)\n", 
                    n->peer.user.val, n->uid );
           this->remove_authenticated( *n,
             n->ping_fail_count ?  BYE_PING : BYE_ORPHANED );
@@ -403,7 +400,7 @@ UserDB::check_user_timeout( uint64_t current_mono_time,
               do {
                 m = this->bridge_tab[ uid2 ];
                 if ( m != NULL ) {
-                  d_usr( "find_inconsistent3 from %s(%u) to %s(%u)\n", 
+                  d_usr( "find_inconsistent from %s(%u) to %s(%u)\n", 
                            n->peer.user.val, n->uid, m->peer.user.val, m->uid );
                   this->send_adjacency_request2( *n, *m, DIJKSTRA_SYNC_REQ );
                   goto break_loop;
@@ -411,7 +408,7 @@ UserDB::check_user_timeout( uint64_t current_mono_time,
               } while ( p->next( uid2 ) );
             }
           }
-          d_usr( "find_inconsistent2 delay orphaned %s(%u)\n",
+          d_usr( "find_inconsistent delay orphaned %s(%u)\n",
                    n->peer.user.val, n->uid );
         break_loop:;
         }
@@ -427,7 +424,7 @@ UserDB::check_user_timeout( uint64_t current_mono_time,
                 (double) t / SEC_TO_NS, this->uid_auth_count,
                 invalidate_reason_string( this->peer_dist.invalid_reason ) );
       }
-      this->find_user_primary_routes();
+      this->find_adjacent_routes();
     }
   }
   else {
@@ -435,8 +432,8 @@ UserDB::check_user_timeout( uint64_t current_mono_time,
       this->send_adjacency_change();
     if ( this->uid_auth_count > 0 )
       this->interval_ping( current_mono_time, current_time );
-    if ( ! this->direct_pending.is_empty() )
-      this->process_direct_pending( current_mono_time );
+    if ( ! this->mesh_pending.is_empty() )
+      this->process_mesh_pending( current_mono_time );
   }
 }
 const char *
@@ -622,14 +619,16 @@ UserRoute::set_mesh( UserDB &user_db,  const void *p,  size_t len ) noexcept
          ::memcmp( this->mesh_url, p, len ) == 0 )
       return;
 
-    /*if ( debug_usr )*/
-      this->n.printf( "set_mesh( %.*s, tport=%s )\n", (int) len, (char *) p,
-                      this->rte.name );
     this->mesh_url = (char *) ::realloc( this->mesh_url, len + 1 );
     ::memcpy( this->mesh_url, p, len );
     this->mesh_url[ len ] = '\0';
     this->mesh_url_len    = (uint16_t) len;
     this->url_hash        = kv_crc_c( this->mesh_url, len, 0 );
+
+    /*if ( debug_usr )*/
+      this->n.printf( "set_mesh( %.*s, tport=%s, hash=%x )\n",
+                      (int) len, (char *) p, this->rte.name, this->url_hash );
+   this->rte.mesh_conn_hash = this->url_hash;
 
     this->set( MESH_URL_STATE );
   }
@@ -698,7 +697,6 @@ UserRoute::inbox_route_str( char *buf,  size_t buflen ) noexcept
   ::snprintf( &buf[ i ], buflen - i, "%.*s", (int) len, s );
   return buf;
 }
-
 /* initialize a route index for rte */
 void
 UserDB::add_user_route( UserBridge &n,  TransportRoute &rte,  uint32_t fd,
@@ -718,14 +716,7 @@ UserDB::add_user_route( UserBridge &n,  TransportRoute &rte,  uint32_t fd,
          dec.type != U_INBOX_AUTH )
       hops = 1;
   }
-#if 0
-  else if ( ! rte.is_mcast() ) {
-    if ( this->route_list[ fd ].sys_route_refs > 0 ) {
-      if ( dec.type < U_SESSION_HELLO || dec.type > U_SESSION_BYE )
-        hops = 1;
-    }
-  }
-#endif
+
   this->events.add_user_route( n.uid, rte.tport_id, src ? src->n.uid : 0, hops);
   d_usr( "add_user_route( %s, %s, %s, fd=%u, hops=%u, has=%s )\n",
          dec.get_type_string(), n.peer.user.val, rte.name, fd, hops,
@@ -741,13 +732,7 @@ UserDB::add_user_route( UserBridge &n,  TransportRoute &rte,  uint32_t fd,
   u_ptr->hops     = hops;
   n.user_route    = u_ptr;
   this->set_mesh_url( *u_ptr, dec );
-#if 0
-  if ( dec.test( FID_MESH_URL ) ) {
-    size_t       url_len = dec.mref[ FID_MESH_URL ].fsize;
-    const char * url     = (const char *) dec.mref[ FID_MESH_URL ].fptr;
-    u_ptr->set_mesh( url, url_len );
-  }
-#endif
+
   /* if directly attached to a transport route, hops == 0 */
   if ( hops == 0 ) {
     if ( dec.test( FID_UCAST_URL ) ) {
@@ -772,110 +757,113 @@ UserDB::add_user_route( UserBridge &n,  TransportRoute &rte,  uint32_t fd,
       this->add_inbox_route( n, NULL );
   }
 }
-
+/* use adjacency tab to find the best routes for each pear */
 void
-UserDB::find_user_primary_routes( void ) noexcept
+UserDB::find_adjacent_routes( void ) noexcept
 {
+#if 0
   if ( this->transport_tab.count == 1 &&
        ! this->transport_tab.ptr[ 0 ]->is_mcast() &&
        ! this->transport_tab.ptr[ 0 ]->is_mesh() )
     return;
-
+  char src_buf[ 32 ];
+  uint32_t uid;
+  for ( uid = 1; uid < this->next_uid; uid++ ) {
+    UserBridge &n = *this->bridge_tab.ptr[ uid ];
+    if ( ! n.is_set( AUTHENTICATED_STATE ) )
+      continue;
+    printf( "tport %s = primary %u, secondary %u, cost %u\n",
+            this->peer_dist.uid_name( uid, src_buf, sizeof( src_buf ) ),
+            this->peer_dist.primary[ uid ], this->peer_dist.secondary[ uid ],
+            this->peer_dist.primary_cost[ uid ] );
+  }
+#endif
   for ( uint32_t uid = 1; uid < this->next_uid; uid++ ) {
     if ( this->bridge_tab.ptr[ uid ] == NULL )
       continue;
     UserBridge &n = *this->bridge_tab.ptr[ uid ];
     if ( ! n.is_set( AUTHENTICATED_STATE ) )
       continue;
-#if 0
-    uint32_t min_dist  = this->peer_dist.max_uid,
-             my_dist   = min_dist,
-             min_route = count,
-             /*min_count = 0,*/
-             my_route  = n.primary_route;
-    bool     is_mcast  = false;
-    for ( uint32_t i = 0; i < count; i++ ) {
-      TransportRoute *rte = this->transport_tab.ptr[ i ];
-      uint32_t d = this->peer_dist.calc_transport_cache( uid, i, *rte );
-      if ( d <= min_dist ) {
-        if ( d < min_dist ) {
-          min_dist  = d;
-          min_route = i;
-          /*min_count = 1;*/
-          is_mcast  = rte->is_mcast();
-        }
-        /*else {
-          min_count++;
-        }*/
-#if 0
-        else if ( d == 1 ) {
-          UserRoute *u_ptr = n.user_route_ptr( *this, i );
-          if ( u_ptr->is_set( MESH_URL_STATE ) ) {
-            min_dist  = d;
-            min_route = i;
-            is_mcast  = false;
-          }
-        }
-#endif
+
+    UserRoute * u_ptr;
+    uint32_t hops, min_cost;
+
+    for ( uint8_t i = 0; i < COST_PATH_COUNT; i++ ) {
+      UidSrcPath & path = n.src_path[ i ];
+      if ( ! this->peer_dist.get_path( uid, i, path ) ) {
+        if ( debug_usr )
+          n.printf( "no route, path %u\n", i );
       }
-      if ( i == my_route )
-        my_dist = d;
+      else {
+        u_ptr = n.user_route_ptr( *this, path.tport );
+        hops  = u_ptr->rte.uid_connected.is_member( n.uid ) ? 0 : 1;
+        /* route through another peer */
+        if ( ! u_ptr->is_valid() && hops > 0 ) {
+          UserBridge *m = this->bridge_tab.ptr[ path.src_uid ];
+          if ( m == NULL ) {
+            n.printf( "no closest peer route, old primary tport %u\n",
+                       n.primary_route );
+            continue;
+          }
+          UserRoute *u_peer = m->user_route_ptr( *this, path.tport );
+          if ( ! u_peer->is_valid() ) {
+            n.printf( "no peer route yet, using old primary tport %u\n",
+                       n.primary_route );
+            continue;
+          }
+          u_ptr->mcast_fd = u_peer->mcast_fd;
+          u_ptr->inbox_fd = u_peer->inbox_fd;
+          u_ptr->hops     = 1;
+          if ( u_peer->is_set( UCAST_URL_STATE | UCAST_URL_SRC_STATE ) ) {
+            if ( u_peer->is_set( UCAST_URL_STATE ) )
+              u_ptr->set_ucast( *this, NULL, 0, u_peer );
+            else
+              u_ptr->set_ucast( *this, NULL, 0, u_peer->ucast_src );
+          }
+          this->push_user_route( n, *u_ptr );
+        }
+        /* primary go to other */
+        if ( i > 0 && u_ptr->is_valid() ) {
+          if ( debug_usr )
+            n.printf( "new route, path %u\n", i );
+          if ( n.bloom_rt[ i ] != NULL ) {
+            n.bloom_rt[ i ]->del_bloom_ref( &n.bloom );
+            n.bloom_rt[ i ]->remove_if_empty();
+            n.bloom_rt[ i ] = NULL;
+          }
+          n.bloom_rt[ i ] = u_ptr->rte.sub_route.create_bloom_route(
+                                               u_ptr->mcast_fd, &n.bloom, i );
+        }
+      }
     }
-#endif
-    uint32_t min_route;
-    if ( ! this->peer_dist.get_primary_tport( uid, min_route ) ) {
+    UidSrcPath & path = n.src_path[ 0 ];
+    if ( path.cost == 0 ) {
       n.printf( "no route, primary tport %u\n", n.primary_route );
       continue;
     }
+    u_ptr    = n.user_route_ptr( *this, path.tport );
+    hops     = u_ptr->rte.uid_connected.is_member( n.uid ) ? 0 : 1,
+    min_cost = peer_dist.calc_transport_cache( uid, path.tport, 0 );
 
-    UserRoute * u_ptr    = n.user_route_ptr( *this, min_route );
-    uint32_t    min_dist = peer_dist.calc_transport_cache( uid, min_route,
-                                                           u_ptr->rte );
-    if ( n.primary_route != min_route ) {
+    if ( n.primary_route != path.tport ) {
       UserRoute * primary = n.primary( *this );
-      uint32_t    my_dist = peer_dist.calc_transport_cache( uid,
-                                                            n.primary_route,
-                                                            primary->rte );
-      n.printf( "old primary route is tport %s.%u(d=%u),"
-                " using shorter route %s.%u(d=%u)\n",
-          primary->rte.transport.tport.val,
-          primary->rte.tport_id, my_dist,
-          u_ptr->rte.transport.tport.val,
-          u_ptr->rte.tport_id, min_dist );
-
-      if ( ! u_ptr->is_valid() && min_dist > 0 ) {
-        uint32_t hops;
-        UserBridge *m = this->closest_peer_route( u_ptr->rte, n, hops );
-        if ( m == NULL ) {
-          n.printf( "no closest peer route, old primary tport %u\n",
-                     n.primary_route );
-          continue;
-        }
-        UserRoute *u_peer = m->user_route_ptr( *this, min_route );
-        if ( ! u_peer->is_valid() ) {
-          n.printf( "no peer route yet, using old primary tport %u\n",
-                     n.primary_route );
-          continue;
-        }
-        u_ptr->mcast_fd = u_peer->mcast_fd;
-        u_ptr->inbox_fd = u_peer->inbox_fd;
-        u_ptr->hops     = 1;
-        n.user_route    = u_ptr;
-        if ( u_peer->is_set( UCAST_URL_STATE | UCAST_URL_SRC_STATE ) ) {
-          if ( u_peer->is_set( UCAST_URL_STATE ) )
-            u_ptr->set_ucast( *this, NULL, 0, u_peer );
-          else
-            u_ptr->set_ucast( *this, NULL, 0, u_peer->ucast_src );
-        }
-        this->push_user_route( n, *u_ptr );
+      uint32_t    my_cost = peer_dist.calc_transport_cache( uid,
+                                                           n.primary_route, 0 );
+      if ( my_cost >= min_cost ) {
+        n.printf( "old primary route is tport %s.%u(d=%u),"
+                  " using route %s.%u(d=%u)\n",
+            primary->rte.transport.tport.val,
+            primary->rte.tport_id, my_cost,
+            u_ptr->rte.transport.tport.val,
+            u_ptr->rte.tport_id, min_cost );
+        this->add_inbox_route( n, u_ptr );
       }
-      this->add_inbox_route( n, u_ptr );
     }
-    else if ( u_ptr->rte.is_mcast() && min_dist > 0 ) {
-      uint32_t hops;
-      UserBridge *m = this->closest_peer_route( u_ptr->rte, n, hops );
+    else if ( u_ptr->rte.is_mcast() && hops > 0 ) {
+      UserBridge *m = this->bridge_tab.ptr[ path.src_uid ];
+      /*UserBridge *m = this->closest_peer_route( u_ptr->rte, n, tmp_cost );*/
       if ( m != NULL ) {
-        UserRoute *u_peer = m->user_route_ptr( *this, min_route );
+        UserRoute *u_peer = m->user_route_ptr( *this, path.tport );
         if ( u_peer->mcast_fd == u_ptr->mcast_fd &&
              u_peer->inbox_fd == u_ptr->inbox_fd ) {
 
@@ -897,89 +885,98 @@ UserDB::find_user_primary_routes( void ) noexcept
         }
       }
     }
-    if ( min_dist > 0 && u_ptr->is_set( MESH_URL_STATE ) ) {
+#if 0
+    if ( hops > 0 && u_ptr->is_set( MESH_URL_STATE ) ) {
       if ( this->start_time > n.start_time ) {
-        this->direct_pending.update( u_ptr );
+        this->mesh_pending.update( u_ptr );
       }
     }
+#endif
   }
 }
-
+#if 0
 void
-DirectList::update( UserRoute *u ) noexcept
+MeshDirectList::update( UserRoute *u ) noexcept
 {
   this->update( u->rte, u->mesh_url, u->mesh_url_len, u->url_hash,
                 u->n.bridge_id.nonce );
 }
-
+#endif
 void
-DirectList::update( TransportRoute &rte,  const char *url,  uint32_t len,
-                    uint32_t h,  const Nonce &b_nonce ) noexcept
+MeshDirectList::update( TransportRoute &rte,  const char *url,  uint32_t len,
+                        uint32_t h,  const Nonce &b_nonce ) noexcept
 {
   MeshRoute *m;
+  if ( rte.mesh_id == NULL ) {
+    fprintf( stderr, "%s not in a mesh: %.*s\n", rte.name, len, url );
+    return;
+  }
+  if ( h == 0 )
+    h = kv_crc_c( url, len, 0 );
   for ( m = this->hd; m != NULL; m = m->next ) {
-    if ( m->mesh_url_len == len && ::memcmp( m->mesh_url, url, len ) == 0 )
+    if ( m->url_hash == h )
       return;
   }
   void * p = ::malloc( sizeof( MeshRoute ) + len + 1 );
   char * s = &((char *) p)[ sizeof( MeshRoute ) ];
   ::memcpy( s, url, len );
   s[ len ] = '\0';
-  if ( h == 0 )
-    h = kv_crc_c( s, len, 0 );
-  m = new ( p ) MeshRoute( rte, s, len, h, b_nonce );
+  m = new ( p ) MeshRoute( *rte.mesh_id, s, len, h, b_nonce );
   this->push_tl( m );
 }
 
 void
-UserDB::process_direct_pending( uint64_t curr_mono ) noexcept
+UserDB::process_mesh_pending( uint64_t curr_mono ) noexcept
 {
   MeshRoute * next;
   size_t      n_pos;
   uint32_t    uid;
 
-  this->direct_pending.last_process_mono = curr_mono;
-  for ( MeshRoute *m = this->direct_pending.hd; m != NULL; m = next ) {
+  this->mesh_pending.last_process_mono = curr_mono;
+  for ( MeshRoute *m = this->mesh_pending.hd; m != NULL; m = next ) {
     next = m->next;
-    if ( this->node_ht->find( m->b_nonce, n_pos, uid ) ) {
-      UserBridge * n = this->bridge_tab[ uid ];
-      if ( n != NULL ) {
-        if ( this->start_time > n->start_time ) {
-          if ( m->rte.add_mesh_connect( m->mesh_url, m->url_hash ) ) {
-            n->printf( "add_mesh ok %s\n", m->mesh_url );
+    if ( m->conn_mono_time == 0 ) {
+      if ( this->node_ht->find( m->b_nonce, n_pos, uid ) ) {
+        UserBridge * n = this->bridge_tab[ uid ];
+        if ( n != NULL ) {
+          m->conn_mono_time = curr_mono;
+          if ( this->start_time > n->start_time ) {
+            if ( m->rte.add_mesh_connect( m->mesh_url, m->url_hash ) ) {
+              n->printf( "add_mesh ok %s\n", m->mesh_url );
+            }
           }
         }
-        this->direct_pending.pop( m );
-        delete m;
       }
+    }
+    if ( m->start_mono_time == 0 )
+      m->start_mono_time = curr_mono;
+    else if ( m->start_mono_time + SEC_TO_NS < curr_mono ) {
+      this->mesh_pending.pop( m );
+      delete m;
     }
   }
 }
 
 UserBridge *
 UserDB::closest_peer_route( TransportRoute &rte,  UserBridge &n,
-                            uint32_t &dist ) noexcept
+                            uint32_t &cost ) noexcept
 {
-  uint32_t uid;
-  if ( rte.uid_connected.is_member( n.uid ) ) {
-    dist = 0;
-    return &n;
-  }
-  uint32_t d, max_uid = this->peer_dist.max_uid,
-           min_uid    = max_uid,
-           min_dist   = max_uid;
+  uint32_t uid, d,
+           min_uid  = 0,
+           min_cost = COST_MAXIMUM;
   for ( bool ok = rte.uid_connected.first( uid ); ok;
         ok = rte.uid_connected.next( uid ) ) {
-    UserBridge *src = this->bridge_tab.ptr[ uid ];
-    d = this->peer_dist.calc_distance_from( *src, n.uid );
-    if ( d < min_dist ) {
-      min_dist = d;
-      min_uid  = uid;
+    if ( uid != n.uid ) {
+      d = this->peer_dist.calc_cost( uid, n.uid, 0 );
+      if ( d < min_cost ) {
+        min_cost = d;
+        min_uid  = uid;
+      }
     }
   }
-  if ( min_dist == max_uid )
+  if ( min_cost == COST_MAXIMUM )
     return NULL;
-  dist = min_dist;
+  cost = min_cost;
   return this->bridge_tab.ptr[ min_uid ];
 }
 
@@ -1028,19 +1025,13 @@ UserBridge::init_user_route( UserDB &me,  uint32_t i,  uint32_t j,
 uint32_t
 UserDB::new_uid( void ) noexcept
 {
-  size_t   id_pos;
-  uint32_t uid, id_h;
-  do {
-    uid  = this->next_uid++; /* make sure hash( id ) is unique */
-    id_h = kv_hash_uint( uid );
-  } while ( this->uid_tab->find( id_h, id_pos ) );
-  this->uid_tab->set_rsz( this->uid_tab, id_h, id_pos, uid );
+  uint32_t uid = this->next_uid++; /* make sure hash( id ) is unique */
   this->bridge_tab.make( this->next_uid, true );
   return uid;
 }
 
 void
-UserDB::retire_source( TransportRoute &rte,  uint32_t fd ) noexcept
+UserDB::retire_source( TransportRoute &,  uint32_t fd ) noexcept
 {
   for (;;) {
     UserBridge *n = this->close_source_route( fd );
@@ -1054,14 +1045,10 @@ UserDB::retire_source( TransportRoute &rte,  uint32_t fd ) noexcept
   if ( fd < this->route_list.count ) {
     UserRouteList & list = this->route_list[ fd ];
     if ( list.sys_route_refs == 0 ) {
-      BloomRoute *b = this->auth_bloom.get_bloom_by_fd( fd );
+      BloomRoute *b = this->peer_bloom.get_bloom_by_fd( fd, 0 );
       if ( b != NULL ) {
-        printf( "retire auth_bloom fd %u\n", fd );
-        b->del_bloom_ref( &this->auth_bloom );
-        if ( b->nblooms == 0 ) {
-          rte.sub_route.bloom_list.pop( b );
-          delete b;
-        }
+        b->del_bloom_ref( &this->peer_bloom );
+        b->remove_if_empty();
       }
     }
   }
@@ -1093,6 +1080,7 @@ UserDB::add_authenticated( UserBridge &n,
   const char * from     = auth_stage_string( stage );
   bool         send_add = false;
 
+  this->last_auth_mono = cur_time;
   n.auth_count++;
   if ( cur_time - n.auth_mono_time > SEC_TO_NS ) {
     n.printn( "add authentication from %s via %s @ %s, state %s, count=%u\n",
@@ -1112,6 +1100,10 @@ UserDB::add_authenticated( UserBridge &n,
   }
   if ( ! n.test_set( AUTHENTICATED_STATE ) ) {
     this->events.auth_add( n.uid, src ? src->uid : 0, stage );
+    /*printf( "--- uid_csum " ); this->uid_csum.print(); printf( "\n" );*/
+    this->uid_csum ^= n.bridge_id.nonce;
+    /*printf( "--- uid_auth_count %u uid_csum ", this->uid_auth_count );
+    this->uid_csum.print(); printf( "\n" );*/
 
     if ( dec.test( FID_UPTIME ) ) {
       uint64_t uptime = 0;
@@ -1176,7 +1168,7 @@ UserDB::add_authenticated( UserBridge &n,
       this->send_adjacency_change();
   }
   if ( send_add )
-    this->forward_peer_add( n, src->user_route->rte );
+    this->send_peer_add( n, &src->user_route->rte );
 }
 
 void
@@ -1185,6 +1177,7 @@ UserDB::remove_authenticated( UserBridge &n,  ByeReason bye ) noexcept
   size_t n_pos;
   bool   send_del = false;
 
+  this->last_auth_mono = current_monotonic_time_ns();
   /*if ( debug_usr )*/
     n.printn( "remove auth %s %s\n", bye_reason_string( bye ),
                n.is_set( ZOMBIE_STATE ) ? "zombie" : "" );
@@ -1195,12 +1188,12 @@ UserDB::remove_authenticated( UserBridge &n,  ByeReason bye ) noexcept
     if ( bye != BYE_HB_TIMEOUT )
       this->remove_adjacency( n );
     this->uid_auth_count--;
-    this->sub_db.sub_update_mono_time = current_monotonic_time_ns();
+    this->sub_db.sub_update_mono_time = this->last_auth_mono;
     d_usr( "--- uid_auth_count=%u -%s\n", this->uid_auth_count,
             n.peer.user.val );
-    /**this->uid_csum = *this->uid_csum ^ n.bridge_id.nonce;
-    printf( "--- uid_auth_count %u uid_csum ", this->uid_auth_count );
-    this->uid_csum->print(); printf( "\n" );*/
+    this->uid_csum ^= n.bridge_id.nonce;
+    /*printf( "--- uid_auth_count %u uid_csum ", this->uid_auth_count );
+    this->uid_csum.print(); printf( "\n" );*/
 
     send_del = true;
   }
@@ -1225,7 +1218,16 @@ UserDB::remove_authenticated( UserBridge &n,  ByeReason bye ) noexcept
        n.bloom.has_link( this->ipc_transport->fd ) )
     this->ipc_transport->sub_route.do_notify_bloom_deref( n.bloom );
   n.bloom.unlink( false );
+  for ( uint8_t i = 0; i < COST_PATH_COUNT; i++ ) {
+    if ( n.bloom_rt[ i ] != NULL ) {
+      n.bloom_rt[ i ]->remove_if_empty();
+      n.bloom_rt[ i ] = NULL;
+    }
+    n.forward_path[ i ].reset();
+    n.src_path[ i ].zero();
+  }
   n.bloom.zero();
+  n.adjacency.reset();
   n.sub_seqno = 0;
   n.link_state_seqno = 0;
   n.uid_csum.zero();
@@ -1237,6 +1239,8 @@ UserDB::remove_authenticated( UserBridge &n,  ByeReason bye ) noexcept
     this->zombie_ht->upsert_rsz( this->zombie_ht, n.bridge_id.nonce, n.uid );
   n.state = ZOMBIE_STATE;
   n.user_route_reset();
+  n.user_route = NULL;
+  n.primary_route = 0;
 
   if ( ! this->adjacency_change.is_empty() )
     this->send_adjacency_change();
@@ -1270,9 +1274,23 @@ UserDB::set_mesh_url( UserRoute &u_rte,  const MsgHdrDecoder &dec ) noexcept
 }
 
 void
+UserDB::add_bloom_routes( UserBridge &n,  TransportRoute &rte ) noexcept
+{
+  BloomRoute *rt = rte.router_rt[ 0 ];
+  if ( ! n.bloom.has_link( rt->r ) ) {
+    rt->add_bloom_ref( &n.bloom );
+    if ( rte.is_set( TPORT_IS_IPC ) )
+      rte.sub_route.do_notify_bloom_ref( n.bloom );
+    for ( uint8_t i = 1; i < COST_PATH_COUNT; i++ )
+      rte.router_rt[ i ]->add_bloom_ref( &n.bloom );
+    d_usr( "add_bloom_ref( %s, %s )\n", n.peer.user.val,
+           rte.transport.tport.val );
+  }
+}
+
+void
 UserDB::add_transport( TransportRoute &rte ) noexcept
 {
-  TransportRoute *t = this->transport_tab.ptr[ 0 ];
   this->peer_dist.invalidate( ADD_TRANSPORT_INV );
 
   for ( uint32_t uid = 1; uid < this->next_uid; uid++ ) {
@@ -1281,20 +1299,7 @@ UserDB::add_transport( TransportRoute &rte ) noexcept
     UserBridge &n = *this->bridge_tab.ptr[ uid ];
     if ( ! n.is_set( AUTHENTICATED_STATE ) )
       continue;
-
-    if ( this->transport_tab.count == 2 &&
-         ! n.bloom.has_link( t->router_rt->r ) ) {
-      t->router_rt->add_bloom_ref( &n.bloom );
-      if ( t->is_set( TPORT_IS_IPC ) )
-        t->sub_route.do_notify_bloom_ref( n.bloom );
-      d_usr( "add_bloom_ref( %s, %s )\n", n.peer.user.val,
-              t->transport.tport.val );
-    }
-    rte.router_rt->add_bloom_ref( &n.bloom );
-    if ( rte.is_set( TPORT_IS_IPC ) )
-      rte.sub_route.do_notify_bloom_ref( n.bloom );
-    d_usr( "add_bloom_ref( %s, %s )\n", n.peer.user.val,
-           rte.transport.tport.val );
+    this->add_bloom_routes( n, rte );
   }
 }
 
@@ -1307,18 +1312,21 @@ UserDB::add_inbox_route( UserBridge &n,  UserRoute *primary ) noexcept
   uint32_t    count = (uint32_t) this->transport_tab.count;
 
   if ( primary == NULL ) {
-    for ( uint32_t i = 0; i < count; i++ ) {
-      UserRoute * u_ptr = n.user_route_ptr( *this, i );
+    uint32_t primary_route = n.primary_route;
+    for ( uint32_t tport_id = 0; tport_id < count; tport_id++ ) {
+      UserRoute * u_ptr = n.user_route_ptr( *this, tport_id );
       if ( u_ptr->is_valid() ) {
         if ( primary == NULL ||
-             this->peer_dist.calc_transport_cache( n.uid, i, u_ptr->rte ) <
-             this->peer_dist.calc_transport_cache( n.uid, i, primary->rte ) ) {
+             this->peer_dist.calc_transport_cache( n.uid, tport_id, 0 ) <
+             this->peer_dist.calc_transport_cache( n.uid, primary_route, 0 ) ) {
+          primary_route = tport_id;
           primary = u_ptr;
         }
       }
     }
   }
   if ( inbox->is_set( INBOX_ROUTE_STATE ) ) {
+    /* reassign primary, deref inbox */
     if ( primary != inbox ) {
       if ( debug_usr )
         n.printf( "del inbox route %.*s -> %u\n",
@@ -1326,7 +1334,9 @@ UserDB::add_inbox_route( UserBridge &n,  UserRoute *primary ) noexcept
       if ( this->ipc_transport != NULL &&
            n.bloom.has_link( this->ipc_transport->fd ) )
         this->ipc_transport->sub_route.do_notify_bloom_deref( n.bloom );
-      n.bloom.unlink( false );
+      n.bloom_rt[ 0 ]->del_bloom_ref( &n.bloom );
+      n.bloom_rt[ 0 ]->remove_if_empty();
+      n.bloom_rt[ 0 ] = NULL;
       inbox->rte.sub_route.del_pattern_route_str( ibx.buf, (uint16_t) ibx.len(),
                                                   inbox->inbox_fd );
       inbox->rte.primary_count--;
@@ -1337,6 +1347,7 @@ UserDB::add_inbox_route( UserBridge &n,  UserRoute *primary ) noexcept
     n.printe( "add inbox no valid route\n" );
     return;
   }
+  /* reset hb timeout */
   if ( n.primary_route != primary->rte.tport_id ) {
     n.primary_route = primary->rte.tport_id;
     n.hb_seqno = 0;
@@ -1346,18 +1357,21 @@ UserDB::add_inbox_route( UserBridge &n,  UserRoute *primary ) noexcept
       this->hb_queue.push( &n );
     }
   }
+  /* add bloom for sending messages to peer */
   if ( ! primary->test_set( INBOX_ROUTE_STATE ) ) {
     if ( debug_usr )
       n.printf( "add inbox_route %.*s -> %u (%s) (bcast %u)\n",
               (int) ibx.len(), ibx.buf, primary->inbox_fd,
               primary->ucast_url_len == 0 ? "ptp" : primary->ucast_url,
               primary->mcast_fd );
-    primary->rte.sub_route.create_bloom_route( primary->mcast_fd, &n.bloom );
+    n.bloom_rt[ 0 ] = primary->rte.sub_route.create_bloom_route(
+                                               primary->mcast_fd, &n.bloom, 0 );
     primary->rte.sub_route.do_notify_bloom_ref( n.bloom );
     primary->rte.sub_route.add_pattern_route_str( ibx.buf, (uint16_t) ibx.len(),
                                                   primary->inbox_fd );
     primary->rte.primary_count++;
   }
+  /* already routing */
   else {
     if ( debug_usr )
       n.printf( "inbox exists %.*s -> %u (%s) (bcast %u)\n",
@@ -1365,22 +1379,15 @@ UserDB::add_inbox_route( UserBridge &n,  UserRoute *primary ) noexcept
               primary->ucast_url_len == 0 ? "ptp" : primary->ucast_url,
               primary->mcast_fd );
   }
+  /* add inbox to bloom */
   if ( ! n.test_set( INBOX_ROUTE_STATE ) ) {
     uint32_t seed = primary->rte.sub_route.prefix_seed( ibx.len() ),
              hash = kv_crc_c( ibx.buf, ibx.len(), seed );
     n.bloom.add_route( (uint16_t) ibx.len(), hash );
   }
-  if ( count > 1 ) {
-    for ( uint32_t i = 0; i < count; i++ ) {
-      TransportRoute *t = this->transport_tab.ptr[ i ];
-      if ( ! n.bloom.has_link( t->router_rt->r ) ) {
-        t->router_rt->add_bloom_ref( &n.bloom );
-        if ( t->is_set( TPORT_IS_IPC ) )
-          t->sub_route.do_notify_bloom_ref( n.bloom );
-        d_usr( "add_bloom_ref( %s, %s )\n", n.peer.user.val,
-               t->transport.tport.val );
-      }
-    }
+  for ( uint32_t i = 0; i < count; i++ ) {
+    TransportRoute & rte = *this->transport_tab.ptr[ i ];
+    this->add_bloom_routes( n, rte );
   }
 }
 

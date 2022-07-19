@@ -515,8 +515,9 @@ struct Console : public md::MDOutput, public SubOnMsg, public ConfigPrinter {
   void show_urls( ConsoleOutput *p ) noexcept;
   void show_counters( ConsoleOutput *p ) noexcept;
   void show_reachable( ConsoleOutput *p ) noexcept;
-  void show_tree( ConsoleOutput *p,  const UserBridge *src ) noexcept;
-  void show_primary( ConsoleOutput *p ) noexcept;
+  void show_tree( ConsoleOutput *p,  const UserBridge *src,
+                  uint8_t path_select ) noexcept;
+  void show_path( ConsoleOutput *p,  uint8_t path_select ) noexcept;
   void show_fds( ConsoleOutput *p ) noexcept;
   void show_blooms( ConsoleOutput *p ) noexcept;
   void show_running( ConsoleOutput *p,  int which,  const char *name,
@@ -582,7 +583,7 @@ enum ConsoleCmd {
   CMD_SHOW_COUNTERS    = 18, /* show counters              */
   CMD_SHOW_REACHABLE   = 19, /* show reachable             */
   CMD_SHOW_TREE        = 20, /* show tree [U]              */
-  CMD_SHOW_PRIMARY     = 21, /* show primary               */
+  CMD_SHOW_PATH        = 21, /* show primary               */
   CMD_SHOW_FDS         = 22, /* show fds                   */
   CMD_SHOW_BLOOMS      = 23, /* show blooms                */
   CMD_SHOW_RUN         = 24, /* show running               */
@@ -742,7 +743,7 @@ static const ConsoleCmdString show_cmd[] = {
   { CMD_SHOW_COUNTERS  , "counters"      ,0,0}, /* show counters */
   { CMD_SHOW_REACHABLE , "reachable"     ,0,0}, /* show reachable */
   { CMD_SHOW_TREE      , "tree"          ,0,0}, /* show tree */
-  { CMD_SHOW_PRIMARY   , "primary"       ,0,0}, /* show primary */
+  { CMD_SHOW_PATH      , "path"          ,0,0}, /* show path */
   { CMD_SHOW_FDS       , "fds"           ,0,0}, /* show fds */
   { CMD_SHOW_BLOOMS    , "blooms"        ,0,0}, /* show blooms */
   { CMD_SHOW_RUN       , "running"       ,0,0}  /* show running */
@@ -791,7 +792,7 @@ static const ConsoleCmdString help_cmd[] = {
   { CMD_SHOW_COUNTERS    , "show counters", "",  "Show peers seqno and time values"                  },
   { CMD_SHOW_REACHABLE   , "show reachable", "", "Show reachable peers through tports"               },
   { CMD_SHOW_TREE        , "show tree", "[U]",   "Show multicast tree from me or U"                  },
-  { CMD_SHOW_PRIMARY     , "show primary", "",   "Show primary multicast tree"                       },
+  { CMD_SHOW_PATH        , "show path", "[N]",   "Show multicast path N"                       },
   { CMD_SHOW_FDS         , "show fds", "",       "Show fd centric routes"                            },
   { CMD_SHOW_BLOOMS      , "show blooms", "",    "Show bloom centric routes"                         },
   { CMD_SHOW_RUN         , "show running", "",   "Show all config running"                           },

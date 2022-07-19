@@ -1088,8 +1088,9 @@ TabPrint::width( UserDB &user_db,  char *buf ) noexcept
         return 0;
       u_ptr = n->primary( user_db );
       this->len = user_db.peer_dist.calc_transport_cache( this->n->uid,
-                                                          u_ptr->rte.tport_id,
-                                                          u_ptr->rte );
+                                                       u_ptr->rte.tport_id, 0 );
+      if ( this->len == COST_MAXIMUM )
+        return 1;
       /* fall through */
     case PRINT_INT:
       return (uint32_t) uint32_digits( this->len );
@@ -1238,6 +1239,8 @@ TabPrint::string( char *buf ) noexcept
     case PRINT_DIST:
       if ( this->n == NULL )
         return "";
+      if ( this->len == COST_MAXIMUM )
+        return "X";
       /* fall through */
     case PRINT_INT:
       sz = uint32_to_string( this->len, buf );
@@ -1315,7 +1318,6 @@ TabPrint::string( char *buf ) noexcept
       if ( this->len & TPORT_IS_EDGE      ) buf[ j++ ] = 'E';
       if ( this->len & TPORT_IS_IPC       ) buf[ j++ ] = 'I';
       if ( this->len & TPORT_IS_SHUTDOWN  ) buf[ j++ ] = '-';
-      if ( this->len & TPORT_IS_PREFERRED ) buf[ j++ ] = '%';
       buf[ j ] = '\0';
       return buf;
     }
@@ -1365,7 +1367,6 @@ hdr_full( const char *h )
     "ac",   "accept",
     "bs",   "bytes sent",
     "br",   "bytes recv",
-    "dist", "distance",
     "fl",   "flags",
     "lat",  "latency",
     "link", "link seqno",
@@ -1554,6 +1555,17 @@ Console::find_user( const char *name,  size_t len ) noexcept
   return NULL;
 }
 
+static uint32_t
+int_arg( const char *arg,  size_t len ) noexcept
+{
+  uint32_t i = 0;
+  while ( len > 0 && *arg >= '0' && *arg <= '9' ) {
+    i = i * 10 + (uint32_t) ( *arg - '0' );
+    len--; arg++;
+  }
+  return i;
+}
+
 bool
 Console::on_input( ConsoleOutput *p,  const char *buf,
                    size_t buflen ) noexcept
@@ -1640,6 +1652,18 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
     case CMD_TPORT_LISTEN:
     case CMD_TPORT_CONNECT:
     case CMD_TPORT_PORT:
+      if ( argc < 1 )
+        goto help;
+      if ( argc < 2 ) {
+        args[ 1 ] = NULL;
+        arglen[ 1 ] = 0;
+      }
+      else {
+        arglen[ 1 ] = &args[ argc - 1 ][ arglen[ argc - 1 ] ] - args[ 1 ];
+      }
+      this->config_tport_route( args[ 0 ], arglen[ 0 ],
+                                args[ 1 ], arglen[ 1 ] );
+      break;
     case CMD_TPORT_TIMEOUT:
     case CMD_TPORT_MTU:
     case CMD_TPORT_TXW_SQNS:
@@ -1697,10 +1721,15 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
       break;
     case CMD_SHOW_COUNTERS:  this->show_counters( p );  break;
     case CMD_SHOW_REACHABLE: this->show_reachable( p ); break;
-    case CMD_SHOW_TREE:
-      this->show_tree( p, this->find_user( arg, len ) );
+    case CMD_SHOW_TREE: {
+      UserBridge * u = this->find_user( arg, len );
+      uint32_t     i = ( u == NULL ? int_arg( arg, len ) : 0 );
+      if ( u != NULL && argc > 1 )
+        i = int_arg( args[ 1 ], arglen[ 1 ] );
+      this->show_tree( p, u, i );
       break;
-    case CMD_SHOW_PRIMARY:   this->show_primary( p );   break;
+    }
+    case CMD_SHOW_PATH:      this->show_path( p, int_arg( arg, len ) ); break;
     case CMD_SHOW_FDS:       this->show_fds( p );       break;
     case CMD_SHOW_BLOOMS:    this->show_blooms( p );    break;
     case CMD_SHOW_RUN:
@@ -2179,26 +2208,34 @@ Console::config_tport_route( const char *param, size_t plen,
 {
   ConfigTree::PairList & route = this->cfg_tport->route;
   ConfigTree::StringPair *sp = route.get_pair( param, plen );
+
+  if ( sp == NULL ) {
+    if ( vlen == 0 ) {
+      this->printf( "notfound: %.*s\n", (int) plen, param );
+      return;
+    }
+  }
   if ( sp != NULL ) {
-    if ( vlen > 0 )
-      this->string_tab.reref_string( value, vlen, sp->value );
-    else {
+    ConfigTree::StringPair *next;
+    for (;;) {
+      next = sp->next;
+      if ( vlen != 0 && ( next == NULL || ! next->name.equals( param, plen ) ) )
+        break;
       route.unlink( sp );
       this->free_pairs.push_tl( sp );
+      if ( vlen == 0 && ( next == NULL || ! next->name.equals( param, plen ) ) )
+        return;
+      sp = next;
     }
-    return;
   }
-  if ( vlen == 0 ) {
-    this->printf( "notfound: %.*s\n", (int) plen, param );
-  }
-  else {
+  if ( sp == NULL ) {
     if ( this->free_pairs.is_empty() )
       sp = this->string_tab.make<ConfigTree::StringPair>();
     else
       sp = this->free_pairs.pop_hd();
-    this->string_tab.ref_string( param, plen, sp->name );
     route.push_tl( sp );
   }
+  this->string_tab.reref_string( param, plen, sp->name );
   this->string_tab.reref_string( value, vlen, sp->value );
 }
 
@@ -2329,7 +2366,7 @@ Console::on_ping( ConsolePing &ping ) noexcept
       tab[ i++ ].set_null();
   }
   this->table.count = i;
-  static const char *hdr[ ncols ] = { "user", "dist", "lat", "tport" };
+  static const char *hdr[ ncols ] = { "user", "cost", "lat", "tport" };
   for ( size_t n = 0; n < ping.out.count; n++ ) {
     ConsoleOutput * p = ping.out.ptr[ n ];
     this->print_table( p, hdr, ncols );
@@ -2640,6 +2677,7 @@ PortOutput::put_show_ports( void ) noexcept
   this->console.table.count += this->ncols;
   tab[ i++ ].set( *this->tport, this->tport_id, PRINT_ID );
   tab[ i++ ].set( type ); /* type */
+  tab[ i++ ].set_int( this->rte->uid_connected.cost[ 0 ] ); /* cost */
   if ( ( this->flags & P_IS_DOWN ) == 0 )
     tab[ i++ ].set_int( this->fd ); /* fd */
   else
@@ -2687,7 +2725,7 @@ PortOutput::put_show_ports( void ) noexcept
 void
 Console::show_ports( ConsoleOutput *p, const char *name,  size_t len ) noexcept
 {
-  static const uint32_t ncols = 10;
+  static const uint32_t ncols = 11;
   size_t count = this->user_db.transport_tab.count;
 
   if ( len == 3 && ::memcmp( name, "all", 3 ) == 0 )
@@ -2706,8 +2744,8 @@ Console::show_ports( ConsoleOutput *p, const char *name,  size_t len ) noexcept
     PortOutput out( *this, (uint32_t) t, ncols );
     out.output( &PortOutput::put_show_ports );
   }
-  static const char *hdr[ ncols ] = { "tport", "type", "fd", "bs", "br", "ms",
-                                      "mr", "lat", "fl", "address" };
+  static const char *hdr[ ncols ] = { "tport", "type", "cost", "fd", "bs", "br",
+                                      "ms", "mr", "lat", "fl", "address" };
   this->print_table( p, hdr, ncols );
 }
 
@@ -2723,6 +2761,7 @@ PortOutput::put_status( void ) noexcept
   this->console.table.count += this->ncols;
   tab[ i++ ].set( *this->tport, this->tport_id, PRINT_ID );
   tab[ i++ ].set( type ); /* type */
+  tab[ i++ ].set_int( this->rte->uid_connected.cost[ 0 ] ); /* cost */
   if ( ( this->flags & P_IS_DOWN ) == 0 )
     tab[ i++ ].set_int( this->fd ); /* fd */
   else
@@ -2756,7 +2795,7 @@ PortOutput::put_status( void ) noexcept
 void
 Console::show_status( ConsoleOutput *p, const char *name,  size_t len ) noexcept
 {
-  static const uint32_t ncols = 5;
+  static const uint32_t ncols = 6;
   size_t count = this->user_db.transport_tab.count;
 
   if ( len == 3 && ::memcmp( name, "all", 3 ) == 0 )
@@ -2775,7 +2814,8 @@ Console::show_status( ConsoleOutput *p, const char *name,  size_t len ) noexcept
     PortOutput out( *this, (uint32_t) t, ncols );
     out.output( &PortOutput::put_status );
   }
-  static const char *hdr[ ncols ] = { "tport", "type", "fd", "fl", "status" };
+  static const char *hdr[ ncols ] = { "tport", "type", "cost", "fd", "fl",
+                                      "status" };
   this->print_table( p, hdr, ncols );
 }
 
@@ -2909,7 +2949,7 @@ Console::show_peers( ConsoleOutput *p ) noexcept
   tab[ i++ ].set_long( this->user_db.link_state_seqno ); /* link */
   tab[ i++ ].set_null(); /* lat */
   tab[ i++ ].set_null(); /* tport */
-  tab[ i++ ].set_null(); /* dist */
+  tab[ i++ ].set_null(); /* cost */
   tab[ i++ ].set_null(); /* ptp */
 
   for ( uint32_t uid = 0; uid < this->user_db.next_uid; uid++ ) {
@@ -2928,14 +2968,14 @@ Console::show_peers( ConsoleOutput *p ) noexcept
     UserRoute *u_ptr = n->primary( this->user_db );
     if ( ! u_ptr->is_valid() ) {
       tab[ i++ ].set_null(); /* tport */
-      tab[ i++ ].set_null(); /* dist */
+      tab[ i++ ].set_null(); /* cost */
       tab[ i++ ].set_null(); /* address */
     }
     else {
       const char * url_type = u_ptr->rte.transport.type.val;
       tab[ i++ ].set( u_ptr->rte.transport.tport, u_ptr->rte.tport_id,
                       PRINT_ID ); /* tport */
-      tab[ i++ ].set( n, PRINT_DIST ); /* dist */
+      tab[ i++ ].set( n, PRINT_DIST ); /* cost */
       switch ( u_ptr->is_set( UCAST_URL_STATE | UCAST_URL_SRC_STATE |
                               MESH_URL_STATE ) ) {
         default: { /* normal tcp */
@@ -2978,14 +3018,14 @@ Console::show_peers( ConsoleOutput *p ) noexcept
     }
   }
   static const char *hdr[ ncols ] = { "user", "bridge", "sub", "link", "lat",
-                                      "tport", "dist", "address" };
+                                      "tport", "cost", "address" };
   this->print_table( p, hdr, ncols );
 }
 
 void
 Console::show_adjacency( ConsoleOutput *p ) noexcept
 {
-  static const size_t cols = 3;
+  static const size_t cols = 4;
   TabPrint * tab = NULL;
   size_t     count, i = 0, sep;
   uint32_t   uid, last_user, last_tport;
@@ -3014,6 +3054,7 @@ Console::show_adjacency( ConsoleOutput *p ) noexcept
         tab[ i++ ].set( rte->transport.tport, (uint32_t) t, PRINT_ID );
       else
         tab[ i++ ].set_null();
+      tab[ i++ ].set_int( rte->uid_connected.cost[ 0 ] );
       last_user  = 0;
       last_tport = (uint32_t) t;
     }
@@ -3027,6 +3068,7 @@ Console::show_adjacency( ConsoleOutput *p ) noexcept
         tab[ i++ ].set_null();
       tab[ i++ ].set_null();
       tab[ i++ ].set( rte->transport.tport, (uint32_t) t, PRINT_ID );
+      tab[ i++ ].set_int( rte->uid_connected.cost[ 0 ] );
       last_user  = 0;
       last_tport = (uint32_t) t;
     }
@@ -3072,6 +3114,7 @@ Console::show_adjacency( ConsoleOutput *p ) noexcept
           }
           else
             tab[ i++ ].set_null();
+          tab[ i++ ].set_int( set->cost[ 0 ] );
           last_user  = uid;
           last_tport = j;
         }
@@ -3082,20 +3125,21 @@ Console::show_adjacency( ConsoleOutput *p ) noexcept
       sep = i;
     }
   }
-  const char *hdr[ cols ] = { "user", "adj", "tport" };
+  const char *hdr[ cols ] = { "user", "adj", "tport", "cost" };
   this->print_table( p, hdr, cols );
 
   this->printf( "consistent: %s\n",
-    this->user_db.peer_dist.is_consistent() ? "true" : "false" );
+    this->user_db.peer_dist.found_inconsistency ? "false" : "true" );
+
   UserBridge * from, * to;
-  while ( this->user_db.peer_dist.find_inconsistent2( from, to ) ) {
+  while ( this->user_db.peer_dist.find_inconsistent( from, to ) ) {
     if ( from != NULL ) {
       if ( to != NULL ) {
-        this->printf( "find_inconsistent2 from %s.%u to %s.%u\n",
+        this->printf( "find_inconsistent from %s.%u to %s.%u\n",
           from->peer.user.val, from->uid, to->peer.user.val, to->uid );
       }
       else {
-        this->printf( "find_inconsistent2 from %s.%u orphaned\n",
+        this->printf( "find_inconsistent from %s.%u orphaned\n",
           from->peer.user.val, from->uid );
       }
     }
@@ -3222,10 +3266,10 @@ Console::show_routes( ConsoleOutput *p ) noexcept
       tab[ i - 1 ].typ |= PRINT_SEP;
     tab[ i++ ].set( n, PRINT_USER ); /* user */
 
-    size_t count = this->user_db.transport_tab.count;
+    uint32_t count = this->user_db.transport_tab.count;
     first_tport = true;
-    for ( size_t t = 0; t < count; t++ ) {
-      UserRoute *u_ptr = n->user_route_ptr( this->user_db, (uint32_t) t );
+    for ( uint32_t tport_id = 0; tport_id < count; tport_id++ ) {
+      UserRoute *u_ptr = n->user_route_ptr( this->user_db, tport_id );
       if ( ! u_ptr->is_valid() )
         continue;
 
@@ -3237,14 +3281,17 @@ Console::show_routes( ConsoleOutput *p ) noexcept
       else {
         first_tport = false;
       }
-      TransportRoute *rte = this->user_db.transport_tab.ptr[ t ];
-      uint32_t dist =
-        this->user_db.peer_dist.calc_transport_cache( uid, (uint32_t) t, *rte );
-      tab[ i++ ].set( rte->transport.tport, (uint32_t) t, PRINT_ID );
+      TransportRoute *rte = this->user_db.transport_tab.ptr[ tport_id ];
+      uint32_t cost =
+        this->user_db.peer_dist.calc_transport_cache( uid, tport_id, 0 );
+      tab[ i++ ].set( rte->transport.tport, tport_id, PRINT_ID );
       tab[ i++ ].set_int( u_ptr->state, PRINT_STATE ); /* state */
 
-      tab[ i++ ].set_int( dist );  /* dist */
-      if ( n->primary_route == t )
+      if ( cost != COST_MAXIMUM )
+        tab[ i++ ].set_int( cost );  /* cost */
+      else
+        tab[ i++ ].set( "X" );  /* cost */
+      if ( n->primary_route == tport_id )
         tab[ i++ ].set_long( n->round_trip_time, PRINT_LATENCY ); /* lat */
       else
         tab[ i++ ].set_null();
@@ -3252,7 +3299,7 @@ Console::show_routes( ConsoleOutput *p ) noexcept
       switch ( u_ptr->is_set( UCAST_URL_STATE | UCAST_URL_SRC_STATE |
                               MESH_URL_STATE ) ) {
         case MESH_URL_STATE:
-          if ( dist == 0 ) {
+          if ( cost == 1 ) {
             tab[ i++ ].set( u_ptr->mesh_url, u_ptr->mesh_url_len ); /* ptp */
             break;
           }
@@ -3264,7 +3311,7 @@ Console::show_routes( ConsoleOutput *p ) noexcept
             bool found = false;
             address  = poll.sock[ ucast_fd ]->peer_address.buf;
             addr_len = (uint32_t) get_strlen64( address );
-            if ( dist > 0 && u_ptr->rte.uid_connected.first( uid2 ) ) {
+            if ( cost > 1 && u_ptr->rte.uid_connected.first( uid2 ) ) {
               UserBridge * n = this->user_db.bridge_tab[ uid2 ];
               if ( n != NULL && n->is_set( AUTHENTICATED_STATE ) ) { /* ptp */
                 tab[ i++ ].set_url_dest( n, url_type, address, addr_len );
@@ -3304,7 +3351,7 @@ Console::show_routes( ConsoleOutput *p ) noexcept
     }
   }
   static const char *hdr[ ncols ] = { "user", "tport", "state",
-                                      "dist", "lat", "route" };
+                                      "cost", "lat", "route" };
   this->print_table( p, hdr, ncols );
 }
 
@@ -3331,10 +3378,10 @@ Console::show_urls( ConsoleOutput *p ) noexcept
       tab[ i - 1 ].typ |= PRINT_SEP;
     tab[ i++ ].set( n, PRINT_USER ); /* user */
 
-    size_t count = this->user_db.transport_tab.count;
+    uint32_t count = this->user_db.transport_tab.count;
     first_tport = true;
-    for ( size_t t = 0; t < count; t++ ) {
-      UserRoute *u_ptr = n->user_route_ptr( this->user_db, (uint32_t) t );
+    for ( uint32_t tport_id = 0; tport_id < count; tport_id++ ) {
+      UserRoute *u_ptr = n->user_route_ptr( this->user_db, tport_id );
       if ( ! u_ptr->is_valid() )
         continue;
 
@@ -3346,13 +3393,16 @@ Console::show_urls( ConsoleOutput *p ) noexcept
       else {
         first_tport = false;
       }
-      TransportRoute *rte = this->user_db.transport_tab.ptr[ t ];
-      uint32_t dist =
-        this->user_db.peer_dist.calc_transport_cache( uid, (uint32_t) t, *rte );
-      tab[ i++ ].set( rte->transport.tport, (uint32_t) t, PRINT_ID );
+      TransportRoute *rte = this->user_db.transport_tab.ptr[ tport_id ];
+      uint32_t cost =
+        this->user_db.peer_dist.calc_transport_cache( uid, tport_id, 0 );
+      tab[ i++ ].set( rte->transport.tport, tport_id, PRINT_ID );
       tab[ i++ ].set_int( u_ptr->state, PRINT_STATE ); /* state */
 
-      tab[ i++ ].set_int( dist );  /* dist */
+      if ( cost != COST_MAXIMUM )
+        tab[ i++ ].set_int( cost );  /* cost */
+      else
+        tab[ i++ ].set( "X" );  /* cost */
       if ( rte->mesh_id == NULL )
         tab[ i++ ].set_null();
       else
@@ -3409,7 +3459,7 @@ Console::show_urls( ConsoleOutput *p ) noexcept
     }
   }
   static const char *hdr[ ncols ] = { "user", "tport", "state",
-                                      "dist", "mesh", "url",
+                                      "cost", "mesh", "url",
                                       "local", "remote" };
   this->print_table( p, hdr, ncols );
 }
@@ -3494,95 +3544,90 @@ Console::show_reachable( ConsoleOutput *p ) noexcept
 }
 
 void
-Console::show_tree( ConsoleOutput *p,  const UserBridge *src ) noexcept
+Console::show_tree( ConsoleOutput *p,  const UserBridge *src,
+                    uint8_t path_select ) noexcept
 {
   static const uint32_t ncols = 4;
   AdjDistance & peer_dist = this->user_db.peer_dist;
   TabPrint    * tab;
   char          buf[ 80 ];
-  uint32_t      i = 0,
-                src_uid;
+  uint32_t      i       = 0,
+                src_uid = ( src != NULL ? src->uid : 0 ),
+                cost    = 0,
+                max_uid = peer_dist.max_uid;
+
+  path_select &= ( COST_PATH_COUNT - 1 );
   this->table.count = 0;
   this->tmp.count = 0;
-  if ( src != NULL )
-    src_uid = src->uid;
-  else
-    src_uid = 0;
 
-  for ( uint32_t dist = 0; ; dist++ ) {
-    if ( peer_dist.calc_dist_peers( src_uid, dist ) == 0 )
-      break;
-    uint32_t count = peer_dist.uid_next.idx;
+  peer_dist.coverage_init( src_uid, path_select );
+  while ( (cost = peer_dist.coverage_step()) != 0 ) {
+    UIntBitSet & fwd = peer_dist.fwd;
+    uint32_t uid, count = fwd.count( max_uid );
     tab = this->table.make( count * ncols );
     this->table.count += count * ncols;
-    for ( uint32_t k = 0; k < count; k++ ) {
-      PeerUidSet * rec = peer_dist.uid_next.ptr[ k ];
-      uint32_t uid = rec->src_uid;
-      tab[ i++ ].set_int( dist ); /* dist */
-      if ( uid == UserDB::MY_UID ) {
+
+    for ( bool ok = fwd.first( uid, max_uid ); ok;
+          ok = fwd.next( uid, max_uid ) ) {
+      AdjacencySpace * set = peer_dist.coverage_link( uid );
+
+      tab[ i++ ].set_int( cost ); /* cost */
+      if ( set->uid == UserDB::MY_UID ) {
         TransportRoute *rte =
-          this->user_db.transport_tab.ptr[ rec->tport_id ];
+          this->user_db.transport_tab.ptr[ set->tport_id ];
         tab[ i++ ].set( this->user_db.user.user, PRINT_SELF ); /* user */
-        tab[ i++ ].set( rte->transport.tport, rec->tport_id, PRINT_ID );
+        tab[ i++ ].set( rte->transport.tport, set->tport_id, PRINT_ID );
       }
       else {
-        UserBridge * n = this->user_db.bridge_tab.ptr[ uid ];
+        UserBridge * n = this->user_db.bridge_tab.ptr[ set->uid ];
         tab[ i++ ].set( n, PRINT_USER ); /* user */
-        AdjacencySpace *set = n->adjacency[ rec->tport_id ];
         if ( set->tport.len > 0 )
-          tab[ i++ ].set( set->tport, rec->tport_id, PRINT_ID );
+          tab[ i++ ].set( set->tport, set->tport_id, PRINT_ID );
         else
-          tab[ i++ ].set_int( rec->tport_id );
+          tab[ i++ ].set_int( set->tport_id );
       }
-      peer_dist.uid_set_names( *rec, buf, sizeof( buf ) );
+      peer_dist.uid_set_names( fwd, buf, sizeof( buf ) );
       this->tab_string( buf, tab[ i++ ] ); /* dest */
     }
   }
 
   static const char *hdr[ ncols ] =
-    { "dist", "source", "tport", "dest" };
+    { "cost", "source", "tport", "dest" };
   this->print_table( p, hdr, ncols );
 }
 
 void
-Console::show_primary( ConsoleOutput *p ) noexcept
+Console::show_path( ConsoleOutput *p,  uint8_t path_select ) noexcept
 {
-  static const uint32_t ncols = 3;
+  static const uint32_t ncols = 4;
   AdjDistance & peer_dist = this->user_db.peer_dist;
   TabPrint    * tab;
-  char          buf[ 80 ];
   uint32_t      i = 0;
+
+  path_select &= ( COST_PATH_COUNT - 1 );
   this->table.count = 0;
   this->tmp.count = 0;
-  peer_dist.calc_primary();
+  peer_dist.update_path( path_select );
 
-  uint32_t count = peer_dist.uid_primary.idx;
-  tab = this->table.make( count * ncols );
-  this->table.count += count * ncols;
-  for ( uint32_t k = 0; k < count; k++ ) {
-    PeerUidSet * rec = peer_dist.uid_primary.ptr[ k ];
-    uint32_t uid = rec->src_uid;
-    if ( uid == UserDB::MY_UID ) {
-      TransportRoute *rte =
-        this->user_db.transport_tab.ptr[ rec->tport_id ];
-      tab[ i++ ].set( this->user_db.user.user, PRINT_SELF ); /* user */
-      tab[ i++ ].set( rte->transport.tport, rec->tport_id, PRINT_ID );
-    }
-    else {
+  uint32_t count = peer_dist.max_uid;
+  for ( uint32_t uid = 1; uid < count; uid++ ) {
+    UidSrcPath path  = peer_dist.x[ path_select ].path[ uid ];
+    uint32_t path_cost = peer_dist.calc_transport_cache( uid, path.tport,
+                                                         path_select );
+    if ( path.cost != 0 ) {
       UserBridge * n = this->user_db.bridge_tab.ptr[ uid ];
+      TransportRoute * rte = this->user_db.transport_tab.ptr[ path.tport ];
+      tab = this->table.make( ncols );
+      this->table.count += ncols;
+      tab[ i++ ].set( rte->transport.tport, path.tport, PRINT_ID );
+      tab[ i++ ].set_int( path.cost ); /* cost */
+      tab[ i++ ].set_int( path_cost ); /* path_cost */
       tab[ i++ ].set( n, PRINT_USER ); /* user */
-      AdjacencySpace *set = n->adjacency[ rec->tport_id ];
-      if ( set->tport.len > 0 )
-        tab[ i++ ].set( set->tport, rec->tport_id, PRINT_ID );
-      else
-        tab[ i++ ].set_int( rec->tport_id );
     }
-    peer_dist.uid_set_names( *rec, buf, sizeof( buf ) );
-    this->tab_string( buf, tab[ i++ ] ); /* dest */
   }
 
   static const char *hdr[ ncols ] =
-    { "source", "tport", "dest" };
+    { "tport", "cost", "path_cost", "dest" };
   this->print_table( p, hdr, ncols );
 }
 
@@ -3667,7 +3712,7 @@ Console::show_fds( ConsoleOutput *p ) noexcept
 void
 Console::show_blooms( ConsoleOutput *p ) noexcept
 {
-  static const uint32_t ncols = 8;
+  static const uint32_t ncols = 11;
   TabPrint * tab;
   /*uint32_t   uid;*/
   size_t     i = 0, count = this->user_db.transport_tab.count;
@@ -3678,7 +3723,7 @@ Console::show_blooms( ConsoleOutput *p ) noexcept
     TransportRoute *rte = this->user_db.transport_tab.ptr[ t ];
     if ( i > 0 )
       tab[ i - 1 ].typ |= PRINT_SEP;
-    for ( BloomRoute *p = rte->sub_route.bloom_list.hd; p != NULL;
+    for ( BloomRoute *p = rte->sub_route.bloom_list.hd( 0 ); p != NULL;
           p = p->next ) {
       size_t sz = 0;
       char   buf[ 80 ];
@@ -3709,19 +3754,49 @@ Console::show_blooms( ConsoleOutput *p ) noexcept
       }
       tab[ i++ ].set( rte->transport.tport, rte->tport_id, PRINT_ID );
       uint64_t pref_mask = 0, detail_mask = 0;
-      uint32_t subs = 0, total = 0;
-      for ( uint32_t j = 0; j < p->nblooms; j++ ) {
+      uint32_t j, subs = 0, total = 0;
+      for ( j = 0; j < p->nblooms; j++ ) {
         BloomRef   * ref = p->bloom[ j ];
         pref_mask |= ref->pref_mask;
         detail_mask |= ref->detail_mask;
         total += (uint32_t) ref->bits->count;
         subs  += ref->pref_count[ SUB_RTE ];
-        sz = cat80( buf, sz, ref->name );
-        sz = cat80( buf, sz, ", " );
+        if ( p->r != (uint32_t) rte->fd ) {
+          sz = cat80( buf, sz, ref->name );
+          sz = cat80( buf, sz, ", " );
+        }
       }
-      if ( sz > 1 ) sz -= 2; /* strip , */
-      buf[ sz ] = '\0';
+      if ( p->r == (uint32_t) rte->fd ) {
+        ::strcpy( buf, "(all-peers)" );
+      }
+      else {
+        if ( sz > 1 ) sz -= 2; /* strip , */
+        buf[ sz ] = '\0';
+      }
       this->tab_string( buf, tab[ i++ ] );
+
+      for ( uint8_t n = 1; n < COST_PATH_COUNT; n++ ) {
+        if ( p->r != (uint32_t) rte->fd ) {
+          sz = 0;
+          for ( BloomRoute *q = rte->sub_route.bloom_list.hd( n ); q != NULL;
+                q = q->next ) {
+            if ( q->r == p->r ) {
+              for ( j = 0; j < q->nblooms; j++ ) {
+                BloomRef   * ref = q->bloom[ j ];
+                sz = cat80( buf, sz, ref->name );
+                sz = cat80( buf, sz, ", " );
+              }
+              break;
+            }
+          }
+          if ( sz > 1 ) sz -= 2;
+          buf[ sz ] = 0;
+        }
+        else {
+          ::strcpy( buf, "(all-peers)" );
+        }
+        this->tab_string( buf, tab[ i++ ] );
+      }
       tab[ i++ ].set_long( pref_mask, PRINT_LONG_HEX );
       tab[ i++ ].set_long( detail_mask, PRINT_LONG_HEX );
       tab[ i++ ].set_int( subs );
@@ -3729,7 +3804,7 @@ Console::show_blooms( ConsoleOutput *p ) noexcept
     }
   }
   static const char *hdr[ ncols ] =
-    { "fd", "dest", "tport", "bloom", "prefix", "detail", "subs", "total" };
+    { "fd", "dest", "tport", "bloom", "bl2", "bl3", "bl4", "prefix", "detail", "subs", "total" };
   this->print_table( p, hdr, ncols );
 }
 

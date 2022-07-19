@@ -15,6 +15,14 @@ void
 UserDB::make_hb( TransportRoute &rte,  const char *sub,  size_t sublen,
                  uint32_t h,  MsgCat &m ) noexcept
 {
+  static const char * ver_str;
+  static size_t       ver_len;
+
+  if ( ver_len == 0 ) {
+    ver_str = ms_get_version();
+    ver_len = ::strlen( ver_str );
+  }
+
   uint64_t uptime = rte.hb_mono_time - this->start_mono_time;
   if ( uptime == 0 )
     uptime = 1;
@@ -33,7 +41,13 @@ UserDB::make_hb( TransportRoute &rte,  const char *sub,  size_t sublen,
    .uid_csum  ()
    .mesh_csum ()
    .ucast_url ( rte.ucast_url_len )
-   .mesh_url  ( rte.mesh_url_len );
+   .mesh_url  ( rte.mesh_url_len )
+   .cost      ()
+   .cost2     ()
+   .cost3     ()
+   .cost4     ()
+   .version   ( ver_len )
+   .pk_digest ();
 
   m.reserve( e.sz );
   m.open( this->bridge_id.nonce, sublen )
@@ -61,12 +75,17 @@ UserDB::make_hb( TransportRoute &rte,  const char *sub,  size_t sublen,
       m.ucast_url( rte.ucast_url_addr, rte.ucast_url_len );
     if ( rte.mesh_url_len != 0 )
       m.mesh_url( rte.mesh_url_addr, rte.mesh_url_len );
+    if ( rte.uid_connected.is_advertised ) {
+      m.cost( rte.uid_connected.cost[ 0 ] );
+      m.cost2( rte.uid_connected.cost[ 1 ] );
+      m.cost3( rte.uid_connected.cost[ 2 ] );
+      m.cost4( rte.uid_connected.cost[ 3 ] );
+    }
+    m.version( ver_str, ver_len );
   }
+  m.pk_digest();
   m.close( e.sz, h, CABA_HEARTBEAT );
-  if ( h != bye_h )
-    m.sign( sub, sublen, *this->hello_key );
-  else
-    m.sign( sub, sublen, *this->session_key );
+  m.sign_hb( sub, sublen, *this->session_key, *this->hello_key );
 }
 
 void
@@ -148,9 +167,8 @@ UserDB::interval_hb( uint64_t cur_mono,  uint64_t cur_time ) noexcept
            do_hb = true;
       }
       if ( do_hb ) {
-        if ( debug_hb ) {
+        if ( debug_hb )
           printf( "send hb %s\n", rte->name );
-        }
         MsgCat m;
         this->push_hb_time( *rte, cur_time, cur_mono );
         this->make_hb( *rte, X_HB, X_HB_SZ, hb_h, m );
@@ -169,8 +187,9 @@ UserDB::on_heartbeat( const MsgFramePublish &pub,  UserBridge &n,
 {
   Nonce    cnonce;
   uint64_t time, seqno, uptime, start, old_hb_seqno, current_mono_time;
-  uint32_t ival;
-
+  uint32_t cost[ COST_PATH_COUNT ] = { COST_DEFAULT, COST_DEFAULT,
+                                       COST_DEFAULT, COST_DEFAULT },
+           ival;
   if ( ! dec.get_ival<uint64_t>( FID_UPTIME, uptime ) ||
        ! dec.get_ival<uint64_t>( FID_SEQNO, seqno ) ||
        ! dec.get_ival<uint64_t>( FID_TIME, time ) ||
@@ -186,7 +205,7 @@ UserDB::on_heartbeat( const MsgFramePublish &pub,  UserBridge &n,
     }
     return true;
   }
-  if ( n.is_set( AUTHENTICATED_STATE ) ) {
+  if ( pub.status == FRAME_STATUS_OK && n.is_set( AUTHENTICATED_STATE ) ) {
     if ( ! pub.rte.uid_connected.is_member( n.uid ) ) {
       if ( debug_hb )
         n.printf( "authenticated but not a uid member!\n" );
@@ -201,100 +220,91 @@ UserDB::on_heartbeat( const MsgFramePublish &pub,  UserBridge &n,
           n.printf( "primary hops greater than hb user_route!\n" );
         this->add_inbox_route( n, n.user_route );
       }
-#if 0
-      if ( primary != n.user_route ) {
-        n.printf( "hb state hops=%u primary hops %u!\n",
-                  n.user_route->hops, primary->hops );
-      }
-#endif
       this->uid_hb_count++;
     }
-#if 0
-    if ( ! n.user_route->test_set( SENT_ZADD_STATE ) ) {
-      n.printf( "no zadd\n" );
-      this->send_peer_db( n );
+    if ( dec.get_ival<uint32_t>( FID_COST, cost[ 0 ] ) ) {
+      dec.get_ival<uint32_t>( FID_COST2, cost[ 1 ] );
+      dec.get_ival<uint32_t>( FID_COST3, cost[ 2 ] );
+      dec.get_ival<uint32_t>( FID_COST4, cost[ 3 ] );
+      n.user_route->rte.update_cost( n, cost );
     }
-#endif
   }
-  if ( ! n.user_route->test_set( HAS_HB_STATE ) )
+  if ( ! n.user_route->test_set( HAS_HB_STATE ) ) {
     n.user_route->rte.hb_count++;
+    if ( debug_hb )
+      n.printf( "set hb state %s\n", n.user_route->rte.name );
+  }
 
-  if ( dec.test( FID_MESH_URL ) ) {
+  if ( dec.test( FID_MESH_URL ) )
     this->set_mesh_url( *n.user_route, dec );
-#if 0
-    if ( ! n.user_route->is_set( MESH_URL_STATE ) ) {
-      this->set_mesh_url( *n.user_route, dec );
-      this->peer_dist.invalidate( ADD_MESH_URL_INV );
-    }
-#endif
-  }
-  if ( dec.test( FID_UCAST_URL ) ) {
+
+  if ( dec.test( FID_UCAST_URL ) )
     this->set_ucast_url( *n.user_route, dec );
-#if 0
-    if ( ! n.user_route->is_set( UCAST_URL_STATE ) ) {
+
+  /*if ( seqno <= n.hb_seqno )
+    return true;*/
+  /* the following for unauthenticated, watches for hb replay */
+  if ( n.primary_route != pub.rte.tport_id ) {
+    if ( pub.status != FRAME_STATUS_OK ) {
       if ( debug_hb )
-        n.printf( "hb set ucast_url\n" );
-      n.user_route->set_ucast( (const char *) dec.mref[ FID_UCAST_URL ].fptr,
-                               dec.mref[ FID_UCAST_URL ].fsize, NULL );
+        n.printf( "primary route not hb %s\n", n.user_route->rte.name );
+      return true;
     }
-#endif
   }
-  /* these change unauthenticated, watches for hb replay */
-  if ( n.primary_route != pub.rte.tport_id )
-    return true;
-  if ( seqno <= n.hb_seqno )
-    return true;
-  old_hb_seqno      = n.hb_seqno;
-  n.hb_seqno        = seqno;
-  n.hb_time         = time;
-  n.hb_interval     = ival;
-  n.start_time      = start;
-  current_mono_time = current_monotonic_time_ns();
-  n.hb_mono_time    = current_mono_time;
-  n.hb_cnonce       = cnonce;
+  if ( seqno > n.hb_seqno ) {
+    old_hb_seqno      = n.hb_seqno;
+    n.hb_seqno        = seqno;
+    n.hb_time         = time;
+    n.hb_interval     = ival;
+    n.start_time      = start;
+    current_mono_time = current_monotonic_time_ns();
+    n.hb_mono_time    = current_mono_time;
+    n.hb_cnonce       = cnonce;
 
-  /*n.printf( "HB %.*s\n", (int) pub.subject_len, pub.subject );*/
-  /* challenge the peer for auth, both client and server use this */
-  if ( ! n.is_set( AUTHENTICATED_STATE | CHALLENGE_STATE ) ) {
-    bool i_am_older = false, do_challenge = false, oldest_peer;
-    if ( start > this->start_time )
-      i_am_older = true;
-    /*else if ( start == this->start_time )
-      i_am_older = ( uptime <= n.hb_mono_time - this->start_mono_time );*/
-    /* if I am the oldest node in route_list (or only node), do the challenge */
-    oldest_peer = ( pub.rte.oldest_uid == 0 );
-    uint64_t cur_time = current_realtime_ns();
+    /*n.printf( "HB %.*s\n", (int) pub.subject_len, pub.subject );*/
+    /* challenge the peer for auth, both client and server use this */
+    if ( ! n.is_set( AUTHENTICATED_STATE | CHALLENGE_STATE ) ) {
+      bool i_am_older = false, do_challenge = false, oldest_peer;
+      if ( start > this->start_time )
+        i_am_older = true;
+      /*else if ( start == this->start_time )
+        i_am_older = ( uptime <= n.hb_mono_time - this->start_mono_time );*/
+      /* if I am the oldest node in route_list (or only node), do the challenge */
+      oldest_peer = ( pub.rte.oldest_uid == 0 );
+      uint64_t cur_time = current_realtime_ns();
 
-    if ( i_am_older && oldest_peer ) {
-      do_challenge = true;
-      n.printf( "I am oldest peer\n" );
-    }
-    /* if a heartbeat passed and peer is old, try to challenge */
-    else {
-      n.printf( "i_am %s oldest %s\n", i_am_older ? "true" : "false",
-                                       oldest_peer ? "true" : "false" );
-      if ( ( oldest_peer && pub.rte.is_mcast() ) ||
-           ( old_hb_seqno > 0 && old_hb_seqno + 1 == seqno &&
-             start + SEC_TO_NS < cur_time ) ) {
-        n.printf( "old_hb_seqno %lu seqno %lu, age %lu\n",
-                  old_hb_seqno, seqno, cur_time - start );
+      if ( i_am_older && oldest_peer ) {
         do_challenge = true;
+        n.printf( "I am oldest peer\n" );
       }
-    }
-    if ( do_challenge ) {
-      n.auth[ 0 ].construct( n.hb_time, n.hb_seqno, n.hb_cnonce );
-      n.auth[ 1 ].construct( cur_time, ++n.send_inbox_seqno,
-                             this->cnonce->calc() );
-      this->send_challenge( n, AUTH_FROM_HELLO );
-      if ( ! n.test_set( CHALLENGE_STATE ) ) {
-        n.set( CHALLENGE_STATE );
-        n.challenge_count++;
-        this->challenge_queue.push( &n );
+      /* if a heartbeat passed and peer is old, try to challenge */
+      else {
+        n.printf( "i_am %s oldest %s\n", i_am_older ? "true" : "false",
+                                         oldest_peer ? "true" : "false" );
+        if ( ( oldest_peer && pub.rte.is_mcast() ) ||
+             ( old_hb_seqno > 0 && old_hb_seqno + 1 == seqno &&
+               start + SEC_TO_NS < cur_time ) ) {
+          n.printf( "old_hb_seqno %lu seqno %lu, age %lu\n",
+                    old_hb_seqno, seqno, cur_time - start );
+          do_challenge = true;
+        }
+      }
+      if ( do_challenge ) {
+        this->compare_version( n, dec );
+        n.auth[ 0 ].construct( n.hb_time, n.hb_seqno, n.hb_cnonce );
+        n.auth[ 1 ].construct( cur_time, ++n.send_inbox_seqno,
+                               this->cnonce->calc() );
+        this->send_challenge( n, AUTH_FROM_HELLO );
+        if ( ! n.test_set( CHALLENGE_STATE ) ) {
+          n.set( CHALLENGE_STATE );
+          n.challenge_count++;
+          this->challenge_queue.push( &n );
+        }
       }
     }
   }
   /* ignore hb which are not authenticated */
-  if ( ! n.is_set( AUTHENTICATED_STATE ) )
+  if ( pub.status != FRAME_STATUS_OK || ! n.is_set( AUTHENTICATED_STATE ) )
     return true;
   if ( n.is_set( IN_HB_QUEUE_STATE ) ) {
     this->hb_queue.remove( &n );
@@ -324,12 +334,13 @@ UserDB::on_heartbeat( const MsgFramePublish &pub,  UserBridge &n,
       if ( dec.test( FID_UID_CSUM ) ) {
         Nonce csum;
         csum.copy_from( dec.mref[ FID_UID_CSUM ].fptr );
-        if ( n.uid_csum != csum ) {
+        n.uid_csum = csum;
+        if ( this->uid_csum != csum ) {
           n.printf( "uid_csum not equal %s=[%s] hb[%s]\n",
-                   n.peer.user.val, n.uid_csum.to_base64_str( buf ),
+                   n.peer.user.val, this->uid_csum.to_base64_str( buf ),
                    csum.to_base64_str( buf2 ) );
-          if ( debug_hb )
-            this->debug_uids( this->uid_authenticated, csum );
+          /*if ( debug_hb )
+            this->debug_uids( this->uid_authenticated, csum );*/
         }
       }
       if ( dec.test( FID_MESH_CSUM ) && pub.rte.is_mesh() ) {
@@ -337,20 +348,16 @@ UserDB::on_heartbeat( const MsgFramePublish &pub,  UserBridge &n,
         csum.copy_from( dec.mref[ FID_MESH_CSUM ].fptr );
         my_csum ^= this->bridge_id.nonce;
         if ( my_csum != csum ) {
-          n.printf( "mesh_csum not equal %s=[%s] hb[%s] is_empty=%u\n",
+          current_mono_time = current_monotonic_time_ns();
+          if ( this->last_auth_mono + SEC_TO_NS < current_mono_time )
+            n.printf( "mesh_csum not equal %s=[%s] hb[%s] "
+                      "mesh pending queue is_empty=%u\n",
                    n.peer.user.val, my_csum.to_base64_str( buf ),
-                   csum.to_base64_str( buf2 ), this->direct_pending.is_empty()/*,
-                   this->start_time > n.start_time*/ );
-          if ( debug_hb )
-            this->debug_uids( *pub.rte.uid_in_mesh, csum );
-          if ( this->direct_pending.is_empty() /*&&
-               this->start_time > n.start_time */) {
-            /*if ( this->direct_pending.last_process_mono + SEC_TO_NS / 2 <
-                 current_mono_time ) {
-              this->direct_pending.last_process_mono = current_mono_time;*/
-              this->send_mesh_request( n, dec );
-            /*}*/
-          }
+                   csum.to_base64_str( buf2 ), this->mesh_pending.is_empty() );
+          /*if ( debug_hb )
+            this->debug_uids( *pub.rte.uid_in_mesh, csum );*/
+          if ( this->mesh_pending.is_empty() )
+            this->send_mesh_request( n, dec );
         }
       }
     }
@@ -389,24 +396,18 @@ UserDB::debug_uids( BitSpace &uids,  Nonce &csum ) noexcept
 uint32_t
 UserDB::random_uid_walk( void ) noexcept
 {
-  if ( this->uid_auth_count == 0 )
+  uint32_t serial_count = this->uid_auth_count;
+  if ( serial_count == 0 )
     return 0;
-  size_t   id_pos = this->rand.next() & this->uid_tab->tab_mask;
-  uint32_t uid, id_h, test_count = 0;
-  for (;;) {
-    if ( this->uid_tab->next( id_pos ) ) {
-      this->uid_tab->get( id_pos, id_h, uid );
-      if ( this->uid_authenticated.is_member( uid ) ) {
-        if ( ! this->random_walk.test_set( uid ) )
-          return uid;
-        if ( ++test_count >= this->uid_auth_count )
-          this->random_walk.zero();
-      }
-    }
-    else {
-      id_pos = 0;
-    }
-  }
+  if ( serial_count > 8 )
+    serial_count /= 4;
+  if ( ( this->uid_ping_count++ % serial_count ) == 0 )
+    this->next_ping_uid = (uint32_t) this->rand.next() % this->next_uid;
+
+  if ( this->uid_authenticated.next( this->next_ping_uid ) ||
+       this->uid_authenticated.first( this->next_ping_uid ) )
+    return this->next_ping_uid;
+  return 0;
 }
 
 void
@@ -414,17 +415,22 @@ UserDB::interval_ping( uint64_t curr_mono,  uint64_t ) noexcept
 {
   if ( this->next_ping_mono > curr_mono )
     return;
-  uint32_t uid = this->random_uid_walk();
-  if ( uid == 0 /*|| this->bridge_tab.ptr[ uid ]->test( HAS_HB_STATE )*/ )
-    return;
 
   uint64_t hb_ns   = this->hb_ival_ns,
            hb_mask = this->hb_ival_mask;
   this->next_ping_mono  = curr_mono;
   this->next_ping_mono += ( this->rand.next() & hb_mask ) + hb_ns / 2;
 
+  uint32_t uid = this->random_uid_walk();
+  if ( uid == 0 /*|| this->bridge_tab.ptr[ uid ]->test( HAS_HB_STATE )*/ )
+    return;
+
   UserBridge & n = *this->bridge_tab.ptr[ uid ];
-  this->send_ping_request( n );
+  if ( n.auth_mono_time + hb_ns < curr_mono ) {
+    if ( debug_hb )
+      n.printf( "send ping\n" );
+    this->send_ping_request( n );
+  }
 }
 
 void
@@ -524,6 +530,8 @@ UserDB::recv_pong_result( const MsgFramePublish &,  UserBridge &n,
     this->ping_queue.remove( &n );
     n.ping_fail_count = 0;
   }
+  if ( debug_hb )
+    n.printf( "recv pong\n" );
   return true;
 }
 

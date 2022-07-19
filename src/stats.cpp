@@ -80,7 +80,7 @@ SessionMgr::publish_stats( uint64_t cur_time ) noexcept
       const char * latency_val;
       UserRoute  * u_ptr;
       uint64_t     seqno, sub_count;
-      uint32_t     dist;
+      uint32_t     cost;
       int          latency_len;
 
       n_peer_pub_count++;
@@ -92,8 +92,8 @@ SessionMgr::publish_stats( uint64_t cur_time ) noexcept
         peer_len    = peer->peer.user.len;
         peer_val    = peer->peer.user.val;
         u_ptr       = peer->primary( this->user_db );
-        dist        = this->user_db.peer_dist.calc_transport_cache( uid,
-                                              u_ptr->rte.tport_id, u_ptr->rte );
+        cost        = this->user_db.peer_dist.calc_transport_cache( uid,
+                                                   u_ptr->rte.tport_id, 0 );
         seqno       = ++peer->stats_seqno;
         sub_count   = peer->bloom.bits->count;
 
@@ -120,7 +120,7 @@ SessionMgr::publish_stats( uint64_t cur_time ) noexcept
       else {
         peer_len    = this->user.user.len;
         peer_val    = this->user.user.val;
-        dist        = 0;
+        cost        = 0;
         seqno       = ++this->stats.n_peer_seqno;
         sub_count   = this->sub_db.bloom.bits->count;
         latency_len = 1;
@@ -140,7 +140,7 @@ SessionMgr::publish_stats( uint64_t cur_time ) noexcept
        .sub_cnt   ()
        .latency   ( latency_len )
        /*.tport     ( tport_len )*/
-       .distance  ();
+       .cost      ();
        /*.address   ( addr_len );*/
 
       MsgCat m;
@@ -154,7 +154,7 @@ SessionMgr::publish_stats( uint64_t cur_time ) noexcept
        .uid       ( uid )
        .sub_cnt   ( sub_count )
        .latency   ( latency_val, latency_len )
-       .distance  ( dist );
+       .cost      ( cost );
 
       m.close( e.sz, h, CABA_MCAST );
       m.sign( s.msg, s.len(), *this->user_db.session_key );
