@@ -14,6 +14,7 @@ using namespace rai;
 using namespace ds;
 using namespace ms;
 using namespace kv;
+using namespace md;
 
 TarEntry rai::ms::WebService::entry[ MAX_ENTRIES ];
 uint32_t rai::ms::WebService::entry_count;
@@ -208,7 +209,11 @@ WebService::process_wsmsg( WSMsg &wmsg ) noexcept
     char         * frame;
 
     if ( size > 9 && ::memcmp( cmd, "template ", 9 ) == 0 ) {
-      q.out_size = q.template_substitute( NULL, 0, &cmd[ 9 ], size - 9, '{' );
+      WebReqData data;
+      data.template_buf = &cmd[ 9 ];
+      data.template_len = size - 9;
+      data.paren = '{';
+      q.out_size = q.template_substitute( data );
     }
     else {
       this->console->on_input( &q, cmd, size );
@@ -307,85 +312,66 @@ WebService::process_close( void ) noexcept
   this->EvSocket::process_close();
 }
 
-void
-WebService::process_get( const char *path,  size_t path_len,
-                         const char *cmd,  size_t cmd_len,
-                         const void *data,  size_t data_len,
-                         bool is_immutable ) noexcept
+bool
+WebService::process_post( const HttpReq &hreq ) noexcept
 {
-  static const char fmt_gzip[]    = "\r\nContent-Encoding: gzip\r\n\r\n",
-                    fmt_immutab[] = "Cache-Control: immutable\r\n",
-                    fmt_nocache[] = "Cache-Control: no-cache\r\n";
-  size_t       mlen;
-  bool         is_gzip;
-  const char * mime = get_mime_type( path, path_len, mlen, is_gzip );
+  MDMsgMem     mem;
+  const char * obj = hreq.path,
+             * end = &hreq.path[ hreq.path_len ];
+  char         path[ 1024 ],
+             * data_buf;
+  size_t       data_len;
+  WebReqData   data;
 
-  if ( ! is_gzip && mlen > 4 && ::memcmp( mime, "text/", 5 ) == 0 ) {
-    this->template_substitute( cmd, cmd_len, mime, mlen,
-                               (const char *) data, data_len );
+  data.path     = path;
+  data.path_len = HttpReq::decode_uri( &obj[ 1 ], end, path, sizeof( path ) );
+
+  data_buf = (char *) mem.make( hreq.content_length );
+  data_len = hreq.content_length;
+
+  data_len = HttpReq::decode_uri( hreq.data, &hreq.data[ hreq.content_length ],
+                                  data_buf, data_len );
+
+  if ( ::strncmp( data_buf, "graph_data=", 11 ) == 0 ) {
+    kv::ArrayOutput out;
+    compute_message_graph( &data_buf[ 11 ], data_len - 11, out );
+
+    data.graph            = out.ptr;
+    data.graph_len        = out.count;
+    data.graph_source     = &data_buf[ 11 ];
+    data.graph_source_len = data_len - 11;
+
+    return this->process_get_file2( data );
   }
-  else {
-    static const char fmt_hdr[] =
-      "HTTP/1.1 200 OK\r\n"
-      "Connection: keep-alive\r\n", fmt_type[] =
-      "Content-Type: ", fmt_len[] = "\r\n"
-      "Content-Length: ", fmt_end[] = "\r\n"
-      "\r\n";
-    HtmlOutput   q( *this, W_HTML );
-    size_t       size,
-                 prefix_len;
-    size_t       fmt_off,
-                 d;
-    size = q.append_bytes( data, data_len );
-    d = uint64_digits( size );
-    prefix_len = sizeof( fmt_hdr ) - 1 +
-               ( is_immutable ? ( sizeof( fmt_immutab ) - 1 ) :
-                                ( sizeof( fmt_nocache ) - 1 ) ) +
-                 sizeof( fmt_type ) - 1 + mlen +
-                 sizeof( fmt_len ) - 1 + d +
-               ( is_gzip ? ( sizeof( fmt_gzip ) - 1 ) :
-                           ( sizeof( fmt_end ) - 1 ) );
-    char * hdr = q.prepend_buf( prefix_len );
-
-    fmt_off = cat( hdr, fmt_hdr, sizeof( fmt_hdr ) - 1 );
-    if ( is_immutable )
-      fmt_off += cat( &hdr[ fmt_off ], fmt_immutab, sizeof( fmt_immutab ) - 1 );
-    else
-      fmt_off += cat( &hdr[ fmt_off ], fmt_nocache, sizeof( fmt_nocache ) - 1 );
-    fmt_off += cat( &hdr[ fmt_off ], fmt_type, sizeof( fmt_type ) - 1 );
-    fmt_off += cat( &hdr[ fmt_off ], mime, mlen );
-    fmt_off += cat( &hdr[ fmt_off ], fmt_len, sizeof( fmt_len ) - 1 );
-    fmt_off += uint64_to_string( size, &hdr[ fmt_off ], d );
-    if ( is_gzip )
-      fmt_off += cat( &hdr[ fmt_off ], fmt_gzip, sizeof( fmt_gzip ) - 1 );
-    else
-      ::memcpy( &hdr[ fmt_off ], fmt_end, sizeof( fmt_end ) - 1 );
-
-    this->append_iov( q );
-    this->msgs_sent++;
-  }
+  return false;
 }
 
 bool
 WebService::process_get_file( const char *path,  size_t path_len ) noexcept
 {
-  const char * cmd     = NULL;
-  size_t       cmd_len = 0;
+  WebReqData data;
+  data.path     = path;
+  data.path_len = path_len;
+  return this->process_get_file2( data );
+}
 
+bool
+WebService::process_get_file2( WebReqData &data ) noexcept
+{
   if ( this->out.in_progress ) {
     if ( this->out.rpc != NULL )
       this->out.rpc->out.replace( &this->out, WebService::get_null_output() );
     this->truncate( this->out.strm_start );
   }
-  const char * p;
-  if ( (p = (const char *) ::memchr( path, '?', path_len )) != NULL ) {
-    cmd       = &p[ 1 ];
-    cmd_len   = &path[ path_len ] - cmd;
-    path_len -= cmd_len + 1;
+  const char * p = (const char *) ::memchr( data.path, '?', data.path_len );
+  if ( p != NULL ) {
+    data.cmd       = &p[ 1 ];
+    data.cmd_len   = &data.path[ data.path_len ] - data.cmd;
+    data.path_len -= data.cmd_len + 1;
   }
-  if ( path_len == 0 ) {
+  if ( data.path_len == 0 ) {
     this->out.init( W_JSON );
-    this->console->on_input( &this->out, cmd, cmd_len );
+    this->console->on_input( &this->out, data.cmd, data.cmd_len );
     if ( this->out.out_size != 0 ) {
       this->out.add_http_header( "application/json", 16, this->out.out_size );
       this->append_iov( this->out );
@@ -402,12 +388,15 @@ WebService::process_get_file( const char *path,  size_t path_len ) noexcept
     char path2[ 1024 ];
     ::snprintf( path2, sizeof( path2 ), "%.*s%.*s",
                 (int) this->http_dir_len, this->http_dir,
-                (int) path_len, path );
+                (int) data.path_len, data.path );
     MapFile map( path2 );
 
     if ( map.open() ) {
-      this->process_get( path, path_len, cmd, cmd_len, map.map,
-                         map.map_size, false );
+      data.data         = (const char *) map.map;
+      data.data_len     = map.map_size;
+      data.is_immutable = false;
+
+      this->process_get( data );
       return true;
     }
     num = errno;
@@ -417,39 +406,98 @@ WebService::process_get_file( const char *path,  size_t path_len ) noexcept
     size_t   off       = entry[ i ].fname_off,
              fname_len = entry[ i ].fname_len - off;
     const char * fname = &entry[ i ].fname[ off ];
-    if ( fname_len >= path_len &&
-         ::memcmp( path, fname, path_len ) == 0 ) {
-      if ( fname_len == path_len ||
-           ( path_len + 3 == fname_len &&
+    if ( fname_len >= data.path_len &&
+         ::memcmp( data.path, fname, data.path_len ) == 0 ) {
+      if ( fname_len == data.path_len ||
+           ( data.path_len + 3 == fname_len &&
              ::memcmp( &fname[ fname_len - 3 ], ".gz", 3 ) == 0 ) ) {
-        this->process_get( fname, fname_len, cmd, cmd_len, entry[ i ].data,
-                           entry[ i ].size, true );
+        data.path         = fname;
+        data.path_len     = fname_len;
+        data.data         = (const char *) entry[ i ].data;
+        data.data_len     = entry[ i ].size;
+        data.is_immutable = true;
+
+        this->process_get( data );
         return true;
       }
     }
   }
   if ( this->http_dir_len == 0 ) {
     fprintf( stderr, "web service file get: \"%.*s\": not found\n",
-             (int) path_len, path );
+             (int) data.path_len, data.path );
     return false;
   }
   fprintf( stderr, "web service file get: \"%.*s\": %d/%s\n",
-           (int) path_len, path, num, strerror( num ) );
+           (int) data.path_len, data.path, num, strerror( num ) );
   return false;
 }
 
 void
-WebService::template_substitute( const char *cmd,  size_t cmd_len,
-                                 const char *mime,  size_t mlen,
-                                 const char *template_buf,
-                                 size_t template_sz ) noexcept
+WebService::process_get( WebReqData &data ) noexcept
+{
+  static const char fmt_gzip[]    = "\r\nContent-Encoding: gzip\r\n\r\n",
+                    fmt_immutab[] = "Cache-Control: immutable\r\n",
+                    fmt_nocache[] = "Cache-Control: no-cache\r\n";
+  bool is_gzip;
+  data.mime = get_mime_type( data.path, data.path_len, data.mime_len, is_gzip );
+
+  if ( ! is_gzip && data.mime_len > 4 &&
+       ::memcmp( data.mime, "text/", 5 ) == 0 ) {
+    data.template_buf = data.data;
+    data.template_len = data.data_len;
+    data.paren = '(';
+    this->template_substitute( data );
+  }
+  else {
+    static const char fmt_hdr[] =
+      "HTTP/1.1 200 OK\r\n"
+      "Connection: keep-alive\r\n", fmt_type[] =
+      "Content-Type: ", fmt_len[] = "\r\n"
+      "Content-Length: ", fmt_end[] = "\r\n"
+      "\r\n";
+    HtmlOutput   q( *this, W_HTML );
+    size_t       size,
+                 prefix_len;
+    size_t       fmt_off,
+                 d;
+    size = q.append_bytes( data.data, data.data_len );
+    d = uint64_digits( size );
+    prefix_len = sizeof( fmt_hdr ) - 1 +
+               ( data.is_immutable ? ( sizeof( fmt_immutab ) - 1 ) :
+                                     ( sizeof( fmt_nocache ) - 1 ) ) +
+                 sizeof( fmt_type ) - 1 + data.mime_len +
+                 sizeof( fmt_len ) - 1 + d +
+               ( is_gzip ? ( sizeof( fmt_gzip ) - 1 ) :
+                           ( sizeof( fmt_end ) - 1 ) );
+    char * hdr = q.prepend_buf( prefix_len );
+
+    fmt_off = cat( hdr, fmt_hdr, sizeof( fmt_hdr ) - 1 );
+    if ( data.is_immutable )
+      fmt_off += cat( &hdr[ fmt_off ], fmt_immutab, sizeof( fmt_immutab ) - 1 );
+    else
+      fmt_off += cat( &hdr[ fmt_off ], fmt_nocache, sizeof( fmt_nocache ) - 1 );
+    fmt_off += cat( &hdr[ fmt_off ], fmt_type, sizeof( fmt_type ) - 1 );
+    fmt_off += cat( &hdr[ fmt_off ], data.mime, data.mime_len );
+    fmt_off += cat( &hdr[ fmt_off ], fmt_len, sizeof( fmt_len ) - 1 );
+    fmt_off += uint64_to_string( size, &hdr[ fmt_off ], d );
+    if ( is_gzip )
+      fmt_off += cat( &hdr[ fmt_off ], fmt_gzip, sizeof( fmt_gzip ) - 1 );
+    else
+      ::memcpy( &hdr[ fmt_off ], fmt_end, sizeof( fmt_end ) - 1 );
+
+    this->append_iov( q );
+    this->msgs_sent++;
+  }
+}
+
+void
+WebService::template_substitute( WebReqData &data ) noexcept
 {
   size_t size;
-  this->out.init( mlen == 9 ? W_HTML : W_JSON /* text/html */);
-  size = this->out.template_substitute( cmd, cmd_len,
-                                        template_buf, template_sz );
+  this->out.init( data.mime_len == 9 ? W_HTML : W_JSON /* text/html */);
+  size = this->out.template_substitute( data );
   if ( this->out.rpc == NULL || this->out.rpc->complete ) {
-    this->out.add_http_header( mime, mlen, size );
+    this->out.add_http_header( data.mime, data.mime_len, size );
     this->append_iov( this->out );
     this->out.reset();
     this->msgs_sent++;
@@ -461,7 +509,8 @@ WebService::template_substitute( const char *cmd,  size_t cmd_len,
 }
 
 bool
-WebOutput::template_property( const char *var,  size_t varlen ) noexcept
+WebOutput::template_property( const char *var,  size_t varlen,
+                              WebReqData &data ) noexcept
 {
   switch ( var[ 0 ] ) {
     case 'u':
@@ -477,6 +526,21 @@ WebOutput::template_property( const char *var,  size_t varlen ) noexcept
         const char * svc    = this->svc.console->user_db.svc.svc.val;
         size_t       svclen = this->svc.console->user_db.svc.svc.len;
         this->out_size = this->append_bytes( svc, svclen );
+        return true;
+      }
+      break;
+    case 'g':
+      if ( varlen == 10 && ::memcmp( "graph_data", var, 10 ) == 0 ) {
+        if ( data.graph_len == 0 )
+          this->out_size += this->append_bytes( "null", 4 );
+        else
+          this->out_size += this->append_bytes( data.graph, data.graph_len );
+        return true;
+      }
+      if ( varlen == 12 && ::memcmp( "graph_source", var, 12 ) == 0 ) {
+        if ( data.graph_source_len > 0 )
+          this->out_size +=
+            this->append_bytes( data.graph_source, data.graph_source_len );
         return true;
       }
       break;
@@ -542,14 +606,12 @@ WebOutput::template_property( const char *var,  size_t varlen ) noexcept
 }
 
 size_t
-WebOutput::template_substitute( const char *cmd,  size_t cmd_len,
-                                const char *template_buf,  size_t template_sz,
-                                char paren ) noexcept
+WebOutput::template_substitute( WebReqData &data ) noexcept
 {
-  const char   open = ( paren == '(' ? '(' : '{' ),
-               clos = ( paren == '(' ? ')' : '}' );
-  const char * m    = (const char *) template_buf,
-             * e    = &m[ template_sz ];
+  const char   open = ( data.paren == '(' ? '(' : '{' ),
+               clos = ( data.paren == '(' ? ')' : '}' );
+  const char * m    = data.template_buf,
+             * e    = &m[ data.template_len ];
   size_t       size = 0;
   for (;;) {
     const char * p = (const char *) ::memchr( m, '@', e - m );
@@ -566,18 +628,18 @@ WebOutput::template_substitute( const char *cmd,  size_t cmd_len,
         size_t       varlen = s - &p[ 2 ];
         if ( varlen == sizeof( cmd_str ) && var[ 0 ] == '_' &&
              ::memcmp( &var[ 1 ], cmd_str, varlen - 1 ) == 0 ) {
-          size += this->append_bytes( cmd, cmd_len );
+          size += this->append_bytes( data.cmd, data.cmd_len );
         }
         else {
           bool run_var = false;
           if ( varlen == sizeof( cmd_str ) - 1 &&
                ::memcmp( var, cmd_str, varlen ) == 0 ) {
-            var     = cmd;
-            varlen  = cmd_len;
+            var     = data.cmd;
+            varlen  = data.cmd_len;
             run_var = true;
           }
           else {
-            run_var = ! this->template_property( var, varlen );
+            run_var = ! this->template_property( var, varlen, data );
           }
           if ( run_var ) {
             this->svc.console->on_input( this, var, varlen );

@@ -394,12 +394,7 @@ struct ConfigChangeList : public kv::DLinkList< ConfigChange > {
 };
 
 struct ConsoleCmdString;
-struct ConsoleOutBuf : public kv::ArrayCount< char, 8192 > {
-  int puts( const char *s ) noexcept;
-  void putchar( char c ) noexcept;
-  int printf( const char *fmt,  ... ) noexcept __attribute__((format(printf,2,3)));
-  int vprintf( const char *fmt, va_list args ) noexcept;
-};
+struct ConsoleOutBuf : public kv::ArrayOutput {};
 
 struct Console : public md::MDOutput, public SubOnMsg, public ConfigPrinter {
   SessionMgr      & mgr;

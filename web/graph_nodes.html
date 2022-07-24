@@ -1,0 +1,216 @@
+<!DOCTYPE>
+<html>
+  <head>
+    <link rel="icon" href="rai_icon.svg" type="image/svg+xml"/>
+    <meta name="viewport" content="width=device-width, user-scalable=no, initial-scale=1, maximum-scale=1">
+    <title>Graph MS Nodes</title>
+    <script src="cytoscape-min-3.21.2.js"></script>
+    <script src="cola.min-3.3.8.js"></script>
+    <script src="cytoscape-cola-2.5.1.js"></script>
+    <script src="canvas2svg-1.0.19.js"></script>
+    <script src="cytoscape-svg-0.4.0.js"></script>
+
+    <style>
+      html, body {
+        height: 100%;
+      }
+      #container {
+        display: flex;
+        flex-direction: row;
+        height: 100%;
+      }
+      .row {
+        background: #eee;
+        flex: 0;
+      }
+      .row:nth-child(2) {
+        background: white;
+        flex: auto;
+      }
+    </style>
+
+    <script>
+      function color( colnum ) {
+        let n  = ( ( colnum * 19 ) % 127 );
+        let b = 255 - ( ( n * 255 / 126 ) | 0 );
+        let r = ( ( n * 510 / 126 ) | 0 );
+        let g = ( ( n * 255 / 126 ) | 0 );
+        if ( r > 255 ) r = 510 - r;
+        return "rgb(" + r + "," + g + "," + b + ")";
+      };
+
+      function step_color( colnum ) {
+        if ( colnum == -1 )
+          return '#badaca';
+        let r = 0, g = 0, b = 0;
+        if ( colnum % 3 == 0 )
+          g = 255 - colnum * 4;
+        else if ( colnum % 3 == 1 )
+          b = 255 - colnum * 4;
+        else
+          r = 255 - colnum * 4;
+        return "rgb(" + r + "," + g + "," + b + ")";
+      }
+
+      var cy = null;
+      function init_graph( els ) {
+        let container = document.getElementById( "cy" );
+
+        cy = window.cy = cytoscape({
+          container: container,
+          autounselectify: true,
+          boxSelectionEnabled: false,
+
+          layout: {
+            name: 'cola',
+            animate: false
+          },
+
+          style: [
+            {
+              selector: 'node',
+              css: {
+                'background-color': 'data(color)',
+                'label': 'data(label)',
+                'color': 'data(step)',
+                'padding': '0px',
+                'border-color': 'data(step)',
+                'border-width': '1px',
+                'font-size': '12px'
+              }
+            },
+            {
+              selector: 'edge',
+              css: {
+                'line-color': 'data(color)',
+                'curve-style': 'straight',
+                'target-arrow-color': 'data(color)',
+                'target-arrow-shape': 'data(arrow)',
+                'label': 'data(cost)',
+                'font-size': '10px'
+              }
+            }
+          ],
+
+          elements: els
+        });
+      };
+
+      function node_data( node ) {
+        return {
+          group: "nodes",
+          data: {
+            id: node.uid,
+            label: node.user,
+            color: color( node.uid ),
+            step: step_color( node.step )
+          }
+        };
+      };
+
+      function edge_data( nodes, link, link2 ) {
+        let step = link.step >= link2.step ? link.step : link2.step;
+        return {
+          group: "edges",
+          data: {
+            source: link.source,
+            target: link.target,
+            color: step_color( step ),
+            arrow: ( link.step == -1 ? 'none' : 'triangle' ),
+            cost: ( link2.step == -1 ? '' : nodes[ link.source ].cost + '' )
+          }
+        };
+      };
+      var graphs = @(graph_data);
+
+      var max_uid = 0;
+      function reload_graph( n ) {
+        if ( graphs != null ) {
+          for ( let i = 0; i < max_uid; i++ ) {
+            cy.remove( cy.getElementById( i ) );
+          }
+          cy.add( transform( graphs[ n ] ) );
+          cy.layout( { name: "cola", animate: false } ).run();
+        }
+        document.getElementById("save").value = "path" + ( n + 1 ) + ".svg";
+      }
+      function transform( graph ) {
+        let elements = [];
+        let gn = graph.nodes,
+            gl = graph.links,
+            gl2 = null;
+        let i, j;
+        max_uid = gn.length;
+        for ( i = 0; i < gn.length; i++ ) {
+          elements.push( node_data( gn[ i ] ) );
+        }
+        for ( i = 0; i < gl.length; i++ ) {
+          for ( j = 0; j < gl.length; j++ ) {
+            if ( gl[ i ].source == gl[ j ].target && gl[ i ].target == gl[ j ].source ) {
+              gl2 = gl[ j ];
+              break;
+            }
+          }
+          elements.push( edge_data( gn, gl[ i ], gl2 ) );
+        }
+        return elements;
+      };
+
+      window.onload = function() {
+        init_graph( graphs == null ? null : transform( graphs[ 0 ] ) );
+        /*fetch( "test.json" ).then( response => response.json() ).then( data => set_graphs( data ) );*/
+      };
+
+      function saveAsSvg() {
+        let svg_content = cy.svg({scale: 1, full: true, bg: '#ffffff'});
+        let f = new Blob([svg_content], {type:"image/svg+xml;charset=utf-8"});
+        let a = document.createElement("a");
+        let el = document.getElementById("savesvg");
+        a.href = window.URL.createObjectURL(f);
+        a.download = el.value;
+        a.click();
+      };
+      function saveText() {
+        let text_content = document.getElementById("text").value;
+        let f = new Blob([text_content], {type:"text/plain;charset=utf-8"});
+        let a = document.createElement("a");
+        let el = document.getElementById("savetxt");
+        a.href = window.URL.createObjectURL(f);
+        a.download = el.value;
+        a.click();
+      };
+      function getSvgUrl() {
+        var svgContent = cy.svg({scale: 1, full: true, bg: '#ffffff'});
+        var blob = new Blob([svgContent], {type:"image/svg+xml;charset=utf-8"});
+        var url = window.URL.createObjectURL(blob);
+        return url;
+      };
+    </script>
+</head>
+
+<body>
+  <div id="container">
+    <div class="row">
+      <div>
+      <button style="color: white; background-color: #008CBA" onclick="saveText()">Save Text</button>
+      <input id="savetxt" type="text" value="nodes.txt"></input>
+      <button style="color: white; background-color: #008CBA" onclick="saveAsSvg()">Save SVG</button>
+      <input id="savesvg" type="text" value="path1.svg"></input>
+      <button style="color: white; background-color: #008CBA" onclick="window.location=getSvgUrl()">View SVG</button>
+      <button style="color: white; background-color: #007070" onclick="reload_graph(0)">Path 1</button>
+      <button style="color: white; background-color: #007070" onclick="reload_graph(1)">Path 2</button>
+      <button style="color: white; background-color: #007070" onclick="reload_graph(2)">Path 3</button>
+      <button style="color: white; background-color: #007070" onclick="reload_graph(3)">Path 4</button>
+      </div>
+      <div id="show">
+      <form method="post" id="form" action="graph_nodes.html" spellcheck="false">
+        <textarea id="text" name="graph_data" form="form" cols="65" rows="25">@(graph_source)</textarea>
+        <button style="color: white; background-color: #008CBA">Show Graph</button>
+      </form>
+      </div>
+    </div>
+    <div class="row" id="cy"></div>
+  </div>
+</body>
+
+</html>

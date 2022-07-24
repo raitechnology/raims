@@ -4,9 +4,15 @@
 #include <raims/crypt.h>
 #include <raims/string_tab.h>
 #include <raikv/bit_set.h>
+#include <raims/adjacency.h>
 
 namespace rai {
 namespace ms {
+
+const char *peer_sync_reason_string( PeerSyncReason r ) noexcept;
+const char *adjacency_change_string( AdjacencyChange c ) noexcept;
+const char *adjacency_request_string( AdjacencyRequest r ) noexcept;
+const char *invalidate_reason_string( InvalidReason r ) noexcept;
 
 static const uint64_t SEC_TO_NS = 1000 * 1000 * 1000;
 /* hmac of user + instance nonce */

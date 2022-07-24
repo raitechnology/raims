@@ -6,7 +6,6 @@
 #include <raims/config_tree.h>
 #include <raims/crypt.h>
 #include <raims/auth.h>
-#include <raims/adjacency.h>
 #include <raims/peer.h>
 #include <raims/state_test.h>
 #include <raims/debug.h>

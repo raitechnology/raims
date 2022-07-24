@@ -3836,59 +3836,15 @@ Console::show_running( ConsoleOutput *p,  int which,  const char *name,
 }
 
 int
-ConsoleOutBuf::puts( const char *s ) noexcept
-{
-  size_t n = ::strlen( s );
-  char * p = this->make( this->count + n );
-  ::memcpy( &p[ this->count ], s, n );
-  this->count += n;
-  return n;
-}
-
-int
 Console::puts( const char *s ) noexcept
 {
   return this->out.puts( s );
 }
 
 void
-ConsoleOutBuf::putchar( char c ) noexcept
-{
-  char * p = this->make( this->count + 1 );
-  p[ this->count ] = c;
-  this->count += 1;
-}
-
-void
 Console::putchar( char c ) noexcept
 {
   return this->out.putchar( c );
-}
-
-int
-ConsoleOutBuf::printf( const char *fmt, ... ) noexcept
-{
-  va_list args;
-  va_start( args, fmt );
-  int n = this->vprintf( fmt, args );
-  va_end( args );
-  return n;
-}
-
-int
-ConsoleOutBuf::vprintf( const char *fmt, va_list args ) noexcept
-{
-  int n, len = 1024;
-  for (;;) {
-    char * p = this->make( this->count + len );
-    n = ::vsnprintf( &p[ this->count ], len, fmt, args );
-    if ( n < len ) {
-      this->count += n;
-      break;
-    }
-    len += 1024;
-  }
-  return n;
 }
 
 int

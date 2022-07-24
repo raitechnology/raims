@@ -1,4 +1,4 @@
-#ifndef TEST_ADJ
+#ifndef NO_MS_HEADERS
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

@@ -20,15 +20,37 @@ enum WebType {
   W_JSON
 };
 
+struct WebReqData {
+  const char * path,         /* GET /path */
+             * cmd,          /* GET ?cmd */
+             * template_buf, /* html or json data */
+             * data,         /* file data */
+             * mime,         /* mime derived from path */
+             * graph,        /* graph computation json */
+             * graph_source; /* graph source description */
+  size_t       path_len,
+               cmd_len,
+               template_len,
+               data_len,
+               mime_len,
+               graph_len,
+               graph_source_len;
+  char         paren;        /* template variable paren @(var) or @{var} */
+  bool         is_immutable; /* data is read only, gzipped */
+
+  WebReqData() {
+    ::memset( (void *) this, 0, sizeof( *this ) );
+  }
+};
+
 struct WebOutput : public kv::StreamBuf::BufQueue, public ConsoleOutput {
   WebService & svc;
   size_t       out_size;
 
   WebOutput( WebService &str,  WebType type );
-  size_t template_substitute( const char *cmd,  size_t cmd_len,
-                              const char *template_buf,  size_t template_sz,
-                              char paren = '(' ) noexcept;
-  bool template_property( const char *var,  size_t varlen ) noexcept;
+  size_t template_substitute( WebReqData &data ) noexcept;
+  bool template_property( const char *var,  size_t varlen,
+                          WebReqData &data ) noexcept;
   virtual bool on_output( const char *buf,  size_t buflen ) noexcept;
 };
 
@@ -102,15 +124,11 @@ struct WebService : public ds::EvHttpConnection {
       http_dir( 0 ), http_dir_len( 0 ) {}
 
   uint32_t tar_entry_count( void ) noexcept;
-  void process_get( const char *path,  size_t path_len,
-                    const char *cmd,  size_t cmd_len,
-                    const void *data,  size_t data_len,
-                    bool is_immutable ) noexcept;
+  void process_get( WebReqData &data ) noexcept;
+  virtual bool process_post( const ds::HttpReq &hreq ) noexcept;
   virtual bool process_get_file( const char *path,  size_t len ) noexcept;
-  void template_substitute( const char *cmd,  size_t cmd_len,
-                            const char *mime,  size_t mlen,
-                            const char *template_buf,
-                            size_t template_sz ) noexcept;
+  bool process_get_file2( WebReqData &data ) noexcept;
+  void template_substitute( WebReqData &data ) noexcept;
   virtual void process_wsmsg( ds::WSMsg &wmsg ) noexcept;
   virtual void write( void ) noexcept;
   virtual void process_close( void ) noexcept;
