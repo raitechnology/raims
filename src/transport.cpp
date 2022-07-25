@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <stdarg.h>
 #ifndef _MSC_VER
 #include <unistd.h>
 #else
@@ -72,8 +73,9 @@ TransportRoute::TransportRoute( kv::EvPoll &p,  SessionMgr &m,
       primary_count( 0 ), ext( 0 ), svc( s ), transport( t )
 {
   uint8_t i;
-  this->uid_connected.tport    = t.tport;
-  this->uid_connected.tport_id = id;
+  this->uid_connected.tport      = t.tport;
+  this->uid_connected.tport_type = t.type;
+  this->uid_connected.tport_id   = id;
   for ( i = 0; i < COST_PATH_COUNT; i++ )
     this->router_rt[ i ] = NULL;
   /* parse config that has cost, cost2 ... */
@@ -145,6 +147,19 @@ TransportRoute::set_peer_name( PeerData &pd,  const char *suff ) noexcept
   int len = ::snprintf( buf, sizeof( buf ), "%s.%s.%s.%u",
                         svc.svc.val, tport.tport.val, suff, this->tport_id );
   pd.set_name( buf, len );
+}
+
+int
+TransportRoute::printf( const char *fmt,  ... ) const noexcept
+{
+  va_list ap;
+  int n, m;
+
+  n = fprintf( stdout, "%s.%u ", this->transport.tport.val, this->tport_id );
+  va_start( ap, fmt );
+  m = vfprintf( stdout, fmt, ap );
+  va_end( ap );
+  return ( n >= 0 && m >= 0 ) ? n + m : -1;
 }
 
 void
@@ -731,22 +746,34 @@ SessionMgr::add_mesh_connect( TransportRoute &mesh_rte,  const char **mesh_url,
 {
   TransportRoute * rte;
   uint32_t         tport_id,
-                   count, i;
+                   count, i, j, first_hash = 0;
 
   if ( mesh_rte.mesh_id == NULL )
     return true;
-  printf( "%s.%u add_mesh_connect",
-        mesh_rte.transport.tport.val, mesh_rte.tport_id );
+  mesh_rte.printf( "add_mesh_connect" );
   for ( i = 0; i < url_count; i++ )
     printf( " %s (%x)", mesh_url[ i ], mesh_hash[ i ] );
   printf( "\n" );
 
   for ( i = 0; i < url_count; i++ ) {
+    if ( mesh_hash[ i ] == mesh_rte.mesh_conn_hash &&
+         mesh_rte.is_set( TPORT_IS_LISTEN ) ) {
+      mesh_rte.printf( "not connecting to self (%s)\n", mesh_url[ i ] );
+      mesh_url[ i ]  = NULL;
+      mesh_hash[ i ] = 0;
+      continue;
+    }
     rte = this->find_mesh_conn( mesh_rte, mesh_hash[ i ] );
     if ( rte != NULL ) {
-      printf( "already connected (%s)\n", mesh_url[ i ] );
+      mesh_rte.printf( "already connected (%s)\n", mesh_url[ i ] );
       return true;
     }
+    if ( first_hash == 0 )
+      first_hash = mesh_hash[ i ];
+  }
+  if ( first_hash == 0 ) {
+    mesh_rte.printf( "no mesh urls to connect\n" );
+    return true;
   }
   count = (uint32_t) this->user_db.transport_tab.count;
   for ( tport_id = 0; tport_id < count; tport_id++ ) {
@@ -776,7 +803,7 @@ SessionMgr::add_mesh_connect( TransportRoute &mesh_rte,  const char **mesh_url,
   rte->mesh_id        = mesh_rte.mesh_id;
   rte->uid_in_mesh    = mesh_rte.uid_in_mesh;
   rte->mesh_csum      = mesh_rte.mesh_csum;
-  rte->mesh_conn_hash = mesh_hash[ 0 ];
+  rte->mesh_conn_hash = first_hash;
   for ( uint8_t i = 0; i < COST_PATH_COUNT; i++ )
     rte->uid_connected.cost[ i ] = mesh_rte.uid_connected.cost[ i ];
 
@@ -786,12 +813,16 @@ SessionMgr::add_mesh_connect( TransportRoute &mesh_rte,  const char **mesh_url,
 
   EvTcpTransportParameters parm;
 
+  j = 0;
   for ( i = 0; i < url_count; i++ ) {
-    char tcp_buf[ MAX_TCP_HOST_LEN ];
-    size_t len = sizeof( tcp_buf );
-    int port;
-    port = ConfigTree::Transport::get_host_port( mesh_url[ i ], tcp_buf, len );
-    parm.set_host_port( tcp_buf, port, mesh_hash[ i ], i );
+    if ( mesh_url[ i ] != NULL ) {
+      char tcp_buf[ MAX_TCP_HOST_LEN ];
+      size_t len = sizeof( tcp_buf );
+      int port;
+      port = ConfigTree::Transport::get_host_port( mesh_url[ i ], tcp_buf, len);
+      parm.set_host_port( tcp_buf, port, mesh_hash[ i ], j );
+      j++;
+    }
   }
 
   if ( ! mesh_rte.transport.get_route_int( "timeout", parm.timeout ) )
@@ -1040,9 +1071,10 @@ TransportRoute::create_listener_mesh_url( void ) noexcept
   if ( url == NULL )
     url = (char *) ::malloc( MAX_TCP_HOST_LEN );
   ::memcpy( url, tmp, len + 1 );
-  this->mesh_url_addr = url;
-  this->mesh_url_len  = (uint32_t) len;
-  d_tran( "%s: %s\n", this->name, url );
+  this->mesh_url_addr  = url;
+  this->mesh_url_len   = (uint32_t) len;
+  this->mesh_conn_hash = kv_crc_c( url, len, 0 );
+  d_tran( "%s: %s (%x)\n", this->name, url, this->mesh_conn_hash );
 }
 
 bool

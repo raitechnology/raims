@@ -508,6 +508,26 @@ WebService::template_substitute( WebReqData &data ) noexcept
   }
 }
 
+void
+WebOutput::make_graph_data( WebReqData &data ) noexcept
+{
+  AdjDistance & peer_dist = this->svc.console->user_db.peer_dist;
+  kv::ArrayOutput out, out2;
+
+  peer_dist.message_graph_description( out );
+  compute_message_graph( out.ptr, out.count, out2 );
+
+  char * src = this->strm.alloc_temp( out.count ),
+       * gr  = this->strm.alloc_temp( out2.count );
+  data.graph_source     = src;
+  data.graph_source_len = out.count;
+  data.graph            = gr;
+  data.graph_len        = out2.count;
+
+  ::memcpy( src, out.ptr, out.count );
+  ::memcpy( gr, out2.ptr, out2.count );
+}
+
 bool
 WebOutput::template_property( const char *var,  size_t varlen,
                               WebReqData &data ) noexcept
@@ -532,15 +552,15 @@ WebOutput::template_property( const char *var,  size_t varlen,
     case 'g':
       if ( varlen == 10 && ::memcmp( "graph_data", var, 10 ) == 0 ) {
         if ( data.graph_len == 0 )
-          this->out_size += this->append_bytes( "null", 4 );
-        else
-          this->out_size += this->append_bytes( data.graph, data.graph_len );
+          this->make_graph_data( data );
+        this->out_size += this->append_bytes( data.graph, data.graph_len );
         return true;
       }
       if ( varlen == 12 && ::memcmp( "graph_source", var, 12 ) == 0 ) {
-        if ( data.graph_source_len > 0 )
-          this->out_size +=
-            this->append_bytes( data.graph_source, data.graph_source_len );
+        if ( data.graph_source_len == 0 )
+          this->make_graph_data( data );
+        this->out_size +=
+          this->append_bytes( data.graph_source, data.graph_source_len );
         return true;
       }
       break;

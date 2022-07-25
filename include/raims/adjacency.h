@@ -18,11 +18,11 @@ struct TransportRoute;
 
 enum PeerSyncReason {
   NO_REASON_SYNC  = 0,
-  PEER_DB_SYNC    = 1,
-  PEER_ADD_SYNC   = 2,
-  ADJ_CHANGE_SYNC = 3,
-  ADJ_RESULT_SYNC = 4,
-  UNAUTH_ADJ_SYNC = 5,
+  PEER_DB_SYNC    = 1,  /* peer db sync found new user */
+  PEER_ADD_SYNC   = 2,  /* peer add msg found new user */
+  ADJ_CHANGE_SYNC = 3,  /* adjacency change msg found new user */
+  ADJ_RESULT_SYNC = 4,  /* adjacency result msg found new user */
+  UNAUTH_ADJ_SYNC = 5,  /* placeholder waiting for auth user to verify */
   MAX_REASON_SYNC = 6
 };
 enum AdjacencyChange {
@@ -143,7 +143,8 @@ static const uint8_t  COST_PATH_COUNT = 4;
 
 struct AdjacencySpace : public kv::BitSpace {
   AdjacencySpace * next_link; /* tenp list for equal paths calc */
-  ms::StringVal    tport;     /* name of link that peer advertised */
+  ms::StringVal    tport,     /* name of link that peer advertised */
+                   tport_type;/* type of link (mesh, tcp, pgm, ipc) */
   uint32_t         uid,       /* uid owner of link */
                    tport_id,  /* tport owner of link */
                    cost[ COST_PATH_COUNT ]; /* cost of each path shard */
@@ -217,6 +218,8 @@ struct AdjDistance : public md::MDMsgMem {
                  fwd,           /* next uid map transitioning at cost */
                  reachable;     /* reachable uid map through tport */
   kv::ArrayCount< AdjacencySpace *, 4 > links; /* links for fwd */
+  kv::BitSpace   graph_used,    /* graph description visit map */
+                 graph_mesh;    /* mesh common peers */
   uint64_t       cache_seqno,   /* seqno of adjacency in cache */
                  update_seqno;  /* seqno of current adjacency */
   uint32_t       max_uid,       /* all uid < max_uid */
@@ -224,7 +227,8 @@ struct AdjDistance : public md::MDMsgMem {
                  miss_tos,      /* number of missing uids in missing[] */
                  inc_hd,        /* list hd of uids in inc_list[] */
                  inc_tl,        /* list to of uids in inc_list[] */
-                 inc_run_count; /* count of inc_runs after adjacency change */
+                 inc_run_count, /* count of inc_runs after adjacency change */
+                 max_tport_count; /* maximum tports any peer has, for graph */
   uint64_t       last_run_mono, /* timestamp of last adjacency update */
                  invalid_mono; /* when cache was invalidated */
   uint16_t       adjacency_clock; /* label transitions that were taken */
@@ -238,7 +242,9 @@ struct AdjDistance : public md::MDMsgMem {
   }
   AdjDistance( UserDB &u ) : user_db( u ) {
     zero_mem( &this->stack, &this->inc_visit );
-    zero_mem( &this->cache_seqno, &this[ 1 ] );
+    zero_mem( &this->max_uid, &this[ 1 ] );
+    this->cache_seqno = 0;
+    this->update_seqno = 1;
   }
 
   void invalidate( InvalidReason why ) {
@@ -323,8 +329,12 @@ struct AdjDistance : public md::MDMsgMem {
   const char * uid_name( uint32_t uid,  char *buf,  size_t buflen ) noexcept;
   const char * uid_name( uint32_t uid,  char *buf,  size_t &off,
                          size_t buflen ) noexcept;
+  const char * uid_user( uint32_t uid ) noexcept;
   const char * uid_set_names( kv::UIntBitSet &set,  char *buf,
                               size_t buflen ) noexcept;
+  bool find_peer_conn( const char *type,  uint32_t uid,
+                       uint32_t peer_uid,  uint32_t &peer_conn_id ) noexcept;
+  void message_graph_description( kv::ArrayOutput &out ) noexcept;
 };
 
 #ifdef INCLUDE_DUMMY_DEFS
@@ -364,13 +374,21 @@ struct UserBridge {
   UserBridge( uint32_t id ) : start_time( 0 ), uid( id ), step( 0 ), cost( 0 ){}
   ~UserBridge();
 
-  void add_link( uint32_t target_uid,  uint32_t cost[ COST_PATH_COUNT ] ) {
+  void add_link( uint32_t target_uid,  uint32_t cost[ COST_PATH_COUNT ],
+                 const char *type,  const char *name,
+                 ms::StringTab &st ) {
     AdjacencySpace *adj = this->adjacency.get( this->adjacency.count,
                                                this->uid, cost );
     adj->add( target_uid );
+    if ( type != NULL )
+      st.ref_string( type, ::strlen( type ), adj->tport_type );
+    if ( name != NULL )
+      st.ref_string( name, ::strlen( name ), adj->tport );
   }
-  void add_link( UserBridge *n,  uint32_t cost[ COST_PATH_COUNT ] ) {
-    this->add_link( n->uid, cost );
+  void add_link( UserBridge *n,  uint32_t cost[ COST_PATH_COUNT ],
+                 const char *type,  const char *name,
+                 ms::StringTab &st ) {
+    this->add_link( n->uid, cost, type, name, st );
   }
 };
 
@@ -412,7 +430,9 @@ struct UserDB {
     }
     return this->add( u, s, st );
   }
-  TransportRoute *add_link( UserBridge *n,  uint32_t cost[ COST_PATH_COUNT ] ) {
+  TransportRoute *add_link( UserBridge *n,  uint32_t cost[ COST_PATH_COUNT ],
+                            const char *type,  const char *name,
+                            ms::StringTab &st ) {
     uint32_t tport_id = this->transport_tab.count;
     void * p = ::malloc( sizeof( TransportRoute ) );
     TransportRoute *t = new ( p ) TransportRoute( *this, tport_id );
@@ -421,19 +441,24 @@ struct UserDB {
     for ( uint8_t i = 0; i < COST_PATH_COUNT; i++ )
       t->uid_connected.cost[ i ] = cost[ i ];
     t->uid_connected.tport_id = tport_id;
-    n->add_link( (uint32_t) 0, cost );
+    if ( type != NULL )
+      st.ref_string( type, ::strlen( type ), t->uid_connected.tport_type );
+    if ( name != NULL )
+      st.ref_string( name, ::strlen( name ), t->uid_connected.tport );
+    n->add_link( (uint32_t) 0, cost, type, name, st );
     this->peer_dist.update_seqno++;
     return t;
   }
   void make_link( UserBridge *x,  UserBridge *y,
-                  uint32_t cost[ COST_PATH_COUNT ] ) {
+                  uint32_t cost[ COST_PATH_COUNT ],
+                  const char *type,  const char *name,  ms::StringTab &st ) {
     if ( x == NULL )
-      this->add_link( y, cost );
+      this->add_link( y, cost, type, name, st );
     else if ( y == NULL )
-      this->add_link( x, cost );
+      this->add_link( x, cost, type, name, st );
     else {
-      x->add_link( y, cost );
-      y->add_link( x, cost );
+      x->add_link( y, cost, type, name, st );
+      y->add_link( x, cost, type, name, st );
     }
   }
   bool load_users( const char *fn,  ms::StringTab &st ) noexcept;

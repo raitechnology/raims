@@ -16,16 +16,18 @@ using namespace md;
 struct AdjacencyRec : public MsgFldSet {
   Nonce          nonce;
   const char   * tport_name,
+               * tport_type,
                * user;
   uint32_t       tport_len,
+                 tport_type_len,
                  user_len,
-                 tport,
+                 tportid,
                  cost[ COST_PATH_COUNT ];
   bool           add;
   AdjacencyRec * next;
   void * operator new( size_t, void *ptr ) { return ptr; }
   AdjacencyRec() : tport_name( 0 ), user( 0 ), tport_len( 0 ), user_len( 0 ),
-                   tport( 0 ), add( false ), next( 0 ) {
+                   tportid( 0 ), add( false ), next( 0 ) {
     for ( uint8_t i = 0; i < COST_PATH_COUNT; i++ )
       this->cost[ i ] = COST_DEFAULT;
     this->nonce.zero();
@@ -33,7 +35,7 @@ struct AdjacencyRec : public MsgFldSet {
   void set_field( uint32_t fid,  MDReference &mref ) {
     switch ( fid ) {
       case FID_TPORTID:
-        cvt_number<uint32_t>( mref, this->tport );
+        cvt_number<uint32_t>( mref, this->tportid );
         break;
       case FID_COST:
         cvt_number<uint32_t>( mref, this->cost[ 0 ] );
@@ -50,6 +52,10 @@ struct AdjacencyRec : public MsgFldSet {
       case FID_TPORT:
         this->tport_name = (const char *) mref.fptr;
         this->tport_len  = (uint32_t) mref.fsize;
+        break;
+      case FID_TPORT_TYPE:
+        this->tport_type     = (const char *) mref.fptr;
+        this->tport_type_len = (uint32_t) mref.fsize;
         break;
       case FID_USER:
         this->user     = (const char *) mref.fptr;
@@ -68,15 +74,16 @@ struct AdjacencyRec : public MsgFldSet {
   void print( void ) const {
     char buf[ NONCE_B64_LEN + 1 ];
     printf(
-    "  %cnonce[%s] %ctport_name[%.*s], %cuser[%.*s], %ctport[%u] %ccost[%u]\n",
+"  %cnonce[%s] %ctport_name[%.*s.%.*s], %cuser[%.*s], %ctport[%u] %ccost[%u]\n",
             this->test( FID_BRIDGE ) ? '+' : '-',
             this->nonce.to_base64_str( buf ),
             this->test( FID_TPORT ) ? '+' : '-',
             this->tport_len, this->tport_name,
+            this->tport_type_len, this->tport_type,
             this->test( FID_USER ) ? '+' : '-',
             this->user_len, this->user,
             this->test( FID_TPORTID ) ? '+' : '-',
-            this->tport,
+            this->tportid,
             this->test( FID_COST ) ? '+' : '-',
             this->cost[ 0 ] );
   }
@@ -126,13 +133,20 @@ UserDB::save_unauthorized_adjacency( MsgFramePublish &pub ) noexcept
           p = this->adjacency_unknown.create( pub.rte, rec.nonce );
 
         if ( rec.test( FID_TPORTID ) )
-          p->tport = rec.tport;
+          p->tportid = rec.tportid;
+
         for ( uint8_t i = 0; i < COST_PATH_COUNT; i++ )
           p->cost[ i ] = rec.cost[ i ];
+
         if ( rec.test( FID_TPORT ) )
-          this->string_tab.ref_string( rec.user, rec.user_len, p->tport_sv );
+          this->string_tab.ref_string( rec.tport_name, rec.tport_len,
+                                       p->tport_sv );
+        if ( rec.test( FID_TPORT_TYPE ) )
+          this->string_tab.ref_string( rec.tport_type, rec.tport_type_len,
+                                       p->tport_type_sv );
         if ( rec.test( FID_USER ) )
           this->string_tab.ref_string( rec.user, rec.user_len, p->user_sv );
+
         if ( rec.test( FID_LINK_ADD ) )
           p->add = rec.add;
       }
@@ -178,10 +192,13 @@ UserDB::add_unknown_adjacency( UserBridge &n ) noexcept
       if ( p->uid != 0 ) {
         UserBridge *n2 = this->bridge_tab[ p->uid ];
         if ( n2 != NULL ) {
-          AdjacencySpace *set = n2->adjacency.get( p->tport, p->uid, p->cost );
+          AdjacencySpace *set;
+          set = n2->adjacency.get( p->tportid, p->uid, p->cost );
           char str64[ NONCE_B64_LEN + 1 ];
           if ( p->tport_sv.len > 0 )
             set->tport = p->tport_sv;
+          if ( p->tport_type_sv.len > 0 )
+            set->tport_type = p->tport_type_sv;
 
           if ( n2->unknown_refs != 0 ) {
             if ( p->add ) {
@@ -434,7 +451,7 @@ UserDB::send_adjacency_change( void ) noexcept
     printf( "send_adj_change\n" );
   MsgEst adj;
   for ( ; p != NULL; p = p->next ) {
-    rte = this->transport_tab.ptr[ p->tport ];
+    rte = this->transport_tab.ptr[ p->tportid ];
     n   = this->bridge_tab.ptr[ p->uid ];
 
     adj.tportid()
@@ -442,7 +459,8 @@ UserDB::send_adjacency_change( void ) noexcept
        .cost2()
        .cost3()
        .cost4()
-       .tport( rte->transport.tport.len );
+       .tport( rte->transport.tport.len )
+       .tport_type( rte->transport.type.len );
     if ( n != NULL )
       adj.user( n->peer.user.len );
     else
@@ -479,14 +497,16 @@ UserDB::send_adjacency_change( void ) noexcept
     p = this->adjacency_change.pop_hd();
     this->events.send_adjacency_change( p->uid, p->add );
     n   = this->bridge_tab.ptr[ p->uid ];
-    rte = this->transport_tab.ptr[ p->tport ];
-    s.tportid( p->tport )
+    rte = this->transport_tab.ptr[ p->tportid ];
+    s.tportid( p->tportid )
      .cost   ( rte->uid_connected.cost[ 0 ] )
      .cost2  ( rte->uid_connected.cost[ 1 ] )
      .cost3  ( rte->uid_connected.cost[ 2 ] )
      .cost4  ( rte->uid_connected.cost[ 3 ] );
-    if ( tport_changed( last, p->tport ) )
-      s.tport( rte->transport.tport.val, rte->transport.tport.len );
+    if ( tport_changed( last, p->tportid ) ) {
+      s.tport     ( rte->transport.tport.val, rte->transport.tport.len )
+       .tport_type( rte->transport.type.val, rte->transport.type.len );
+    }
     if ( n != NULL )
       s.user( n->peer.user.val, n->peer.user.len );
     else
@@ -553,20 +573,26 @@ UserDB::recv_adjacency_change( const MsgFramePublish &pub,  UserBridge &n,
      * with the tport set */
     while ( rec_list != NULL ) {
       AdjacencyRec   & rec = *rec_list;
-      AdjacencySpace * set   = NULL;
-      uint32_t         tport = 0;
+      AdjacencySpace * set      = NULL;
+      uint32_t         tport_id = 0;
       StringVal        tport_sv,
+                       tport_type_sv,
                        user_sv;
       rec_list = rec.next;
 
       if ( rec.test( FID_TPORT ) )
         this->string_tab.ref_string( rec.tport_name, rec.tport_len, tport_sv );
+      if ( rec.test( FID_TPORT_TYPE ) )
+        this->string_tab.ref_string( rec.tport_type, rec.tport_type_len,
+                                     tport_type_sv );
 
       if ( rec.test( FID_TPORTID ) ) {
-        tport = rec.tport;
-        set   = n.adjacency.get( tport, n.uid, rec.cost );
+        tport_id = rec.tportid;
+        set      = n.adjacency.get( tport_id, n.uid, rec.cost );
         if ( tport_sv.len > 0 )
           set->tport = tport_sv;
+        if ( tport_type_sv.len > 0 )
+          set->tport_type = tport_type_sv;
       }
       if ( rec.test( FID_USER ) )
         this->string_tab.ref_string( rec.user, rec.user_len, user_sv );
@@ -601,14 +627,15 @@ UserDB::recv_adjacency_change( const MsgFramePublish &pub,  UserBridge &n,
           n.unknown_refs++;
           n.unknown_link_seqno = link_state;
           AdjPending *p =
-            this->adjacency_unknown.find_update( rec.nonce, tport, rec.add );
+            this->adjacency_unknown.find_update( rec.nonce, tport_id, rec.add );
           if ( p == NULL )
             p = this->adjacency_unknown.create( pub.rte, rec.nonce );
           if ( link_state > p->link_state_seqno ) {
             p->link_state_seqno = link_state;
             p->uid              = n.uid;
-            p->tport            = tport;
+            p->tportid          = tport_id;
             p->tport_sv         = set->tport;
+            p->tport_type_sv    = set->tport_type;
             p->user_sv          = user_sv;
             p->reason           = ADJ_CHANGE_SYNC;
             p->add              = rec.add;
@@ -726,8 +753,10 @@ UserDB::adjacency_size( UserBridge *sync ) noexcept
              .cost2()
              .cost3()
              .cost4();
-            if ( tport_changed( last, i ) )
-              e.tport( set->tport.len );
+            if ( tport_changed( last, i ) ) {
+              e.tport     ( set->tport.len )
+               .tport_type( set->tport_type.len );
+            }
             e.user   ( this->user.user.len )
              .bridge2();
           }
@@ -735,8 +764,10 @@ UserDB::adjacency_size( UserBridge *sync ) noexcept
             n2 = this->bridge_tab.ptr[ uid ];
             if ( n2 != NULL ) {
               e.tportid();
-              if ( tport_changed( last, i ) )
-                e.tport( set->tport.len );
+              if ( tport_changed( last, i ) ) {
+                e.tport     ( set->tport.len )
+                 .tport_type( set->tport_type.len );
+              }
               e.user   ( n2->peer.user.len )
                .bridge2();
             }
@@ -760,8 +791,10 @@ UserDB::adjacency_size( UserBridge *sync ) noexcept
              .cost2()
              .cost3()
              .cost4();
-            if ( tport_changed( last, i ) )
-              e.tport( rte->transport.tport.len );
+            if ( tport_changed( last, i ) ) {
+              e.tport     ( rte->transport.tport.len )
+               .tport_type( rte->transport.type.len );
+            }
             e.user   ( n2->peer.user.len )
              .bridge2();
           }
@@ -795,8 +828,10 @@ UserDB::adjacency_submsg( UserBridge *sync,  MsgCat &m ) noexcept
              .cost2  ( set->cost[ 1 ] )
              .cost3  ( set->cost[ 2 ] )
              .cost4  ( set->cost[ 3 ] );
-            if ( tport_changed( last, i ) )
-              s.tport( set->tport.val, set->tport.len );
+            if ( tport_changed( last, i ) ) {
+              s.tport     ( set->tport.val, set->tport.len )
+               .tport_type( set->tport_type.val, set->tport_type.len );
+            }
             s.user   ( this->user.user.val, this->user.user.len )
              .bridge2( this->bridge_id.nonce );
           }
@@ -808,8 +843,10 @@ UserDB::adjacency_submsg( UserBridge *sync,  MsgCat &m ) noexcept
                .cost2  ( set->cost[ 1 ] )
                .cost3  ( set->cost[ 2 ] )
                .cost4  ( set->cost[ 3 ] );
-              if ( tport_changed( last, i ) )
-                s.tport( set->tport.val, set->tport.len );
+              if ( tport_changed( last, i ) ) {
+                s.tport     ( set->tport.val, set->tport.len )
+                 .tport_type( set->tport_type.val, set->tport_type.len );
+              }
               s.user   ( n2->peer.user.val, n2->peer.user.len )
                .bridge2( n2->bridge_id.nonce );
             }
@@ -833,8 +870,10 @@ UserDB::adjacency_submsg( UserBridge *sync,  MsgCat &m ) noexcept
              .cost2  ( rte->uid_connected.cost[ 1 ] )
              .cost3  ( rte->uid_connected.cost[ 2 ] )
              .cost4  ( rte->uid_connected.cost[ 3 ] );
-            if ( tport_changed( last, i ) )
-              s.tport( rte->transport.tport.val, rte->transport.tport.len );
+            if ( tport_changed( last, i ) ) {
+              s.tport     ( rte->transport.tport.val, rte->transport.tport.len )
+               .tport_type( rte->transport.type.val, rte->transport.type.len );
+            }
             s.user   ( n2->peer.user.val, n2->peer.user.len )
              .bridge2( n2->bridge_id.nonce );
           }
@@ -1016,18 +1055,24 @@ UserDB::recv_adjacency_result( const MsgFramePublish &pub,  UserBridge &n,
     while ( rec_list != NULL ) {
       AdjacencyRec & rec = *rec_list;
       StringVal      user_sv;
-      uint32_t       tport = 0;
-      StringVal      tport_sv;
+      uint32_t       tport_id = 0;
+      StringVal      tport_sv,
+                     tport_type_sv;
       rec_list = rec.next;
 
       if ( rec.test( FID_TPORT ) )
         this->string_tab.ref_string( rec.tport_name, rec.tport_len, tport_sv );
+      if ( rec.test( FID_TPORT_TYPE ) )
+        this->string_tab.ref_string( rec.tport_type, rec.tport_type_len,
+                                     tport_type_sv );
 
       if ( rec.test( FID_TPORTID ) ) {
-        tport = rec.tport;
-        set   = sync->adjacency.get( tport, sync->uid, rec.cost );
+        tport_id = rec.tportid;
+        set      = sync->adjacency.get( tport_id, sync->uid, rec.cost );
         if ( tport_sv.len > 0 )
           set->tport = tport_sv;
+        if ( tport_type_sv.len > 0 )
+          set->tport_type = tport_type_sv;
       }
       else {
         set = NULL;
@@ -1053,14 +1098,15 @@ UserDB::recv_adjacency_result( const MsgFramePublish &pub,  UserBridge &n,
           sync->unknown_refs++;
           sync->unknown_link_seqno = link_state;
           AdjPending *p =
-            this->adjacency_unknown.find_update( rec.nonce, tport, rec.add );
+            this->adjacency_unknown.find_update( rec.nonce, tport_id, rec.add );
           if ( p == NULL )
             p = this->adjacency_unknown.create( pub.rte, rec.nonce );
           if ( link_state > p->link_state_seqno ) {
             p->link_state_seqno = link_state;
             p->uid              = sync->uid;
-            p->tport            = tport;
+            p->tportid          = tport_id;
             p->tport_sv         = set->tport;
+            p->tport_type_sv    = set->tport_type;
             p->user_sv          = user_sv;
             p->reason           = ADJ_RESULT_SYNC;
             p->add              = true;

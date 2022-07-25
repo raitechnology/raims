@@ -26,8 +26,19 @@ UserDB::UserDB( EvPoll &p,  ConfigTree::User &u,
     hb_ival_ns( 0 ), hb_ival_mask( 0 ), next_ping_mono( 0 ),
     peer_dist( *this )
 {
+  this->start_time = current_realtime_ns();
+  /* fill in lower nanos if resolution is low */
+  for ( uint64_t i = 1000000000; i > 0; i /= 1000 ) {
+    if ( ( this->start_time % i ) == 0 ) {
+      uint64_t r;
+      rand::fill_urandom_bytes( &r, sizeof( r ) );
+      this->start_time += r % i;
+      while ( current_realtime_ns() < this->start_time )
+        kv_sync_pause();
+      break;
+    }
+  }
   this->start_mono_time = current_monotonic_time_ns(); 
-  this->start_time      = current_realtime_ns();
   this->rand.static_init( this->start_mono_time, this->start_time );
 }
 

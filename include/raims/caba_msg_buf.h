@@ -210,6 +210,8 @@ struct MsgBufDigestT : public BMsgBufT<T> {
     return this->b( FID_MESH_URL, in, (uint16_t) in_len ); }
   T  & tport      ( const char *in, size_t in_len ) {
     return this->b( FID_TPORT, in, (uint16_t) in_len ); }
+  T  & tport_type ( const char *in, size_t in_len ) {
+    return this->b( FID_TPORT_TYPE, in, (uint16_t) in_len ); }
   T  & user       ( const char *in, size_t in_len ) {
     return this->b( FID_USER, in, (uint16_t) in_len ); }
   T  & service    ( const char *in, size_t in_len ) {
@@ -379,6 +381,7 @@ struct MsgEst {
   MsgEst & ucast_url  ( size_t l ) { sz += fid_est( FID_UCAST_URL, l ); return *this; }
   MsgEst & mesh_url   ( size_t l ) { sz += fid_est( FID_MESH_URL, l ); return *this; }
   MsgEst & tport      ( size_t l ) { sz += fid_est( FID_TPORT, l ); return *this; }
+  MsgEst & tport_type ( size_t l ) { sz += fid_est( FID_TPORT_TYPE, l ); return *this; }
   MsgEst & user       ( size_t l ) { sz += fid_est( FID_USER, l ); return *this; }
   MsgEst & service    ( size_t l ) { sz += fid_est( FID_SERVICE, l ); return *this; }
   MsgEst & create     ( size_t l ) { sz += fid_est( FID_CREATE, l ); return *this; }

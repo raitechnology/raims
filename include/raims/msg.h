@@ -10,7 +10,7 @@
 namespace rai {
 namespace ms {
 /*
-bytes 0 -> 3 are ver(3), type(2), opt(3), message size
+bytes 0 -> 3 are ver(1), type(2), opt(5), message size (24)
  1               8               16              24              32   
 |-+-+-+-+-+-+-+-|-+-+-+-+-+-+-+-|-+-+-+-+-+-+-+-|-+-+-+-+-+-+-+-|
 |1|0 0|0 0 0 0 0|0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 0 0 0 0|
@@ -274,7 +274,8 @@ enum MsgFid {
   FID_PEER           = 65 ,
   FID_LATENCY        = 66 ,
 
-  FID_PK_DIGEST      = 67   /* public key digest, in hb before auth */
+  FID_PK_DIGEST      = 67 , /* public key digest, in hb before auth */
+  FID_TPORT_TYPE     = 68   /* tport type in adjacency msg */
 };
 static const int FID_TYPE_SHIFT = 8,
                  FID_MAX        = 1 << FID_TYPE_SHIFT; /* 256 */
@@ -758,7 +759,8 @@ static FidTypeName fid_type_name[] = {
 { FID_PEER        , SHORT_STRING                , LIT , 0 ,"peer"            },
 { FID_LATENCY     , SHORT_STRING                , LIT , 0 ,"latency"         },
 
-{ FID_PK_DIGEST   , OPAQUE_16                   , XCL , 0 ,"pk_digest"       }
+{ FID_PK_DIGEST   , OPAQUE_16                   , XCL , 0 ,"pk_digest"       },
+{ FID_TPORT_TYPE  , SHORT_STRING                , XCL , 0 ,"tport_type"      }
 };
 
 #endif

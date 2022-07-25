@@ -235,6 +235,7 @@ struct TransportRoute : public kv::EvSocket, public kv::EvConnectionNotify,
   /* a disconnect */
   virtual void on_shutdown( kv::EvSocket &conn,  const char *,
                             size_t ) noexcept;
+  int printf( const char *fmt, ... ) const noexcept __attribute__((format(printf,2,3)));
 };
 
 struct TransportTab : public kv::ArrayCount<TransportRoute *, 4> {

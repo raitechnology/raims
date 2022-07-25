@@ -115,24 +115,38 @@ UserDB::load_users( const char *p,  size_t size,  ms::StringTab &st ) noexcept
         break;
       }
     }
-    if ( ::strncmp( args[ 0 ], "link", 4 ) == 0 ) {
+    char type[ 5 ];
+    int32_t i = 0;
+    const char * s = args[ 0 ], * name;
+    for ( ; *s != '\0' && *s != ' ' && *s != '_'; s++ ) {
+      if ( i < 4 )
+        type[ i++ ] = *s;
+    }
+    type[ i < 4 ? i : 4 ] = '\0';
+    if ( *s == '_' )
+      name = s + 1;
+    else
+      name = type;
+
+    if ( ::strcmp( type, "link" ) == 0 || ::strcmp( type, "tcp" ) == 0 ) {
       if ( argc < 3 )
         continue;
+      ::strcpy( type, "tcp" );
 
       UserBridge *one = this->find( args[ 1 ], "test", st ),
                  *two = this->find( args[ 2 ], "test", st );
-      this->make_link( one, two, cost );
+      this->make_link( one, two, cost, type, name, st );
       for ( int i = 3; i < argc; i++ ) {
         two = this->find( args[ i ], "test", st );
-        this->make_link( one, two, cost );
+        this->make_link( one, two, cost, type, name, st );
       }
     }
-    else if ( ::strncmp( args[ 0 ], "mesh", 4 ) == 0 ) {
+    else if ( ::strcmp( type, "mesh" ) == 0 || ::strcmp( type, "pgm" ) == 0 ) {
       for ( int i = 1; i < argc; i++ ) {
         UserBridge *one = this->find( args[ i ], "test", st );
         for ( int j = i + 1; j < argc; j++ ) {
           UserBridge *two = this->find( args[ j ], "test", st );
-          this->make_link( one, two, cost );
+          this->make_link( one, two, cost, type, name, st );
         }
       }
     }

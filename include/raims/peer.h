@@ -193,8 +193,9 @@ struct AdjPending {
                    request_time_mono, /* last time request started */
                    pending_time_mono; /* when pending was added to list */
   uint32_t         uid,   /* uid this adj belongs to */
-                   tport; /* tport of adj, tab[ tport ]->set.add( nonce ) */
+                   tportid; /* tport of adj, tab[ tport ]->set.add( nonce ) */
   StringVal        tport_sv, /* name assigned to tport at src */
+                   tport_type_sv, /* type of tport at src */
                    user_sv;  /* user assigned to nonce */
   uint64_t         pending_seqno; /* unique pending list seqno */
   uint32_t         request_count,
@@ -207,7 +208,7 @@ struct AdjPending {
   AdjPending( TransportRoute &r,  const Nonce &n ) :
     next( 0 ), back( 0 ), rte( r ), nonce( n ),
     link_state_seqno( 0 ), request_time_mono( 0 ), pending_time_mono( 0 ),
-    uid( 0 ), tport( 0 ), pending_seqno( 0 ), request_count( 0 ),
+    uid( 0 ), tportid( 0 ), pending_seqno( 0 ), request_count( 0 ),
     reason( UNAUTH_ADJ_SYNC ), add( true ) {
     for ( uint8_t i = 0; i < COST_PATH_COUNT; i++ )
       this->cost[ i ] = COST_DEFAULT;
@@ -227,10 +228,10 @@ struct AdjPendingList : public kv::DLinkList< AdjPending > {
     }
     return NULL;
   }
-  AdjPending *find_update( const Nonce &nonce,  uint32_t tport,  bool add ) {
+  AdjPending *find_update( const Nonce &nonce,  uint32_t tportid,  bool add ) {
     for ( AdjPending *p = this->hd; p != NULL; p = p->next ) {
       if ( p->reason != UNAUTH_ADJ_SYNC ) {
-        if ( p->nonce == nonce && p->tport == tport && p->add == add )
+        if ( p->nonce == nonce && p->tportid == tportid && p->add == add )
           return p; 
       }
     }
@@ -250,14 +251,14 @@ struct AdjChange {
             * back;
   Nonce       nonce; /* nonce of adjacency, unknown or changed */
   uint32_t    uid,   /* uid this adj belongs to */
-              tport; /* tport of adj, tab[ tport ]->set.add( nonce ) */
+              tportid; /* tport of adj, tab[ tportid ]->set.add( nonce ) */
   uint64_t    seqno; /* link_state_seqno of X */
   bool        add;   /* whether to add or remove it */
   void * operator new( size_t, void *ptr ) { return ptr; }
   void operator delete( void *ptr ) { ::free( ptr ); }
   AdjChange( const Nonce &n, uint32_t u_id, uint32_t tp_id, uint64_t ls_seqno,
              bool a )
-    : next( 0 ), back( 0 ), nonce( n ), uid( u_id ), tport( tp_id ),
+    : next( 0 ), back( 0 ), nonce( n ), uid( u_id ), tportid( tp_id ),
       seqno( ls_seqno ), add( a ) {}
 };
 

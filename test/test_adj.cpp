@@ -39,22 +39,22 @@ init_test_users( UserDB &user_db,  ms::StringTab &st ) noexcept
   UserBridge * e = user_db.add( "E", "test", st );
   UserBridge * f = user_db.add( "F", "test", st );
   UserBridge * g = user_db.add( "G", "test", st );
-  user_db.make_link( NULL, e, default_cost );
-  user_db.make_link( NULL, f, default_cost );
-  user_db.make_link( c, d, default_cost );
-  user_db.make_link( d, e, default_cost );
-  user_db.make_link( f, g, default_cost );
-  user_db.make_link( g, c, default_cost );
+  user_db.make_link( NULL, e, default_cost, "tcp", NULL, st );
+  user_db.make_link( NULL, f, default_cost, "tcp", NULL, st );
+  user_db.make_link( c, d, default_cost, "tcp", NULL, st );
+  user_db.make_link( d, e, default_cost, "tcp", NULL, st );
+  user_db.make_link( f, g, default_cost, "tcp", NULL, st );
+  user_db.make_link( g, c, default_cost, "tcp", NULL, st );
 
   uint32_t x = COST_DEFAULT * 5;
   uint32_t bc[ 4 ]={ COST_DEFAULT, x, x, x };
-  user_db.make_link( b, c, bc );
+  user_db.make_link( b, c, bc, "tcp", NULL, st );
   uint32_t ab[ 4 ]={ x, COST_DEFAULT, x, x };
-  user_db.make_link( NULL, b, ab );
+  user_db.make_link( NULL, b, ab, "tcp", NULL, st );
   uint32_t bf[ 4 ]={ x, x, COST_DEFAULT, x };
-  user_db.make_link( b, f, bf );
+  user_db.make_link( b, f, bf, "tcp", NULL, st );
   uint32_t bd[ 4 ]={ x, x, x, COST_DEFAULT };
-  user_db.make_link( b, d, bd );
+  user_db.make_link( b, d, bd, "tcp", NULL, st );
 
 #if 0
   user_db.make_link( NULL, b, 1 );
@@ -83,6 +83,7 @@ main( int argc, char *argv[] )
   uint32_t uid, cost, tport_id, tport_count;
   uint8_t path_sel;
   char src_buf[ 32 ];
+  kv::ArrayOutput out;
 
   /* find inconsistent peers */
   for (;;) {
@@ -182,12 +183,16 @@ main( int argc, char *argv[] )
       }
     }
   }
-  kv::ArrayOutput out;
+  peer_dist.message_graph_description( out );
+  fwrite( out.ptr, 1, out.count, stdout );
   /*user_db.print_paths( out );*/
-  kv::MapFile map( argv[ 1 ] );
-  if ( map.open() ) {
-    ms::compute_message_graph( (const char *) map.map, map.map_size, out );
-    fwrite( out.ptr, 1, out.count, stdout );
-  }
+  /*if ( argc > 1 ) {
+    kv::MapFile map( argv[ 1 ] );
+    if ( map.open() ) {
+      out.clear();
+      ms::compute_message_graph( (const char *) map.map, map.map_size, out );
+      fwrite( out.ptr, 1, out.count, stdout );
+    }
+  }*/
   return 0;
 }

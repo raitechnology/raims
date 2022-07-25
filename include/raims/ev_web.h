@@ -51,6 +51,7 @@ struct WebOutput : public kv::StreamBuf::BufQueue, public ConsoleOutput {
   size_t template_substitute( WebReqData &data ) noexcept;
   bool template_property( const char *var,  size_t varlen,
                           WebReqData &data ) noexcept;
+  void make_graph_data( WebReqData &data ) noexcept;
   virtual bool on_output( const char *buf,  size_t buflen ) noexcept;
 };
 

@@ -1744,6 +1744,7 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
       this->show_running( p, PRINT_GROUPS | PRINT_HDR, arg, len ); break;
     case CMD_SHOW_RUN_PARAM:
       this->show_running( p, PRINT_PARAMETERS | PRINT_HDR, arg, len ); break;
+    case CMD_SHOW_GRAPH:     this->show_graph( p ); break;
 
     case CMD_DEBUG:
       if ( len == 0 )
@@ -3025,7 +3026,7 @@ Console::show_peers( ConsoleOutput *p ) noexcept
 void
 Console::show_adjacency( ConsoleOutput *p ) noexcept
 {
-  static const size_t cols = 4;
+  static const size_t cols = 5;
   TabPrint * tab = NULL;
   size_t     count, i = 0, sep;
   uint32_t   uid, last_user, last_tport;
@@ -3050,10 +3051,14 @@ Console::show_adjacency( ConsoleOutput *p ) noexcept
       else
         tab[ i++ ].set_null();
       tab[ i++ ].set( n, PRINT_USER );
-      if ( last_tport != t )
+      if ( last_tport != t ) {
         tab[ i++ ].set( rte->transport.tport, (uint32_t) t, PRINT_ID );
-      else
+        tab[ i++ ].set( rte->transport.type );
+      }
+      else {
         tab[ i++ ].set_null();
+        tab[ i++ ].set_null();
+      }
       tab[ i++ ].set_int( rte->uid_connected.cost[ 0 ] );
       last_user  = 0;
       last_tport = (uint32_t) t;
@@ -3068,6 +3073,7 @@ Console::show_adjacency( ConsoleOutput *p ) noexcept
         tab[ i++ ].set_null();
       tab[ i++ ].set_null();
       tab[ i++ ].set( rte->transport.tport, (uint32_t) t, PRINT_ID );
+      tab[ i++ ].set( rte->transport.type );
       tab[ i++ ].set_int( rte->uid_connected.cost[ 0 ] );
       last_user  = 0;
       last_tport = (uint32_t) t;
@@ -3111,9 +3117,15 @@ Console::show_adjacency( ConsoleOutput *p ) noexcept
               tab[ i++ ].set( set->tport, j, PRINT_ID );
             else
               tab[ i++ ].set_int( j );
+            if ( set->tport_type.len > 0 )
+              tab[ i++ ].set( set->tport_type );
+            else
+              tab[ i++ ].set_null();
           }
-          else
+          else {
             tab[ i++ ].set_null();
+            tab[ i++ ].set_null();
+          }
           tab[ i++ ].set_int( set->cost[ 0 ] );
           last_user  = uid;
           last_tport = j;
@@ -3125,7 +3137,7 @@ Console::show_adjacency( ConsoleOutput *p ) noexcept
       sep = i;
     }
   }
-  const char *hdr[ cols ] = { "user", "adj", "tport", "cost" };
+  const char *hdr[ cols ] = { "user", "adj", "tport", "type", "cost" };
   this->print_table( p, hdr, cols );
 
   this->printf( "consistent: %s\n",
@@ -3714,8 +3726,7 @@ Console::show_blooms( ConsoleOutput *p ) noexcept
 {
   static const uint32_t ncols = 11;
   TabPrint * tab;
-  /*uint32_t   uid;*/
-  size_t     i = 0, count = this->user_db.transport_tab.count;
+  uint32_t   i = 0, count = this->user_db.transport_tab.count;
 
   this->table.count = 0;
   this->tmp.count = 0;
@@ -3833,6 +3844,15 @@ Console::show_running( ConsoleOutput *p,  int which,  const char *name,
     else
       this->tree.print_js( *this, which, name, namelen );
   }
+}
+
+void
+Console::show_graph( ConsoleOutput *p ) noexcept
+{
+  AdjDistance & peer_dist = this->user_db.peer_dist;
+  ArrayOutput out;
+  peer_dist.message_graph_description( out );
+  p->on_output( out.ptr, out.count );
 }
 
 int
