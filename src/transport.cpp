@@ -1372,8 +1372,11 @@ SessionMgr::create_telnet( ConfigTree::Transport &tport ) noexcept
 
   if ( ! l->in_list( IN_ACTIVE_LIST ) ) {
     if ( l->listen2( parm.host[ 0 ], parm.port[ 0 ], parm.opts,
-                     "telnet_listen", -1 ) != 0 )
+                     "telnet_listen", -1 ) != 0 ) {
+      fprintf( stderr, "failed to start telnet at %s.%d\n",
+               parm.host[ 0 ] ? parm.host[ 0 ] : "*", parm.port[ 0 ] );
       return false;
+    }
     l->console = &this->console;
     printf( "%s listening on %s\n", tport.tport.val, l->peer_address.buf );
   }
@@ -1402,8 +1405,11 @@ SessionMgr::create_web( ConfigTree::Transport &tport ) noexcept
 
   if ( ! l->in_list( IN_ACTIVE_LIST ) ) {
     if ( l->listen2( parm.host[ 0 ], parm.port[ 0 ], parm.opts, "web_listen",
-                     -1 ) != 0 )
+                     -1 ) != 0 ) {
+      fprintf( stderr, "failed to start web at %s.%d\n",
+               parm.host[ 0 ] ? parm.host[ 0 ] : "*", parm.port[ 0 ] );
       return false;
+    }
     l->console = &this->console;
     printf( "%s listening on %s\n", tport.tport.val, l->peer_address.buf );
   }

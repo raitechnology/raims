@@ -397,7 +397,7 @@ struct UserBridgeTab : public kv::ArrayCount< UserBridge *, 128 > {};
 
 struct UserDB {
   PeerEntry     user;
-  uint32_t      next_uid;
+  uint32_t      next_uid, step, cost;
   uint64_t      start_time;
   UserBridgeTab bridge_tab;
   TransportTab  transport_tab;
@@ -405,7 +405,7 @@ struct UserDB {
                 fwd;
   AdjDistance   peer_dist;
 
-  UserDB() : next_uid( 1 ), peer_dist( *this ) {}
+  UserDB() : next_uid( 1 ), step( 0 ), cost( 0 ), peer_dist( *this ) {}
   ~UserDB();
 
   UserBridge *add( const char *u,  const char *s,  ms::StringTab &st ) {
@@ -413,7 +413,7 @@ struct UserDB {
     UserBridge *n = new ( ::malloc( sizeof( UserBridge ) ) ) UserBridge( uid );
     this->bridge_tab[ uid ] = n;
     n->peer.set( u, s, st );
-    n->start_time = kv::current_realtime_ns();
+    n->start_time = kv::current_realtime_ns() + (uint64_t) uid;
     this->uid_authenticated.add( uid );
     this->peer_dist.update_seqno++;
     return n;
@@ -461,16 +461,19 @@ struct UserDB {
       y->add_link( x, cost, type, name, st );
     }
   }
-  bool load_users( const char *fn,  ms::StringTab &st ) noexcept;
-  bool load_users( const char *p,  size_t size,  ms::StringTab &st ) noexcept;
+  bool load_users( const char *fn,  ms::StringTab &st,
+                   uint32_t &start_uid ) noexcept;
+  bool load_users( const char *p,  size_t size,  ms::StringTab &st,
+                   uint32_t &start_uid ) noexcept;
   void print_elements( kv::ArrayOutput &out ) noexcept;
-  void print_paths( kv::ArrayOutput &out ) noexcept;
+  void print_paths( kv::ArrayOutput &out,  uint32_t start_uid ) noexcept;
 };
 #endif
 }
 
 namespace ms {
-bool compute_message_graph( const char *network,  size_t network_len,
+bool compute_message_graph( const char *start,  const char *network,
+                            size_t network_len,
                             kv::ArrayOutput &out ) noexcept;
 }
 

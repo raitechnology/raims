@@ -764,9 +764,23 @@ print_cost( kv::ArrayOutput &out,  AdjacencySpace *set ) noexcept
   }
 }
 
+namespace {
+struct UidSort {
+  UserBridge * n;
+  uint64_t start_time;
+
+  UidSort( UserBridge * b,  uint64_t t ) : n( b ), start_time( t ) {}
+  static bool is_older( UidSort *x,  UidSort *y ) {
+    return x->start_time > y->start_time;
+  }
+};
+}
+
 void
 AdjDistance::message_graph_description( kv::ArrayOutput &out ) noexcept
 {
+  kv::ArrayCount<UidSort, 16> uid_start;
+  kv::PrioQueue<UidSort *, UidSort::is_older> uid_sort;
   kv::ArrayCount<uint32_t, 16> peer_conn;
   UserBridge     * n;
   AdjacencySpace * set;
@@ -781,16 +795,37 @@ AdjDistance::message_graph_description( kv::ArrayOutput &out ) noexcept
 
   this->clear_cache_if_dirty();
 
-  this->max_tport_count = this->adjacency_count( 0 );
-  out.s( "node " ).s( this->user_db.user.user.val );
+  out.s( "start " ).s( this->user_db.user.user.val ).s( "\n" );
+
+  uid_start.push( UidSort( NULL, this->user_db.start_time ) );
   for ( uid = 1; uid < this->max_uid; uid++ ) {
     n = this->user_db.bridge_tab.ptr[ uid ];
     if ( n == NULL || ! n->is_set( AUTHENTICATED_STATE ) )
       continue;
-    count = this->adjacency_count( uid );
-    if ( count > this->max_tport_count )
-      this->max_tport_count = count;
-    out.s( " " ).s( n->peer.user.val );
+    uid_start.push( UidSort( n, n->start_time ) );
+  }
+  for ( uint32_t i = 0; i < uid_start.count; i++ )
+    uid_sort.push( &uid_start.ptr[ i ] );
+
+  this->max_tport_count = this->adjacency_count( 0 );
+  bool first = true;
+  while ( ! uid_sort.is_empty() ) {
+    UserBridge * n = uid_sort.heap[ 0 ]->n;
+    uid_sort.pop();
+
+    if ( first ) {
+      out.s( "node" );
+      first = false;
+    }
+    out.s( " " );
+    if ( n == NULL )
+      out.s( this->user_db.user.user.val );
+    else {
+      count = this->adjacency_count( n->uid );
+      if ( count > this->max_tport_count )
+        this->max_tport_count = count;
+      out.s( n->peer.user.val );
+    }
   }
   out.s( "\n" );
 

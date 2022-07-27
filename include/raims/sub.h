@@ -268,15 +268,19 @@ struct SubTab {
 
 struct Pub {
   int64_t  seqno;
+  uint64_t stamp;
   uint32_t hash;
   uint16_t len;
   char     value[ 2 ]; /* prefix */
   
   void init( bool is_inbox ) {
     this->seqno = ( is_inbox ? -1 : 0 );
+    this->stamp = 0;
   }
-  void copy( const Pub &p ) {
+  void copy( Pub &p ) {
     this->seqno = p.seqno;
+    this->stamp = p.stamp;
+    p.stamp = 0;
   }
   bool is_inbox( void ) const {
     return this->seqno < 0;
@@ -309,38 +313,78 @@ struct PubTab {
     }
     return p;
   }
+  Pub *find( uint32_t h,  const char *sub,  uint16_t sublen ) {
+    Pub * p = this->pub->find( h, sub, sublen );
+    if ( p == NULL )
+      p = this->pub_old->find( h, sub, sublen );
+    return p;
+  }
+  Pub *first( kv::RouteLoc &loc,  bool &is_old ) {
+    Pub *p = this->pub->first( loc );
+    if ( p != NULL )
+      is_old = false;
+    else {
+      p = this->pub_old->first( loc );
+      is_old = true;
+      if ( p != NULL && p->stamp == 0 )
+        return this->next( loc, is_old );
+    }
+    return p;
+  }
+  Pub *next( kv::RouteLoc &loc,  bool &is_old ) {
+    Pub *p;
+    if ( ! is_old ) {
+      p = this->pub->next( loc );
+      if ( p != NULL )
+        return p;
+      is_old = true;
+      p = this->pub_old->first( loc );
+    }
+    else {
+      p = this->pub_old->next( loc );
+    }
+    while ( p != NULL && p->stamp == 0 )
+      p = this->pub_old->next( loc );
+    return p;
+  }
+
   /* limit size of pub sequences */
-  void flip( void ) {
+  bool flip( void ) {
     PubT * p = this->pub;
     if ( p->vec_size * sizeof( PubT::VecData ) > 1024 * 1024 ) {
       this->pub_old->release();
       this->pub = this->pub_old;
       this->pub_old = p;
+      return true;
     }
+    return false;
   }
 };
 
 struct SeqnoSave {
-  uint32_t save[ 4 ];
+  static const size_t SAVE_INTS = 6;
+  uint32_t save[ SAVE_INTS ];
 
   SeqnoSave() {}
   SeqnoSave( const SeqnoSave &sv ) {
-    for ( size_t i = 0; i < 4; i++ )
+    for ( size_t i = 0; i < SAVE_INTS; i++ )
       this->save[ i ] = sv.save[ i ];
   }
   SeqnoSave &operator=( const SeqnoSave &sv ) {
-    for ( size_t i = 0; i < 4; i++ )
+    for ( size_t i = 0; i < SAVE_INTS; i++ )
       this->save[ i ] = sv.save[ i ];
     return *this;
   }
 
-  void update( uint64_t seqno,  uint64_t time ) {
+  void update( uint64_t seqno,  uint64_t time,  uint64_t stamp ) {
     ::memcpy( &this->save[ 0 ], &seqno, sizeof( uint64_t ) );
     ::memcpy( &this->save[ 2 ], &time, sizeof( uint64_t ) );
+    ::memcpy( &this->save[ 4 ], &stamp, sizeof( uint64_t ) );
   }
-  void restore( uint64_t &seqno,  uint64_t &time ) const {
+  void restore( uint64_t &seqno,  uint64_t &time,  uint64_t &stamp ) const {
     ::memcpy( &seqno, &this->save[ 0 ], sizeof( uint64_t ) );
     ::memcpy( &time, &this->save[ 2 ], sizeof( uint64_t ) );
+    ::memcpy( &stamp, &this->save[ 4 ], sizeof( uint64_t ) );
   }
 };
 
@@ -361,6 +405,7 @@ struct SubSeqno {
              last_uid;    /* last uid publisher */
   uint64_t   last_seqno,  /* seqno of last msg used by uid */
              last_time,   /* time of last msg */
+             last_stamp,  /* stamp of recv */
              start_seqno, /* the seqno of the sub start */
              update_seqno;/* the seqno when the sub was matched */
   SubOnMsg * on_data;     /* callback cached */
@@ -370,11 +415,12 @@ struct SubSeqno {
   char       value[ 2 ];  /* subject */
 
   SeqnoStatus init( uint32_t uid,  uint64_t seqno,  uint64_t start,
-                    uint64_t time,  uint64_t upd_sno,  SubOnMsg *cb,
-                    uint32_t mask ) {
+                    uint64_t time,  uint64_t stamp,  uint64_t upd_sno,
+                    SubOnMsg *cb,  uint32_t mask ) {
     this->last_uid     = uid;
     this->last_seqno   = seqno;
     this->last_time    = time;
+    this->last_stamp   = stamp;
     this->start_seqno  = start;
     this->update_seqno = upd_sno;
     this->on_data      = cb;
@@ -386,6 +432,7 @@ struct SubSeqno {
     this->last_uid     = sub.last_uid;
     this->last_seqno   = sub.last_seqno;
     this->last_time    = sub.last_time;
+    this->last_stamp   = sub.last_stamp; sub.last_stamp = 0;
     this->start_seqno  = sub.start_seqno;
     this->update_seqno = sub.update_seqno;
     this->on_data      = sub.on_data;
@@ -393,32 +440,46 @@ struct SubSeqno {
     this->tport_mask   = sub.tport_mask;
   }
   /* check that seqno is next published by uid (or first) */
-  SeqnoStatus update( uint32_t uid,  uint64_t seqno,  uint64_t time,
+  SeqnoStatus update( uint64_t old_start_seqno,  uint32_t uid,  uint64_t seqno,
+                      uint64_t time,  uint64_t stamp,
                       uint64_t &last_seqno_recvd,
                       uint64_t &last_time_recvd ) {
     /* if not the last uid published */
     if ( this->last_uid != uid ) {
-      if ( this->restore_uid( uid, seqno, time ) == SEQNO_UID_FIRST )
+      if ( this->restore_uid( uid, seqno, time, stamp ) == SEQNO_UID_FIRST )
         return SEQNO_UID_FIRST;
     }
-    return this->update_last( seqno, time, last_seqno_recvd,
-                              last_time_recvd );
+    return this->update_last( old_start_seqno, seqno, time, stamp,
+                              last_seqno_recvd, last_time_recvd );
   }
   SeqnoStatus restore_uid( uint32_t uid,  uint64_t seqno,
-                           uint64_t time ) noexcept;
+                           uint64_t time,  uint64_t stamp ) noexcept;
   /* set the next seqno */
-  SeqnoStatus update_last( uint64_t seqno,  uint64_t time,
+  SeqnoStatus update_last( uint64_t old_start_seqno,
+                           uint64_t seqno,  uint64_t time,  uint64_t stamp,
                            uint64_t &last_seqno_recvd,
                            uint64_t &last_time_recvd ) {
     SeqnoStatus status = SEQNO_UID_REPEAT; /* if repeated */
     last_seqno_recvd = this->last_seqno;
     last_time_recvd  = this->last_time;
-    if ( seqno > this->last_seqno ) {
+    /* resubscribed */
+    if ( old_start_seqno != this->start_seqno ) {
+      this->last_time  = time;
       this->last_seqno = seqno;
+      this->last_stamp = stamp;
       status = SEQNO_UID_NEXT;
     }
-    if ( time > this->last_time ) {
-      this->last_time = time;
+    /* time included, resequence wanted */
+    else if ( time > this->last_time ) {
+      this->last_time  = time;
+      this->last_seqno = seqno;
+      this->last_stamp = stamp;
+      status = SEQNO_UID_NEXT;
+    }
+    /* normal sequence + 1 */
+    else if ( seqno > this->last_seqno ) {
+      this->last_seqno = seqno;
+      this->last_stamp = stamp;
       status = SEQNO_UID_NEXT;
     }
     return status;
@@ -435,13 +496,14 @@ struct SeqnoArgs {
   uint64_t   time,        /* message time */
              last_seqno,  /* last message seqno */
              last_time,   /* last message time */
-             start_seqno; /* subscription start */
+             start_seqno, /* subscription start */
+             stamp;
   SubOnMsg * cb;          /* callback for subscription */
   uint32_t   tport_mask;  /* tports matched */
 
-  SeqnoArgs( const MsgFramePublish &p )
+  SeqnoArgs( const MsgFramePublish &p,  uint64_t time )
     : pub( p ), time( 0 ), last_seqno( 0 ), last_time( 0 ), start_seqno( 0 ),
-      cb( 0 ), tport_mask( 0 ) {}
+      stamp( time ), cb( 0 ), tport_mask( 0 ) {}
 };
 
 struct InboxSub {
@@ -468,22 +530,64 @@ struct SeqnoTab {
     this->tab_old = &this->tab2;
   }
   SubSeqno *upsert( uint32_t h,  const char *sub,  uint16_t sublen,
-                    kv::RouteLoc &loc ) {
-    SubSeqno * p = this->tab->upsert( h, sub, sublen, loc ), * p2;
+                    kv::RouteLoc &loc, kv::RouteLoc &loc2,
+                    bool &is_old ) {
+    loc2.init();
+    is_old = false;
+
+    SubSeqno * p = this->tab->upsert( h, sub, sublen, loc );
     if ( ! loc.is_new )
       return p;
-    kv::RouteLoc loc2;
-    if ( (p2 = this->tab_old->find( h, sub, sublen, loc2 )) != NULL ) {
+
+    SubSeqno * p2 = this->tab_old->find( h, sub, sublen, loc2 );
+    if ( p2 != NULL ) {
       p->copy( *p2 );
       loc.is_new = false;
+      is_old = true;
     }
     return p;
   }
-  void remove( kv::RouteLoc &loc ) {
+  SubSeqno *find( uint32_t h,  const char *sub,  uint16_t sublen ) {
+    SubSeqno * p = this->tab->find( h, sub, sublen );
+    if ( p == NULL )
+      p = this->tab_old->find( h, sub, sublen );
+    return p;
+  }
+  SubSeqno *first( kv::RouteLoc &loc,  bool &is_old ) {
+    SubSeqno *p = this->tab->first( loc );
+    if ( p != NULL )
+      is_old = false;
+    else {
+      p = this->tab_old->first( loc );
+      is_old = true;
+      if ( p != NULL && p->last_stamp == 0 )
+        return this->next( loc, is_old );
+    }
+    return p;
+  }
+  SubSeqno *next( kv::RouteLoc &loc,  bool &is_old ) {
+    SubSeqno *p;
+    if ( ! is_old ) {
+      p = this->tab->next( loc );
+      if ( p != NULL )
+        return p;
+      is_old = true;
+      p = this->tab_old->first( loc );
+    }
+    else {
+      p = this->tab_old->next( loc );
+    }
+    while ( p != NULL && p->last_stamp == 0 )
+      p = this->tab_old->next( loc );
+    return p;
+  }
+  void remove( kv::RouteLoc &loc,  kv::RouteLoc &loc2,  bool is_old ) {
     this->tab->remove( loc );
+    if ( is_old )
+      this->tab_old->remove( loc2 );
   }
   /* limit size of pub sequences */
-  void flip( void ) {
+  bool flip( void ) {
     SeqnoT * p = this->tab;
     if ( p->vec_size * sizeof( SeqnoT::VecData ) > 1024 * 1024 ) {
       kv::RouteLoc loc;
@@ -493,7 +597,9 @@ struct SeqnoTab {
       this->tab_old->release();
       this->tab = this->tab_old;
       this->tab_old = p;
+      return true;
     }
+    return false;
   }
 };
 

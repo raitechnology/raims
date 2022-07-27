@@ -108,22 +108,22 @@
         };
       };
 
-      function edge_data( nodes, link, link2 ) {
-        let step = link.step >= link2.step ? link.step : link2.step;
+      function edge_data( nodes, link ) {
         return {
           group: "edges",
           data: {
             source: link.source,
             target: link.target,
-            color: step_color( step ),
+            color: step_color( link.step ),
             arrow: ( link.step == -1 ? 'none' : 'triangle' ),
-            cost: ( link2.step == -1 ? '' : nodes[ link.source ].cost + '' )
+            cost: ( link.step == -1 ? '' : nodes[ link.target ].cost + '' )
           }
         };
       };
       var graphs = @(graph_data);
 
       var max_uid = 0;
+      var cur_path = 0;
       function reload_graph( n ) {
         if ( graphs != null ) {
           for ( let i = 0; i < max_uid; i++ ) {
@@ -132,7 +132,9 @@
           cy.add( transform( graphs[ n ] ) );
           cy.layout( { name: "cola", animate: false } ).run();
         }
-        document.getElementById("save").value = "path" + ( n + 1 ) + ".svg";
+        document.getElementById("p" + cur_path).checked = false;
+        cur_path = n;
+        document.getElementById("savesvg").value = "path" + ( n + 1 ) + ".svg";
       }
       function transform( graph ) {
         let elements = [];
@@ -145,19 +147,36 @@
           elements.push( node_data( gn[ i ] ) );
         }
         for ( i = 0; i < gl.length; i++ ) {
-          for ( j = 0; j < gl.length; j++ ) {
-            if ( gl[ i ].source == gl[ j ].target && gl[ i ].target == gl[ j ].source ) {
-              gl2 = gl[ j ];
-              break;
-            }
-          }
-          elements.push( edge_data( gn, gl[ i ], gl2 ) );
+          if ( gl[ i ].step < 0 )
+            elements.push( edge_data( gn, gl[ i ] ) );
+        }
+        for ( i = 0; i < gl.length; i++ ) {
+          if ( gl[ i ].step >= 0 )
+            elements.push( edge_data( gn, gl[ i ] ) );
         }
         return elements;
       };
+      function init_select( gn ) {
+        let sel = document.getElementById("select");
+        let text = document.getElementById("text");
+        let found_start = false;
+        for ( i = 0; i < gn.length; i++ ) {
+          let opt = document.createElement("option");
+          opt.text  = gn[ i ].user;
+          opt.value = gn[ i ].user;
+          if ( ! found_start ) {
+            if ( text.value.includes( "start " + opt.value ) ) {
+              opt.selected = true;
+              found_start = true;
+            }
+          }
+          sel.appendChild( opt );
+        }
+      }
 
       window.onload = function() {
         init_graph( graphs == null ? null : transform( graphs[ 0 ] ) );
+        init_select( graphs[ 0 ].nodes );
         /*fetch( "test.json" ).then( response => response.json() ).then( data => set_graphs( data ) );*/
       };
 
@@ -197,15 +216,18 @@
       <button style="color: white; background-color: #008CBA" onclick="saveAsSvg()">Save SVG</button>
       <input id="savesvg" type="text" value="path1.svg"></input>
       <button style="color: white; background-color: #008CBA" onclick="window.location=getSvgUrl()">View SVG</button>
-      <button style="color: white; background-color: #007070" onclick="reload_graph(0)">Path 1</button>
-      <button style="color: white; background-color: #007070" onclick="reload_graph(1)">Path 2</button>
-      <button style="color: white; background-color: #007070" onclick="reload_graph(2)">Path 3</button>
-      <button style="color: white; background-color: #007070" onclick="reload_graph(3)">Path 4</button>
+      <p>
+      <input type="radio" id="p0" checked="true" style="color: white; background-color: #007070" onclick="reload_graph(0)">Path 1</input>
+      <input type="radio" id="p1" style="color: white; background-color: #007070" onclick="reload_graph(1)">Path 2</input>
+      <input type="radio" id="p2" style="color: white; background-color: #007070" onclick="reload_graph(2)">Path 3</input>
+      <input type="radio" id="p3" style="color: white; background-color: #007070" onclick="reload_graph(3)">Path 4</input>
+      </p>
       </div>
       <div id="show">
       <form method="post" id="form" action="graph_nodes.html" spellcheck="false">
-        <textarea id="text" name="graph_data" form="form" cols="65" rows="25">@(graph_source)</textarea>
+        <textarea id="text" name="graph_data" form="form" cols="70" rows="25">@(graph_source)</textarea>
         <button style="color: white; background-color: #008CBA">Show Graph</button>
+        <select style="color: white; background-color: #008CBA" id="select" name="start" onchange="this.form.submit()"></select>
       </form>
       </div>
     </div>

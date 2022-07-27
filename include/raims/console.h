@@ -140,9 +140,10 @@ enum PrintType {
   PRINT_LONG_HEX    = 14,
   PRINT_STATE       = 15,
   PRINT_LONG        = 16,
-  PRINT_STAMP       = 17,
-  PRINT_TPORT_STATE = 18,
-  PRINT_SOCK_STATE  = 19,
+  PRINT_SLONG       = 17,
+  PRINT_STAMP       = 18,
+  PRINT_TPORT_STATE = 19,
+  PRINT_SOCK_STATE  = 20,
   PRINT_LEFT        = 0x40, /* left justify */
   PRINT_SEP         = 0x80, /* separator after row */
   PRINT_NULL_TERM   = 0x100,/* string null terminated */
@@ -299,6 +300,7 @@ struct SubsReply {
 struct ConsoleSubs : public ConsoleRPC {
   kv::ArrayCount< char, 8192 >      strings;
   kv::ArrayCount< SubsReply, 1024 > reply;
+  bool show_self;
 
   void * operator new( size_t, void *ptr ) { return ptr; }
   void operator delete( void *ptr ) { ::free( ptr ); }
@@ -308,6 +310,7 @@ struct ConsoleSubs : public ConsoleRPC {
     this->ConsoleRPC::init();
     this->strings.count = 0;
     this->reply.count   = 0;
+    this->show_self     = false;
   }
 };
 
@@ -514,10 +517,13 @@ struct Console : public md::MDOutput, public SubOnMsg, public ConfigPrinter {
                   uint8_t path_select ) noexcept;
   void show_path( ConsoleOutput *p,  uint8_t path_select ) noexcept;
   void show_fds( ConsoleOutput *p ) noexcept;
-  void show_blooms( ConsoleOutput *p ) noexcept;
+  void show_blooms( ConsoleOutput *p,  uint8_t path_select ) noexcept;
   void show_running( ConsoleOutput *p,  int which,  const char *name,
                      size_t len ) noexcept;
   void show_graph( ConsoleOutput *p ) noexcept;
+  void tab_pub( Pub *pub ) noexcept;
+  void tab_seqno( SubSeqno *sub ) noexcept;
+  void show_seqno( ConsoleOutput *p, const char *arg,  size_t arglen ) noexcept;
   void config( const char *name,  size_t len ) noexcept;
   int puts( const char *s ) noexcept;
   void putchar( char c ) noexcept;
@@ -579,9 +585,9 @@ enum ConsoleCmd {
   CMD_SHOW_COUNTERS    = 18, /* show counters              */
   CMD_SHOW_REACHABLE   = 19, /* show reachable             */
   CMD_SHOW_TREE        = 20, /* show tree [U]              */
-  CMD_SHOW_PATH        = 21, /* show primary               */
+  CMD_SHOW_PATH        = 21, /* show path [N]              */
   CMD_SHOW_FDS         = 22, /* show fds                   */
-  CMD_SHOW_BLOOMS      = 23, /* show blooms                */
+  CMD_SHOW_BLOOMS      = 23, /* show blooms [N]            */
   CMD_SHOW_RUN         = 24, /* show running               */
   CMD_SHOW_RUN_TPORTS  = 25, /* show running transport [T] */
   CMD_SHOW_RUN_SVCS    = 26, /* show running service [S]   */
@@ -589,43 +595,44 @@ enum ConsoleCmd {
   CMD_SHOW_RUN_GROUPS  = 28, /* show running group [G]     */
   CMD_SHOW_RUN_PARAM   = 29, /* show running parameter [P] */
   CMD_SHOW_GRAPH       = 30, /* show graph                 */
-  CMD_CONNECT          = 31, /* connect [T]                */
-  CMD_LISTEN           = 32, /* listen [T]                 */
-  CMD_SHUTDOWN         = 33, /* shutdown [T]               */
-  CMD_CONFIGURE        = 34, /* configure                  */
-  CMD_CONFIGURE_TPORT  = 35, /* configure transport T      */
-  CMD_CONFIGURE_PARAM  = 36, /* configure parameter P V    */
-  CMD_SAVE             = 37, /* save                       */
-  CMD_SUB_START        = 38, /* sub subject [file]         */
-  CMD_SUB_STOP         = 39, /* unsub subject [file]       */
-  CMD_PSUB_START       = 40, /* psub rv-wildcard [file]    */
-  CMD_PSUB_STOP        = 41, /* punsub rv-wildcard [file]  */
-  CMD_GSUB_START       = 42, /* gsub glob-wildcard [file]  */
-  CMD_GSUB_STOP        = 43, /* gunsub glob-wildcard [file]*/
-  CMD_PUBLISH          = 44, /* pub subject msg            */
-  CMD_TRACE            = 45, /* trace subject msg          */
-  CMD_PUB_ACK          = 46, /* ack subject msg            */
-  CMD_RPC              = 47, /* rpc subject msg            */
-  CMD_ANY              = 48, /* any subject msg            */
-  CMD_DEBUG            = 50, /* debug ival                 */
-  CMD_CANCEL           = 51, /* cancel                     */
-  CMD_MUTE_LOG         = 52, /* mute                       */
-  CMD_UNMUTE_LOG       = 53, /* unmute                     */
-  CMD_QUIT             = 54, /* quit/exit                  */
-  CMD_TPORT_NAME       = 55, /* tport N                    */
-  CMD_TPORT_TYPE       = 56, /* type T                     */
-  CMD_TPORT_LISTEN     = 57, /* listen A                   */
-  CMD_TPORT_CONNECT    = 58, /* connect A                  */
-  CMD_TPORT_PORT       = 59, /* port N                     */
-  CMD_TPORT_TIMEOUT    = 60, /* timeout N                  */
-  CMD_TPORT_MTU        = 61, /* mtu N                      */
-  CMD_TPORT_TXW_SQNS   = 62, /* txw_sqns N                 */
-  CMD_TPORT_RXW_SQNS   = 63, /* rxw_sqns N                 */
-  CMD_TPORT_MCAST_LOOP = 64, /* mcast_loop N               */
-  CMD_TPORT_EDGE       = 65, /* edge B                     */
-  CMD_TPORT_SHOW       = 66, /* show                       */
-  CMD_TPORT_QUIT       = 67, /* quit/exit                  */
-  CMD_BAD              = 68
+  CMD_SHOW_SEQNO       = 31, /* show seqno                 */
+  CMD_CONNECT          = 32, /* connect [T]                */
+  CMD_LISTEN           = 33, /* listen [T]                 */
+  CMD_SHUTDOWN         = 34, /* shutdown [T]               */
+  CMD_CONFIGURE        = 35, /* configure                  */
+  CMD_CONFIGURE_TPORT  = 36, /* configure transport T      */
+  CMD_CONFIGURE_PARAM  = 37, /* configure parameter P V    */
+  CMD_SAVE             = 38, /* save                       */
+  CMD_SUB_START        = 39, /* sub subject [file]         */
+  CMD_SUB_STOP         = 40, /* unsub subject [file]       */
+  CMD_PSUB_START       = 41, /* psub rv-wildcard [file]    */
+  CMD_PSUB_STOP        = 42, /* punsub rv-wildcard [file]  */
+  CMD_GSUB_START       = 43, /* gsub glob-wildcard [file]  */
+  CMD_GSUB_STOP        = 44, /* gunsub glob-wildcard [file]*/
+  CMD_PUBLISH          = 45, /* pub subject msg            */
+  CMD_TRACE            = 46, /* trace subject msg          */
+  CMD_PUB_ACK          = 47, /* ack subject msg            */
+  CMD_RPC              = 48, /* rpc subject msg            */
+  CMD_ANY              = 49, /* any subject msg            */
+  CMD_DEBUG            = 51, /* debug ival                 */
+  CMD_CANCEL           = 52, /* cancel                     */
+  CMD_MUTE_LOG         = 53, /* mute                       */
+  CMD_UNMUTE_LOG       = 54, /* unmute                     */
+  CMD_QUIT             = 55, /* quit/exit                  */
+  CMD_TPORT_NAME       = 56, /* tport N                    */
+  CMD_TPORT_TYPE       = 57, /* type T                     */
+  CMD_TPORT_LISTEN     = 58, /* listen A                   */
+  CMD_TPORT_CONNECT    = 59, /* connect A                  */
+  CMD_TPORT_PORT       = 60, /* port N                     */
+  CMD_TPORT_TIMEOUT    = 61, /* timeout N                  */
+  CMD_TPORT_MTU        = 62, /* mtu N                      */
+  CMD_TPORT_TXW_SQNS   = 63, /* txw_sqns N                 */
+  CMD_TPORT_RXW_SQNS   = 64, /* rxw_sqns N                 */
+  CMD_TPORT_MCAST_LOOP = 65, /* mcast_loop N               */
+  CMD_TPORT_EDGE       = 66, /* edge B                     */
+  CMD_TPORT_SHOW       = 67, /* show                       */
+  CMD_TPORT_QUIT       = 68, /* quit/exit                  */
+  CMD_BAD              = 69
 };
 
 enum ConsoleArgType {
@@ -744,7 +751,8 @@ static const ConsoleCmdString show_cmd[] = {
   { CMD_SHOW_FDS       , "fds"           ,0,0}, /* show fds */
   { CMD_SHOW_BLOOMS    , "blooms"        ,0,0}, /* show blooms */
   { CMD_SHOW_RUN       , "running"       ,0,0}, /* show running */
-  { CMD_SHOW_GRAPH     , "graph"         ,0,0}  /* show graph */
+  { CMD_SHOW_GRAPH     , "graph"         ,0,0}, /* show graph */
+  { CMD_SHOW_SEQNO     , "seqno"         ,0,0}  /* show seqno */
 };
 static const size_t num_show_cmds = ASZ( show_cmd );
 
@@ -792,7 +800,7 @@ static const ConsoleCmdString help_cmd[] = {
   { CMD_SHOW_TREE        , "show tree", "[U]",   "Show multicast tree from me or U"                  },
   { CMD_SHOW_PATH        , "show path", "[N]",   "Show multicast path N"                       },
   { CMD_SHOW_FDS         , "show fds", "",       "Show fd centric routes"                            },
-  { CMD_SHOW_BLOOMS      , "show blooms", "",    "Show bloom centric routes"                         },
+  { CMD_SHOW_BLOOMS      , "show blooms", "[N]", "Show bloom centric routes N"                         },
   { CMD_SHOW_RUN         , "show running", "",   "Show all config running"                           },
   { CMD_SHOW_RUN_TPORTS  , "show running transport","[T]", "Show transports running, T or all"       },
   { CMD_SHOW_RUN_SVCS    , "show running service","[S]",   "Show services running config, S or all"  },
@@ -800,6 +808,7 @@ static const ConsoleCmdString help_cmd[] = {
   { CMD_SHOW_RUN_GROUPS  , "show running group","[G]",     "Show groups running config, G or all"    },
   { CMD_SHOW_RUN_PARAM   , "show running parameter","[P]", "Show parameters running config, P or all"},
   { CMD_SHOW_GRAPH       , "show graph", "",     "Show network description for node graph"           },
+  { CMD_SHOW_SEQNO       , "show seqno", "[S]",  "Show subject seqno values"                         },
   { CMD_SUB_START        , "sub","[S] [F]",      "Subscribe subject S, output to file F"             },
   { CMD_SUB_STOP         , "unsub","[S] [F]",    "Unsubscribe subject S, stop output file F"         },
   { CMD_PSUB_START       , "psub","[W] [F]",     "Subscribe rv-wildcard W, output to file F"         },

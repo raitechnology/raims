@@ -3,6 +3,7 @@
 #include <string.h>
 #include <stdint.h>
 #include <stdarg.h>
+#include <errno.h>
 #include <raikv/os_file.h>
 #include <raikv/logger.h>
 #include <raims/parse_config.h>
@@ -121,9 +122,17 @@ main( int argc, char *argv[] )
             argv[ 0 ], ms_get_version() );
     return 0;
   }
+  int err_fd = dup( STDERR_FILENO );
 
   if ( lo != NULL ) {
-    ::freopen( lo, "a", stderr );
+    if ( ::freopen( lo, "a", stderr ) == NULL ) {
+      const char *err = ::strerror( errno );
+      ::write( err_fd, lo, ::strlen( lo ) );
+      ::write( err_fd, ": ", 2 );
+      ::write( err_fd, err, ::strlen( err ) );
+      ::write( err_fd, "\n", 1 );
+      return 1;
+    }
     ::setvbuf( stderr, NULL, _IOLBF, 1024 );
     Console::log_header( STDERR_FILENO );
   }
@@ -160,8 +169,14 @@ main( int argc, char *argv[] )
   MySessionMgr sess( poll, log, *tree, *usr, *svc, st );
   EvTerminal   term( poll, cb );
 
-  if ( lo != NULL )
+  if ( lo != NULL ) {
     sess.console.open_log( lo, false );
+
+    if ( err_fd >= 0 ) { /* errs go to log */
+      ::close( err_fd );
+      err_fd = -1;
+    }
+  }
   if ( co != NULL ) {
     sess.console.term_list.push_tl( &cb );
     term.term.prompt = ""; /* no prompt until after init */
@@ -181,6 +196,11 @@ main( int argc, char *argv[] )
     static char *recipe[] = { iec, question, show_help };
     lc_bindkey( term.term.lc, recipe, 3 );
     lc_tty_set_prompt( term.term.tty, TTYP_PROMPT1, "" );
+
+    if ( err_fd >= 0 ) { /* errs go to console */
+      ::close( err_fd );
+      err_fd = -1;
+    }
   }
   else {
     term.stdin_fd = -1;
@@ -236,8 +256,9 @@ main( int argc, char *argv[] )
     }
   }
   else {
+    uint64_t timeout_ns = current_monotonic_time_ns() + SEC_TO_NS;
     while ( sess.loop() ) {
-      if ( sighndl.signaled ) {
+      if ( sighndl.signaled || current_monotonic_time_ns() > timeout_ns ) {
         if ( poll.quit == 0 )
           poll.quit = 1;
       }
@@ -250,12 +271,16 @@ main( int argc, char *argv[] )
   sess.console.flush_log( log );
   if ( co != NULL )
     term.finish();
+  else if ( lo == NULL ) {
+    if ( status != 0 && sess.console.log_index > 0 )
+      ::write( err_fd, sess.console.log.ptr, sess.console.log_index );
+  }
   log.shutdown();
   /*if ( log_fp != NULL )
     fclose( log_fp );*/
   /*term.printf( "stdout: %.*s\n", (int) log.out_sz, log.out_buf );
   term.printf( "stderr: %.*s\n", (int) log.err_sz, log.err_buf );*/
 
-  return 0;
+  return status == 0 ? 0 : 1;
 }
 

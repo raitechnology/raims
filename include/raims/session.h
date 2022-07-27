@@ -198,6 +198,12 @@ struct SessionMgr : public kv::EvSocket {
   UScoreTab               u_tab;          /* table of _subscriptions */
   uint32_t                next_timer,     /* session start gets a timer_id */
                           timer_id;       /* timer_id for this session */
+  uint64_t                timer_mono_time,/* mono updated at timer expire */
+                          timer_time,     /* real updated at timer expire */
+                          timer_start_mono,/* start mono */
+                          timer_start,     /* start time */
+                          timer_ticks,    /* incremented each expires */
+                          timer_ival;     /* interval for timer */
   InboxHash               ibx;            /* match inbox hashes */
   McastHash               mch;            /* match mcast hashes */
   UserDB                  user_db;        /* db of user nonce routes */

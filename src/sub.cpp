@@ -660,23 +660,25 @@ SeqnoStatus
 SubDB::match_seqno( SeqnoArgs &ctx ) noexcept
 {
   const MsgFramePublish &pub = ctx.pub;
-  RouteLoc   loc;
+  RouteLoc   loc, loc2;
+  bool       is_old;
   SubSeqno * seq = this->seqno_tab.upsert( pub.subj_hash, pub.subject,
-                                           pub.subject_len, loc );
+                                           pub.subject_len, loc, loc2,
+                                           is_old );
   uint32_t   uid = ( pub.n == NULL ? 0 : pub.n->uid );
   if ( seq == NULL )
     return SEQNO_ERROR;
   /* starting a new uid/seqno/time triplet */
   if ( loc.is_new ) {
     if ( ! this->match_subscription( ctx ) ) {
-      this->seqno_tab.remove( loc );
+      this->seqno_tab.remove( loc, loc2, is_old );
       return SEQNO_NOT_SUBSCR;
     }
     return seq->init( uid, pub.dec.seqno, ctx.start_seqno, ctx.time,
-                      this->update_seqno, ctx.cb, ctx.tport_mask );
+                      ctx.stamp, this->update_seqno, ctx.cb, ctx.tport_mask );
   }
-
-  /* if not inbox, check if subscription modified */
+  /* check if subscription modified */
+  uint64_t old_start_seqno = seq->start_seqno;
   if ( seq->update_seqno != this->update_seqno ){
     if ( this->match_subscription( ctx ) ) {
       seq->start_seqno  = ctx.start_seqno;
@@ -687,7 +689,7 @@ SubDB::match_seqno( SeqnoArgs &ctx ) noexcept
     /* otherwise, no sub matches */
     else {
       seq->release();
-      this->seqno_tab.remove( loc );
+      this->seqno_tab.remove( loc, loc2, is_old );
       return SEQNO_NOT_SUBSCR;
     }
   }
@@ -696,8 +698,8 @@ SubDB::match_seqno( SeqnoArgs &ctx ) noexcept
     ctx.cb          = seq->on_data;
     ctx.tport_mask  = seq->tport_mask;
   }
-  return seq->update( uid, pub.dec.seqno, ctx.time, ctx.last_seqno,
-                      ctx.last_time );
+  return seq->update( old_start_seqno, uid, pub.dec.seqno, ctx.time,
+                      ctx.stamp, ctx.last_seqno, ctx.last_time );
 }
 
 bool
@@ -762,7 +764,8 @@ SubDB::match_any_sub( const char *sub,  uint16_t sublen ) noexcept
 }
 
 SeqnoStatus
-SubSeqno::restore_uid( uint32_t uid,  uint64_t seqno,  uint64_t time ) noexcept
+SubSeqno::restore_uid( uint32_t uid,  uint64_t seqno,  uint64_t time,
+                       uint64_t stamp ) noexcept
 {
   SeqnoSave id_val;
   size_t    id_pos;
@@ -771,22 +774,23 @@ SubSeqno::restore_uid( uint32_t uid,  uint64_t seqno,  uint64_t time ) noexcept
   if ( this->seqno_ht == NULL )
     this->seqno_ht = UidSeqno::resize( NULL );
   /* save the last uid */
-  id_h = kv_hash_uint( this->last_uid );
+  id_h = this->last_uid;
   if ( ! this->seqno_ht->find( id_h, id_pos, id_val ) ) {
-    id_val.update( this->last_seqno, this->last_time );
+    id_val.update( this->last_seqno, this->last_time, this->last_stamp );
     this->seqno_ht->set_rsz( this->seqno_ht, id_h, id_pos, id_val );
   }
   /* find the uid which published */
-  id_h = kv_hash_uint( uid );
+  id_h = uid;
   if ( ! this->seqno_ht->find( id_h, id_pos, id_val ) ) {
     this->last_uid   = uid;
     this->last_seqno = seqno;
     this->last_time  = time;
+    this->last_stamp = stamp;
     return SEQNO_UID_FIRST;
   }
   /* restore the seqno of the last time uid published */
   this->last_uid = uid;
-  id_val.restore( this->last_seqno, this->last_time );
+  id_val.restore( this->last_seqno, this->last_time, this->last_stamp );
   return SEQNO_UID_NEXT;
 }
 

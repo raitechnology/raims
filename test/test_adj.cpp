@@ -23,7 +23,6 @@ init_test_users( UserDB &user_db,  ms::StringTab &st ) noexcept
   static uint32_t default_cost[ 4 ] =
     { COST_DEFAULT, COST_DEFAULT, COST_DEFAULT, COST_DEFAULT };
 
-  user_db.start_time = kv::current_realtime_ns();
   user_db.user.set( "A", "test", st );
   UserBridge * b = user_db.add( "B", "test", st );
   UserBridge * c = user_db.add( "C", "test", st );
@@ -71,10 +70,12 @@ main( int argc, char *argv[] )
   UserDB user_db;
   md::MDMsgMem mem;
   ms::StringTab st( mem );
+  uint32_t start_uid;
   bool quiet = ( argc > 1 );
 
+  user_db.start_time = kv::current_realtime_ns();
   if ( argc > 1 )
-    user_db.load_users( argv[ 1 ], st );
+    user_db.load_users( argv[ 1 ], st, start_uid );
   else
     init_test_users( user_db, st );
 
@@ -185,14 +186,13 @@ main( int argc, char *argv[] )
   }
   peer_dist.message_graph_description( out );
   fwrite( out.ptr, 1, out.count, stdout );
-  /*user_db.print_paths( out );*/
-  /*if ( argc > 1 ) {
+  if ( argc > 1 ) {
     kv::MapFile map( argv[ 1 ] );
     if ( map.open() ) {
       out.clear();
-      ms::compute_message_graph( (const char *) map.map, map.map_size, out );
+      ms::compute_message_graph( NULL, (const char *) map.map, map.map_size, out );
       fwrite( out.ptr, 1, out.count, stdout );
     }
-  }*/
+  }
   return 0;
 }

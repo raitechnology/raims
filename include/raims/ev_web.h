@@ -45,7 +45,6 @@ struct WebReqData {
 
 struct WebOutput : public kv::StreamBuf::BufQueue, public ConsoleOutput {
   WebService & svc;
-  size_t       out_size;
 
   WebOutput( WebService &str,  WebType type );
   size_t template_substitute( WebReqData &data ) noexcept;
@@ -61,8 +60,7 @@ struct HtmlOutput : public WebOutput {
   HtmlOutput( WebService &str,  WebType type );
   void init( WebType type ) noexcept;
   virtual bool on_output( const char *buf,  size_t buflen ) noexcept;
-  void add_http_header( const char *mime,  size_t mlen,
-                        size_t size ) noexcept;
+  void add_http_header( const char *mime,  size_t mlen ) noexcept;
 };
 
 struct SubOutput : public WebOutput {

@@ -142,7 +142,7 @@ NullOutput::on_output( const char *,  size_t ) noexcept
 WebOutput::WebOutput( WebService &str,  WebType type ) :
   kv::StreamBuf::BufQueue( str, 256, 4 * 1024 ),
   ConsoleOutput( type == W_HTML, type == W_JSON ),
-  svc( str ), out_size( 0 ) {}
+  svc( str ) {}
 
 HtmlOutput::HtmlOutput( WebService &str,  WebType type ) :
   WebOutput( str, type ), strm_start( 0 ), in_progress( false ) {}
@@ -154,7 +154,6 @@ void
 HtmlOutput::init( WebType type ) noexcept
 {
   this->StreamBuf::BufQueue::init( 256, 4 * 1024 );
-  this->out_size    = 0;
   this->strm_start  = 0;
   this->rpc         = NULL;
   this->is_html     = ( type == W_HTML );
@@ -166,7 +165,6 @@ void
 SubOutput::init( void ) noexcept
 {
   this->StreamBuf::BufQueue::init( 256, 4 * 1024 );
-  this->out_size    = 0;
   this->rpc         = NULL;
   this->is_html     = false;
   this->is_json     = true;
@@ -213,12 +211,12 @@ WebService::process_wsmsg( WSMsg &wmsg ) noexcept
       data.template_buf = &cmd[ 9 ];
       data.template_len = size - 9;
       data.paren = '{';
-      q.out_size = q.template_substitute( data );
+      q.template_substitute( data );
     }
     else {
       this->console->on_input( &q, cmd, size );
     }
-    ws.set( q.out_size, 0, WebSocketFrame::WS_TEXT, true );
+    ws.set( q.used_size(), 0, WebSocketFrame::WS_TEXT, true );
     frame = q.prepend_buf( ws.hdr_size() );
     ws.encode( frame );
     this->append_iov( q );
@@ -242,20 +240,20 @@ cat( char *buf, const void *data,  size_t data_len )
 bool
 WebOutput::on_output( const char *buf,  size_t buflen ) noexcept
 {
-  this->out_size += this->append_bytes( buf, buflen );
+  this->append_bytes( buf, buflen );
   return true;
 }
 
 bool
 HtmlOutput::on_output( const char *buf,  size_t buflen ) noexcept
 {
-  this->out_size += this->append_bytes( buf, buflen );
+  this->append_bytes( buf, buflen );
   if ( ! this->in_progress )
     return true;
 
   static const char templ_trail[] = "</body>\n</html>\n";
-  this->out_size += this->append_bytes( templ_trail, sizeof( templ_trail ) - 1 );
-  this->add_http_header( "text/html",  9, this->out_size );
+  this->append_bytes( templ_trail, sizeof( templ_trail ) - 1 );
+  this->add_http_header( "text/html", 9 );
   this->svc.append_iov( *this );
   this->svc.msgs_sent++;
   this->in_progress = false;
@@ -319,7 +317,8 @@ WebService::process_post( const HttpReq &hreq ) noexcept
   const char * obj = hreq.path,
              * end = &hreq.path[ hreq.path_len ];
   char         path[ 1024 ],
-             * data_buf;
+             * data_buf,
+             * start = NULL;
   size_t       data_len;
   WebReqData   data;
 
@@ -331,15 +330,43 @@ WebService::process_post( const HttpReq &hreq ) noexcept
 
   data_len = HttpReq::decode_uri( hreq.data, &hreq.data[ hreq.content_length ],
                                   data_buf, data_len );
+  for ( size_t i = data_len; i > 0; ) {
+    if ( data_buf[ --i ] == '&' &&
+         ::strncmp( &data_buf[ i + 1 ], "start=", 6 ) == 0 ) {
+      data_len = i;
+      data_buf[ i ] = '\0';
+      start = &data_buf[ i + 7 ];
+    }
+  }
 
   if ( ::strncmp( data_buf, "graph_data=", 11 ) == 0 ) {
     kv::ArrayOutput out;
-    compute_message_graph( &data_buf[ 11 ], data_len - 11, out );
 
-    data.graph            = out.ptr;
-    data.graph_len        = out.count;
-    data.graph_source     = &data_buf[ 11 ];
-    data.graph_source_len = data_len - 11;
+    data_buf       = &data_buf[ 11 ];
+    data_len       = data_len - 11;
+
+    compute_message_graph( start, data_buf, data_len, out );
+
+    data.graph     = out.ptr;
+    data.graph_len = out.count;
+
+    if ( start != NULL ) {
+      if ( ::strncmp( data_buf, "start ", 6 ) == 0 ) {
+        size_t start_len = ::strlen( start );
+        char * eol       = (char *) ::memchr( &data_buf[ 6 ], '\n',
+                                              data_len - 6 ),
+             * end       = &data_buf[ data_len ],
+             * new_eol   = &data_buf[ 6 + start_len ];
+
+        if ( eol != NULL ) {
+          ::memmove( new_eol, eol, end - eol );
+          ::memcpy( &data_buf[ 6 ], start, start_len );
+          data_len = 6 + start_len + ( end - eol );
+        }
+      }
+    }
+    data.graph_source     = data_buf;
+    data.graph_source_len = data_len;
 
     return this->process_get_file2( data );
   }
@@ -372,8 +399,8 @@ WebService::process_get_file2( WebReqData &data ) noexcept
   if ( data.path_len == 0 ) {
     this->out.init( W_JSON );
     this->console->on_input( &this->out, data.cmd, data.cmd_len );
-    if ( this->out.out_size != 0 ) {
-      this->out.add_http_header( "application/json", 16, this->out.out_size );
+    if ( this->out.used_size() != 0 ) {
+      this->out.add_http_header( "application/json", 16 );
       this->append_iov( this->out );
       this->out.reset();
       this->msgs_sent++;
@@ -493,18 +520,16 @@ WebService::process_get( WebReqData &data ) noexcept
 void
 WebService::template_substitute( WebReqData &data ) noexcept
 {
-  size_t size;
   this->out.init( data.mime_len == 9 ? W_HTML : W_JSON /* text/html */);
-  size = this->out.template_substitute( data );
+  this->out.template_substitute( data );
   if ( this->out.rpc == NULL || this->out.rpc->complete ) {
-    this->out.add_http_header( data.mime, data.mime_len, size );
+    this->out.add_http_header( data.mime, data.mime_len );
     this->append_iov( this->out );
     this->out.reset();
     this->msgs_sent++;
   }
   else {
     this->out.in_progress = true;
-    this->out.out_size    = size;
   }
 }
 
@@ -515,7 +540,7 @@ WebOutput::make_graph_data( WebReqData &data ) noexcept
   kv::ArrayOutput out, out2;
 
   peer_dist.message_graph_description( out );
-  compute_message_graph( out.ptr, out.count, out2 );
+  compute_message_graph( NULL, out.ptr, out.count, out2 );
 
   char * src = this->strm.alloc_temp( out.count ),
        * gr  = this->strm.alloc_temp( out2.count );
@@ -537,7 +562,7 @@ WebOutput::template_property( const char *var,  size_t varlen,
       if ( varlen == 4 && ::memcmp( "user", var, 4 ) == 0 ) {
         const char * user    = this->svc.console->user_db.user.user.val;
         size_t       userlen = this->svc.console->user_db.user.user.len;
-        this->out_size = this->append_bytes( user, userlen );
+        this->append_bytes( user, userlen );
         return true;
       }
       break;
@@ -545,7 +570,7 @@ WebOutput::template_property( const char *var,  size_t varlen,
       if ( varlen == 7 && ::memcmp( "service", var, 7 ) == 0 ) {
         const char * svc    = this->svc.console->user_db.svc.svc.val;
         size_t       svclen = this->svc.console->user_db.svc.svc.len;
-        this->out_size = this->append_bytes( svc, svclen );
+        this->append_bytes( svc, svclen );
         return true;
       }
       break;
@@ -553,14 +578,13 @@ WebOutput::template_property( const char *var,  size_t varlen,
       if ( varlen == 10 && ::memcmp( "graph_data", var, 10 ) == 0 ) {
         if ( data.graph_len == 0 )
           this->make_graph_data( data );
-        this->out_size += this->append_bytes( data.graph, data.graph_len );
+        this->append_bytes( data.graph, data.graph_len );
         return true;
       }
       if ( varlen == 12 && ::memcmp( "graph_source", var, 12 ) == 0 ) {
         if ( data.graph_source_len == 0 )
           this->make_graph_data( data );
-        this->out_size +=
-          this->append_bytes( data.graph_source, data.graph_source_len );
+        this->append_bytes( data.graph_source, data.graph_source_len );
         return true;
       }
       break;
@@ -579,15 +603,15 @@ WebOutput::template_property( const char *var,  size_t varlen,
         size_t ncmds;
         this->svc.console->get_valid_help_cmds( cmds, ncmds );
         #define STR( s ) s, sizeof( s ) - 1
-        this->out_size = this->append_bytes( STR( script ) );
-        this->out_size = this->append_bytes( STR( "<dl>" ) );
+        this->append_bytes( STR( script ) );
+        this->append_bytes( STR( "<dl>" ) );
         for ( uint32_t i = 0; i < ncmds; i++ ) {
           if ( cmds[ i ].cmd < CMD_CONNECT ) {
             size_t slen = ::strlen( cmds[ i ].str ),
                    dlen = ::strlen( cmds[ i ].descr );
             char buf[ 256 ], link[ 128 ];
             size_t n;
-            this->out_size += this->append_bytes( STR( "\n<dt><a href=\"" ) );
+            this->append_bytes( STR( "\n<dt><a href=\"" ) );
 
             if ( cmds[ i ].args[ 0 ] != '\0' ) {
               n = ::snprintf( link, sizeof( link ),
@@ -597,24 +621,24 @@ WebOutput::template_property( const char *var,  size_t varlen,
               n = ::snprintf( link, sizeof( link ), "cmd.html?%s",
                               cmds[ i ].str);
             }
-            this->out_size += this->append_bytes( link, n );
-            this->out_size += this->append_bytes( STR( "\">" ) );
-            this->out_size += this->append_bytes( cmds[ i ].str, slen );
-            this->out_size += this->append_bytes( STR( "</a>" ) );
+            this->append_bytes( link, n );
+            this->append_bytes( STR( "\">" ) );
+            this->append_bytes( cmds[ i ].str, slen );
+            this->append_bytes( STR( "</a>" ) );
 
             if ( cmds[ i ].args[ 0 ] != '\0' ) {
               n = ::snprintf( buf, sizeof( buf ),
                 " %s: <input id=\"t%u\" type=\"text\" "
                   "onkeydown=\"jskey(this, '%s')\"></input>",
                   cmds[ i ].args, i, cmds[ i ].str );
-              this->out_size += this->append_bytes( buf, n );
+              this->append_bytes( buf, n );
             }
-            this->out_size += this->append_bytes( STR( "</dt><dd>" ) );
-            this->out_size += this->append_bytes( cmds[ i ].descr, dlen );
-            this->out_size += this->append_bytes( STR( "</dd>" ) );
+            this->append_bytes( STR( "</dt><dd>" ) );
+            this->append_bytes( cmds[ i ].descr, dlen );
+            this->append_bytes( STR( "</dd>" ) );
           }
         }
-        this->out_size += this->append_bytes( STR( "</dl>" ) );
+        this->append_bytes( STR( "</dl>" ) );
         #undef STR
         return true;
       }
@@ -648,7 +672,7 @@ WebOutput::template_substitute( WebReqData &data ) noexcept
         size_t       varlen = s - &p[ 2 ];
         if ( varlen == sizeof( cmd_str ) && var[ 0 ] == '_' &&
              ::memcmp( &var[ 1 ], cmd_str, varlen - 1 ) == 0 ) {
-          size += this->append_bytes( data.cmd, data.cmd_len );
+          this->append_bytes( data.cmd, data.cmd_len );
         }
         else {
           bool run_var = false;
@@ -666,7 +690,6 @@ WebOutput::template_substitute( WebReqData &data ) noexcept
             if ( this->rpc != NULL && ! this->rpc->complete )
               return size;
           }
-          size += this->out_size; this->out_size = 0;
         }
         m = &s[ 1 ];
         continue;
@@ -679,8 +702,7 @@ WebOutput::template_substitute( WebReqData &data ) noexcept
 }
 
 void
-HtmlOutput::add_http_header( const char *mime,  size_t mlen,
-                             size_t size ) noexcept
+HtmlOutput::add_http_header( const char *mime,  size_t mlen ) noexcept
 {
   static const char fmt[] =
     "HTTP/1.1 200 OK\r\n"
@@ -689,7 +711,8 @@ HtmlOutput::add_http_header( const char *mime,  size_t mlen,
     "Content-Type: ", fmt_mid[] = "\r\n"
     "Content-Length: ", fmt_trail[] = "\r\n"
     "\r\n";
-  size_t prefix_len,
+  size_t size = this->used_size(),
+         prefix_len,
          fmt_off,
          d = uint64_digits( size );
 
