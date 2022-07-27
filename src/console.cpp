@@ -3925,7 +3925,7 @@ Console::show_seqno( ConsoleOutput *p,  const char *arg,
       count++;
     }
   }
-  if ( count == 0 && arglen > 0 ) {
+  if ( count == 0 ) {
     for ( pub = this->sub_db.pub_tab.first( loc, b ); pub != NULL;
           pub = this->sub_db.pub_tab.next( loc, b ) ) {
       if ( arglen == 0 || ::memmem( pub->value, pub->len, arg, arglen ) != 0 )
