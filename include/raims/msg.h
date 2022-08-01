@@ -9,6 +9,14 @@
 
 namespace rai {
 namespace ms {
+
+extern int64_t tz_offset_sec,
+               tz_offset_ns,
+               tz_stamp_sec,
+               tz_stamp_ns;
+extern bool    tz_stamp_gmt;
+void update_tz_stamp( void );
+
 /*
 bytes 0 -> 3 are ver(1), type(2), opt(5), message size (24)
  1               8               16              24              32   
@@ -275,7 +283,10 @@ enum MsgFid {
   FID_LATENCY        = 66 ,
 
   FID_PK_DIGEST      = 67 , /* public key digest, in hb before auth */
-  FID_TPORT_TYPE     = 68   /* tport type in adjacency msg */
+  FID_TPORT_TYPE     = 68 , /* tport type in adjacency msg */
+  FID_CHAIN_SEQNO    = 69 , /* previous seqno when changing time frame */
+  FID_STAMP          = 70 , /* time stamp */
+  FID_CONVERGE       = 71   /* network convergence stamp */
 };
 static const int FID_TYPE_SHIFT = 8,
                  FID_MAX        = 1 << FID_TYPE_SHIFT; /* 256 */
@@ -706,7 +717,7 @@ static FidTypeName fid_type_name[] = {
 
 { FID_SEQNO       , U_SHORT | U_INT | U_LONG    , XCL , 0 ,"seqno"           },
 { FID_SUB_SEQNO   , U_SHORT | U_INT | U_LONG    , XCL , 0 ,"sub_seqno"       },
-{ FID_TIME        , U_SHORT | U_INT | U_LONG    , TIM , 0 ,"time"            },
+{ FID_TIME        , U_SHORT | U_INT | U_LONG    , XCL , 0 ,"time"            },
 { FID_UPTIME      , U_SHORT | U_INT | U_LONG    , XCL , 0 ,"uptime"          },
 { FID_INTERVAL    , U_SHORT | U_INT             , XCL , 0 ,"interval"        },
 { FID_REF_CNT     , U_SHORT | U_INT             , LIT , 0 ,"ref_cnt"         },
@@ -760,7 +771,10 @@ static FidTypeName fid_type_name[] = {
 { FID_LATENCY     , SHORT_STRING                , LIT , 0 ,"latency"         },
 
 { FID_PK_DIGEST   , OPAQUE_16                   , XCL , 0 ,"pk_digest"       },
-{ FID_TPORT_TYPE  , SHORT_STRING                , XCL , 0 ,"tport_type"      }
+{ FID_TPORT_TYPE  , SHORT_STRING                , XCL , 0 ,"tport_type"      },
+{ FID_CHAIN_SEQNO , U_SHORT | U_INT | U_LONG    , XCL , 0 ,"chain_seqno"     },
+{ FID_STAMP       , U_SHORT | U_INT | U_LONG    , TIM , 0 ,"stamp"           },
+{ FID_CONVERGE    , U_SHORT | U_INT | U_LONG    , XCL , 0 ,"converge"        }
 };
 
 #endif

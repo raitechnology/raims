@@ -213,7 +213,7 @@ function update_msg_rate( msg ) {
       mr        = msg[ "mr" ] | 0,
       bs        = msg[ "bs" ] | 0,
       br        = msg[ "br" ] | 0,
-      time      = msg[ "time" ],
+      time      = msg[ "stamp" ],
       total_m   = ms + mr,
       total_b   = bs + br,
       last_ms   = 0,
@@ -485,7 +485,7 @@ function update_port_table( key, msg ) {
   }
 }
 
-const peer_fields = ["time", "user", "sub_cnt", "latency", "cost",
+const peer_fields = ["stamp", "user", "sub_cnt", "latency", "cost",
                      "bs", "br", "ms", "mr" ];
 
 function init_peer_table( name, msg ) {
@@ -495,7 +495,8 @@ function init_peer_table( name, msg ) {
   for ( let i = 0; i < peer_fields.length; i++ ) {
     let th = document.createElement( "th" );
     thead.appendChild( th );
-    th.appendChild( document.createTextNode( peer_fields[ i ] ) );
+    let f = ( i == 0 ? "time" : peer_fields[ i ] );
+    th.appendChild( document.createTextNode( f ) );
   }
   let body = document.createElement( "tbody" );
   table.appendChild( body );

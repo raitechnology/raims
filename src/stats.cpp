@@ -49,7 +49,7 @@ SessionMgr::publish_stats( uint64_t cur_time ) noexcept
     h = s.hash();
     MsgEst e( s.len() );
     e.seqno      ()
-     .time       ()
+     .stamp      ()
      .fmt        ()
      .user       ( this->user.user.len );
 
@@ -58,7 +58,7 @@ SessionMgr::publish_stats( uint64_t cur_time ) noexcept
 
     m.open      ( this->user_db.bridge_id.nonce, s.len() )
      .seqno     ( cache_seqno )
-     .time      ( cur_time )
+     .stamp     ( cur_time )
      .fmt       ( CABA_TYPE_ID )
      .user      ( this->user.user.val, this->user.user.len );
 
@@ -133,7 +133,7 @@ SessionMgr::publish_stats( uint64_t cur_time ) noexcept
 
       MsgEst e( s.len() );
       e.seqno     ()
-       .time      ()
+       .stamp     ()
        .fmt       ()
        .peer      ( peer_len )
        .uid       ()
@@ -148,7 +148,7 @@ SessionMgr::publish_stats( uint64_t cur_time ) noexcept
 
       m.open      ( this->user_db.bridge_id.nonce, s.len() )
        .seqno     ( seqno )
-       .time      ( cur_time )
+       .stamp     ( cur_time )
        .fmt       ( CABA_TYPE_ID )
        .peer      ( peer_val, peer_len )
        .uid       ( uid )
@@ -274,7 +274,7 @@ SessionMgr::fwd_port_stat_msg( SubjectVar &s,  TransportRoute *rte,
 
   MsgEst e( s.len() );
   e.seqno   ()
-   .time    ()
+   .stamp   ()
    .fmt     ()
    .user    ( this->user.user.len )
    .peer    ( peer_len )
@@ -296,7 +296,7 @@ SessionMgr::fwd_port_stat_msg( SubjectVar &s,  TransportRoute *rte,
 
   m.open    ( this->user_db.bridge_id.nonce, s.len() )
    .seqno   ( stats_seqno )
-   .time    ( cur_time )
+   .stamp   ( cur_time )
    .fmt     ( CABA_TYPE_ID )
    .user    ( this->user.user.val, this->user.user.len )
    .peer    ( peer_val, peer_len )

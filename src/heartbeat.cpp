@@ -37,6 +37,7 @@ UserDB::make_hb( TransportRoute &rte,  const char *sub,  size_t sublen,
    .cnonce    ()
    .sub_seqno ()
    .link_state()
+   .converge  ()
    .uid_cnt   ()
    .uid_csum  ()
    .mesh_csum ()
@@ -62,9 +63,10 @@ UserDB::make_hb( TransportRoute &rte,  const char *sub,  size_t sublen,
      .cnonce    ( rte.hb_cnonce          )
      .sub_seqno ( this->sub_db.sub_seqno );
     if ( h != hello_h ) {
-      m.link_state( this->link_state_seqno )
-       .uid_cnt   ( this->uid_auth_count   )
-       .uid_csum  ( this->uid_csum         );
+      m.link_state( this->link_state_seqno  )
+       .converge  ( this->net_converge_time )
+       .uid_cnt   ( this->uid_auth_count    )
+       .uid_csum  ( this->uid_csum          );
       if ( rte.is_set( TPORT_IS_MESH ) ) {
         Nonce csum = *rte.mesh_csum;
         csum ^= this->bridge_id.nonce;
@@ -317,6 +319,12 @@ UserDB::on_heartbeat( const MsgFramePublish &pub,  UserBridge &n,
     n.set( IN_HB_QUEUE_STATE );
     this->hb_queue.push( &n );
   }
+  if ( dec.test( FID_CONVERGE ) ) {
+    uint64_t converge = 0;
+    cvt_number<uint64_t>( dec.mref[ FID_CONVERGE ], converge );
+    if ( converge > this->net_converge_time )
+      this->net_converge_time = converge;
+  }
   if ( dec.test_2( FID_LINK_STATE, FID_SUB_SEQNO ) ) {
     uint64_t link_seqno = 0,
              sub_seqno  = 0;
@@ -437,13 +445,13 @@ void
 UserDB::send_ping_request( UserBridge &n ) noexcept
 {
   InboxBuf ibx( n.bridge_id, _PING );
-  uint64_t time = current_realtime_ns();
+  uint64_t stamp = current_realtime_ns();
   n.ping_send_count++;
-  n.ping_send_time = time;
+  n.ping_send_time = stamp;
 
   MsgEst e( ibx.len() );
   e.seqno     ()
-   .time      ()
+   .stamp     ()
    .sub_seqno ()
    .link_state();
 
@@ -452,7 +460,7 @@ UserDB::send_ping_request( UserBridge &n ) noexcept
 
   m.open( this->bridge_id.nonce, ibx.len() )
    .seqno     ( ++n.send_inbox_seqno   )
-   .time      ( time                   )
+   .stamp     ( stamp                  )
    .sub_seqno ( this->sub_db.sub_seqno )
    .link_state( this->link_state_seqno );
   uint32_t h = ibx.hash();
@@ -469,21 +477,21 @@ UserDB::recv_ping_request( const MsgFramePublish &,  UserBridge &n,
   char     ret_buf[ 16 ];
   const char * suf = dec.get_return( ret_buf, _PONG );
   InboxBuf ibx( n.bridge_id, suf );
-  uint64_t time = 0, token = 0;
+  uint64_t stamp = 0, token = 0;
 
-  if ( dec.test( FID_TIME ) )
-    cvt_number<uint64_t>( dec.mref[ FID_TIME ], time );
+  if ( dec.test( FID_STAMP ) )
+    cvt_number<uint64_t>( dec.mref[ FID_STAMP ], stamp );
   if ( dec.test( FID_TOKEN ) )
     cvt_number<uint64_t>( dec.mref[ FID_TOKEN ], token );
-  if ( time == 0 )
-    time = current_realtime_ns();
+  if ( stamp == 0 )
+    stamp = current_realtime_ns();
   if ( suf != ret_buf ) { /* exclude manual pings */
     n.ping_recv_count++;
-    n.ping_recv_time = time;
+    n.ping_recv_time = stamp;
   }
   MsgEst e( ibx.len() );
   e.seqno  ()
-   .time   ()
+   .stamp  ()
    .token  ();
 
   MsgCat m;
@@ -491,7 +499,7 @@ UserDB::recv_ping_request( const MsgFramePublish &,  UserBridge &n,
 
   m.open( this->bridge_id.nonce, ibx.len() )
    .seqno  ( ++n.send_inbox_seqno )
-   .time   ( time );
+   .stamp  ( stamp );
   if ( token != 0 )
     m.token( token );
   uint32_t h = ibx.hash();
@@ -519,13 +527,13 @@ bool
 UserDB::recv_pong_result( const MsgFramePublish &,  UserBridge &n,
                           const MsgHdrDecoder &dec ) noexcept
 {
-  uint64_t time = 0;
-  if ( dec.test( FID_TIME ) )
-    cvt_number<uint64_t>( dec.mref[ FID_TIME ], time );
-  n.pong_recv_time = time;
+  uint64_t stamp = 0;
+  if ( dec.test( FID_STAMP ) )
+    cvt_number<uint64_t>( dec.mref[ FID_STAMP ], stamp );
+  n.pong_recv_time = stamp;
   n.pong_recv_count++;
-  time = current_realtime_ns() - time;
-  n.round_trip_time = time;
+  stamp = current_realtime_ns() - stamp;
+  n.round_trip_time = stamp;
   if ( n.test_clear( PING_STATE ) ) {
     this->ping_queue.remove( &n );
     n.ping_fail_count = 0;

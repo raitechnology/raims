@@ -42,13 +42,19 @@ SessionMgr::SessionMgr( EvPoll &p,  Logger &l,  ConfigTree &c,
              ipc_rt( p, *this ), console_rt( p, *this ),
              tree( c ), user( u ), svc( s ), next_timer( 1 ), timer_id( 0 ),
              timer_mono_time( 0 ), timer_time( 0 ),
-             timer_start_mono( 0 ), timer_start( 0 ),
-             timer_ticks( 0 ), timer_ival( 0 ),
+             timer_converge_time( 0 ), converge_seqno( 0 ),
+             timer_start_mono( 0 ), timer_start( 0 ), timer_ival( 0 ),
              user_db( p, u, s, this->sub_db, st, this->events ),
              sub_db( p, this->user_db, *this ),
              sys_bloom( 0, "(sys)", p.g_bloom_db ),
              console( *this ), log( l ), telnet( 0 ), web( 0 ),
-             telnet_tport( 0 ), web_tport( 0 )
+             telnet_tport( 0 ), web_tport( 0 ),
+             pub_window_mono_time( 0 ),
+             sub_window_mono_time( 0 ),
+             pub_window_size( 4 * 1024 * 1024 ),
+             sub_window_size( 4 * 1024 * 1024 ),
+             pub_window_ival( (uint64_t) 10 * SEC_TO_NS ),
+             sub_window_ival( (uint64_t) 10 * SEC_TO_NS )
 {
   this->sock_opts = OPT_NO_POLL;
   this->tcp_accept_sock_type = p.register_type( "ev_tcp_tport" );
@@ -72,6 +78,43 @@ SessionMgr::SessionMgr( EvPoll &p,  Logger &l,  ConfigTree &c,
 
   md_init_auto_unpack();
   CabaMsg::init_auto_unpack();
+}
+
+static const char pub_w[] = "pub-window-size",
+                  sub_w[] = "sub-window-size",
+                  pub_t[] = "pub-window-time",
+                  sub_t[] = "sub-window-time",
+                  hb_t[]  = "heartbeat",
+                  tz_s[]  = "timestamp";
+bool
+SessionMgr::init_param( void ) noexcept
+{
+  const char *s = "", *val = NULL;
+  uint64_t hb_ival;
+
+  if ( this->tree.find_parameter( s = pub_w, val, NULL ) &&
+       ! ConfigTree::string_to_bytes( val, this->pub_window_size ) ) goto fail;
+  if ( this->tree.find_parameter( s = sub_w, val, NULL ) &&
+       ! ConfigTree::string_to_bytes( val, this->sub_window_size ) ) goto fail;
+  if ( this->tree.find_parameter( s = pub_t, val, NULL ) &&
+       ! ConfigTree::string_to_nanos( val, this->pub_window_ival ) ) goto fail;
+  if ( this->tree.find_parameter( s = sub_t, val, NULL ) &&
+       ! ConfigTree::string_to_nanos( val, this->sub_window_ival ) ) goto fail;
+  if ( this->tree.find_parameter( s = hb_t, val, NULL ) ) {
+    if ( ! ConfigTree::string_to_secs( val, hb_ival ) ) goto fail;
+    this->user_db.hb_interval = (uint32_t) hb_ival;
+  }
+  if ( this->tree.find_parameter( s = tz_s, val, NULL ) ) {
+    if ( val != NULL &&
+         ( ::strcmp( val, "gmt" ) == 0 || ::strcmp( val, "GMT" ) == 0 ) )
+      tz_stamp_gmt = true;
+  }
+  update_tz_stamp();
+  return true;
+
+fail:
+  fprintf( stderr, "bad %s value: %s\n", s, val );
+  return false;
 }
 
 int
@@ -221,18 +264,27 @@ SessionMgr::add_wildcard_rte( const char *prefix,  size_t pref_len,
 void
 SessionMgr::start( void ) noexcept
 {
+  printf( "%s: %lu bytes\n", pub_w, this->pub_window_size );
+  printf( "%s: %lu bytes\n", sub_w, this->sub_window_size );
+  printf( "%s: %lu secs\n", pub_t, this->pub_window_ival / SEC_TO_NS );
+  printf( "%s: %lu secs\n", sub_t, this->sub_window_ival / SEC_TO_NS );
+  printf( "%s: %u secs\n", hb_t, this->user_db.hb_interval );
+
   uint64_t cur_mono = this->poll.timer.current_monotonic_time_ns(),
            cur_time = this->poll.timer.current_time_ns();
   this->user_db.hello_hb();
-  this->timer_id         = ++this->next_timer;
-  this->timer_mono_time  = cur_mono;
-  this->timer_time       = cur_time;
-  this->timer_start_mono = cur_mono;
-  this->timer_start      = cur_time;
-  this->timer_ticks      = 0;
+  this->timer_id             = ++this->next_timer;
+  this->timer_mono_time      = cur_mono;
+  this->timer_time           = cur_time;
+  this->timer_converge_time  = cur_time;
+  this->converge_seqno       = seqno_init( cur_time );
+  this->timer_start_mono     = cur_mono;
+  this->timer_start          = cur_time;
   this->stats.mono_time  = cur_mono;
   this->stats.mono_time -= cur_time % ( STATS_INTERVAL * SEC_TO_NS );
   this->stats.mono_time += STATS_INTERVAL * SEC_TO_NS;
+  this->pub_window_mono_time = cur_mono + this->pub_window_ival;
+  this->sub_window_mono_time = cur_mono + this->sub_window_ival;
   uint64_t ival = this->user_db.hb_interval * SEC_TO_NS;
   this->timer_ival         = (uint32_t) ( ival / 1000 );
   this->user_db.hb_ival_ns = ival;
@@ -257,22 +309,38 @@ SessionMgr::timer_expire( uint64_t tid,  uint64_t ) noexcept
            cur_time = this->poll.timer.current_time_ns();
   if ( tid != this->timer_id )
     return false;
-  this->timer_mono_time = cur_mono;
-  this->timer_time      = cur_time;
-  this->timer_ticks++;
-  if ( ( this->timer_ticks & 0x7ffU ) == 0 ) {
-    this->timer_ticks =
-      ( ( cur_mono - this->timer_start_mono ) / this->timer_ival );
+  this->timer_mono_time      = cur_mono;
+  this->timer_time           = cur_time;
+  if ( this->user_db.net_converge_time > this->timer_converge_time &&
+       cur_time >= this->user_db.net_converge_time ) {
+    uint64_t seqno = seqno_init( cur_time );
+    if ( seqno != this->converge_seqno ) {
+      d_sess( "set converge seqno %lu\n", seqno );
+      this->converge_seqno      = seqno;
+      this->timer_converge_time = cur_time;
+    }
   }
   this->user_db.interval_hb( cur_mono, cur_time );
   this->user_db.check_user_timeout( cur_mono, cur_time );
   if ( this->console.log_rotate_time <= cur_time )
     this->console.rotate_log();
   this->console.on_log( this->log );
-  if ( this->sub_db.pub_tab.flip() )
-    printf( "pub_tab flipped\n" );
-  if ( this->sub_db.seqno_tab.flip() )
-    printf( "seqno_tab flipped\n" );
+
+  if ( cur_mono > this->pub_window_mono_time ) {
+    if ( this->sub_db.pub_tab.flip( this->pub_window_size ) ) {
+      this->pub_window_mono_time = cur_mono + this->pub_window_ival;
+      printf( "pub_tab flipped, count %lu\n",
+              this->sub_db.pub_tab.pub_old->pop_count());
+    }
+  }
+
+  if ( cur_mono > this->sub_window_mono_time ) {
+    if ( this->sub_db.seqno_tab.flip( this->sub_window_size ) ) {
+      this->sub_window_mono_time = cur_mono + this->sub_window_ival;
+      printf( "seqno_tab flipped, count %lu\n",
+              this->sub_db.seqno_tab.tab_old->pop_count());
+    }
+  }
   this->sub_db.any_tab.gc();
 
   if ( cur_mono < this->stats.mono_time )
@@ -519,32 +587,54 @@ IpcRoute::on_msg( EvPublish &pub ) noexcept
   SeqnoArgs seq( fpub, this->mgr.timer_time );
   uint32_t  fmt;
 
+  dec.get_ival<uint64_t>( FID_CHAIN_SEQNO, seq.chain_seqno );
   dec.get_ival<uint64_t>( FID_TIME, seq.time );
   dec.get_ival<uint32_t>( FID_FMT, fmt );
   SeqnoStatus status = this->sub_db.match_seqno( seq );
 
-  d_sess( "-> ipc_rte: %.*s seqno %" PRIu64 "(%s) reply %.*s "
+  d_sess( "-> ipc_rte: %.*s seqno %lu.%lu (%s) reply %.*s "
           "(len=%u, from %s, fd %d, msg_enc %x)\n",
-          (int) fpub.subject_len, fpub.subject, dec.seqno,
+          (int) fpub.subject_len, fpub.subject,
+          seqno_frame( dec.seqno ), seqno_base( dec.seqno ),
           seqno_status_string( status ),
           (int) replylen, (char *) reply,
           fpub.msg_len, fpub.rte.name, fpub.src_route, fmt );
 
   if ( status > SEQNO_UID_NEXT ) {
     if ( status != SEQNO_NOT_SUBSCR ) {
-      fpub.status = FRAME_STATUS_DUP_SEQNO;
-    /*if ( debug_sess )*/
-      n.printf( "%s %.*s seqno %" PRIu64 " last %" PRIu64
-                       " time %" PRIu64 " last %" PRIu64 " (%s)\n",
+      if ( status > SEQNO_UID_SKIP )
+        fpub.status = FRAME_STATUS_DUP_SEQNO;
+    if ( debug_sess )
+      n.printf( "%s %.*s seqno %lu.%lu last %lu.%lu miss 0x%x (%s)\n",
                 seqno_status_string( status ),
-                (int) fpub.subject_len, fpub.subject, dec.seqno,
-                seq.last_seqno, seq.time, seq.last_time, fpub.rte.name );
+                (int) fpub.subject_len, fpub.subject,
+                seqno_frame( dec.seqno ), seqno_base( dec.seqno ),
+                seqno_frame( seq.last_seqno ), seqno_base( seq.last_seqno ),
+                seq.msg_loss, fpub.rte.name );
     }
-    if ( status == SEQNO_UID_REPEAT )
-      n.seqno_repeat++;
-    else if ( status == SEQNO_NOT_SUBSCR )
-      n.seqno_not_subscr++;
-    return true;
+    if ( status == SEQNO_UID_REPEAT ) {
+      n.msg_repeat_count++;
+      n.msg_repeat_time = this->mgr.timer_time;
+    }
+    else if ( status == SEQNO_NOT_SUBSCR ) {
+      n.msg_not_subscr_count++;
+      n.msg_not_subscr_time = this->mgr.timer_time;
+    }
+    else if ( status == SEQNO_UID_SKIP ) {
+      n.msg_loss_time = this->mgr.timer_time;
+      if ( seq.msg_loss <= MAX_MSG_LOSS )
+        n.msg_loss_count += seq.msg_loss;
+      else
+        n.msg_loss_count++;
+    }
+    if ( status > SEQNO_UID_SKIP ) /* forward when skipped ahead */
+      return true;
+  }
+  else if ( status < SEQNO_UID_NEXT ) {
+    if ( status == SEQNO_UID_FIRST )
+      seq.msg_loss = EV_PUB_START;
+    else if ( status == SEQNO_UID_CYCLE )
+      seq.msg_loss = EV_PUB_CYCLE;
   }
   /*MDMsgMem mem;
   if ( fmt == CABA_TYPE_ID ) {
@@ -562,7 +652,7 @@ IpcRoute::on_msg( EvPublish &pub ) noexcept
         if ( &fpub.rte != rte && rte->is_set( TPORT_IS_IPC ) ) {
           EvPublish pub( fpub.subject, fpub.subject_len, reply, replylen,
                          data, datalen, rte->sub_route, this->fd,
-                         fpub.subj_hash, fmt, 'p' );
+                         fpub.subj_hash, fmt, 'p', seq.msg_loss );
           b &= rte->sub_route.forward_except( pub, this->mgr.router_set );
         }
       }
@@ -574,7 +664,7 @@ IpcRoute::on_msg( EvPublish &pub ) noexcept
       if ( &fpub.rte != rte && rte->is_set( TPORT_IS_IPC ) ) {
         EvPublish pub( fpub.subject, fpub.subject_len, reply, replylen,
                        data, datalen, rte->sub_route, this->fd,
-                       fpub.subj_hash, fmt, 'p' );
+                       fpub.subj_hash, fmt, 'p', seq.msg_loss );
         b &= rte->sub_route.forward_except( pub, this->mgr.router_set );
       }
     }
@@ -583,11 +673,9 @@ IpcRoute::on_msg( EvPublish &pub ) noexcept
     fpub.flags |= MSG_FRAME_IPC_CONTROL;
     SubMsgData val( fpub, &n, data, datalen );
 
-    val.seqno      = dec.seqno;
-    val.time       = seq.time;
-    val.fmt        = fmt;
-    val.last_seqno = seq.last_seqno;
-    val.last_time  = seq.last_time;
+    val.seqno = dec.seqno;
+    val.fmt   = fmt;
+    dec.get_ival<uint64_t>( FID_STAMP, val.stamp );
     dec.get_ival<uint64_t>( FID_TOKEN, val.token );
     dec.get_ival<uint32_t>( FID_RET,   val.reply );
     seq.cb->on_data( val );
@@ -607,9 +695,12 @@ ConsoleRoute::fwd_console( EvPublish &pub,  bool is_caba ) noexcept
 {
   TransportRoute & rte = *this->user_db.ipc_transport;
   MDMsgMem     mem;
-  CabaMsg    * msg     = NULL;
-  const void * data    = NULL;
-  size_t       datalen = 0,
+  CabaMsg    * msg         = NULL;
+  const void * data        = NULL;
+  uint64_t     time        = 0,
+               stamp       = 0,
+               chain_seqno = 0;
+  size_t       datalen     = 0,
                end;
   if ( is_caba ) {
     end = pub.msg_len;
@@ -622,10 +713,9 @@ ConsoleRoute::fwd_console( EvPublish &pub,  bool is_caba ) noexcept
                                            pub.subject_len, loc );
     if ( p == NULL )
       return 0;
-    if ( loc.is_new )
-      p->init( false );
-    p->stamp = this->mgr.timer_time;
-    uint64_t seqno = p->next_seqno();
+    uint64_t seqno;
+    seqno = p->next_seqno( loc.is_new, time, this->mgr.timer_time,
+                           this->mgr.converge_seqno, chain_seqno );
 
     MsgEst e( pub.subject_len );
     e.seqno ();
@@ -648,29 +738,35 @@ ConsoleRoute::fwd_console( EvPublish &pub,  bool is_caba ) noexcept
   fpub.dec.decode_msg();
   fpub.dec.get_ival<uint64_t>( FID_SEQNO, fpub.dec.seqno );
   SeqnoArgs seq( fpub, this->mgr.timer_time );
+  if ( is_caba ) {
+    fpub.dec.get_ival<uint64_t>( FID_TIME, time );
+    fpub.dec.get_ival<uint64_t>( FID_CHAIN_SEQNO, chain_seqno );
+    fpub.dec.get_ival<uint64_t>( FID_STAMP, stamp );
+  }
+  seq.time        = time;
+  seq.chain_seqno = chain_seqno;
   SeqnoStatus status = this->sub_db.match_seqno( seq );
 
-  if ( status <= SEQNO_UID_NEXT ) {
+  if ( status > SEQNO_UID_NEXT ) {
+    if ( status != SEQNO_NOT_SUBSCR )
+      printf( "fwd_console %s %.*s seqno %" PRIu64 " (%s)\n",
+               seqno_status_string( status ),
+               (int) fpub.subject_len, fpub.subject, fpub.dec.seqno,
+               fpub.rte.name );
+  }
+  if ( status <= SEQNO_UID_SKIP ) {
     if ( seq.cb != NULL ) {
       fpub.flags |= MSG_FRAME_CONSOLE_CONTROL;
       SubMsgData val( fpub, NULL, data, datalen );
 
-      val.seqno      = fpub.dec.seqno;
-      val.time       = 0;
-      val.fmt        = pub.msg_enc;
-      val.last_seqno = seq.last_seqno;
-      val.last_time  = seq.last_time;
-      val.token      = 0;
-      val.reply      = 0;
+      val.seqno = fpub.dec.seqno;
+      val.stamp = stamp;
+      val.fmt   = pub.msg_enc;
+      val.token = 0;
+      val.reply = 0;
       seq.cb->on_data( val );
       return 1;
     }
-  }
-  else if ( status != SEQNO_NOT_SUBSCR ) {
-    printf( "fwd_console %s %.*s seqno %" PRIu64 " (%s)\n",
-             seqno_status_string( status ),
-             (int) fpub.subject_len, fpub.subject, fpub.dec.seqno,
-             fpub.rte.name );
   }
   return 0;
 }
@@ -905,6 +1001,8 @@ SessionMgr::on_msg( EvPublish &pub ) noexcept
     case U_INBOX_ANY_RTE:   /* _I.Nonce.any, ipc_rt inbox */
       if ( dec.seqno > n.recv_inbox_seqno ) {
         if ( n.recv_inbox_seqno != 0 && dec.seqno != n.recv_inbox_seqno + 1 ) {
+          n.inbox_msg_loss_time   = this->timer_time;
+          n.inbox_msg_loss_count += dec.seqno - ( n.recv_inbox_seqno + 1 );
           n.printf( "%.*s missing inbox seqno %" PRIu64 " -> %" PRIu64 " (%s)\n",
                     (int) fpub.subject_len, fpub.subject,
                     n.recv_inbox_seqno, dec.seqno, fpub.rte.name );
@@ -973,11 +1071,12 @@ SessionMgr::on_msg( EvPublish &pub ) noexcept
       SeqnoArgs  seq( fpub, this->timer_time );
 
       val.seqno = dec.seqno;
-      dec.get_ival<uint64_t>( FID_TIME,  val.time );
-      dec.get_ival<uint64_t>( FID_TOKEN, val.token );
-      dec.get_ival<uint32_t>( FID_RET,   val.reply );
-      dec.get_ival<uint32_t>( FID_FMT,   val.fmt );
-      seq.time = val.time;
+      dec.get_ival<uint64_t>( FID_CHAIN_SEQNO, seq.chain_seqno );
+      dec.get_ival<uint64_t>( FID_STAMP,       val.stamp );
+      dec.get_ival<uint64_t>( FID_TOKEN,       val.token );
+      dec.get_ival<uint32_t>( FID_RET,         val.reply );
+      dec.get_ival<uint32_t>( FID_FMT,         val.fmt );
+      dec.get_ival<uint64_t>( FID_TIME,        seq.time );
 
       /* if _I.Nonce.<inbox_ret>, find the inbox_ret */
       if ( dec.inbox_ret != 0 || type == U_INBOX_ANY ) {
@@ -1017,21 +1116,34 @@ SessionMgr::on_msg( EvPublish &pub ) noexcept
 
         if ( status > SEQNO_UID_NEXT ) {
           if ( status != SEQNO_NOT_SUBSCR ) {
-            fpub.status = FRAME_STATUS_DUP_SEQNO;
-          /*if ( debug_sess )*/
-            n.printf( "%s %.*s seqno %" PRIu64 " (%s)\n",
-                      seqno_status_string( status ),
-                      (int) fpub.subject_len, fpub.subject, dec.seqno,
-                      fpub.rte.name );
+            if ( status > SEQNO_UID_SKIP )
+              fpub.status = FRAME_STATUS_DUP_SEQNO;
+          if ( debug_sess )
+            n.printf( "%s %.*s seqno %lu.%lu last %lu.%lu miss %x (%s)\n",
+                    seqno_status_string( status ),
+                    (int) fpub.subject_len, fpub.subject,
+                    seqno_frame( dec.seqno ), seqno_base( dec.seqno ),
+                    seqno_frame( seq.last_seqno ), seqno_base( seq.last_seqno ),
+                    seq.msg_loss, fpub.rte.name );
           }
-          if ( status == SEQNO_UID_REPEAT )
-            n.seqno_repeat++;
-          else if ( status == SEQNO_NOT_SUBSCR )
-            n.seqno_not_subscr++;
-          return true;
+          if ( status == SEQNO_UID_REPEAT ) {
+            n.msg_repeat_count++;
+            n.msg_repeat_time = this->timer_time;
+          }
+          else if ( status == SEQNO_NOT_SUBSCR ) {
+            n.msg_not_subscr_count++;
+            n.msg_not_subscr_time = this->timer_time;
+          }
+          else if ( status == SEQNO_UID_SKIP ) {
+            n.msg_loss_time = this->timer_time;
+            if ( seq.msg_loss <= MAX_MSG_LOSS )
+              n.msg_loss_count += seq.msg_loss;
+            else
+              n.msg_loss_count++;
+          }
+          if ( status > SEQNO_UID_SKIP )
+            return true;
         }
-        val.last_seqno = seq.last_seqno;
-        val.last_time  = seq.last_time;
       }
       if ( seq.cb != NULL )
         seq.cb->on_data( val );
@@ -1058,7 +1170,9 @@ SessionMgr::publish( PubMcastData &mc ) noexcept
   UserBridge * dest_bridge_id = NULL;
   uint32_t     h  = kv_crc_c( mc.sub, mc.sublen, 0 );
   CabaFlags    fl( CABA_MCAST );
-  bool         need_seqno = ( mc.seqno == 0 );
+  uint64_t     chain_seqno = 0,
+               time        = 0;
+  bool         need_seqno  = true;
   
   if ( mc.sublen > 2 && mc.sub[ 0 ] == '_' ) {
     static const char   inbox_prefix[] = _INBOX ".",
@@ -1085,10 +1199,12 @@ SessionMgr::publish( PubMcastData &mc ) noexcept
     Pub * p = this->sub_db.pub_tab.upsert( h, mc.sub, mc.sublen, loc );
     if ( p == NULL )
       return false;
-    if ( loc.is_new )
-      p->init( false );
-    mc.seqno = p->next_seqno();
-    p->stamp = this->timer_time;
+
+    mc.seqno = p->next_seqno( loc.is_new, time, this->timer_time,
+                              this->converge_seqno, chain_seqno );
+    if ( chain_seqno != 0 ) {
+      printf( "seqno frame jump\n" );
+    }
   }
 
   uint8_t  path_select = 0;
@@ -1101,12 +1217,14 @@ SessionMgr::publish( PubMcastData &mc ) noexcept
   fl.set_opt( option );
 
   MsgEst e( mc.sublen );
-  e.seqno ()
-   .ret   ()
-   .time  ()
-   .token ()
-   .fmt   ()
-   .data  ( mc.datalen );
+  e.seqno       ()
+   .chain_seqno ()
+   .ret         ()
+   .time        ()
+   .stamp       ()
+   .token       ()
+   .fmt         ()
+   .data        ( mc.datalen );
 
   MsgCat m;
   m.reserve( e.sz );
@@ -1114,10 +1232,14 @@ SessionMgr::publish( PubMcastData &mc ) noexcept
   m.open( this->user_db.bridge_id.nonce, mc.sublen )
    .seqno ( mc.seqno );
 
+  if ( chain_seqno != 0 )
+    m.chain_seqno( chain_seqno );
   if ( mc.reply != 0 )
     m.ret( mc.reply );
-  if ( mc.time != 0 )
-    m.time( mc.time );
+  if ( time != 0 )
+    m.time( time );
+  if ( mc.stamp != 0 )
+    m.stamp( mc.stamp );
   if ( mc.token != 0 )
     m.token( mc.token );
   if ( mc.fmt != 0 )
@@ -1266,23 +1388,25 @@ bool
 SessionMgr::forward_ipc( TransportRoute &src_rte,  EvPublish &pub ) noexcept
 {
   CabaFlags fl( CABA_MCAST );
-  RouteLoc loc;
-  Pub * p = this->sub_db.pub_tab.upsert( pub.subj_hash, pub.subject,
-                                         pub.subject_len, loc );
-  if ( p == NULL )
-    return NULL;
-  if ( loc.is_new )
-    p->init( is_ipc_inbox( pub.subject, pub.subject_len ) );
-  p->stamp = this->timer_time;
-
-  if ( p->is_inbox() )
-    return this->forward_inbox( pub );
-  uint64_t seqno = p->next_seqno(),
-           stamp = ( loc.is_new ? this->poll.current_coarse_ns() : 0 );
-
-  d_sess( "-> fwd_ipc: %.*s seqno %lu time %lu reply %.*s "
+  RouteLoc  loc;
+  Pub * p = this->sub_db.pub_tab.pub->find( pub.subj_hash, pub.subject,
+                                            pub.subject_len, loc );
+  if ( p == NULL ) {
+    if ( is_ipc_inbox( pub.subject, pub.subject_len ) )
+      return this->forward_inbox( pub );
+    p = this->sub_db.pub_tab.upsert( pub.subj_hash, pub.subject,
+                                     pub.subject_len, loc );
+    if ( p == NULL ) {
+      fprintf( stderr, "error forward_ipc\n" );
+      return true;
+    }
+  }
+  uint64_t time, seqno, chain_seqno;
+  seqno = p->next_seqno( loc.is_new, time, this->timer_time,
+                         this->converge_seqno, chain_seqno );
+  d_sess( "-> fwd_ipc: %.*s seqno %lu reply %.*s "
           "(len=%u, from %s, fd %d, enc %x)\n",
-          (int) pub.subject_len, pub.subject, seqno, stamp,
+          (int) pub.subject_len, pub.subject, seqno,
           (int) pub.reply_len, (char *) pub.reply,
           pub.msg_len, src_rte.name, pub.src_route, pub.msg_enc );
 
@@ -1291,11 +1415,12 @@ SessionMgr::forward_ipc( TransportRoute &src_rte,  EvPublish &pub ) noexcept
   fl.set_opt( path_select << CABA_OPT_MC_SHIFT );
 
   MsgEst e( pub.subject_len );
-  e.seqno ()
-   .time  ()
-   .reply ( pub.reply_len )
-   .fmt   ()
-   .data  ( pub.msg_len );
+  e.seqno       ()
+   .chain_seqno ()
+   .time        ()
+   .reply       ( pub.reply_len )
+   .fmt         ()
+   .data        ( pub.msg_len );
 
   MsgCat m;
   m.reserve( e.sz );
@@ -1303,8 +1428,10 @@ SessionMgr::forward_ipc( TransportRoute &src_rte,  EvPublish &pub ) noexcept
   m.open( this->user_db.bridge_id.nonce, pub.subject_len )
    .seqno ( seqno );
 
-  if ( stamp != 0 )
-    m.time( stamp );
+  if ( chain_seqno != 0 )
+    m.chain_seqno( chain_seqno );
+  if ( time != 0 )
+    m.time( time );
   if ( pub.reply_len != 0 )
     m.reply( (const char *) pub.reply, pub.reply_len );
   if ( pub.msg_enc != 0 )
@@ -1400,7 +1527,7 @@ SessionMgr::publish_to( PubPtpData &ptp ) noexcept
   e.seqno  ()
    .subject( ptp.sublen )
    .ret    ()
-   .time   ()
+   .stamp  ()
    .token  ()
    .fmt    ()
    .data   ( ptp.datalen );
@@ -1415,8 +1542,8 @@ SessionMgr::publish_to( PubPtpData &ptp ) noexcept
     m.subject( ptp.sub, ptp.sublen );
   if ( ptp.reply2 != 0 )
     m.ret( ptp.reply2 );
-  if ( ptp.time != 0 )
-    m.time( ptp.time );
+  if ( ptp.stamp != 0 )
+    m.stamp( ptp.stamp );
   if ( ptp.token != 0 )
     m.token( ptp.token );
   if ( ptp.fmt != 0 )
@@ -1444,13 +1571,13 @@ SessionMgr::send_ack( const MsgFramePublish &pub,  UserBridge &n,
 {
   char     ret_buf[ 16 ];
   InboxBuf ibx( n.bridge_id, dec.get_return( ret_buf, suf ) );
-  uint64_t time_val, token;
+  uint64_t stamp, token;
   uint32_t d;
   uint8_t  path_select;
 
   MsgEst e( ibx.len() );
   e.seqno    ()
-   .time     ()
+   .stamp    ()
    .token    ()
    .cost     ()
    .tportid  ()
@@ -1458,8 +1585,8 @@ SessionMgr::send_ack( const MsgFramePublish &pub,  UserBridge &n,
    .ref_seqno();
 
   dec.get_ival<uint64_t>( FID_TOKEN, token );
-  if ( ! dec.get_ival<uint64_t>( FID_TIME, time_val ) || time_val == 0 )
-    time_val = current_realtime_ns();
+  if ( ! dec.get_ival<uint64_t>( FID_STAMP, stamp ) || stamp == 0 )
+    stamp = current_realtime_ns();
   path_select = ( dec.msg->caba.get_opt() & CABA_OPT_MC_ONE ) ? 1 : 0;
   d = this->user_db.peer_dist.calc_transport_cache( n.uid, pub.rte.tport_id,
                                                     path_select );
@@ -1467,7 +1594,7 @@ SessionMgr::send_ack( const MsgFramePublish &pub,  UserBridge &n,
   m.reserve( e.sz );
   m.open( this->user_db.bridge_id.nonce, ibx.len() )
    .seqno    ( ++n.send_inbox_seqno )
-   .time     ( time_val );
+   .stamp    ( stamp );
   if ( token != 0 )
     m.token( token );
   m.cost     ( d )

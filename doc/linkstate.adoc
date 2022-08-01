@@ -1,0 +1,36 @@
+Link State
+----------
+
+The Forwarding Set
+~~~~~~~~~~~~~~~~~~
+
+Each node in a network must construct a forwarding set for any message sent by
+any peer.  A forwarding set instructs the node where to send a message so that
+all subscribers of it will see the message exactly one time, when the network
+is converged and stable.  When a Link State database is used to compute the
+forwarding set, it is sometimes called Proactive Routing.  This is different
+from flood and learn type systems, where messages flood the network and
+duplicate links are pruned by the receivers.  This sometimes called Reactive
+Routing.
+
+The Proactive case and the Reactive case will converge to the same network
+coverage.   The difference between them is that the Proactive protocol can
+compute the forwarding set before routing the messages by using the Link State
+database, and the Reactive case forwards the message and then computes the
+forwarding set using the peers which will tell the sender to prune the route if
+it is unnecessary.
+
+This system uses Proactive routing, which I believe is better because of the
+number of unique subjects published can be very large.  A Reactive system needs
+to resolve the routes for each new subject published or become a hybrid system
+where some aspects of the Proactive design are maintained to alleviate this
+need.
+
+A node uses the source of the message as an index to arrive at a forwarding set
+for the message.  If a node A has peers B, C and D, then a message from B with
+have a different forwarding set than a message from C or D.  The set for
+B must have a path that includes C and D, and a message from D must have a path
+that includes B and C.  These paths can be calculated with the Link State
+database and are summarized as a set of send operations.
+
+

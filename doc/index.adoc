@@ -1,0 +1,27 @@
+Rai Multicast Services Guide
+============================
+v1.0, 2022
+:doctype: book
+:showcomments:
+:toc:
+
+include::introduction.adoc[]
+
+include::configuration.adoc[]
+
+include::authentication.adoc[]
+
+include::subjects.adoc[]
+
+include::networking.adoc[]
+
+include::linkstate.adoc[]
+
+include::loss.adoc[]
+
+include::protocol.adoc[]
+
+include::console.adoc[]
+
+include::monitoring.adoc[]
+

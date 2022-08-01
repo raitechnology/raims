@@ -149,11 +149,24 @@ struct UserBridge : public UserStateTest<UserBridge> {
   Nonce              uid_csum,            /* current xor of adjacency */
                      hb_cnonce;           /* last cnonce used for hb */
   UserRoute        * user_route;          /* the routes for this user */
+  uint32_t           state,               /* UserNonceState bits */
+                     uid,                 /* unique id for route */
+                     hb_interval,         /* interval of heartbeat */
+                     primary_route;       /* route with min hops */
   uint64_t           hb_seqno,            /* users hb seqno */
                      hb_time,             /* users hb time */
                      sub_seqno,           /* seqno used for start/stop sub */
-                     link_state_seqno,    /* seqno used for link state db */
-                     unknown_link_seqno,  /* edge of link_state_seqno */
+                     link_state_seqno;    /* seqno used for link state db */
+  UserRoute        * u_buf[ 24 ];         /* indexes user_route */
+  StageAuth          auth[ 2 ];           /* auth handshake state */
+  uint32_t           ping_send_count,
+                     ping_recv_count,
+                     pong_recv_count,
+                     ping_fail_count,     /* ping counters */
+                     challenge_count,     /* count of challenges */
+                     unknown_refs,        /* link refs are yet to be resolved */
+                     auth_count;          /* number of times authenticated */
+  uint64_t           unknown_link_seqno,  /* edge of link_state_seqno */
                      recv_peer_seqno,     /* seqno used for add/del/blm peer */
                      send_inbox_seqno,    /* inbox seqnos for ptp links */
                      recv_inbox_seqno,    /* recv side inbox seqno */
@@ -171,22 +184,15 @@ struct UserBridge : public UserStateTest<UserBridge> {
                      ping_send_time,
                      ping_recv_time,
                      pong_recv_time,      /* ping times */
-                     stats_seqno;         /* _N.PEER. stats */
-  uint32_t           state,               /* UserNonceState bits */
-                     uid,                 /* unique id for route */
-                     hb_interval,         /* interval of heartbeat */
-                     challenge_count,     /* count of challenges */
-                     primary_route,       /* route with min hops */
-                     unknown_refs,        /* link refs are yet to be resolved */
-                     ping_send_count,
-                     ping_recv_count,
-                     pong_recv_count,
-                     ping_fail_count,     /* ping counters */
-                     seqno_repeat,
-                     seqno_not_subscr,
-                     auth_count;
-  StageAuth          auth[ 2 ];           /* auth handshake state */
-  UserRoute        * u_buf[ 24 ];         /* indexes user_route */
+                     stats_seqno,         /* _N.PEER. stats */
+                     msg_repeat_count,    /* count mcast sub out of sequence */
+                     msg_repeat_time,
+                     msg_not_subscr_count, /* count mcast sub not subscribed */
+                     msg_not_subscr_time,
+                     msg_loss_time,       /* multicast message loss */
+                     msg_loss_count,      /* count mcast msg loss */
+                     inbox_msg_loss_time,
+                     inbox_msg_loss_count; /* inbox message loss */
   void * operator new( size_t, void *ptr ) { return ptr; }
 
   UserBridge( const PeerEntry &pentry,  kv::BloomDB &db,  uint32_t seed )
@@ -196,7 +202,7 @@ struct UserBridge : public UserStateTest<UserBridge> {
     this->uid_csum.zero();
     this->hb_cnonce.zero();
     ::memset( &this->user_route , 0,
-              (char *) (void *) &this->u_buf[ 24 ] -
+              (char *) (void *) &this[ 1 ] -
               (char *) (void *) &this->user_route );
     this->hb_interval = HB_DEFAULT_INTERVAL;
   }
@@ -437,7 +443,10 @@ struct UserDB {
                         hb_ival_ns,      /* heartbeat interval */
                         hb_ival_mask,    /* ping ival = pow2 hb_ival * 1.5 */
                         next_ping_mono,  /* when next ping is sent */
-                        last_auth_mono;
+                        last_auth_mono,  /* when last uid was authenticated */
+                        converge_time,   /* time of convergence */
+                        converge_mono,   /* convergence mono time */
+                        net_converge_time; /* time that network agrees */
   kv::rand::xoroshiro128plus rand;       /* used to generate bloom seeds */
 
   /* memory buffers for keys and peer nodes */

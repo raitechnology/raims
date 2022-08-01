@@ -274,6 +274,9 @@ struct MsgBufDigestT : public BMsgBufT<T> {
   T  & bs         ( uint64_t n )  { return this->u( FID_BS, n ); }
   T  & br         ( uint64_t n )  { return this->u( FID_BR, n ); }
   T  & sub_cnt    ( uint64_t n )  { return this->u( FID_SUB_CNT, n ); }
+  T  & chain_seqno( uint64_t n )  { return this->u( FID_CHAIN_SEQNO, n ); }
+  T  & stamp      ( uint64_t n )  { return this->u( FID_STAMP, n ); }
+  T  & converge   ( uint64_t n )  { return this->u( FID_CONVERGE, n ); }
   T  & cost       ( uint32_t n )  { return this->i( FID_COST, n ); }
   T  & cost2      ( uint32_t n )  { return this->i( FID_COST2, n ); }
   T  & cost3      ( uint32_t n )  { return this->i( FID_COST3, n ); }
@@ -435,6 +438,9 @@ struct MsgEst {
   MsgEst & bs         ( void ) { sz += fid_est( FID_BS ); return *this; }
   MsgEst & br         ( void ) { sz += fid_est( FID_BR ); return *this; }
   MsgEst & sub_cnt    ( void ) { sz += fid_est( FID_SUB_CNT ); return *this; }
+  MsgEst & chain_seqno( void ) { sz += fid_est( FID_CHAIN_SEQNO ); return *this; }
+  MsgEst & stamp      ( void ) { sz += fid_est( FID_STAMP ); return *this; }
+  MsgEst & converge   ( void ) { sz += fid_est( FID_CONVERGE ); return *this; }
   MsgEst & cost       ( void ) { sz += fid_est( FID_COST ); return *this; }
   MsgEst & cost2      ( void ) { sz += fid_est( FID_COST2 ); return *this; }
   MsgEst & cost3      ( void ) { sz += fid_est( FID_COST3 ); return *this; }

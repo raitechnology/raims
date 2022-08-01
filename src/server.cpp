@@ -122,15 +122,15 @@ main( int argc, char *argv[] )
             argv[ 0 ], ms_get_version() );
     return 0;
   }
-  int err_fd = dup( STDERR_FILENO );
+  int err_fd = os_dup( STDERR_FILENO );
 
   if ( lo != NULL ) {
     if ( ::freopen( lo, "a", stderr ) == NULL ) {
       const char *err = ::strerror( errno );
-      ::write( err_fd, lo, ::strlen( lo ) );
-      ::write( err_fd, ": ", 2 );
-      ::write( err_fd, err, ::strlen( err ) );
-      ::write( err_fd, "\n", 1 );
+      os_write( err_fd, lo, ::strlen( lo ) );
+      os_write( err_fd, ": ", 2 );
+      os_write( err_fd, err, ::strlen( err ) );
+      os_write( err_fd, "\n", 1 );
       return 1;
     }
     ::setvbuf( stderr, NULL, _IOLBF, 1024 );
@@ -210,7 +210,8 @@ main( int argc, char *argv[] )
     log.start_ev( poll );
   }
   int status = 0;
-  if ( ! sess.add_ipc_transport( *svc, ip, ma, db ? atoi( db ) : 0 ) )
+  if ( ! sess.init_param() ||
+       ! sess.add_ipc_transport( *svc, ip, ma, db ? atoi( db ) : 0 ) )
     status = -1;
   if ( status == 0 && ti != NULL ) {
     tport = tree->find_transport( ti, ::strlen( ti ), &conn );
@@ -272,8 +273,8 @@ main( int argc, char *argv[] )
   if ( co != NULL )
     term.finish();
   else if ( lo == NULL ) {
-    if ( status != 0 && sess.console.log_index > 0 )
-      ::write( err_fd, sess.console.log.ptr, sess.console.log_index );
+    if ( status != 0 && sess.console.log_index > 0 && err_fd >= 0 )
+      os_write( err_fd, sess.console.log.ptr, sess.console.log_index );
   }
   log.shutdown();
   /*if ( log_fp != NULL )

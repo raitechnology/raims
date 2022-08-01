@@ -238,7 +238,7 @@ CabaMsg::caba_to_rvmsg( MDMsgMem &mem,  void *&data,
               char   buf[ 2 + 1 + 2 + 1 + 2 + 1 ];
               MDStamp stamp;
               if ( stamp.get_stamp( mref ) == 0 ) {
-                uint64_t secs   = stamp.seconds();
+                uint64_t secs   = stamp.seconds() + tz_stamp_sec;
                 uint32_t hr     = ( secs / 60 / 60 ) % 24,
                          min    = ( secs / 60 ) % 60,
                          sec    = secs % 60;

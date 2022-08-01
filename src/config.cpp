@@ -2085,3 +2085,76 @@ ConfigTree::find_parameter( const char *name,  const char *&value,
   return false;
 }
 
+static bool
+int_prefix( const char *s,  uint64_t &n,  size_t &off ) noexcept
+{
+  size_t i, j, k, len = ::strlen( s );
+  if ( len == 0 )
+    return false;
+
+  for ( j = len; ; ) {
+    if ( isdigit( s[ j - 1 ] ) )
+      break;
+    if ( --j == 0 )
+      return false;
+  }
+  for ( i = 0; i < j; i++ )
+    if ( ! isspace( s[ i ] ) )
+      break;
+  for ( k = i; k < j; k++ )
+    if ( ! isdigit( s[ k ] ) )
+      return false;
+  n = string_to_uint64( &s[ i ], j - i );
+  while ( j < len && isspace( s[ j ] ) )
+    j++;
+  off = j;
+  return true;
+}
+
+
+bool
+ConfigTree::string_to_bytes( const char *s,  uint64_t &bytes ) noexcept
+{
+  size_t off;
+  if ( ! int_prefix( s, bytes, off ) )
+    return false;
+  switch ( s[ off ] ) {
+    case '\0': case 'b': case 'B':                   return true;
+    case 'k': case 'K': bytes *= 1024;               return true;
+    case 'm': case 'M': bytes *= 1024 * 1024;        return true;
+    case 'g': case 'G': bytes *= 1024 * 1024 * 1024; return true;
+  }
+  return false;
+}
+
+bool
+ConfigTree::string_to_secs( const char *s,  uint64_t &secs ) noexcept
+{
+  size_t off;
+  if ( ! int_prefix( s, secs, off ) )
+    return false;
+  switch ( s[ off ] ) {
+    case '\0': case 's': case 'S':            return true;
+    case 'm': case 'M': secs *= 60;           return true;
+    case 'h': case 'H': secs *= 60 * 60;      return true;
+    case 'd': case 'D': secs *= 24 * 60 * 60; return true;
+  }
+  return false;
+}
+
+bool
+ConfigTree::string_to_nanos( const char *s,  uint64_t &nanos ) noexcept
+{
+  size_t off;
+  if ( ! int_prefix( s, nanos, off ) )
+    return false;
+  nanos *= 1000000000;
+  switch ( s[ off ] ) {
+    case '\0': case 's': case 'S':             return true;
+    case 'm': case 'M': nanos *= 60;           return true;
+    case 'h': case 'H': nanos *= 60 * 60;      return true;
+    case 'd': case 'D': nanos *= 24 * 60 * 60; return true;
+  }
+  return false;
+}
+

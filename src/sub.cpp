@@ -248,28 +248,38 @@ SubDB::fwd_resub( UserBridge &n,  const char *sub,  size_t sublen,
 bool
 SubDB::find_fwd_sub( UserBridge &n,  uint32_t hash,
                      uint64_t &from_seqno,  uint64_t seqno,
-                     const char *suf,  uint64_t token ) noexcept
+                     const char *suf,  uint64_t token,
+                     const char *match,  size_t match_len ) noexcept
 {
   SubRoute * sub;
   if ( (sub = this->sub_tab.find_sub( hash, seqno )) == NULL )
     return true;
-  bool b = this->fwd_resub( n, sub->value, sub->len, from_seqno, seqno, false,
-                            suf ? suf : _RESUB, token );
-  from_seqno = seqno;
+  bool b = true;
+  if ( match_len == 0 ||
+       ::memmem( sub->value, sub->len, match, match_len ) != NULL ) {
+    b &= this->fwd_resub( n, sub->value, sub->len, from_seqno, seqno, false,
+                          suf ? suf : _RESUB, token );
+    from_seqno = seqno;
+  }
   return b;
 }
 /* locate psub */
 bool
 SubDB::find_fwd_psub( UserBridge &n,  uint32_t hash,
                       uint64_t &from_seqno,  uint64_t seqno,
-                      const char *suf,  uint64_t token ) noexcept
+                      const char *suf,  uint64_t token,
+                      const char *match,  size_t match_len ) noexcept
 {
   PatRoute * sub;
   if ( (sub = this->pat_tab.find_sub( hash, seqno )) == NULL )
     return true;
-  bool b = this->fwd_resub( n, sub->value, sub->len, from_seqno, seqno, true,
-                            suf ? suf : _REPSUB, token );
-  from_seqno = seqno;
+  bool b = true;
+  if ( match_len == 0 ||
+       ::memmem( sub->value, sub->len, match, match_len ) != NULL ) {
+    b &= this->fwd_resub( n, sub->value, sub->len, from_seqno, seqno, true,
+                          suf ? suf : _REPSUB, token );
+    from_seqno = seqno;
+  }
   return b;
 }
 /* peer asks for subs in range start -> end */
@@ -277,7 +287,12 @@ bool
 SubDB::recv_subs_request( const MsgFramePublish &,  UserBridge &n,
                           const MsgHdrDecoder &dec ) noexcept
 {
-  uint64_t start = 0, end = 0, token = 0;
+  uint64_t     start     = 0,
+               end       = 0,
+               token     = 0;
+  const char * match     = NULL;
+  size_t       match_len = 0;
+
   if ( dec.test( FID_START ) )
     cvt_number<uint64_t>( dec.mref[ FID_START ], start );
   if ( dec.test( FID_END ) )
@@ -286,6 +301,10 @@ SubDB::recv_subs_request( const MsgFramePublish &,  UserBridge &n,
     cvt_number<uint64_t>( dec.mref[ FID_TOKEN ], token );
   if ( end == 0 )
     end = this->sub_seqno;
+  if ( dec.test( FID_DATA ) ) {
+    match     = (const char *) dec.mref[ FID_DATA ].fptr;
+    match_len = dec.mref[ FID_DATA ].fsize;
+  }
 
   SubListIter  iter( this->sub_list, start + 1, end );
   uint64_t     from_seqno = start;
@@ -296,10 +315,10 @@ SubDB::recv_subs_request( const MsgFramePublish &,  UserBridge &n,
     do {
       if ( iter.action == ACTION_SUB_JOIN )
         b &= this->find_fwd_sub( n, iter.hash, from_seqno, iter.seqno, suf,
-                                 token );
+                                 token, match, match_len );
       else if ( iter.action == ACTION_PSUB_START )
         b &= this->find_fwd_psub( n, iter.hash, from_seqno, iter.seqno, suf,
-                                  token );
+                                  token, match, match_len );
     } while ( iter.next() );
   }
   if ( from_seqno < end ) {
@@ -648,7 +667,9 @@ rai::ms::seqno_status_string( SeqnoStatus status ) noexcept
 {
   switch ( status ) {
     case SEQNO_UID_FIRST:  return "first sequence";
+    case SEQNO_UID_CYCLE:  return "cycle sequence";
     case SEQNO_UID_NEXT:   return "next sequence";
+    case SEQNO_UID_SKIP:   return "skipped sequence";
     case SEQNO_UID_REPEAT: return "sequence repeated";
     case SEQNO_NOT_SUBSCR: return "not subscribed";
     case SEQNO_ERROR:
@@ -660,6 +681,7 @@ SeqnoStatus
 SubDB::match_seqno( SeqnoArgs &ctx ) noexcept
 {
   const MsgFramePublish &pub = ctx.pub;
+  const uint64_t seqno = pub.dec.seqno;
   RouteLoc   loc, loc2;
   bool       is_old;
   SubSeqno * seq = this->seqno_tab.upsert( pub.subj_hash, pub.subject,
@@ -674,11 +696,11 @@ SubDB::match_seqno( SeqnoArgs &ctx ) noexcept
       this->seqno_tab.remove( loc, loc2, is_old );
       return SEQNO_NOT_SUBSCR;
     }
-    return seq->init( uid, pub.dec.seqno, ctx.start_seqno, ctx.time,
+    return seq->init( uid, seqno, ctx.start_seqno, ctx.time,
                       ctx.stamp, this->update_seqno, ctx.cb, ctx.tport_mask );
   }
   /* check if subscription modified */
-  uint64_t old_start_seqno = seq->start_seqno;
+  const uint64_t old_start_seqno = seq->start_seqno;
   if ( seq->update_seqno != this->update_seqno ){
     if ( this->match_subscription( ctx ) ) {
       seq->start_seqno  = ctx.start_seqno;
@@ -694,12 +716,81 @@ SubDB::match_seqno( SeqnoArgs &ctx ) noexcept
     }
   }
   else {
-    ctx.start_seqno = seq->start_seqno;
+    ctx.start_seqno = old_start_seqno;
     ctx.cb          = seq->on_data;
     ctx.tport_mask  = seq->tport_mask;
   }
-  return seq->update( old_start_seqno, uid, pub.dec.seqno, ctx.time,
-                      ctx.stamp, ctx.last_seqno, ctx.last_time );
+  if ( seq->last_uid != uid &&
+       seq->restore_uid( uid, seqno, ctx.time, ctx.stamp ) == SEQNO_UID_FIRST )
+    return SEQNO_UID_FIRST;
+
+  const bool     new_sub    = ( ctx.start_seqno != old_start_seqno );
+  const uint64_t last_seqno = seq->last_seqno;
+  const uint64_t last_time  = seq->last_time;
+
+  ctx.last_seqno = last_seqno;
+  ctx.last_time  = last_time;
+  /* normal case */
+  if ( seqno == last_seqno + 1 ) {
+    seq->last_seqno = seqno;
+    seq->last_stamp = ctx.stamp;
+    return SEQNO_UID_NEXT;
+  }
+  /* if seqno is in the same time frame as last seqno */
+  if ( seqno_frame( seqno ) == time_frame( last_time ) ) {
+    /* if new subscription */
+    if ( new_sub ) {
+      if ( seqno > last_seqno ) {
+        seq->last_seqno = seqno;
+        seq->last_stamp = ctx.stamp;
+        return SEQNO_UID_CYCLE; /* new subscription, can skip after resub */
+      }
+      return SEQNO_UID_REPEAT; /* already seen it */
+    }
+    if ( seqno > last_seqno ) {
+      ctx.msg_loss    = (uint32_t) min_int( seqno - ( last_seqno + 1 ),
+                                            (uint64_t) MAX_MSG_LOSS );
+      seq->last_seqno = seqno;
+      seq->last_stamp = ctx.stamp;
+      return SEQNO_UID_SKIP; /* forward msg with loss notification */
+    }
+    return SEQNO_UID_REPEAT; /* already seen it */
+  }
+  /* time included, resequence wanted */
+  if ( ctx.time > last_time ) {
+    /* if seqno is in the new time frame (otherwise ignore time) */
+    if ( seqno_frame( seqno ) == time_frame( ctx.time ) ) {
+      const bool     chained    = ( last_seqno == ctx.chain_seqno );
+      seq->last_time  = ctx.time;
+      seq->last_seqno = seqno;
+      seq->last_stamp = ctx.stamp;
+      if ( chained ) /* sequentialy chained */
+        return SEQNO_UID_NEXT;
+      if ( ! new_sub ) {
+        /* if last seqno was in the previous frame */
+        if ( seqno_frame( ctx.chain_seqno ) == seqno_frame( last_seqno ) ) {
+          ctx.msg_loss = (uint32_t) min_int( ctx.chain_seqno - last_seqno,
+                                             (uint64_t) MAX_MSG_LOSS );
+        }
+        else { /* no reference frame */
+          ctx.msg_loss = MSG_FRAME_LOSS; /* don't know how many */
+        }
+        return SEQNO_UID_SKIP;
+      }
+      /* new sub can skip */
+      return SEQNO_UID_CYCLE;
+    }
+    /* time doesn't match seqno (likely time is zero), missed the start time */
+  }
+  /* seqno not in current time frame, no time is included in message */
+  seq->last_time  = seqno_time( seqno ); /* fake a start time */
+  seq->last_seqno = seqno;
+  seq->last_stamp = ctx.stamp;
+  if ( ! new_sub ) { /* if not joining w/new sub */
+    ctx.msg_loss = MSG_FRAME_LOSS; /* don't know how many */
+    return SEQNO_UID_SKIP;
+  }
+  return SEQNO_UID_CYCLE; /* joined with a new sub */
 }
 
 bool
@@ -769,19 +860,19 @@ SubSeqno::restore_uid( uint32_t uid,  uint64_t seqno,  uint64_t time,
 {
   SeqnoSave id_val;
   size_t    id_pos;
-  uint32_t  id_h;
 
   if ( this->seqno_ht == NULL )
     this->seqno_ht = UidSeqno::resize( NULL );
   /* save the last uid */
-  id_h = this->last_uid;
-  if ( ! this->seqno_ht->find( id_h, id_pos, id_val ) ) {
-    id_val.update( this->last_seqno, this->last_time, this->last_stamp );
-    this->seqno_ht->set_rsz( this->seqno_ht, id_h, id_pos, id_val );
-  }
+  id_val.update( this->last_seqno, this->last_time, this->last_stamp );
+  this->seqno_ht->upsert_rsz( this->seqno_ht, this->last_uid, id_val );
+  /*printf( "save %u %lu.%lu frame %lu\n",
+          this->last_uid, seqno_frame( this->last_seqno ),
+          seqno_base( this->last_seqno ), time_frame( this->last_time ) );*/
+
   /* find the uid which published */
-  id_h = uid;
-  if ( ! this->seqno_ht->find( id_h, id_pos, id_val ) ) {
+  if ( ! this->seqno_ht->find( uid, id_pos, id_val ) ) {
+    /*printf( "not found %u\n", uid );*/
     this->last_uid   = uid;
     this->last_seqno = seqno;
     this->last_time  = time;
@@ -791,7 +882,10 @@ SubSeqno::restore_uid( uint32_t uid,  uint64_t seqno,  uint64_t time,
   /* restore the seqno of the last time uid published */
   this->last_uid = uid;
   id_val.restore( this->last_seqno, this->last_time, this->last_stamp );
-  return SEQNO_UID_NEXT;
+  /*printf( "restore %u %lu.%lu frame %lu\n",
+          uid, seqno_frame( this->last_seqno ),
+          seqno_base( this->last_seqno ), time_frame( this->last_time ) );*/
+  return SEQNO_UID_CYCLE;
 }
 
 uint32_t

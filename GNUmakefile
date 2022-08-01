@@ -286,6 +286,22 @@ clean_pgm:
 	$(MAKE) -C openpgm clean
 clean_subs += clean_pgm
 endif
+ifeq (yes,$(have_sassrv_submodule))
+$(sassrv_lib) $(sassrv_dll):
+	$(MAKE) -C sassrv
+.PHONY: clean_sassrv
+clean_sassrv:
+	$(MAKE) -C sassrv clean
+clean_subs += clean_sassrv
+endif
+ifeq (yes,$(have_natsmd_submodule))
+$(natsmd_lib) $(natsmd_dll):
+	$(MAKE) -C natsmd
+.PHONY: clean_natsmd
+clean_natsmd:
+	$(MAKE) -C natsmd clean
+clean_subs += clean_natsmd
+endif
 
 # copr/fedora build (with version env vars)
 # copr uses this to generate a source rpm with the srpm target

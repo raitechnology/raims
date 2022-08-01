@@ -3,6 +3,7 @@
 
 #include <raikv/route_ht.h>
 #include <raikv/key_hash.h>
+#include <raikv/ev_publish.h>
 #include <raims/sub_list.h>
 
 namespace rai {
@@ -266,15 +267,32 @@ struct SubTab {
   }
 };
 
+/* 33 is ~10 second frames, 35 is 32 billion sequences, 9 hours at 1 mill/sec */
+static inline uint64_t seqno_init( uint64_t time ) {
+  return ( time >> 33 ) << 35;
+}
+static inline uint64_t seqno_frame( uint64_t seqno ) {
+  return seqno >> 35;
+}
+static inline uint64_t time_frame( uint64_t time ) {
+  return ( ( time >> 33 ) << 35 ) >> 35;
+}
+static inline uint64_t seqno_time( uint64_t seqno ) {
+  return ( seqno >> 35 ) << 33;
+}
+static inline uint64_t seqno_base( uint64_t seqno ) {
+  return seqno & ( ( (uint64_t) 1 << 35 ) - 1 );
+}
+
 struct Pub {
-  int64_t  seqno;
-  uint64_t stamp;
+  uint64_t seqno,
+           stamp;
   uint32_t hash;
   uint16_t len;
   char     value[ 2 ]; /* prefix */
   
-  void init( bool is_inbox ) {
-    this->seqno = ( is_inbox ? -1 : 0 );
+  void init( uint64_t time ) {
+    this->seqno = seqno_init( time );
     this->stamp = 0;
   }
   void copy( Pub &p ) {
@@ -282,11 +300,34 @@ struct Pub {
     this->stamp = p.stamp;
     p.stamp = 0;
   }
-  bool is_inbox( void ) const {
-    return this->seqno < 0;
-  }
-  int64_t next_seqno( void ) {
-    return ++this->seqno;
+  uint64_t next_seqno( bool next_timeframe,  uint64_t &time,
+                       uint64_t new_frame,  uint64_t converge_seqno,
+                       uint64_t &last_frame_seqno ) {
+    uint64_t sequence;
+    if ( ! next_timeframe ) {
+      sequence = this->seqno + 1;
+      if ( sequence <= converge_seqno || seqno_base( sequence ) == 0 ) {
+        last_frame_seqno = this->seqno;
+        next_timeframe = true;
+      }
+      else {
+        last_frame_seqno = 0;
+        this->seqno = sequence;
+      }
+    }
+    else {
+      last_frame_seqno = 0;
+    }
+    if ( next_timeframe ) {
+      time = new_frame;
+      this->init( new_frame );
+      sequence = ++this->seqno;
+    }
+    else {
+      time = 0;
+    }
+    this->stamp = new_frame;
+    return sequence;
   }
 };
 
@@ -349,9 +390,9 @@ struct PubTab {
   }
 
   /* limit size of pub sequences */
-  bool flip( void ) {
+  bool flip( size_t max_size ) {
     PubT * p = this->pub;
-    if ( p->vec_size * sizeof( PubT::VecData ) > 1024 * 1024 ) {
+    if ( p->vec_size * sizeof( PubT::VecData ) > max_size ) {
       this->pub_old->release();
       this->pub = this->pub_old;
       this->pub_old = p;
@@ -392,13 +433,35 @@ typedef kv::IntHashTabT<uint32_t,SeqnoSave> UidSeqno;
 
 enum SeqnoStatus {
   SEQNO_UID_FIRST  = 0, /* first time uid published */
-  SEQNO_UID_NEXT   = 1, /* is next in the sequnce */
-  SEQNO_UID_REPEAT = 2, /* is a repeated sequence */
-  SEQNO_NOT_SUBSCR = 3, /* subscription not matched */
-  SEQNO_ERROR      = 4
+  SEQNO_UID_CYCLE  = 1, /* reinitialized seqno  */
+  SEQNO_UID_NEXT   = 2, /* is next in the sequnce */
+  SEQNO_UID_SKIP   = 3, /* is next skipped sequnce */
+  SEQNO_UID_REPEAT = 4, /* is a repeated sequence */
+  SEQNO_NOT_SUBSCR = 5, /* subscription not matched */
+  SEQNO_ERROR      = 7
 };
 
 const char *seqno_status_string( SeqnoStatus status ) noexcept;
+
+static const uint32_t MAX_MSG_LOSS   = kv::EV_MAX_LOSS,
+                      MSG_FRAME_LOSS = kv::EV_PUB_RESTART;
+
+struct SeqnoArgs {
+  const MsgFramePublish & pub;
+  uint64_t   time,        /* message time */
+             last_seqno,  /* last message seqno */
+             last_time,   /* last message time */
+             start_seqno, /* subscription start */
+             stamp,       /* last publish recvd */
+             chain_seqno; /* previous seqno published */
+  SubOnMsg * cb;          /* callback for subscription */
+  uint32_t   tport_mask;  /* tports matched */
+  uint16_t   msg_loss;
+
+  SeqnoArgs( const MsgFramePublish &p,  uint64_t time )
+    : pub( p ), time( 0 ), last_seqno( 0 ), last_time( 0 ), start_seqno( 0 ),
+      stamp( time ), chain_seqno( 0 ), cb( 0 ), tport_mask( 0 ), msg_loss( 0 ){}
+};
 
 struct SubSeqno {
   uint32_t   hash,        /* hash of subject */
@@ -439,71 +502,12 @@ struct SubSeqno {
     this->seqno_ht     = sub.seqno_ht; sub.seqno_ht = NULL;
     this->tport_mask   = sub.tport_mask;
   }
-  /* check that seqno is next published by uid (or first) */
-  SeqnoStatus update( uint64_t old_start_seqno,  uint32_t uid,  uint64_t seqno,
-                      uint64_t time,  uint64_t stamp,
-                      uint64_t &last_seqno_recvd,
-                      uint64_t &last_time_recvd ) {
-    /* if not the last uid published */
-    if ( this->last_uid != uid ) {
-      if ( this->restore_uid( uid, seqno, time, stamp ) == SEQNO_UID_FIRST )
-        return SEQNO_UID_FIRST;
-    }
-    return this->update_last( old_start_seqno, seqno, time, stamp,
-                              last_seqno_recvd, last_time_recvd );
-  }
   SeqnoStatus restore_uid( uint32_t uid,  uint64_t seqno,
                            uint64_t time,  uint64_t stamp ) noexcept;
-  /* set the next seqno */
-  SeqnoStatus update_last( uint64_t old_start_seqno,
-                           uint64_t seqno,  uint64_t time,  uint64_t stamp,
-                           uint64_t &last_seqno_recvd,
-                           uint64_t &last_time_recvd ) {
-    SeqnoStatus status = SEQNO_UID_REPEAT; /* if repeated */
-    last_seqno_recvd = this->last_seqno;
-    last_time_recvd  = this->last_time;
-    /* resubscribed */
-    if ( old_start_seqno != this->start_seqno ) {
-      this->last_time  = time;
-      this->last_seqno = seqno;
-      this->last_stamp = stamp;
-      status = SEQNO_UID_NEXT;
-    }
-    /* time included, resequence wanted */
-    else if ( time > this->last_time ) {
-      this->last_time  = time;
-      this->last_seqno = seqno;
-      this->last_stamp = stamp;
-      status = SEQNO_UID_NEXT;
-    }
-    /* normal sequence + 1 */
-    else if ( seqno > this->last_seqno ) {
-      this->last_seqno = seqno;
-      this->last_stamp = stamp;
-      status = SEQNO_UID_NEXT;
-    }
-    return status;
-  }
-
   void release( void ) {
     if ( this->seqno_ht != NULL )
       delete this->seqno_ht;
   }
-};
-
-struct SeqnoArgs {
-  const MsgFramePublish & pub;
-  uint64_t   time,        /* message time */
-             last_seqno,  /* last message seqno */
-             last_time,   /* last message time */
-             start_seqno, /* subscription start */
-             stamp;
-  SubOnMsg * cb;          /* callback for subscription */
-  uint32_t   tport_mask;  /* tports matched */
-
-  SeqnoArgs( const MsgFramePublish &p,  uint64_t time )
-    : pub( p ), time( 0 ), last_seqno( 0 ), last_time( 0 ), start_seqno( 0 ),
-      stamp( time ), cb( 0 ), tport_mask( 0 ) {}
 };
 
 struct InboxSub {
@@ -587,9 +591,9 @@ struct SeqnoTab {
       this->tab_old->remove( loc2 );
   }
   /* limit size of pub sequences */
-  bool flip( void ) {
+  bool flip( size_t max_size ) {
     SeqnoT * p = this->tab;
-    if ( p->vec_size * sizeof( SeqnoT::VecData ) > 1024 * 1024 ) {
+    if ( p->vec_size * sizeof( SeqnoT::VecData ) > max_size ) {
       kv::RouteLoc loc;
       for ( SubSeqno *s = this->tab_old->first( loc ); p != NULL;
             this->tab_old->next( loc ) )
@@ -741,11 +745,11 @@ struct SubDB {
                   uint64_t from_seqno,  uint64_t seqno,  bool is_psub,
                   const char *suf,  uint64_t token ) noexcept;
   bool find_fwd_sub( UserBridge &n,  uint32_t hash,  uint64_t &from_seqno,
-                     uint64_t seqno,  const char *suf,
-                     uint64_t token ) noexcept;
+                     uint64_t seqno,  const char *suf,  uint64_t token,
+                     const char *match,  size_t match_len ) noexcept;
   bool find_fwd_psub( UserBridge &n,  uint32_t hash,  uint64_t &from_seqno,
-                      uint64_t seqno,  const char *suf,
-                      uint64_t token ) noexcept;
+                      uint64_t seqno,  const char *suf, uint64_t token,
+                      const char *match,  size_t match_len ) noexcept;
   /* request subscriptions from node */
   bool send_subs_request( UserBridge &n,  uint64_t seqno ) noexcept;
 

@@ -101,9 +101,7 @@ struct SubMsgData {
   MsgFramePublish & pub;
   UserBridge      * src_bridge; /* which peer it's from */
   uint64_t          seqno,   /* the seqno of the published message */
-                    time,    /* the optional time of message at the publisher */
-                    last_seqno,/* previous seqno recvd */
-                    last_time, /* previous time */
+                    stamp,   /* the optional time of message at the publisher */
                     token;     /* rpc token */
   const void      * data;    /* message data */
   size_t            datalen; /* message data length */
@@ -114,8 +112,7 @@ struct SubMsgData {
 
   SubMsgData( MsgFramePublish &p,  UserBridge *n,  const void *d,
               size_t dl )
-    : pub( p ), src_bridge( n ), seqno( 0 ), time( 0 ),
-      last_seqno( 0 ), last_time( 0 ),
+    : pub( p ), src_bridge( n ), seqno( 0 ), stamp( 0 ), token( 0 ),
       data( d ), datalen( dl ), fmt( 0 ), reply( 0 ) {}
 };
 /* a publish sent to all subscribers */
@@ -124,7 +121,7 @@ struct PubMcastData {
   uint16_t     sublen,    /* subject length */
                option;    /* message options for the opt field */
   uint64_t     seqno,     /* seqno filled in by the publish */
-               time,      /* optional time of publish */
+               stamp,     /* optional time of publish */
                token;     /* token rpc val */
   const void * data;      /* data to publish */
   size_t       datalen;   /* data length */
@@ -133,11 +130,11 @@ struct PubMcastData {
 
   PubMcastData( const char *s,  size_t sl,  const void *d,  size_t dl,
                 uint32_t f,  uint32_t rep = 0 )
-    : sub( s ), sublen( (uint16_t) sl ), option( 0 ), seqno( 0 ), time( 0 ),
+    : sub( s ), sublen( (uint16_t) sl ), option( 0 ), seqno( 0 ), stamp( 0 ),
       token( 0 ), data( d ), datalen( dl ), fmt( f ), reply( rep ) {}
   PubMcastData( const PubMcastData &mc ) :
     sub( mc.sub ), sublen( mc.sublen ), option( mc.option ), seqno( mc.seqno ),
-    time( mc.time ), token( mc.token ), data( mc.data ), datalen( mc.datalen ),
+   stamp( mc.stamp ), token( mc.token ), data( mc.data ), datalen( mc.datalen ),
     fmt( mc.fmt ), reply( mc.reply ) {}
 };
 /* a publish sent point to point to an inbox */
@@ -200,9 +197,10 @@ struct SessionMgr : public kv::EvSocket {
                           timer_id;       /* timer_id for this session */
   uint64_t                timer_mono_time,/* mono updated at timer expire */
                           timer_time,     /* real updated at timer expire */
+                          timer_converge_time, /* when publishers convege */
+                          converge_seqno, /* zero seqno of converge */
                           timer_start_mono,/* start mono */
                           timer_start,     /* start time */
-                          timer_ticks,    /* incremented each expires */
                           timer_ival;     /* interval for timer */
   InboxHash               ibx;            /* match inbox hashes */
   McastHash               mch;            /* match mcast hashes */
@@ -219,6 +217,12 @@ struct SessionMgr : public kv::EvSocket {
   ConfigTree::Transport * telnet_tport,
                         * web_tport;
   SessionStats            stats;
+  uint64_t                pub_window_mono_time, /* when pub window expires */
+                          sub_window_mono_time; /* when sub window expires */
+  size_t                  pub_window_size, /* maximum size of pub window */
+                          sub_window_size; /* maximum size of sub window */
+  uint64_t                pub_window_ival, /* pub interval of rotate */
+                          sub_window_ival; /* sub interval of rotate */
   uint8_t                 tcp_accept_sock_type, /* free list sock types */
                           tcp_connect_sock_type;
 
@@ -226,6 +230,7 @@ struct SessionMgr : public kv::EvSocket {
               ConfigTree::User &u,  ConfigTree::Service &s,
               StringTab &st ) noexcept;
   int init_sock( void ) noexcept;
+  bool init_param( void ) noexcept;
   bool add_transport( ConfigTree::Service &s,  ConfigTree::Transport &t,
                       bool is_service ) noexcept;
   bool add_transport2( ConfigTree::Service &s,  ConfigTree::Transport &t,

@@ -236,6 +236,9 @@ struct ConfigTree {
                               bool *conn = NULL ) noexcept;
   bool        find_parameter( const char *name,  const char *&value,
                               const char *def_value = NULL ) noexcept;
+  static bool string_to_bytes( const char *s,  uint64_t &bytes ) noexcept;
+  static bool string_to_secs( const char *s,  uint64_t &secs ) noexcept;
+  static bool string_to_nanos( const char *s,  uint64_t &nanos ) noexcept;
 };
 
 }

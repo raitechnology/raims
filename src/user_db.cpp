@@ -91,6 +91,9 @@ UserDB::init( const CryptPass &pwd,  uint32_t my_fd,
   this->hb_ival_mask     = 0; /* hb interval mask, pow2 - 1 > hv_ival_ns */
   this->next_ping_mono   = 0; /* when the next random ping timer expires */
   this->last_auth_mono   = this->start_mono_time;
+  this->converge_time    = this->start_time;
+  this->net_converge_time= this->start_time;
+  this->converge_mono    = this->start_mono_time;
 
   this->new_uid(); /* alloc uid 0 for me prevent loops */
   this->my_src_fd = my_fd;
@@ -429,6 +432,10 @@ UserDB::check_user_timeout( uint64_t current_mono_time,
       if ( ! this->peer_dist.found_inconsistency &&
            this->peer_dist.invalid_mono != 0 ) {
         this->events.converge( this->peer_dist.invalid_reason );
+        this->converge_time = current_time;
+        if ( current_time > this->net_converge_time )
+          this->net_converge_time = current_time;
+        this->converge_mono = current_mono_time;
         uint64_t t = ( current_mono_time > this->peer_dist.invalid_mono ) ?
                      ( current_mono_time - this->peer_dist.invalid_mono ) : 0;
         printf( "network converges %.3f secs, %u uids authenticated, %s\n", 

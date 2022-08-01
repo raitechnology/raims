@@ -1,0 +1,207 @@
+Message Loss
+------------
+
+Under normal conditions, the sequence of the message is one greater than the
+last sequence received.  The sequence numbers are 64 bits so they will never be
+zero.  These conditions are possible when a sequence is not in incrementing
+order from the last message received, which is what normally occurs.
+
+- Publisher includes a timestamp
+
+This causes the subscriber to synchronize the sequence numbers.  The publisher
+will always include a timestamp when the first message of a subject is
+published, or when the last sequence is old enough to be cycled from the
+publisher sequence window.
+
+- The first message received
+
+When a subscription start occurs it will usually not contain a timestamp,
+unless it is the first message published.
+
+- The message sequence is repeated
+
+A sequence is less than or equal the last sequence received.  This indicates
+the message was already processed.  The message is dropped.
+
+- The message sequence skips ahead
+
+Some sequences are missing, indicating messages were lost.  Notification of
+message loss is propagated to the subscriptions.
+
+- The message subject is not subscribed
+
+The subscription may have dropped and the pubilisher has not yet seen the
+unsubscribe.
+
+Multicast sequence numbers
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The sequence numbers include a time frame when the publisher starts the
+message stream.  This is the computation that creates a new sequence stream.
+
+----
+nanosecond timestamp = 1659131646 * 1000000000 = 0x17066b710b706c00
+
+ 1               8               16              24              
+|-+-+-+-+-+-+-+-|-+-+-+-+-+-+-+-|-+-+-+-+-+-+-+-|-+-+-+-+-+-+-+-
+|0 0 0 1 0 1 1 1 0 0 0 0 0 1 1 0 0 1 1 0 1 0 1 1 0 1 1 1 0 0 0 1
+|-+-+-+-+-+-+-+-|-+-+-+-+-+-+-+-|-+-+-+-+-+-+-+-|-+-+-+-+-+-+-+-
+ 32              40              48              56              64
+ -+-+-+-+-+-+-+-|-+-+-+-+-+-+-+-|-+-+-+-+-+-+-+-|-+-+-+-+-+-+-+-|
+ 0 0 0 0 1 0 1 1 0 1 1 1 0 0 0 0 0 1 1 0 1 1 0 0 0 0 0 0 0 0 0 0|
+ -+-+-+-+-+-+-+-|-+-+-+-+-+-+-+-|-+-+-+-+-+-+-+-|-+-+-+-+-+-+-+-|
+
+message sequence number = ( nano time >> 33 << 35 ) + 1 = 0x5c19adc000000001
+
+ 1               8               16              24             
+|-+-+-+-+-+-+-+-|-+-+-+-+-+-+-+-|-+-+-+-+-+-+-+-|-+-+-+-+-+-+-+-
+|0 1 0 1 1 1 0 0 0 0 0 1 1 0 0 1 1 0 1 0 1 1 0 1 1 1 0 0 0 0 0 0
+|-+-+-+-+-+-+-+-|-+-+-+-+-+-+-+-|-+-+-+-+-+-+-+-|-+-+-+-+-+-+-+-
+ 32              40              48              56              64
+ -+-+-+-+-+-+-+-|-+-+-+-+-+-+-+-|-+-+-+-+-+-+-+-|-+-+-+-+-+-+-+-|
+ 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1|
+ -+-+-+-+-+-+-+-|-+-+-+-+-+-+-+-|-+-+-+-+-+-+-+-|-+-+-+-+-+-+-+-|
+----
+
+This truncates nanosecond timestamp to approximately 10 second intervals, a new
+time frame can only occur after 10 seconds.  The time frame stored in the upper
+29 bits will be valid until the year 2115.  The sequence resolution within a
+time frame is 35 bits or 34 billion sequences.  These are rotated to a new time
+frames when the sequence number is zero.
+
+Benefits of encoding the time frame into the message sequence numbers:
+
+1.  The start frame indicates when the publisher started within the publisher
+sequence window.
+
+2.  A start of a new published subject will contain a time that matches the
+seqno frame, this time should be close to the current time.  A new time frame
+is also created as needed when memory limitations prevent caching of the last
+sequence published.
+
+3.  A late subscription join can verify that the time frame is greater than the
+network convergence time.  This validates the message stream is uninterrupted
+to the start of the time frame, since message loss can only occur when the
+network is not stable before convergence.
+
+Publish sequence window
+~~~~~~~~~~~~~~~~~~~~~~~
+
+A map of subject to sequence numbers for published multicast messages is
+maintained by each peer.  This map rotates when a configured memory limit is
+reached, `pub-window-size`, and the window time interval is greater than a
+configured time, `pub-window-time`, which must be at least 10 seconds.  When a
+subject is rotated out of the window, the sequence number is restarted with a
+new time frame.
+
+Subscription sequence window
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A map of subject to sequence numbers for the subscriptons that a peer has
+is also maintained.  This validates that the messages are processed in order
+and allows notification of message loss when the sequences skip and does not
+allow a message to be processed twice.  The memory limit for this is
+`sub-window-size` and time limit is `sub-window-time`.  When a subject is
+rotated out of the window, then the publisher did not update for the window
+time and the next sequence is treated as if a new subscription was created.
+
+Configuration for sequence windows
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The sizes and windows are in the parameters section of the config file and
+default to 4 megabyte (about 60,000 subjects for publishers and 20,000 for
+subscribers) and 10 seconds.  The size of the windows will have an overhead of
+48 bytes for publishers and 128 bytes for subscribers in addition to the
+subject size.  The 10 second rotate timer could cause more memory to be used if
+lots of new subjects are published or lots of new subjects are subscribed
+within 10 seconds.
+
+----
+$ cat config/param.yaml
+parameters:
+  pub-window-size: 10 mb
+  pub-window-time: 60 sec
+  sub-window-size: 10 mb
+  sub-window-time: 60 sec
+----
+
+Show loss
+~~~~~~~~~
+
+The `show loss` console command displays the messaging statistics for the
+peers.
+
+----
+A.test[XftVokMK+WK12CNuEaRFuA]@dyna[545]> show loss                                                                              
+user | repeat | rep time | not sub | not time |  msg loss |   loss time  | ibx loss | ibx time
+-----+--------+----------+---------+----------+-----------+--------------+----------+---------
+ B.1 |      0 |          |       0 |          |         0 |              |        0 |         
+ D.3 |      0 |          |       0 |          |       766 | 20:42:24.431 |        0 |         
+ C.4 |      0 |          |       0 |          |         0 |              |        0 |         
+----
+
+- repeat -- count of multicast messages received more than one time
+- rep time -- last time of repeated messages
+- not sub -- count of multicast messages received which were not subscribed
+- not time -- last time of not subscribed
+- msg loss -- number of multicast messages which were lost
+- loss time -- last time of multicast message loss
+- ibx loss -- number of messages which were lost from the inbox stream
+- ibx time -- last time of inbox message loss
+
+An inbox message loss is not unusual since the point to point messages are
+often used for link state exchanges and other network convergence functions.
+Inbox message loss is usually not as problematic as multicast message loss
+since there often timers are retries associated with their usage.
+
+Multicast message loss is much more difficult to recover from, since there
+are usually many multicast streams and tracking the state of each one is
+a problem solved by persistent message queues.  This requires clients
+which track the state of the messages they consume and notify the queue when
+they are finished with processing them.
+
+Notification of message loss
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+If a message arrives with a sequence which is not in order, it is forwarded
+with state indicating how many messages are missing, if that can be determined.
+The protocol handling of this notification is to publish a message indicating
+how many messages were lost.
+
+RV protocol
+^^^^^^^^^^^
+
+The RV protocol publishes a message to the 
+`_RV.ERROR.SYSTEM.DATALOSS.INBOUND.BCAST` subject with a count of lost messages.
+These are throttled so that on one is published per second after the first one
+is published.
+
+Example:
+
+----
+   mtype : "A"
+     sub : _RV.ERROR.SYSTEM.DATALOSS.INBOUND.BCAST
+    data : {
+   ADV_CLASS : "ERROR"
+  ADV_SOURCE : "SYSTEM"
+    ADV_NAME : "DATALOSS.INBOUND.BCAST"
+    ADV_DESC : "lost msgs"
+        lost : 7
+     sub_cnt : 7
+        sub1 : "RSF.REC.PAC.NaE"
+       lost1 : 1
+        sub2 : "RSF.REC.MTC.NaE"
+       lost2 : 1
+        sub3 : "RSF.REC.MCD.NaE"
+       lost3 : 1
+        sub4 : "RSF.REC.MCD.N"
+       lost4 : 1
+        sub5 : "RSF.REC.SPM4.NaE"
+       lost5 : 1
+        sub6 : "RSF.REC.MER.NaE"
+       lost6 : 1
+        sub7 : "RSF.REC.MER.N"
+       lost7 : 1
+        scid : 7500
+  }
+----

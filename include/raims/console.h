@@ -300,17 +300,27 @@ struct SubsReply {
 struct ConsoleSubs : public ConsoleRPC {
   kv::ArrayCount< char, 8192 >      strings;
   kv::ArrayCount< SubsReply, 1024 > reply;
-  bool show_self;
+  char * match;
+  size_t match_len;
+  bool   show_self;
 
   void * operator new( size_t, void *ptr ) { return ptr; }
   void operator delete( void *ptr ) { ::free( ptr ); }
-  ConsoleSubs( Console &c ) : ConsoleRPC( c, SUBS_RPC ) {}
+  ConsoleSubs( Console &c ) : ConsoleRPC( c, SUBS_RPC ),
+    match( 0 ), match_len( 0 ) {}
   virtual void on_data( const SubMsgData &val ) noexcept;
   virtual void init( void ) noexcept {
     this->ConsoleRPC::init();
     this->strings.count = 0;
     this->reply.count   = 0;
+    this->match_len     = 0;
     this->show_self     = false;
+  }
+  void set_match( const char *s,  size_t l ) {
+    this->match = (char *) ::realloc( this->match, l + 1 );
+    ::memcpy( this->match, s, l );
+    this->match[ l ] = '\0';
+    this->match_len = l;
   }
 };
 
@@ -491,7 +501,8 @@ struct Console : public md::MDOutput, public SubOnMsg, public ConfigPrinter {
                      size_t nvals ) noexcept;
   void config_tport_route( const char *param,  size_t plen,
                            const char *value,  size_t vlen ) noexcept;
-  void show_subs( ConsoleOutput *p,  const char *arg,  size_t arglen ) noexcept;
+  void show_subs( ConsoleOutput *p,  const char *arg,  size_t arglen,
+                  const char *arg2,  size_t arglen2 ) noexcept;
   void ping_peer( ConsoleOutput *p,  const char *arg,  size_t arglen ) noexcept;
   void mcast_ping( ConsoleOutput *p ) noexcept;
 
@@ -512,6 +523,7 @@ struct Console : public md::MDOutput, public SubOnMsg, public ConfigPrinter {
   void show_routes( ConsoleOutput *p ) noexcept;
   void show_urls( ConsoleOutput *p ) noexcept;
   void show_counters( ConsoleOutput *p ) noexcept;
+  void show_loss( ConsoleOutput *p ) noexcept;
   void show_reachable( ConsoleOutput *p ) noexcept;
   void show_tree( ConsoleOutput *p,  const UserBridge *src,
                   uint8_t path_select ) noexcept;
@@ -583,56 +595,57 @@ enum ConsoleCmd {
   CMD_SHOW_UNKNOWN     = 16, /* show unknown               */
   CMD_SHOW_LOG         = 17, /* show log                   */
   CMD_SHOW_COUNTERS    = 18, /* show counters              */
-  CMD_SHOW_REACHABLE   = 19, /* show reachable             */
-  CMD_SHOW_TREE        = 20, /* show tree [U]              */
-  CMD_SHOW_PATH        = 21, /* show path [N]              */
-  CMD_SHOW_FDS         = 22, /* show fds                   */
-  CMD_SHOW_BLOOMS      = 23, /* show blooms [N]            */
-  CMD_SHOW_RUN         = 24, /* show running               */
-  CMD_SHOW_RUN_TPORTS  = 25, /* show running transport [T] */
-  CMD_SHOW_RUN_SVCS    = 26, /* show running service [S]   */
-  CMD_SHOW_RUN_USERS   = 27, /* show running user [U]      */
-  CMD_SHOW_RUN_GROUPS  = 28, /* show running group [G]     */
-  CMD_SHOW_RUN_PARAM   = 29, /* show running parameter [P] */
-  CMD_SHOW_GRAPH       = 30, /* show graph                 */
-  CMD_SHOW_SEQNO       = 31, /* show seqno                 */
-  CMD_CONNECT          = 32, /* connect [T]                */
-  CMD_LISTEN           = 33, /* listen [T]                 */
-  CMD_SHUTDOWN         = 34, /* shutdown [T]               */
-  CMD_CONFIGURE        = 35, /* configure                  */
-  CMD_CONFIGURE_TPORT  = 36, /* configure transport T      */
-  CMD_CONFIGURE_PARAM  = 37, /* configure parameter P V    */
-  CMD_SAVE             = 38, /* save                       */
-  CMD_SUB_START        = 39, /* sub subject [file]         */
-  CMD_SUB_STOP         = 40, /* unsub subject [file]       */
-  CMD_PSUB_START       = 41, /* psub rv-wildcard [file]    */
-  CMD_PSUB_STOP        = 42, /* punsub rv-wildcard [file]  */
-  CMD_GSUB_START       = 43, /* gsub glob-wildcard [file]  */
-  CMD_GSUB_STOP        = 44, /* gunsub glob-wildcard [file]*/
-  CMD_PUBLISH          = 45, /* pub subject msg            */
-  CMD_TRACE            = 46, /* trace subject msg          */
-  CMD_PUB_ACK          = 47, /* ack subject msg            */
-  CMD_RPC              = 48, /* rpc subject msg            */
-  CMD_ANY              = 49, /* any subject msg            */
-  CMD_DEBUG            = 51, /* debug ival                 */
-  CMD_CANCEL           = 52, /* cancel                     */
-  CMD_MUTE_LOG         = 53, /* mute                       */
-  CMD_UNMUTE_LOG       = 54, /* unmute                     */
-  CMD_QUIT             = 55, /* quit/exit                  */
-  CMD_TPORT_NAME       = 56, /* tport N                    */
-  CMD_TPORT_TYPE       = 57, /* type T                     */
-  CMD_TPORT_LISTEN     = 58, /* listen A                   */
-  CMD_TPORT_CONNECT    = 59, /* connect A                  */
-  CMD_TPORT_PORT       = 60, /* port N                     */
-  CMD_TPORT_TIMEOUT    = 61, /* timeout N                  */
-  CMD_TPORT_MTU        = 62, /* mtu N                      */
-  CMD_TPORT_TXW_SQNS   = 63, /* txw_sqns N                 */
-  CMD_TPORT_RXW_SQNS   = 64, /* rxw_sqns N                 */
-  CMD_TPORT_MCAST_LOOP = 65, /* mcast_loop N               */
-  CMD_TPORT_EDGE       = 66, /* edge B                     */
-  CMD_TPORT_SHOW       = 67, /* show                       */
-  CMD_TPORT_QUIT       = 68, /* quit/exit                  */
-  CMD_BAD              = 69
+  CMD_SHOW_LOSS        = 19, /* show loss                  */
+  CMD_SHOW_REACHABLE   = 20, /* show reachable             */
+  CMD_SHOW_TREE        = 21, /* show tree [U]              */
+  CMD_SHOW_PATH        = 22, /* show path [N]              */
+  CMD_SHOW_FDS         = 23, /* show fds                   */
+  CMD_SHOW_BLOOMS      = 24, /* show blooms [N]            */
+  CMD_SHOW_RUN         = 25, /* show running               */
+  CMD_SHOW_RUN_TPORTS  = 26, /* show running transport [T] */
+  CMD_SHOW_RUN_SVCS    = 27, /* show running service [S]   */
+  CMD_SHOW_RUN_USERS   = 28, /* show running user [U]      */
+  CMD_SHOW_RUN_GROUPS  = 29, /* show running group [G]     */
+  CMD_SHOW_RUN_PARAM   = 30, /* show running parameter [P] */
+  CMD_SHOW_GRAPH       = 31, /* show graph                 */
+  CMD_SHOW_SEQNO       = 32, /* show seqno                 */
+  CMD_CONNECT          = 33, /* connect [T]                */
+  CMD_LISTEN           = 34, /* listen [T]                 */
+  CMD_SHUTDOWN         = 35, /* shutdown [T]               */
+  CMD_CONFIGURE        = 36, /* configure                  */
+  CMD_CONFIGURE_TPORT  = 37, /* configure transport T      */
+  CMD_CONFIGURE_PARAM  = 38, /* configure parameter P V    */
+  CMD_SAVE             = 39, /* save                       */
+  CMD_SUB_START        = 40, /* sub subject [file]         */
+  CMD_SUB_STOP         = 41, /* unsub subject [file]       */
+  CMD_PSUB_START       = 42, /* psub rv-wildcard [file]    */
+  CMD_PSUB_STOP        = 43, /* punsub rv-wildcard [file]  */
+  CMD_GSUB_START       = 44, /* gsub glob-wildcard [file]  */
+  CMD_GSUB_STOP        = 45, /* gunsub glob-wildcard [file]*/
+  CMD_PUBLISH          = 46, /* pub subject msg            */
+  CMD_TRACE            = 47, /* trace subject msg          */
+  CMD_PUB_ACK          = 48, /* ack subject msg            */
+  CMD_RPC              = 49, /* rpc subject msg            */
+  CMD_ANY              = 50, /* any subject msg            */
+  CMD_DEBUG            = 52, /* debug ival                 */
+  CMD_CANCEL           = 53, /* cancel                     */
+  CMD_MUTE_LOG         = 54, /* mute                       */
+  CMD_UNMUTE_LOG       = 55, /* unmute                     */
+  CMD_QUIT             = 56, /* quit/exit                  */
+  CMD_TPORT_NAME       = 57, /* tport N                    */
+  CMD_TPORT_TYPE       = 58, /* type T                     */
+  CMD_TPORT_LISTEN     = 59, /* listen A                   */
+  CMD_TPORT_CONNECT    = 60, /* connect A                  */
+  CMD_TPORT_PORT       = 61, /* port N                     */
+  CMD_TPORT_TIMEOUT    = 62, /* timeout N                  */
+  CMD_TPORT_MTU        = 63, /* mtu N                      */
+  CMD_TPORT_TXW_SQNS   = 64, /* txw_sqns N                 */
+  CMD_TPORT_RXW_SQNS   = 65, /* rxw_sqns N                 */
+  CMD_TPORT_MCAST_LOOP = 66, /* mcast_loop N               */
+  CMD_TPORT_EDGE       = 67, /* edge B                     */
+  CMD_TPORT_SHOW       = 68, /* show                       */
+  CMD_TPORT_QUIT       = 69, /* quit/exit                  */
+  CMD_BAD              = 70
 };
 
 enum ConsoleArgType {
@@ -745,6 +758,7 @@ static const ConsoleCmdString show_cmd[] = {
   { CMD_SHOW_UNKNOWN   , "unknown"       ,0,0}, /* show unknown */
   { CMD_SHOW_LOG       , "log"           ,0,0}, /* show log */
   { CMD_SHOW_COUNTERS  , "counters"      ,0,0}, /* show counters */
+  { CMD_SHOW_LOSS      , "loss"          ,0,0}, /* show loss */
   { CMD_SHOW_REACHABLE , "reachable"     ,0,0}, /* show reachable */
   { CMD_SHOW_TREE      , "tree"          ,0,0}, /* show tree */
   { CMD_SHOW_PATH      , "path"          ,0,0}, /* show path */
@@ -796,6 +810,7 @@ static const ConsoleCmdString help_cmd[] = {
   { CMD_SHOW_UNKNOWN     , "show unknown", "",   "Show the list of peers yet to be resolved"         },
   { CMD_SHOW_LOG         , "show log", "",       "Show log buffer"                                   },
   { CMD_SHOW_COUNTERS    , "show counters", "",  "Show peers seqno and time values"                  },
+  { CMD_SHOW_LOSS        , "show loss", "",      "Show message loss counters and time"               },
   { CMD_SHOW_REACHABLE   , "show reachable", "", "Show reachable peers through tports"               },
   { CMD_SHOW_TREE        , "show tree", "[U]",   "Show multicast tree from me or U"                  },
   { CMD_SHOW_PATH        , "show path", "[N]",   "Show multicast path N"                       },

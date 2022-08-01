@@ -46,6 +46,39 @@ static inline void ms_localtime( time_t t, struct tm &tmbuf ) {
   ::localtime_r( &t, &tmbuf );
 }
 #endif
+int64_t rai::ms::tz_offset_sec,
+        rai::ms::tz_offset_ns,
+        rai::ms::tz_stamp_sec,
+        rai::ms::tz_stamp_ns;
+bool    rai::ms::tz_stamp_gmt;
+
+static time_t
+update_tz_offset( void ) noexcept
+{
+  time_t now = ::time( NULL );
+  struct tm local;
+  ms_localtime( now, local );
+  tz_offset_sec = (int64_t) local.tm_gmtoff;
+  tz_offset_ns  = tz_offset_sec * (int64_t) 1000000000;
+  if ( tz_stamp_gmt ) {
+    tz_stamp_sec = 0;
+    tz_stamp_ns  = 0;
+  }
+  else {
+    tz_stamp_sec = tz_offset_sec;
+    tz_stamp_ns  = tz_offset_ns;
+  }
+  local.tm_sec = 0;
+  local.tm_min = 0;
+  local.tm_hour = 0;
+  return mktime( &local );
+}
+
+void
+rai::ms::update_tz_stamp( void )
+{
+  update_tz_offset();
+}
 
 Console::Console( SessionMgr &m ) noexcept
        : MDOutput( MD_OUTPUT_OPAQUE_TO_B64 ), mgr( m ), user_db( m.user_db ),
@@ -56,15 +89,9 @@ Console::Console( SessionMgr &m ) noexcept
          inbox_num( 0 ), log_filename( 0 ), log_fd( -1 ), next_rotate( 1 ),
          log_status( 0 ), mute_log( false ), last_secs( 0 ), last_ms( 0 )
 {
-  time_t t = time( NULL ), t2;
-  struct tm tm;
-  ms_localtime( t, tm );
-  tm.tm_sec = 0;
-  tm.tm_min = 0;
-  tm.tm_hour = 0;
-  t2 = mktime( &tm );
-  t2 += 24 * 60 * 60;
-  this->log_rotate_time = (uint64_t) t2 * 1000000000;
+  time_t t = update_tz_offset();
+  t += 24 * 60 * 60;
+  this->log_rotate_time = (uint64_t) t * 1000000000;
   this->make_prompt();
 }
 
@@ -114,13 +141,8 @@ Console::log_header( int fd ) noexcept
 {
   static const char sep[] = "=--=--=--=\n";
   time_t now = ::time( NULL );
-  struct tm local;
   char   line[ 256 ];
   size_t off = 0;
-  ms_localtime( now, local );
-  int diff_hr = local.tm_hour - ( ( now / 3600 ) % 24 );
-  int diff_mi = local.tm_min  - ( ( now / 60 ) % 60 );
-  if ( diff_mi < 0 ) diff_mi = -diff_mi;
 
   ::strcpy( &line[ off ], "=--=--=--=\n" );  off = sizeof( sep ) - 1;
   ::strcpy( &line[ off ], ::ctime( &now ) ); off = ::strlen( line );
@@ -129,8 +151,16 @@ Console::log_header( int fd ) noexcept
 #else
   const char *tz = _tzname[ _daylight ];
 #endif
+  if ( tz_offset_sec == 0 )
+    update_tz_offset();
+  int diff_min = (int)( tz_offset_sec / (int64_t) 60 ),
+      diff_hr  = diff_min / 60;
+  diff_min %= 60;
+  if ( diff_min < 0 )
+    diff_min = -diff_min;
+
   off += ::snprintf( &line[ off ], sizeof( line ) - off,
-    "UTC offset: %d:%02d (%s)\n", diff_hr, diff_mi, tz );
+    "UTC offset: %d:%02d (%s)\n", diff_hr, diff_min, tz );
   off += ::snprintf( &line[ off ], sizeof( line ) - off,
     "PID: %d, ms_server version: %s\n", ::getpid(), ms_get_version() );
   ::strcpy( &line[ off ], "=--=--=--=\n" );  off += sizeof( sep ) - 1;
@@ -142,8 +172,15 @@ Console::log_header( int fd ) noexcept
 bool
 Console::rotate_log( void ) noexcept
 {
-  uint64_t next = 24 * 60 * 60 * (uint64_t) 1000000000;
-  this->log_rotate_time += next;
+  time_t t = update_tz_offset();
+  t += 24 * 60 * 60;
+  uint64_t next = (uint64_t) t * 1000000000;
+  if ( next > this->log_rotate_time )
+    this->log_rotate_time = next;
+  else {
+    next = 24 * 60 * 60 * (uint64_t) 1000000000;
+    this->log_rotate_time += next;
+  }
   if ( this->log_fd >= 0 ) {
     os_close( this->log_fd );
     this->log_fd = -1;
@@ -256,7 +293,8 @@ Console::log_output( int stream,  uint64_t stamp,  size_t len,
 {
   uint64_t secs, ms;
 
-  secs = stamp / (uint64_t) ( 1000 * 1000 * 1000.0 );
+  stamp += tz_stamp_ns;
+  secs = stamp / (uint64_t) ( 1000 * 1000 * 1000 );
   if ( secs != this->last_secs ) {
     uint32_t ar[ 3 ], j = 0;
     ar[ 2 ] = secs % 60,
@@ -1296,7 +1334,8 @@ TabPrint::string( char *buf ) noexcept
     case PRINT_STAMP: {
       if ( this->ival == 0 )
         return "";
-      uint64_t secs = this->ival / (uint64_t) ( 1000 * 1000 * 1000.0 );
+      uint64_t stamp = this->ival + tz_stamp_ns;
+      uint64_t secs = stamp / (uint64_t) ( 1000 * 1000 * 1000.0 );
       uint32_t ar[ 3 ], j = 0;
       ar[ 2 ] = secs % 60,
       ar[ 1 ] = ( secs / 60 ) % 60;
@@ -1726,6 +1765,7 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
       this->colorize_log( p, this->log.ptr, this->log_index );
       break;
     case CMD_SHOW_COUNTERS:  this->show_counters( p );  break;
+    case CMD_SHOW_LOSS:      this->show_loss( p );      break;
     case CMD_SHOW_REACHABLE: this->show_reachable( p ); break;
     case CMD_SHOW_TREE: {
       UserBridge * u = this->find_user( arg, len );
@@ -1817,7 +1857,13 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
         this->printf( "nothing to cancel\n" );
       break;
     }
-    case CMD_SHOW_SUBS: this->show_subs( p, arg, len ); break;
+    case CMD_SHOW_SUBS:
+      if ( argc <= 3 ) {
+        args[ 3 ] = NULL;
+        arglen[ 3 ] = 0;
+      }
+      this->show_subs( p, arg, len, args[ 3 ], arglen[ 3 ] );
+      break;
     case CMD_PING:      this->ping_peer( p, arg, len ); break;
     case CMD_MPING:     this->mcast_ping( p );          break;
 
@@ -1953,7 +1999,7 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
         else if ( cmd == CMD_ANY )
           mc.option = CABA_OPT_ANY;
         if ( cmd == CMD_TRACE || cmd == CMD_PUB_ACK )
-          mc.time  = current_realtime_ns();
+          mc.stamp = current_realtime_ns();
       }
       this->mgr.publish( mc );
       break;
@@ -2249,13 +2295,16 @@ Console::config_tport_route( const char *param, size_t plen,
 
 void
 Console::show_subs( ConsoleOutput *p,  const char *arg,
-                    size_t arglen ) noexcept
+                    size_t arglen,  const char *arg2,
+                    size_t arglen2 ) noexcept
 {
   UserBridge  * n;
   char          isub[ UserDB::INBOX_BASE_SIZE + sizeof( _SUBS ) ];
   uint32_t      len;
   ConsoleSubs * rpc = this->create_rpc<ConsoleSubs>( p, SUBS_RPC );
 
+  if ( arglen == 1 && arg[ 0 ] == '*' )
+    arglen = 0;
   if ( arglen != 0 ) {
     if ( this->user_db.user.user.equals( arg, arglen ) ||
          ( arglen == 4 && ::memcmp( arg, "self", 4 ) == 0 ) )
@@ -2264,6 +2313,9 @@ Console::show_subs( ConsoleOutput *p,  const char *arg,
   else {
     rpc->show_self = true;
   }
+  if ( rpc->show_self && arglen2 > 0 )
+    rpc->set_match( arg2, arglen2 );
+
   if ( ! rpc->show_self || arglen == 0 ) {
     for ( uint32_t uid = 0; uid < this->user_db.next_uid; uid++ ) {
       n = this->user_db.bridge_tab[ uid ];
@@ -2275,9 +2327,10 @@ Console::show_subs( ConsoleOutput *p,  const char *arg,
         if ( n->sub_seqno > 0 ) { /* must have subs seqno */
           len = n->make_inbox_subject( isub, _SUBS );
 
-          PubMcastData mc( isub, len, NULL, 0, MD_NODATA );
+          PubMcastData mc( isub, len, arg2, arglen2,
+                           arglen2 == 0 ? MD_NODATA : MD_STRING );
           mc.reply = rpc->inbox_num;
-          mc.time  = current_realtime_ns();
+          mc.stamp = current_realtime_ns();
           mc.token = rpc->token;
           this->mgr.publish( mc );
           rpc->count++;
@@ -2313,7 +2366,7 @@ Console::ping_peer( ConsoleOutput *p,  const char *arg,
 
       PubMcastData mc( isub, len, NULL, 0, MD_NODATA );
       mc.reply = rpc->inbox_num;
-      mc.time  = current_realtime_ns();
+      mc.stamp = current_realtime_ns();
       mc.token = rpc->token;
       this->mgr.publish( mc );
       rpc->count++;
@@ -2346,7 +2399,7 @@ Console::mcast_ping( ConsoleOutput *p ) noexcept
     static const char m_ping[] = _MCAST "." _PING;
     PubMcastData mc( m_ping, sizeof( m_ping ) - 1, NULL, 0, MD_NODATA );
     mc.reply = rpc->inbox_num;
-    mc.time  = current_realtime_ns();
+    mc.stamp = current_realtime_ns();
     mc.token = rpc->token;
     this->mgr.publish( mc );
     rpc->reply.zero();
@@ -2407,27 +2460,39 @@ Console::on_subs( ConsoleSubs &subs ) noexcept
 
   if ( subs.show_self ) {
     SubListIter iter( this->sub_db.sub_list, 0, this->sub_db.sub_seqno );
+    const char * match = subs.match;
+    size_t match_len = subs.match_len;
 
     this->table.count += iter.count() * ncols;
     tab = this->table.make( this->table.count );
 
     for ( bool ok = iter.first(); ok; ok = iter.next() ) {
-      if ( i == 0 )
-        tab[ i++ ].set( this->user_db.user.user, PRINT_SELF ); /* user */
-      else
-        tab[ i++ ].set_null();
       if ( iter.action == ACTION_SUB_JOIN ) {
         SubRoute * sub;
         sub = this->sub_db.sub_tab.find_sub( iter.hash, iter.seqno );
         if ( sub != NULL ) {
-          tab[ i++ ].set( sub->value, sub->len );
+          if ( match_len == 0 ||
+               ::memmem( sub->value, sub->len, match, match_len ) != NULL ) { 
+            if ( i == 0 )
+              tab[ i++ ].set( this->user_db.user.user, PRINT_SELF ); /* user */
+            else
+              tab[ i++ ].set_null();
+            tab[ i++ ].set( sub->value, sub->len );
+          }
         }
       }
       else {
         PatRoute * pat;
         pat = this->sub_db.pat_tab.find_sub( iter.hash, iter.seqno );
         if ( pat != NULL ) {
-          this->tab_concat( pat->value, pat->len, "p", tab[ i++ ] );
+          if ( match_len == 0 ||
+               ::memmem( pat->value, pat->len, match, match_len ) != NULL ) { 
+            if ( i == 0 )
+              tab[ i++ ].set( this->user_db.user.user, PRINT_SELF ); /* user */
+            else
+              tab[ i++ ].set_null();
+            this->tab_concat( pat->value, pat->len, "p", tab[ i++ ] );
+          }
         }
       }
     }
@@ -3505,9 +3570,9 @@ Console::show_urls( ConsoleOutput *p ) noexcept
 void
 Console::show_counters( ConsoleOutput *p ) noexcept
 {
-  static const uint32_t ncols = 14;
-  uint32_t     i = 0;
-  TabPrint   * tab;
+  static const uint32_t ncols = 10;
+  uint32_t   i = 0;
+  TabPrint * tab;
 
   this->table.count = 0;
   this->tmp.count = 0;
@@ -3536,16 +3601,45 @@ Console::show_counters( ConsoleOutput *p ) noexcept
     tab[ i++ ].set_long( n->ping_send_count );  /* pisnd */
     tab[ i++ ].set_time( n->ping_send_time );   /* ping_stime */
     tab[ i++ ].set_long( n->pong_recv_count );  /* porcv */
-    tab[ i++ ].set_time( n->pong_recv_time );   /* pong_rtime */
     tab[ i++ ].set_long( n->ping_recv_count );  /* pircv */
-    tab[ i++ ].set_time( n->ping_recv_time );   /* ping_rtime */
-    tab[ i++ ].set_int( n->seqno_repeat );
-    tab[ i++ ].set_int( n->seqno_not_subscr );
   }
   static const char *hdr[ ncols ] =
     { "user", "start", "hb seqno", "hb time", "snd ibx", "rcv ibx",
-      "ping snd", "ping stime", "pong rcv", "pong time",
-      "ping rcv", "ping rtime", "repeat", "not subed" };
+      "ping snd", "ping stime", "pong rcv", "ping rcv" };
+  this->print_table( p, hdr, ncols );
+}
+
+void
+Console::show_loss( ConsoleOutput *p ) noexcept
+{
+  static const uint32_t ncols = 11;
+  uint32_t   i = 0;
+  TabPrint * tab;
+
+  this->table.count = 0;
+  this->tmp.count = 0;
+
+  for ( uint32_t uid = 0; uid < this->user_db.next_uid; uid++ ) {
+    UserBridge * n = this->user_db.bridge_tab[ uid ];
+    if ( n == NULL || ! n->is_set( AUTHENTICATED_STATE ) )
+      continue;
+
+    tab = this->table.make( this->table.count + ncols );
+    this->table.count += ncols;
+
+    tab[ i++ ].set( n, PRINT_USER );                /* user */
+    tab[ i++ ].set_long( n->msg_repeat_count );     /* repeat */
+    tab[ i++ ].set_time( n->msg_repeat_time );      /* rep time */
+    tab[ i++ ].set_long( n->msg_not_subscr_count ); /* not sub */
+    tab[ i++ ].set_time( n->msg_not_subscr_time );  /* not time */
+    tab[ i++ ].set_long( n->msg_loss_count );       /* msg loss */
+    tab[ i++ ].set_time( n->msg_loss_time );        /* loss time */
+    tab[ i++ ].set_long( n->inbox_msg_loss_count ); /* ibx loss */
+    tab[ i++ ].set_time( n->inbox_msg_loss_time );  /* ibx time */
+  }
+  static const char *hdr[ ncols ] =
+    { "user", "repeat", "rep time", "not sub", "not time",
+      "msg loss", "loss time", "ibx loss", "ibx time" };
   this->print_table( p, hdr, ncols );
 }
 
@@ -3848,7 +3942,7 @@ Console::show_blooms( ConsoleOutput *p,  uint8_t path_select ) noexcept
   this->print_table( p, hdr, ncols );
 }
 
-static const uint32_t seqno_ncols = 4;
+static const uint32_t seqno_ncols = 5;
 void
 Console::tab_pub( Pub *pub ) noexcept
 {
@@ -3856,7 +3950,8 @@ Console::tab_pub( Pub *pub ) noexcept
   TabPrint *tab = this->table.make( i + seqno_ncols );
   this->table.count += seqno_ncols;
   tab[ i++ ].set( "ipc", 3 );
-  tab[ i++ ].set_long( pub->seqno, PRINT_SLONG );
+  tab[ i++ ].set_long( seqno_base( pub->seqno ), PRINT_LONG );
+  tab[ i++ ].set_long( seqno_time( pub->seqno ), PRINT_STAMP );
   tab[ i++ ].set_long( pub->stamp, PRINT_STAMP );
   tab[ i++ ].set( pub->value, pub->len );
 }
@@ -3872,7 +3967,8 @@ Console::tab_seqno( SubSeqno *sub ) noexcept
     tab[ i++ ].set( this->user_db.user.user, PRINT_SELF ); /* user */
   else
     tab[ i++ ].set( n, PRINT_USER ); /* user */
-  tab[ i++ ].set_long( sub->last_seqno, PRINT_LONG );
+  tab[ i++ ].set_long( seqno_base( sub->last_seqno ), PRINT_LONG );
+  tab[ i++ ].set_long( seqno_time( sub->last_seqno ), PRINT_STAMP );
   tab[ i++ ].set_long( sub->last_stamp, PRINT_STAMP );
   tab[ i++ ].set( sub->value, sub->len );
 
@@ -3893,7 +3989,8 @@ Console::tab_seqno( SubSeqno *sub ) noexcept
         tab[ i++ ].set( this->user_db.user.user, PRINT_SELF ); /* user */
       else
         tab[ i++ ].set( n, PRINT_USER ); /* user */
-      tab[ i++ ].set_long( seqno, PRINT_LONG );
+      tab[ i++ ].set_long( seqno_base( seqno ), PRINT_LONG );
+      tab[ i++ ].set_long( seqno_time( seqno ), PRINT_STAMP );
       tab[ i++ ].set_long( stamp, PRINT_STAMP );
       tab[ i++ ].set( sub->value, sub->len );
     }
@@ -3928,18 +4025,18 @@ Console::show_seqno( ConsoleOutput *p,  const char *arg,
   if ( count == 0 ) {
     for ( pub = this->sub_db.pub_tab.first( loc, b ); pub != NULL;
           pub = this->sub_db.pub_tab.next( loc, b ) ) {
-      if ( arglen == 0 || ::memmem( pub->value, pub->len, arg, arglen ) != 0 )
+      if ( arglen == 0 || ::memmem( pub->value, pub->len, arg, arglen ) != NULL)
         this->tab_pub( pub );
     }
 
     for ( sub = this->sub_db.seqno_tab.first( loc, b ); sub != NULL;
           sub = this->sub_db.seqno_tab.next( loc, b ) ) {
-      if ( arglen == 0 || ::memmem( sub->value, sub->len, arg, arglen ) != 0 )
+      if ( arglen == 0 || ::memmem( sub->value, sub->len, arg, arglen ) != NULL)
         this->tab_seqno( sub );
     }
   }
   static const char *hdr[ seqno_ncols ] =
-    { "source", "seqno", "time", "subject" };
+    { "source", "seqno", "start", "time", "subject" };
   this->print_table( p, hdr, seqno_ncols );
 }
 
@@ -4143,7 +4240,7 @@ ConsolePing::on_data( const SubMsgData &val ) noexcept
 
   reply.uid       = val.src_bridge->uid;
   reply.tid       = val.pub.rte.tport_id;
-  reply.sent_time = val.time;
+  reply.sent_time = val.stamp;
   reply.recv_time = current_realtime_ns();
 
   if ( this->complete )
@@ -4263,8 +4360,8 @@ Console::print_data( ConsoleOutput *p,  const SubMsgData &val ) noexcept
 {
   size_t       sublen = val.pub.subject_len;
   const char * sub    = val.pub.subject;
-  if ( val.time != 0 ) {
-    uint64_t delta = current_realtime_ns() - val.time;
+  if ( val.stamp != 0 ) {
+    uint64_t delta = current_realtime_ns() - val.stamp;
     this->printf( "%.*sdelta %.1f usecs%.*s\n",
                   rz, rc, (double) delta / 1000.0, nz, nc );
   }
@@ -4284,24 +4381,27 @@ Console::print_data( ConsoleOutput *p,  const SubMsgData &val ) noexcept
       MDMsgMem mem;
       MDMsg * m = MDMsg::unpack( (void *) val.data, 0, val.datalen, val.fmt,
                                  MsgFrameDecoder::msg_dict, &mem );
-      this->printf( "%.*s%.*s%.*s n=%" PRIu64 " (%s @ %s via %s)\n",
-              bz, bc, (int) sublen, sub, nz, nc, val.seqno,
+      this->printf( "%.*s%.*s%.*s n=%lu.%lu (%s @ %s via %s)\n",
+              bz, bc, (int) sublen, sub, nz, nc,
+              seqno_frame( val.seqno ), seqno_base( val.seqno ),
               user_val, src_nonce, val.pub.rte.name );
       if ( m != NULL )
         this->print_msg( *m );
     }
     else {
-      this->printf( "%.*s%.*s%.*s n=%" PRIu64
+      this->printf( "%.*s%.*s%.*s n=%lu.%lu"
                     " (%s @ %s via %s) : %.*s%.*s%.*s\n",
-              bz, bc, (int) sublen, sub, nz, nc, val.seqno,
+              bz, bc, (int) sublen, sub, nz, nc,
+              seqno_frame( val.seqno ), seqno_base( val.seqno ),
               user_val, src_nonce, val.pub.rte.name, cz, cc,
               (int) val.datalen, (char *) val.data, nz, nc );
     }
   }
   else {
-    this->printf( "%.*s%.*s%.*s n=%" PRIu64 " (%s @ %s via %s)\n",
-            bz, bc, (int) sublen, sub, nz, nc, val.seqno,
-            user_val, src_nonce, val.pub.rte.name );
+    this->printf( "%.*s%.*s%.*s n=%lu.%lu (%s @ %s via %s)\n",
+              bz, bc, (int) sublen, sub, nz, nc,
+              seqno_frame( val.seqno ), seqno_base( val.seqno ),
+              user_val, src_nonce, val.pub.rte.name );
 
     this->print_msg( *val.pub.dec.msg );
   }
