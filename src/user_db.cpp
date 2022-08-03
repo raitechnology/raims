@@ -272,6 +272,7 @@ UserDB::release( void ) noexcept
   this->ping_queue.reset();
   this->pending_queue.reset();
   this->uid_authenticated.reset();
+  this->uid_rtt.reset();
   this->bridge_id.zero();
   this->session_key = NULL;
   this->cnonce      = NULL;
@@ -539,8 +540,9 @@ UserDB::lookup_user( MsgFramePublish &pub,  const MsgHdrDecoder &dec ) noexcept
           break;
         default:
           this->add_user_route( *n, pub.rte, pub.src_route, dec, NULL );
-          n->printf( "reanimate zombie %.*s\n",
-                     (int) pub.subject_len, pub.subject );
+          if ( debug_usr )
+            n->printf( "reanimate zombie %.*s\n",
+                       (int) pub.subject_len, pub.subject );
           break;
       }
     }
@@ -1158,6 +1160,7 @@ UserDB::add_authenticated( UserBridge &n,
     if ( this->pending_queue.num_elems > 0 )
       this->remove_pending_peer( &n.bridge_id.nonce, 0 );
     this->uid_authenticated.add( n.uid );
+    this->uid_rtt.add( n.uid );
     this->set_ucast_url( *n.user_route, dec );
     this->set_mesh_url( *n.user_route, dec );
     this->push_source_route( n );
@@ -1202,6 +1205,7 @@ UserDB::remove_authenticated( UserBridge &n,  ByeReason bye ) noexcept
   if ( n.test_clear( AUTHENTICATED_STATE ) ) {
     this->events.auth_remove( n.uid, bye );
     this->uid_authenticated.remove( n.uid );
+    this->uid_rtt.remove( n.uid );
     this->pop_source_route( n );
     if ( bye != BYE_HB_TIMEOUT )
       this->remove_adjacency( n );

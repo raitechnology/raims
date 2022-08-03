@@ -152,9 +152,17 @@ struct UserBridge : public UserStateTest<UserBridge> {
   uint32_t           state,               /* UserNonceState bits */
                      uid,                 /* unique id for route */
                      hb_interval,         /* interval of heartbeat */
-                     primary_route;       /* route with min hops */
+                     primary_route,       /* route with min hops */
+                     hb_skew_ref,
+                     skew_upd;            /* if skew updated */
+  int64_t            hb_skew,             /* time diff from hb */
+                     ping_skew,           /* time diff from ping recv */
+                     pong_skew,           /* time diff w/rtt from pong recv */
+                     clock_skew;          /* best clock skew estimate */
   uint64_t           hb_seqno,            /* users hb seqno */
                      hb_time,             /* users hb time */
+                     hb_mono_time,        /* time hb recvd */
+                     start_time,          /* start timestamp */
                      sub_seqno,           /* seqno used for start/stop sub */
                      link_state_seqno;    /* seqno used for link state db */
   UserRoute        * u_buf[ 24 ];         /* indexes user_route */
@@ -174,13 +182,12 @@ struct UserBridge : public UserStateTest<UserBridge> {
                      start_mono_time,     /* uptime from hb */
                      auth_mono_time,      /* when auth happens */
                      challenge_mono_time, /* time challenge sent */
-                     hb_mono_time,        /* time hb recvd */
                      subs_mono_time,      /* time subs reqeust sent */
                      sub_recv_mono_time,  /* time subscription reqeust recv */
                      adj_mono_time,       /* time adjacency reqeust sent */
                      ping_mono_time,  
                      round_trip_time,     /* ping/pong */
-                     start_time,          /* start timestamp */
+                     min_rtt,
                      ping_send_time,
                      ping_recv_time,
                      pong_recv_time,      /* ping times */
@@ -243,7 +250,7 @@ struct UserBridge : public UserStateTest<UserBridge> {
   }
   /* when to timeout peer for lack of heartbeats */
   uint64_t hb_timeout( void ) const {
-    uint64_t ival_ns = (uint64_t) this->hb_interval * SEC_TO_NS;
+    uint64_t ival_ns = sec_to_ns( this->hb_interval );
     return this->hb_mono_time + ival_ns + ival_ns / 2;
   }
   static bool is_heartbeat_older( UserBridge *r1,  UserBridge *r2 ) {
@@ -254,7 +261,7 @@ struct UserBridge : public UserStateTest<UserBridge> {
     uint32_t count = this->challenge_count;
     if ( count > 7 )
       count = 7;
-    uint64_t ival_ns = ( (uint64_t) 1 << count ) * SEC_TO_NS;
+    uint64_t ival_ns = sec_to_ns( (uint64_t) 1 << count );
     return this->challenge_mono_time + ival_ns;
   }
   static bool is_challenge_older( UserBridge *r1,  UserBridge *r2 ) {
@@ -262,19 +269,19 @@ struct UserBridge : public UserStateTest<UserBridge> {
   }
   /* when to allow repeat subs request */
   uint64_t subs_timeout( void ) const {
-    return this->subs_mono_time + SEC_TO_NS * 5;
+    return this->subs_mono_time + sec_to_ns( 5 );
   }
   static bool is_subs_older( UserBridge *r1,  UserBridge *r2 ) {
     return r1->subs_timeout() > r2->subs_timeout();
   }
   uint64_t adj_timeout( void ) const {
-    return this->adj_mono_time + SEC_TO_NS * 5;
+    return this->adj_mono_time + sec_to_ns( 5 );
   }
   static bool is_adj_older( UserBridge *r1,  UserBridge *r2 ) {
     return r1->adj_timeout() > r2->adj_timeout();
   }
   uint64_t ping_timeout( void ) const {
-    return this->ping_mono_time + SEC_TO_NS * 5;
+    return this->ping_mono_time + sec_to_ns( 5 );
   }
   static bool is_ping_older( UserBridge *r1,  UserBridge *r2 ) {
     return r1->ping_timeout() > r2->ping_timeout();
@@ -424,7 +431,8 @@ struct UserDB {
   PeerKeyCache        * peer_keys;       /* cache of peer keys encrypted */
 
   /* uid bits */
-  kv::BitSpace          uid_authenticated; /* uids authenticated */
+  kv::BitSpace          uid_authenticated, /* uids authenticated */
+                        uid_rtt;           /* uids with ping rtt pending */
   /* system subjects after auth */
   kv::BloomRef          peer_bloom;      /* allow after auth (_S.JOIN, _X.HB) */
 
@@ -525,6 +533,12 @@ struct UserDB {
                           const MsgHdrDecoder &dec ) noexcept;
   bool recv_pong_result( const MsgFramePublish &pub,  UserBridge &n,
                          const MsgHdrDecoder &dec ) noexcept;
+  int64_t min_skew( UserBridge &n ) {
+    if ( n.skew_upd == 0 )
+      return n.clock_skew;
+    return this->get_min_skew( n, 0 );
+  }
+  int64_t get_min_skew( UserBridge &n,  uint32_t i ) noexcept;
   /* auth.cpp */
   bool compare_version( UserBridge &n, MsgHdrDecoder &dec ) noexcept;
   bool on_inbox_auth( const MsgFramePublish &pub,  UserBridge &n,

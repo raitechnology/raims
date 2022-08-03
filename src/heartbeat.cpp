@@ -3,6 +3,7 @@
 #include <string.h>
 #include <stdint.h>
 #include <stdarg.h>
+#include <math.h>
 #include <raims/session.h>
 #include <raims/transport.h>
 
@@ -200,6 +201,15 @@ UserDB::on_heartbeat( const MsgFramePublish &pub,  UserBridge &n,
        ! dec.get_nonce( FID_CNONCE, cnonce ) )
     return true;
 
+  uint64_t cur_time = current_realtime_ns();
+  int64_t  skew     = (int64_t) ( cur_time - time );
+  if ( n.hb_skew == 0 || n.hb_skew_ref != 0 ||
+       n.hb_skew != min_abs( skew, n.hb_skew ) ) {
+    n.hb_skew = skew;
+    n.skew_upd++;
+    n.hb_skew_ref = 0;
+  }
+
   if ( seqno <= n.user_route->hb_seqno ) {
     if ( seqno == n.user_route->hb_seqno ) {
       n.printe( "peer warp from %s, seqno %lu, uptime %lu\n",
@@ -207,6 +217,7 @@ UserDB::on_heartbeat( const MsgFramePublish &pub,  UserBridge &n,
     }
     return true;
   }
+
   if ( pub.status == FRAME_STATUS_OK && n.is_set( AUTHENTICATED_STATE ) ) {
     if ( ! pub.rte.uid_connected.is_member( n.uid ) ) {
       if ( debug_hb )
@@ -262,7 +273,6 @@ UserDB::on_heartbeat( const MsgFramePublish &pub,  UserBridge &n,
     current_mono_time = current_monotonic_time_ns();
     n.hb_mono_time    = current_mono_time;
     n.hb_cnonce       = cnonce;
-
     /*n.printf( "HB %.*s\n", (int) pub.subject_len, pub.subject );*/
     /* challenge the peer for auth, both client and server use this */
     if ( ! n.is_set( AUTHENTICATED_STATE | CHALLENGE_STATE ) ) {
@@ -273,7 +283,12 @@ UserDB::on_heartbeat( const MsgFramePublish &pub,  UserBridge &n,
         i_am_older = ( uptime <= n.hb_mono_time - this->start_mono_time );*/
       /* if I am the oldest node in route_list (or only node), do the challenge */
       oldest_peer = ( pub.rte.oldest_uid == 0 );
-      uint64_t cur_time = current_realtime_ns();
+      if ( n.hb_skew < -(int64_t) sec_to_ns( ival ) ||
+           n.hb_skew >  (int64_t) sec_to_ns( ival ) ) {
+        n.printe( "heartbeat time skew %ld is greater than the "
+                  "interval(%u), time=%lu cur_time=%lu\n",
+                  n.hb_skew, ival, time, cur_time );
+      }
 
       if ( i_am_older && oldest_peer ) {
         do_challenge = true;
@@ -285,7 +300,7 @@ UserDB::on_heartbeat( const MsgFramePublish &pub,  UserBridge &n,
                                          oldest_peer ? "true" : "false" );
         if ( ( oldest_peer && pub.rte.is_mcast() ) ||
              ( old_hb_seqno > 0 && old_hb_seqno + 1 == seqno &&
-               start + SEC_TO_NS < cur_time ) ) {
+               start + sec_to_ns( 1 ) < cur_time ) ) {
           n.printf( "old_hb_seqno %lu seqno %lu, age %lu\n",
                     old_hb_seqno, seqno, cur_time - start );
           do_challenge = true;
@@ -357,7 +372,7 @@ UserDB::on_heartbeat( const MsgFramePublish &pub,  UserBridge &n,
         my_csum ^= this->bridge_id.nonce;
         if ( my_csum != csum ) {
           current_mono_time = current_monotonic_time_ns();
-          if ( this->last_auth_mono + SEC_TO_NS < current_mono_time )
+          if ( this->last_auth_mono + sec_to_ns( 1 ) < current_mono_time )
             n.printf( "mesh_csum not equal %s=[%s] hb[%s] "
                       "mesh pending queue is_empty=%u\n",
                    n.peer.user.val, my_csum.to_base64_str( buf ),
@@ -404,41 +419,69 @@ UserDB::debug_uids( BitSpace &uids,  Nonce &csum ) noexcept
 uint32_t
 UserDB::random_uid_walk( void ) noexcept
 {
-  uint32_t serial_count = this->uid_auth_count;
+  if ( this->uid_auth_count == 0 )
+    return 0;
+  if ( this->next_ping_uid == 0 ) {
+    this->next_ping_uid = (uint32_t) this->rand.next() % this->next_uid;
+    this->uid_ping_count = 1;
+  }
+/*
   if ( serial_count == 0 )
     return 0;
   if ( serial_count > 8 )
     serial_count /= 4;
   if ( ( this->uid_ping_count++ % serial_count ) == 0 )
     this->next_ping_uid = (uint32_t) this->rand.next() % this->next_uid;
-
-  if ( this->uid_authenticated.next( this->next_ping_uid ) ||
-       this->uid_authenticated.first( this->next_ping_uid ) )
+*/
+  if ( this->uid_rtt.count() != 0 ) {
+    if ( this->uid_rtt.next( this->next_ping_uid ) ||
+         this->uid_rtt.first( this->next_ping_uid ) ) {
+      return this->next_ping_uid;
+    }
+  }
+  else if ( this->uid_ping_count++ >= this->next_uid ) {
+    if ( this->uid_auth_count > 8 )
+      this->next_ping_uid = (uint32_t) this->rand.next() % this->next_uid;
+    this->uid_ping_count = 1;
+  }
+  /*printf( "uid auth %u [", this->next_ping_uid );
+  uint32_t i;
+  for ( bool b = this->uid_authenticated.first( i ); b;
+        b = this->uid_authenticated.next( i ) ) {
+    printf( "%u ", i );
+  }
+  printf( "] " );*/
+  if ( this->uid_authenticated.next( this->next_ping_uid ) ) {
+    /*printf( "next %u\n", this->next_ping_uid );*/
     return this->next_ping_uid;
+  }
+  else if ( this->uid_authenticated.first( this->next_ping_uid ) ) {
+    /*printf( "first %u\n", this->next_ping_uid );*/
+    return this->next_ping_uid;
+  }
   return 0;
 }
 
 void
-UserDB::interval_ping( uint64_t curr_mono,  uint64_t ) noexcept
+UserDB::interval_ping( uint64_t curr_mono,  uint64_t /*cur_time*/ ) noexcept
 {
   if ( this->next_ping_mono > curr_mono )
     return;
 
   uint64_t hb_ns   = this->hb_ival_ns,
            hb_mask = this->hb_ival_mask;
-  this->next_ping_mono  = curr_mono;
-  this->next_ping_mono += ( this->rand.next() & hb_mask ) + hb_ns / 2;
 
   uint32_t uid = this->random_uid_walk();
-  if ( uid == 0 /*|| this->bridge_tab.ptr[ uid ]->test( HAS_HB_STATE )*/ )
-    return;
-
-  UserBridge & n = *this->bridge_tab.ptr[ uid ];
-  if ( n.auth_mono_time + hb_ns < curr_mono ) {
+  if ( uid != 0 ) {
+    UserBridge & n = *this->bridge_tab.ptr[ uid ];
+    if ( n.auth_mono_time + hb_ns / 4 > curr_mono )
+      return;
     if ( debug_hb )
       n.printf( "send ping\n" );
     this->send_ping_request( n );
   }
+  this->next_ping_mono  = curr_mono;
+  this->next_ping_mono += ( this->rand.next() & hb_mask ) + hb_ns / 2;
 }
 
 void
@@ -478,28 +521,38 @@ UserDB::recv_ping_request( const MsgFramePublish &,  UserBridge &n,
   const char * suf = dec.get_return( ret_buf, _PONG );
   InboxBuf ibx( n.bridge_id, suf );
   uint64_t stamp = 0, token = 0;
+  uint64_t cur_time = current_realtime_ns();
 
   if ( dec.test( FID_STAMP ) )
     cvt_number<uint64_t>( dec.mref[ FID_STAMP ], stamp );
   if ( dec.test( FID_TOKEN ) )
     cvt_number<uint64_t>( dec.mref[ FID_TOKEN ], token );
   if ( stamp == 0 )
-    stamp = current_realtime_ns();
+    stamp = cur_time;
+  else {
+    int64_t skew = (int64_t) ( cur_time - stamp );
+    if ( n.ping_skew == 0 || n.ping_skew != min_abs( skew, n.ping_skew ) ) {
+      n.ping_skew = skew;
+      n.skew_upd++;
+    }
+  }
   if ( suf != ret_buf ) { /* exclude manual pings */
     n.ping_recv_count++;
     n.ping_recv_time = stamp;
   }
   MsgEst e( ibx.len() );
-  e.seqno  ()
-   .stamp  ()
-   .token  ();
+  e.seqno       ()
+   .stamp       ()
+   .reply_stamp ()
+   .token       ();
 
   MsgCat m;
   m.reserve( e.sz );
 
   m.open( this->bridge_id.nonce, ibx.len() )
-   .seqno  ( ++n.send_inbox_seqno )
-   .stamp  ( stamp );
+   .seqno       ( ++n.send_inbox_seqno )
+   .stamp       ( stamp )
+   .reply_stamp ( cur_time );
   if ( token != 0 )
     m.token( token );
   uint32_t h = ibx.hash();
@@ -527,13 +580,37 @@ bool
 UserDB::recv_pong_result( const MsgFramePublish &,  UserBridge &n,
                           const MsgHdrDecoder &dec ) noexcept
 {
-  uint64_t stamp = 0;
+  uint64_t stamp = 0, reply_stamp = 0,
+           cur_time = current_realtime_ns();
+
+  n.pong_recv_time = cur_time;
+  n.pong_recv_count++;
+
   if ( dec.test( FID_STAMP ) )
     cvt_number<uint64_t>( dec.mref[ FID_STAMP ], stamp );
-  n.pong_recv_time = stamp;
-  n.pong_recv_count++;
-  stamp = current_realtime_ns() - stamp;
-  n.round_trip_time = stamp;
+  if ( dec.test( FID_REPLY_STAMP ) )
+    cvt_number<uint64_t>( dec.mref[ FID_REPLY_STAMP ], reply_stamp );
+
+  if ( stamp != 0 ) {
+    uint64_t rtt = cur_time - stamp;
+    if ( reply_stamp != 0 ) {
+      if ( n.min_rtt == 0 || rtt < n.min_rtt ) {
+        uint64_t peer_now = reply_stamp + rtt / 2;
+        n.pong_skew = (int64_t) cur_time - (int64_t) peer_now;
+        if ( debug_hb )
+          n.printf( "pong_skew %ld rtt %lu min %lu\n", n.pong_skew,
+                    rtt, n.min_rtt );
+        n.min_rtt = rtt;
+        n.skew_upd++;
+      }
+      else {
+        n.min_rtt += n.min_rtt / 8;
+      }
+    }
+    n.round_trip_time = rtt;
+    this->uid_rtt.remove( n.uid );
+  }
+
   if ( n.test_clear( PING_STATE ) ) {
     this->ping_queue.remove( &n );
     n.ping_fail_count = 0;
@@ -541,5 +618,30 @@ UserDB::recv_pong_result( const MsgFramePublish &,  UserBridge &n,
   if ( debug_hb )
     n.printf( "recv pong\n" );
   return true;
+}
+
+int64_t
+UserDB::get_min_skew( UserBridge &n,  uint32_t i ) noexcept
+{
+  int64_t skew;
+  if ( i == this->next_uid )
+    return 0;
+  if ( n.pong_skew != 0 )
+    skew = n.pong_skew;
+  else if ( n.ping_skew != 0 )
+    skew = n.ping_skew;
+  else {
+    skew = n.hb_skew;
+    if ( n.hb_skew_ref != 0 ) {
+      UserBridge &m = *this->bridge_tab.ptr[ n.hb_skew_ref ];
+      uint64_t cur_time = current_realtime_ns(),
+               m_time   = (uint64_t) ( (int64_t) cur_time -
+                                       this->get_min_skew( m, i + 1 ) ),
+               n_time   = (uint64_t) ( (int64_t) m_time - skew );
+      skew = (int64_t) cur_time - n_time;
+    }
+  }
+  n.skew_upd = 0;
+  return n.clock_skew = skew;
 }
 

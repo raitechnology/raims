@@ -64,25 +64,36 @@ message sequence number = ( nano time >> 33 << 35 ) + 1 = 0x5c19adc000000001
 ----
 
 This truncates nanosecond timestamp to approximately 10 second intervals, a new
-time frame can only occur after 10 seconds.  The time frame stored in the upper
-29 bits will be valid until the year 2115.  The sequence resolution within a
-time frame is 35 bits or 34 billion sequences.  These are rotated to a new time
-frames when the sequence number is zero.
+time frame can only occur after 10 seconds.  The time frame is stored in the
+upper 29 bits will be valid until the year 2115.  The sequence resolution
+within a time frame is 35 bits or 34 billion sequences.  These are rotated to
+new time frames when the sequence number is zero.
 
-Benefits of encoding the time frame into the message sequence numbers:
+These are properties of the time frame encoded in the message sequence numbers:
 
-1.  The start frame indicates when the publisher started within the publisher
-sequence window.
+1.  A start of a new multicast stream sequence will use the current time, this
+is always after the last convergence timestamp.  The current time is also used
+as needed when memory limitations prevent caching of the last sequence
+published.  When the sequence is cached, the additional messages won't change
+the time frame but will increment the sequence number.
 
-2.  A start of a new published subject will contain a time that matches the
-seqno frame, this time should be close to the current time.  A new time frame
-is also created as needed when memory limitations prevent caching of the last
-sequence published.
+2.  A new subscription start or uncached sequence publish can verify that the
+first message received is greater than the network convergence time.  This is
+used to validate that the message stream is uninterrupted to the start of the
+time frame, since message loss has not occured since the before network
+convergence.
 
-3.  A late subscription join can verify that the time frame is greater than the
-network convergence time.  This validates the message stream is uninterrupted
-to the start of the time frame, since message loss can only occur when the
-network is not stable before convergence.
+All of the transports are stream oriented, so a loss of unrecoverable network
+packets will cause connections to drop and a new convergence state by pruning
+the lost routes.  All peers will agree on a time that convergence is reached.
+New time frames are created for all messages published so that the time frame
+constructed in any one peer greater than the convergence time in all peers.
+
+When routes are added to or subtracted from the network, the message routing is
+not stable until all peers have finished adjusting their view of the network.
+The peer that publishes a message may use a suboptimal forwarding path to the
+recipients until they are notified that better paths are available with link
+state exchanges.
 
 Publish sequence window
 ~~~~~~~~~~~~~~~~~~~~~~~
@@ -104,6 +115,28 @@ allow a message to be processed twice.  The memory limit for this is
 `sub-window-size` and time limit is `sub-window-time`.  When a subject is
 rotated out of the window, then the publisher did not update for the window
 time and the next sequence is treated as if a new subscription was created.
+
+Message duplicates are avoided by discarding messages that are older than the
+trailing edge of the subscription sequence window.  The clock skew between
+systems is estimated.  The console command `show skew` will display the
+calculated clock skew between systems.
+
+----
+C.test[Jl8gk4f+gVaf60LxKtsaMg]@dyna[560]> show skew
+user |   lat  |   hb   | ref |  ping  |   pong  |     time
+-----+--------+--------+-----+--------+---------+-------------
+ A.1 |  187us |  451us |   0 |  104us | -2.22us | 01:32:56.384
+ B.2 |  304us | 1.25ms |   1 |  207us | -18.9us | 01:32:56.384
+ D.3 |  174us |  690us |   0 | 77.2us | -3.73us | 01:32:56.384
+ G.4 | 25.8ms |  4.5se |   1 |  4.5se |  4.49se | 01:32:51.897
+----
+
+The pong calculation subtracts the round trip time and is the most accurate,
+the others disregard the latency of the network.  The hb are from time
+differences of directly attached peers using heartbeats and are shared with
+those not directly attached.  The ref is the peer (0 = self, 1 = A.1) that
+orinated the hb difference.  The time is the estimated clock setting of the
+remote peer in the current timezone.
 
 Configuration for sequence windows
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

@@ -681,13 +681,28 @@ SeqnoStatus
 SubDB::match_seqno( SeqnoArgs &ctx ) noexcept
 {
   const MsgFramePublish &pub = ctx.pub;
-  const uint64_t seqno = pub.dec.seqno;
+  const uint32_t uid = ( pub.n == NULL ? 0 : pub.n->uid );
+  if ( uid != 0 ) {
+    int64_t skew = this->user_db.min_skew( *pub.n );
+    if ( (uint64_t) ( (int64_t) ctx.time + skew ) <
+         this->seqno_tab.trailing_time && ctx.time != 0 )
+      return SEQNO_UID_REPEAT;
+    /* uint64_t stamp = current_realtime_ns();
+    printf( "publish latency %.6f\n",
+            (double) ( stamp - (uint64_t) ( (int64_t) ctx.time + skew ) ) /
+            1000000000.0 ); */
+  }
+
+  SubSeqno * seq;
   RouteLoc   loc, loc2;
   bool       is_old;
-  SubSeqno * seq = this->seqno_tab.upsert( pub.subj_hash, pub.subject,
-                                           pub.subject_len, loc, loc2,
-                                           is_old );
-  uint32_t   uid = ( pub.n == NULL ? 0 : pub.n->uid );
+
+  const uint64_t seqno = pub.dec.seqno,
+                 time  = ( seqno_frame( seqno ) == time_frame( ctx.time ) ?
+                           ctx.time : seqno_time( seqno ) );
+
+  seq = this->seqno_tab.upsert( pub.subj_hash, pub.subject, pub.subject_len,
+                                loc, loc2, is_old );
   if ( seq == NULL )
     return SEQNO_ERROR;
   /* starting a new uid/seqno/time triplet */
@@ -696,8 +711,8 @@ SubDB::match_seqno( SeqnoArgs &ctx ) noexcept
       this->seqno_tab.remove( loc, loc2, is_old );
       return SEQNO_NOT_SUBSCR;
     }
-    return seq->init( uid, seqno, ctx.start_seqno, ctx.time,
-                      ctx.stamp, this->update_seqno, ctx.cb, ctx.tport_mask );
+    return seq->init( uid, seqno, ctx.start_seqno, time, ctx.stamp,
+                      this->update_seqno, ctx.cb, ctx.tport_mask );
   }
   /* check if subscription modified */
   const uint64_t old_start_seqno = seq->start_seqno;
@@ -721,7 +736,7 @@ SubDB::match_seqno( SeqnoArgs &ctx ) noexcept
     ctx.tport_mask  = seq->tport_mask;
   }
   if ( seq->last_uid != uid &&
-       seq->restore_uid( uid, seqno, ctx.time, ctx.stamp ) == SEQNO_UID_FIRST )
+       seq->restore_uid( uid, seqno, time, ctx.stamp ) == SEQNO_UID_FIRST )
     return SEQNO_UID_FIRST;
 
   const bool     new_sub    = ( ctx.start_seqno != old_start_seqno );
@@ -756,34 +771,30 @@ SubDB::match_seqno( SeqnoArgs &ctx ) noexcept
     }
     return SEQNO_UID_REPEAT; /* already seen it */
   }
-  /* time included, resequence wanted */
-  if ( ctx.time > last_time ) {
-    /* if seqno is in the new time frame (otherwise ignore time) */
-    if ( seqno_frame( seqno ) == time_frame( ctx.time ) ) {
-      const bool     chained    = ( last_seqno == ctx.chain_seqno );
-      seq->last_time  = ctx.time;
-      seq->last_seqno = seqno;
-      seq->last_stamp = ctx.stamp;
-      if ( chained ) /* sequentialy chained */
-        return SEQNO_UID_NEXT;
-      if ( ! new_sub ) {
-        /* if last seqno was in the previous frame */
-        if ( seqno_frame( ctx.chain_seqno ) == seqno_frame( last_seqno ) ) {
-          ctx.msg_loss = (uint32_t) min_int( ctx.chain_seqno - last_seqno,
-                                             (uint64_t) MAX_MSG_LOSS );
-        }
-        else { /* no reference frame */
-          ctx.msg_loss = MSG_FRAME_LOSS; /* don't know how many */
-        }
-        return SEQNO_UID_SKIP;
+  /* time updated, resequence wanted */
+  if ( time > last_time ) {
+    const bool chained = ( last_seqno == ctx.chain_seqno );
+    seq->last_time  = time;
+    seq->last_seqno = seqno;
+    seq->last_stamp = ctx.stamp;
+    if ( chained ) /* sequentialy chained */
+      return SEQNO_UID_NEXT;
+    if ( ! new_sub ) {
+      /* if last seqno was in the previous frame */
+      if ( seqno_frame( ctx.chain_seqno ) == seqno_frame( last_seqno ) ) {
+        ctx.msg_loss = (uint32_t) min_int( ctx.chain_seqno - last_seqno,
+                                           (uint64_t) MAX_MSG_LOSS );
       }
-      /* new sub can skip */
-      return SEQNO_UID_CYCLE;
+      else { /* no reference frame */
+        ctx.msg_loss = MSG_FRAME_LOSS; /* don't know how many */
+      }
+      return SEQNO_UID_SKIP;
     }
-    /* time doesn't match seqno (likely time is zero), missed the start time */
+    /* new sub can skip */
+    return SEQNO_UID_CYCLE;
   }
-  /* seqno not in current time frame, no time is included in message */
-  seq->last_time  = seqno_time( seqno ); /* fake a start time */
+  /* seqno not in last frame, no update time */
+  seq->last_time  = time; /* fake a start time */
   seq->last_seqno = seqno;
   seq->last_stamp = ctx.stamp;
   if ( ! new_sub ) { /* if not joining w/new sub */

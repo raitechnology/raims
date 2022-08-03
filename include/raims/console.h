@@ -71,6 +71,7 @@ struct TransportRoute;
 struct IpcRte;
 struct Nonce;
 struct Console;
+struct TabOut;
 
 enum PortFlags {
   P_IS_LOCAL  = 1,
@@ -82,20 +83,20 @@ struct PortOutput {
   Console        & console;
   SessionMgr     & mgr;
   UserDB         & user_db;
+  TabOut         & out;
   uint32_t         tport_id,
-                   ncols;
+                   state;
   UserBridge     * n;
   StringVal        local,
                    remote,
                  * tport,
                  * type;
   TransportRoute * rte;
-  uint32_t         state;
   int              fd,
                    flags;
   kv::PeerStats    stats;
 
-  PortOutput( Console &c,  uint32_t t,  uint32_t nc ) noexcept;
+  PortOutput( Console &c,  TabOut &o,  uint32_t t ) noexcept;
 
   void init( TransportRoute *rte,  int fl,  int fd,
              UserBridge *user = NULL ) noexcept;
@@ -119,7 +120,7 @@ struct PortOutput {
 
   void put_status( void ) noexcept;
 
-  size_t output( void ( PortOutput::*put )( void ) ) noexcept;
+  void output( void ( PortOutput::*put )( void ) ) noexcept;
 };
 
 enum PrintType {
@@ -169,71 +170,85 @@ struct TabPrint {
   bool null_term( void ) const {
     return ( this->typ & PRINT_NULL_TERM ) != 0;
   }
-  void set_null( void ) {
+  TabPrint &set_null( void ) {
     this->typ = PRINT_NULL;
+    return this[ 1 ];
   }
-  void set( const StringVal &s,  PrintType t = PRINT_STRING_NT ) {
+  TabPrint &set( const StringVal &s,  PrintType t = PRINT_STRING_NT ) {
     this->val = s.val;
     this->len = s.len;
     this->typ = t;
+    return this[ 1 ];
   }
-  void set( const StringVal &s,  uint32_t i,  PrintType t = PRINT_ID ) {
+  TabPrint &set( const StringVal &s,  uint32_t i,  PrintType t = PRINT_ID ) {
     this->val = s.val;
     this->len = i;
     this->typ = t;
+    return this[ 1 ];
   }
-  void set( const char *s,  uint32_t l,  PrintType t = PRINT_STRING ) {
+  TabPrint &set( const char *s,  uint32_t l,  PrintType t = PRINT_STRING ) {
     this->val = s;
     this->len = l;
     this->typ = t;
+    return this[ 1 ];
   }
-  void set_tport( const StringVal &s,  const char *p ) {
+  TabPrint &set_tport( const StringVal &s,  const char *p ) {
     this->val = s.val;
     this->len = s.len;
     this->pre = p;
     this->typ = PRINT_TPORT;
+    return this[ 1 ];
   }
-  void set_url( const char *p,  const StringVal &s ) {
+  TabPrint &set_url( const char *p,  const StringVal &s ) {
     this->set_url( p, s.val, s.len );
+    return this[ 1 ];
   }
-  void set_url_dest( UserBridge *n,  const char *p,  const StringVal &s ) {
+  TabPrint &set_url_dest( UserBridge *n,  const char *p,  const StringVal &s ) {
     this->set_url_dest( n, p, s.val, s.len );
+    return this[ 1 ];
   }
-  void set_url( const char *p,  const char *s,  uint32_t l,
-                PrintType t = PRINT_ADDR ) {
+  TabPrint &set_url( const char *p,  const char *s,  uint32_t l,
+                     PrintType t = PRINT_ADDR ) {
     this->pre = p;
     this->val = s;
     this->len = l;
     this->typ = t;
+    return this[ 1 ];
   }
-  void set_url_dest( UserBridge *n,  const char *p,  const char *s,  uint32_t l,
-                     PrintType t = PRINT_UADDR ) {
+  TabPrint &set_url_dest( UserBridge *n,  const char *p,  const char *s,  uint32_t l,
+                          PrintType t = PRINT_UADDR ) {
     this->n   = n;
     this->pre = p;
     this->val = s;
     this->len = l;
     this->typ = t;
+    return this[ 1 ];
   }
-  void set( const char *s ) {
+  TabPrint &set( const char *s ) {
     this->val = s;
     this->len = (uint32_t) ( s != NULL ? ::strlen( s ) : 0 );
     this->typ = PRINT_STRING_NT;
+    return this[ 1 ];
   }
-  void set( UserBridge *bridge,  PrintType t ) {
+  TabPrint &set( UserBridge *bridge,  PrintType t ) {
     this->n   = bridge;
     this->typ = t;
+    return this[ 1 ];
   }
-  void set_long( uint64_t l,  PrintType t = PRINT_LONG ) {
+  TabPrint &set_long( uint64_t l,  PrintType t = PRINT_LONG ) {
     this->ival = l;
     this->typ  = t;
+    return this[ 1 ];
   }
-  void set_time( uint64_t l ) {
+  TabPrint &set_time( uint64_t l ) {
     this->ival = l;
     this->typ  = PRINT_STAMP;
+    return this[ 1 ];
   }
-  void set_int( uint32_t i,  PrintType t = PRINT_INT ) {
+  TabPrint &set_int( uint32_t i,  PrintType t = PRINT_INT ) {
     this->len = i;
     this->typ = t;
+    return this[ 1 ];
   }
   uint32_t width( UserDB &user_db,  char *buf ) noexcept;
   const char * string( char *buf ) noexcept;
@@ -406,8 +421,36 @@ struct ConfigChangeList : public kv::DLinkList< ConfigChange > {
   }
 };
 
+typedef kv::ArrayCount< TabPrint, 64 > TableArray;
 struct ConsoleCmdString;
 struct ConsoleOutBuf : public kv::ArrayOutput {};
+
+struct TabOut {
+  TableArray    & table;
+  ConsoleOutBuf & tmp;
+  const size_t    ncols;
+  TabOut( TableArray & t, ConsoleOutBuf & b, size_t n )
+      : table( t ), tmp( b ), ncols( n ) {
+    t.count = 0;
+    b.count = 0;
+  }
+  TabPrint *make_row( void ) {
+    TabPrint *tab = this->table.make( this->table.count + this->ncols );
+    this->table.count += this->ncols;
+    return tab;
+  }
+  TabPrint *add_row_p( void ) {
+    size_t i = this->table.count;
+    return &(this->make_row())[ i ];
+  }
+  TabPrint &add_row( void ) {
+    return *this->add_row_p();
+  }
+  TabPrint &row( size_t i ) {
+    i += this->table.count - this->ncols;
+    return this->table.ptr[ i ];
+  }
+};
 
 struct Console : public md::MDOutput, public SubOnMsg, public ConfigPrinter {
   SessionMgr      & mgr;
@@ -426,7 +469,7 @@ struct Console : public md::MDOutput, public SubOnMsg, public ConfigPrinter {
   ConsoleOutBuf     out;
   ConsoleOutBuf     log;
   ConsoleOutBuf     tmp;
-  kv::ArrayCount< TabPrint, 64 > table;
+  TableArray        table;
   JsonOutArray      json_files;
   size_t            max_log,
                     log_index,
@@ -524,6 +567,7 @@ struct Console : public md::MDOutput, public SubOnMsg, public ConfigPrinter {
   void show_urls( ConsoleOutput *p ) noexcept;
   void show_counters( ConsoleOutput *p ) noexcept;
   void show_loss( ConsoleOutput *p ) noexcept;
+  void show_skew( ConsoleOutput *p ) noexcept;
   void show_reachable( ConsoleOutput *p ) noexcept;
   void show_tree( ConsoleOutput *p,  const UserBridge *src,
                   uint8_t path_select ) noexcept;
@@ -533,8 +577,8 @@ struct Console : public md::MDOutput, public SubOnMsg, public ConfigPrinter {
   void show_running( ConsoleOutput *p,  int which,  const char *name,
                      size_t len ) noexcept;
   void show_graph( ConsoleOutput *p ) noexcept;
-  void tab_pub( Pub *pub ) noexcept;
-  void tab_seqno( SubSeqno *sub ) noexcept;
+  void tab_pub( Pub *pub,  TabOut &out ) noexcept;
+  void tab_seqno( SubSeqno *sub,  TabOut &out ) noexcept;
   void show_seqno( ConsoleOutput *p, const char *arg,  size_t arglen ) noexcept;
   void config( const char *name,  size_t len ) noexcept;
   int puts( const char *s ) noexcept;
@@ -596,56 +640,57 @@ enum ConsoleCmd {
   CMD_SHOW_LOG         = 17, /* show log                   */
   CMD_SHOW_COUNTERS    = 18, /* show counters              */
   CMD_SHOW_LOSS        = 19, /* show loss                  */
-  CMD_SHOW_REACHABLE   = 20, /* show reachable             */
-  CMD_SHOW_TREE        = 21, /* show tree [U]              */
-  CMD_SHOW_PATH        = 22, /* show path [N]              */
-  CMD_SHOW_FDS         = 23, /* show fds                   */
-  CMD_SHOW_BLOOMS      = 24, /* show blooms [N]            */
-  CMD_SHOW_RUN         = 25, /* show running               */
-  CMD_SHOW_RUN_TPORTS  = 26, /* show running transport [T] */
-  CMD_SHOW_RUN_SVCS    = 27, /* show running service [S]   */
-  CMD_SHOW_RUN_USERS   = 28, /* show running user [U]      */
-  CMD_SHOW_RUN_GROUPS  = 29, /* show running group [G]     */
-  CMD_SHOW_RUN_PARAM   = 30, /* show running parameter [P] */
-  CMD_SHOW_GRAPH       = 31, /* show graph                 */
-  CMD_SHOW_SEQNO       = 32, /* show seqno                 */
-  CMD_CONNECT          = 33, /* connect [T]                */
-  CMD_LISTEN           = 34, /* listen [T]                 */
-  CMD_SHUTDOWN         = 35, /* shutdown [T]               */
-  CMD_CONFIGURE        = 36, /* configure                  */
-  CMD_CONFIGURE_TPORT  = 37, /* configure transport T      */
-  CMD_CONFIGURE_PARAM  = 38, /* configure parameter P V    */
-  CMD_SAVE             = 39, /* save                       */
-  CMD_SUB_START        = 40, /* sub subject [file]         */
-  CMD_SUB_STOP         = 41, /* unsub subject [file]       */
-  CMD_PSUB_START       = 42, /* psub rv-wildcard [file]    */
-  CMD_PSUB_STOP        = 43, /* punsub rv-wildcard [file]  */
-  CMD_GSUB_START       = 44, /* gsub glob-wildcard [file]  */
-  CMD_GSUB_STOP        = 45, /* gunsub glob-wildcard [file]*/
-  CMD_PUBLISH          = 46, /* pub subject msg            */
-  CMD_TRACE            = 47, /* trace subject msg          */
-  CMD_PUB_ACK          = 48, /* ack subject msg            */
-  CMD_RPC              = 49, /* rpc subject msg            */
-  CMD_ANY              = 50, /* any subject msg            */
-  CMD_DEBUG            = 52, /* debug ival                 */
-  CMD_CANCEL           = 53, /* cancel                     */
-  CMD_MUTE_LOG         = 54, /* mute                       */
-  CMD_UNMUTE_LOG       = 55, /* unmute                     */
-  CMD_QUIT             = 56, /* quit/exit                  */
-  CMD_TPORT_NAME       = 57, /* tport N                    */
-  CMD_TPORT_TYPE       = 58, /* type T                     */
-  CMD_TPORT_LISTEN     = 59, /* listen A                   */
-  CMD_TPORT_CONNECT    = 60, /* connect A                  */
-  CMD_TPORT_PORT       = 61, /* port N                     */
-  CMD_TPORT_TIMEOUT    = 62, /* timeout N                  */
-  CMD_TPORT_MTU        = 63, /* mtu N                      */
-  CMD_TPORT_TXW_SQNS   = 64, /* txw_sqns N                 */
-  CMD_TPORT_RXW_SQNS   = 65, /* rxw_sqns N                 */
-  CMD_TPORT_MCAST_LOOP = 66, /* mcast_loop N               */
-  CMD_TPORT_EDGE       = 67, /* edge B                     */
-  CMD_TPORT_SHOW       = 68, /* show                       */
-  CMD_TPORT_QUIT       = 69, /* quit/exit                  */
-  CMD_BAD              = 70
+  CMD_SHOW_SKEW        = 20, /* show skew                  */
+  CMD_SHOW_REACHABLE   = 21, /* show reachable             */
+  CMD_SHOW_TREE        = 22, /* show tree [U]              */
+  CMD_SHOW_PATH        = 23, /* show path [N]              */
+  CMD_SHOW_FDS         = 24, /* show fds                   */
+  CMD_SHOW_BLOOMS      = 25, /* show blooms [N]            */
+  CMD_SHOW_RUN         = 26, /* show running               */
+  CMD_SHOW_RUN_TPORTS  = 27, /* show running transport [T] */
+  CMD_SHOW_RUN_SVCS    = 28, /* show running service [S]   */
+  CMD_SHOW_RUN_USERS   = 29, /* show running user [U]      */
+  CMD_SHOW_RUN_GROUPS  = 30, /* show running group [G]     */
+  CMD_SHOW_RUN_PARAM   = 31, /* show running parameter [P] */
+  CMD_SHOW_GRAPH       = 32, /* show graph                 */
+  CMD_SHOW_SEQNO       = 33, /* show seqno                 */
+  CMD_CONNECT          = 34, /* connect [T]                */
+  CMD_LISTEN           = 35, /* listen [T]                 */
+  CMD_SHUTDOWN         = 36, /* shutdown [T]               */
+  CMD_CONFIGURE        = 37, /* configure                  */
+  CMD_CONFIGURE_TPORT  = 38, /* configure transport T      */
+  CMD_CONFIGURE_PARAM  = 39, /* configure parameter P V    */
+  CMD_SAVE             = 40, /* save                       */
+  CMD_SUB_START        = 41, /* sub subject [file]         */
+  CMD_SUB_STOP         = 42, /* unsub subject [file]       */
+  CMD_PSUB_START       = 43, /* psub rv-wildcard [file]    */
+  CMD_PSUB_STOP        = 44, /* punsub rv-wildcard [file]  */
+  CMD_GSUB_START       = 45, /* gsub glob-wildcard [file]  */
+  CMD_GSUB_STOP        = 46, /* gunsub glob-wildcard [file]*/
+  CMD_PUBLISH          = 47, /* pub subject msg            */
+  CMD_TRACE            = 48, /* trace subject msg          */
+  CMD_PUB_ACK          = 49, /* ack subject msg            */
+  CMD_RPC              = 50, /* rpc subject msg            */
+  CMD_ANY              = 51, /* any subject msg            */
+  CMD_DEBUG            = 53, /* debug ival                 */
+  CMD_CANCEL           = 54, /* cancel                     */
+  CMD_MUTE_LOG         = 55, /* mute                       */
+  CMD_UNMUTE_LOG       = 56, /* unmute                     */
+  CMD_QUIT             = 57, /* quit/exit                  */
+  CMD_TPORT_NAME       = 58, /* tport N                    */
+  CMD_TPORT_TYPE       = 59, /* type T                     */
+  CMD_TPORT_LISTEN     = 60, /* listen A                   */
+  CMD_TPORT_CONNECT    = 61, /* connect A                  */
+  CMD_TPORT_PORT       = 62, /* port N                     */
+  CMD_TPORT_TIMEOUT    = 63, /* timeout N                  */
+  CMD_TPORT_MTU        = 64, /* mtu N                      */
+  CMD_TPORT_TXW_SQNS   = 65, /* txw_sqns N                 */
+  CMD_TPORT_RXW_SQNS   = 66, /* rxw_sqns N                 */
+  CMD_TPORT_MCAST_LOOP = 67, /* mcast_loop N               */
+  CMD_TPORT_EDGE       = 68, /* edge B                     */
+  CMD_TPORT_SHOW       = 69, /* show                       */
+  CMD_TPORT_QUIT       = 70, /* quit/exit                  */
+  CMD_BAD              = 71
 };
 
 enum ConsoleArgType {
@@ -759,6 +804,7 @@ static const ConsoleCmdString show_cmd[] = {
   { CMD_SHOW_LOG       , "log"           ,0,0}, /* show log */
   { CMD_SHOW_COUNTERS  , "counters"      ,0,0}, /* show counters */
   { CMD_SHOW_LOSS      , "loss"          ,0,0}, /* show loss */
+  { CMD_SHOW_SKEW      , "skew"          ,0,0}, /* show skew */
   { CMD_SHOW_REACHABLE , "reachable"     ,0,0}, /* show reachable */
   { CMD_SHOW_TREE      , "tree"          ,0,0}, /* show tree */
   { CMD_SHOW_PATH      , "path"          ,0,0}, /* show path */
@@ -811,11 +857,12 @@ static const ConsoleCmdString help_cmd[] = {
   { CMD_SHOW_LOG         , "show log", "",       "Show log buffer"                                   },
   { CMD_SHOW_COUNTERS    , "show counters", "",  "Show peers seqno and time values"                  },
   { CMD_SHOW_LOSS        , "show loss", "",      "Show message loss counters and time"               },
+  { CMD_SHOW_SKEW        , "show skew", "",      "Show clock skews"                                  },
   { CMD_SHOW_REACHABLE   , "show reachable", "", "Show reachable peers through tports"               },
   { CMD_SHOW_TREE        , "show tree", "[U]",   "Show multicast tree from me or U"                  },
-  { CMD_SHOW_PATH        , "show path", "[N]",   "Show multicast path N"                       },
+  { CMD_SHOW_PATH        , "show path", "[N]",   "Show multicast path N"                             },
   { CMD_SHOW_FDS         , "show fds", "",       "Show fd centric routes"                            },
-  { CMD_SHOW_BLOOMS      , "show blooms", "[N]", "Show bloom centric routes N"                         },
+  { CMD_SHOW_BLOOMS      , "show blooms", "[N]", "Show bloom centric routes N"                       },
   { CMD_SHOW_RUN         , "show running", "",   "Show all config running"                           },
   { CMD_SHOW_RUN_TPORTS  , "show running transport","[T]", "Show transports running, T or all"       },
   { CMD_SHOW_RUN_SVCS    , "show running service","[S]",   "Show services running config, S or all"  },

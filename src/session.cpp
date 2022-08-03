@@ -53,8 +53,8 @@ SessionMgr::SessionMgr( EvPoll &p,  Logger &l,  ConfigTree &c,
              sub_window_mono_time( 0 ),
              pub_window_size( 4 * 1024 * 1024 ),
              sub_window_size( 4 * 1024 * 1024 ),
-             pub_window_ival( (uint64_t) 10 * SEC_TO_NS ),
-             sub_window_ival( (uint64_t) 10 * SEC_TO_NS )
+             pub_window_ival( sec_to_ns( 10 ) ),
+             sub_window_ival( sec_to_ns( 10 ) )
 {
   this->sock_opts = OPT_NO_POLL;
   this->tcp_accept_sock_type = p.register_type( "ev_tcp_tport" );
@@ -266,8 +266,8 @@ SessionMgr::start( void ) noexcept
 {
   printf( "%s: %lu bytes\n", pub_w, this->pub_window_size );
   printf( "%s: %lu bytes\n", sub_w, this->sub_window_size );
-  printf( "%s: %lu secs\n", pub_t, this->pub_window_ival / SEC_TO_NS );
-  printf( "%s: %lu secs\n", sub_t, this->sub_window_ival / SEC_TO_NS );
+  printf( "%s: %lu secs\n", pub_t, ns_to_sec( this->pub_window_ival ) );
+  printf( "%s: %lu secs\n", sub_t, ns_to_sec( this->sub_window_ival ) );
   printf( "%s: %u secs\n", hb_t, this->user_db.hb_interval );
 
   uint64_t cur_mono = this->poll.timer.current_monotonic_time_ns(),
@@ -281,11 +281,13 @@ SessionMgr::start( void ) noexcept
   this->timer_start_mono     = cur_mono;
   this->timer_start          = cur_time;
   this->stats.mono_time  = cur_mono;
-  this->stats.mono_time -= cur_time % ( STATS_INTERVAL * SEC_TO_NS );
-  this->stats.mono_time += STATS_INTERVAL * SEC_TO_NS;
+  this->stats.mono_time -= cur_time % sec_to_ns( STATS_INTERVAL );
+  this->stats.mono_time += sec_to_ns( STATS_INTERVAL );
   this->pub_window_mono_time = cur_mono + this->pub_window_ival;
   this->sub_window_mono_time = cur_mono + this->sub_window_ival;
-  uint64_t ival = this->user_db.hb_interval * SEC_TO_NS;
+  this->sub_db.seqno_tab.flip_time     = cur_time - this->sub_window_ival;
+  this->sub_db.seqno_tab.trailing_time = cur_time - this->sub_window_ival;
+  uint64_t ival = sec_to_ns( this->user_db.hb_interval );
   this->timer_ival         = (uint32_t) ( ival / 1000 );
   this->user_db.hb_ival_ns = ival;
   this->user_db.hb_ival_mask = ival;
@@ -335,7 +337,7 @@ SessionMgr::timer_expire( uint64_t tid,  uint64_t ) noexcept
   }
 
   if ( cur_mono > this->sub_window_mono_time ) {
-    if ( this->sub_db.seqno_tab.flip( this->sub_window_size ) ) {
+    if ( this->sub_db.seqno_tab.flip( this->sub_window_size, cur_time ) ) {
       this->sub_window_mono_time = cur_mono + this->sub_window_ival;
       printf( "seqno_tab flipped, count %lu\n",
               this->sub_db.seqno_tab.tab_old->pop_count());
@@ -346,7 +348,7 @@ SessionMgr::timer_expire( uint64_t tid,  uint64_t ) noexcept
   if ( cur_mono < this->stats.mono_time )
     return true;
   do {
-    this->stats.mono_time += STATS_INTERVAL * SEC_TO_NS;
+    this->stats.mono_time += sec_to_ns( STATS_INTERVAL );
   } while ( this->stats.mono_time < cur_mono );
   this->publish_stats( cur_time );
   return true;

@@ -301,32 +301,26 @@ struct Pub {
     p.stamp = 0;
   }
   uint64_t next_seqno( bool next_timeframe,  uint64_t &time,
-                       uint64_t new_frame,  uint64_t converge_seqno,
+                       uint64_t cur_frame,  uint64_t converge_seqno,
                        uint64_t &last_frame_seqno ) {
     uint64_t sequence;
+
+    last_frame_seqno = 0;
+    time        = cur_frame;
+    this->stamp = cur_frame;
+
     if ( ! next_timeframe ) {
       sequence = this->seqno + 1;
       if ( sequence <= converge_seqno || seqno_base( sequence ) == 0 ) {
         last_frame_seqno = this->seqno;
         next_timeframe = true;
       }
-      else {
-        last_frame_seqno = 0;
-        this->seqno = sequence;
-      }
-    }
-    else {
-      last_frame_seqno = 0;
     }
     if ( next_timeframe ) {
-      time = new_frame;
-      this->init( new_frame );
-      sequence = ++this->seqno;
+      this->init( cur_frame );
+      sequence = this->seqno + 1;
     }
-    else {
-      time = 0;
-    }
-    this->stamp = new_frame;
+    this->seqno = sequence;
     return sequence;
   }
 };
@@ -524,14 +518,18 @@ struct InboxSub {
 typedef kv::RouteVec<SubSeqno> SeqnoT;
 
 struct SeqnoTab {
-  SeqnoT tab1,
-         tab2,
-       * tab,
-       * tab_old;
+  SeqnoT   tab1,
+           tab2,
+         * tab,
+         * tab_old;
+  uint64_t flip_time,
+           trailing_time;
 
   SeqnoTab() {
     this->tab     = &this->tab1;
     this->tab_old = &this->tab2;
+    this->flip_time     = 0;
+    this->trailing_time = 0;
   }
   SubSeqno *upsert( uint32_t h,  const char *sub,  uint16_t sublen,
                     kv::RouteLoc &loc, kv::RouteLoc &loc2,
@@ -591,7 +589,7 @@ struct SeqnoTab {
       this->tab_old->remove( loc2 );
   }
   /* limit size of pub sequences */
-  bool flip( size_t max_size ) {
+  bool flip( size_t max_size,  uint64_t cur_time ) {
     SeqnoT * p = this->tab;
     if ( p->vec_size * sizeof( SeqnoT::VecData ) > max_size ) {
       kv::RouteLoc loc;
@@ -601,6 +599,8 @@ struct SeqnoTab {
       this->tab_old->release();
       this->tab = this->tab_old;
       this->tab_old = p;
+      this->trailing_time = this->flip_time;
+      this->flip_time = cur_time;
       return true;
     }
     return false;

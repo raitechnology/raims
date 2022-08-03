@@ -286,7 +286,9 @@ enum MsgFid {
   FID_TPORT_TYPE     = 68 , /* tport type in adjacency msg */
   FID_CHAIN_SEQNO    = 69 , /* previous seqno when changing time frame */
   FID_STAMP          = 70 , /* time stamp */
-  FID_CONVERGE       = 71   /* network convergence stamp */
+  FID_CONVERGE       = 71 , /* network convergence stamp */
+  FID_REPLY_STAMP    = 72 , /* reply time stamp */
+  FID_HB_SKEW        = 73
 };
 static const int FID_TYPE_SHIFT = 8,
                  FID_MAX        = 1 << FID_TYPE_SHIFT; /* 256 */
@@ -774,7 +776,9 @@ static FidTypeName fid_type_name[] = {
 { FID_TPORT_TYPE  , SHORT_STRING                , XCL , 0 ,"tport_type"      },
 { FID_CHAIN_SEQNO , U_SHORT | U_INT | U_LONG    , XCL , 0 ,"chain_seqno"     },
 { FID_STAMP       , U_SHORT | U_INT | U_LONG    , TIM , 0 ,"stamp"           },
-{ FID_CONVERGE    , U_SHORT | U_INT | U_LONG    , XCL , 0 ,"converge"        }
+{ FID_CONVERGE    , U_SHORT | U_INT | U_LONG    , XCL , 0 ,"converge"        },
+{ FID_REPLY_STAMP , U_SHORT | U_INT | U_LONG    , XCL , 0 ,"reply_stamp"     },
+{ FID_HB_SKEW     , U_SHORT | U_INT | U_LONG    , XCL , 0 ,"hb_skew"         }
 };
 
 #endif

@@ -49,45 +49,47 @@ UserDB::make_peer_sync_msg( UserBridge &dest,  UserBridge &n,
   encrypted_ha1.encrypt_key_nonce( tmp_ha1, cnonce, n.peer_key );
 
   MsgEst e( sublen );
-  e.seqno     ()
-   .time      ()
-   .session   ()
-   .sess_key  ()
-   .cnonce    ()
-   .hops      ()
-   .uptime    ()
-   .start     ()
-   .interval  ()
-   .user      ( user_len       )
-   .service   ( svc_len        )
-   .create    ( create_len     )
-   .expires   ( expires_len    )
-   .sub_seqno ()
-   .link_state()
-   .bloom     ( code.code_sz * 4 )
-   .ucast_url ( ucast_url_len )
-   .mesh_url  ( mesh_url_len )
-   .adjacency ( this->adjacency_size( &n ) );
+  e.seqno      ()
+   .time       ()
+   .session    ()
+   .sess_key   ()
+   .cnonce     ()
+   .hops       ()
+   .uptime     ()
+   .start      ()
+   .interval   ()
+   .user       ( user_len       )
+   .service    ( svc_len        )
+   .create     ( create_len     )
+   .expires    ( expires_len    )
+   .sub_seqno  ()
+   .link_state ()
+   .hb_skew    ()
+   .bloom      ( code.code_sz * 4 )
+   .ucast_url  ( ucast_url_len )
+   .mesh_url   ( mesh_url_len )
+   .adjacency  ( this->adjacency_size( &n ) );
    /*.mesh_db   ( mesh_db_len );*/
 
   m.reserve( e.sz );
   m.open( this->bridge_id.nonce, sublen )
-   .seqno     ( ++dest.send_inbox_seqno )
-   .time      ( n.hb_time  )
-   .session   ( n.bridge_id.hmac, n.bridge_id.nonce )
-   .sess_key  ( encrypted_ha1 )
-   .cnonce    ( cnonce        )
-   .hops      ( hops          )
-   .uptime    ( n.uptime()    )
-   .start     ( n.start_time  )
-   .interval  ( n.hb_interval )
-   .user      ( n.peer.user.val   , user_len       )
-   .service   ( n.peer.svc.val    , svc_len        )
-   .create    ( n.peer.create.val , create_len     )
-   .expires   ( n.peer.expires.val, expires_len    )
-   .sub_seqno ( n.sub_seqno   )
-   .link_state( n.link_state_seqno )
-   .bloom     ( code.ptr       , code.code_sz * 4 );
+   .seqno      ( ++dest.send_inbox_seqno )
+   .time       ( n.hb_time  )
+   .session    ( n.bridge_id.hmac, n.bridge_id.nonce )
+   .sess_key   ( encrypted_ha1 )
+   .cnonce     ( cnonce        )
+   .hops       ( hops          )
+   .uptime     ( n.uptime()    )
+   .start      ( n.start_time  )
+   .interval   ( n.hb_interval )
+   .user       ( n.peer.user.val   , user_len       )
+   .service    ( n.peer.svc.val    , svc_len        )
+   .create     ( n.peer.create.val , create_len     )
+   .expires    ( n.peer.expires.val, expires_len    )
+   .sub_seqno  ( n.sub_seqno   )
+   .link_state ( n.link_state_seqno )
+   .hb_skew    ( n.hb_skew )
+   .bloom      ( code.ptr       , code.code_sz * 4 );
   if ( ucast_url_len != 0 && hops == 0 )
     m.ucast_url( n.user_route->ucast_url, ucast_url_len );
   if ( mesh_url_len != 0 && in_mesh )
@@ -203,8 +205,8 @@ UserDB::decode_peer_msg( UserBridge &from_n,  const MsgHdrDecoder &dec,
                  tmp_ha1;
   Nonce          cnonce;
   PolyHmacDigest hmac;
-  uint64_t       time = 0,
-                 seqno = 0;
+  uint64_t       time    = 0,
+                 seqno   = 0;
   size_t         n_pos;
   uint32_t       uid;
 
@@ -241,8 +243,7 @@ UserDB::decode_peer_msg( UserBridge &from_n,  const MsgHdrDecoder &dec,
       return false;
     }
   }
-  if ( ! dec.test_4( FID_USER, FID_SERVICE, FID_CREATE, FID_EXPIRES/*,
-                     FID_PUB_KEY*/ ) ) {
+  if ( ! dec.test_4( FID_USER, FID_SERVICE, FID_CREATE, FID_EXPIRES ) ) {
     fprintf( stderr, "fid missing\n" );
     return false;
   }
@@ -298,6 +299,17 @@ UserDB::make_peer_session( const MsgFramePublish &pub,  UserBridge &from_n,
     }
     user_n->peer_key = peer_key;
     user_n->start_time = start;
+
+    if ( dec.test( FID_HB_SKEW ) ) {
+      int64_t hb_skew = 0;
+      cvt_number<int64_t>( dec.mref[ FID_HB_SKEW ], hb_skew );
+      if ( user_n->hb_skew == 0 ||
+           user_n->hb_skew != min_abs( user_n->hb_skew, hb_skew ) ) {
+        user_n->hb_skew     = hb_skew;
+        user_n->hb_skew_ref = from_n.uid;
+        user_n->skew_upd++;
+      }
+    }
   }
   peer_key.zero();
   return user_n;
@@ -314,11 +326,12 @@ struct PeerDBRec : public MsgFldSet {
                hops;
   uint64_t     sub_seqno,
                link_state;
+  int64_t      hb_skew;
   PeerDBRec  * next;
   void * operator new( size_t, void *ptr ) { return ptr; }
-  PeerDBRec() : ucast_url( 0 ), mesh_url( 0 ), user( 0 ),
-                ucast_url_len( 0 ), mesh_url_len( 0 ), user_len( 0 ),
-                hops( 0 ), sub_seqno( 0 ), link_state( 0 ), next( 0 ) {
+  PeerDBRec() : ucast_url( 0 ), mesh_url( 0 ), user( 0 ), ucast_url_len( 0 ),
+                mesh_url_len( 0 ), user_len( 0 ), hops( 0 ), sub_seqno( 0 ),
+                link_state( 0 ), hb_skew( 0 ), next( 0 ) {
     this->nonce.zero();
   }
   void set_field( uint32_t fid,  MDReference &mref ) {
@@ -338,6 +351,9 @@ struct PeerDBRec : public MsgFldSet {
         break;
       case FID_LINK_STATE:
         cvt_number<uint64_t>( mref, this->link_state );
+        break;
+      case FID_HB_SKEW:
+        cvt_number<int64_t>( mref, this->hb_skew );
         break;
       case FID_UCAST_URL:
         this->ucast_url     = (const char *) mref.fptr;
@@ -396,27 +412,21 @@ UserDB::recv_peer_db( const MsgFramePublish &pub,  UserBridge &n,
       this->string_tab.ref_string( rec.user, rec.user_len, user_sv );
       this->start_pending_peer( rec.nonce, n, false, user_sv, PEER_DB_SYNC );
     }
-    else {
-      if ( user_n->link_state_seqno < rec.link_state ||
-           user_n->sub_seqno < rec.sub_seqno ) {
-        this->send_adjacency_request2( n, *user_n, PEERDB_SYNC_REQ );
-      }
-#if 0
-      if ( rec.mesh_url_len != 0 ) {
-        UserRoute * u_ptr   = user_n->user_route_ptr( *this, pub.rte.tport_id );
-        if ( u_ptr->is_valid() ) {
-          if ( debug_peer )
-            user_n->printf( "peer_add mesh_url: %.*s\n", (int) rec.mesh_url_len,
-                            rec.mesh_url );
-          u_ptr->set_mesh( *this, rec.mesh_url, rec.mesh_url_len );
-          updated_mesh = true;
-        }
-      }
-#endif
+    else if ( user_n->link_state_seqno < rec.link_state ||
+              user_n->sub_seqno < rec.sub_seqno ) {
+      this->send_adjacency_request2( n, *user_n, PEERDB_SYNC_REQ );
     }
     if ( rec.mesh_url_len != 0 ) {
       this->mesh_pending.update( pub.rte, rec.mesh_url, rec.mesh_url_len,
                                  0, rec.nonce );
+    }
+    if ( user_n != NULL && rec.hb_skew != 0 ) {
+      if ( user_n->hb_skew == 0 ||
+           user_n->hb_skew != min_abs( user_n->hb_skew, rec.hb_skew ) ) {
+        user_n->hb_skew     = rec.hb_skew;
+        user_n->hb_skew_ref = n.uid;
+        user_n->skew_upd++;
+      }
     }
   }
   return true;
@@ -438,11 +448,13 @@ UserDB::make_peer_db_msg( UserBridge &n,  const char *sub,  size_t sublen,
       if ( uid != n.uid ) {
         if ( (n2 = this->bridge_tab[ uid ]) != NULL ) {
           u_ptr2 = n2->user_route_ptr( *this, tport_id );
-          pdb.bridge2   ()
-             .user      ( n2->peer.user.len )
-             .hops      ()
-             .sub_seqno ()
-             .link_state();
+          pdb.bridge2    ()
+             .user       ( n2->peer.user.len )
+             .hops       ()
+             .sub_seqno  ()
+             .link_state ()
+             .hb_skew    ();
+
           if ( u_ptr2->is_valid() )
             pdb.ucast_url( u_ptr2->ucast_url_len )
                .mesh_url ( u_ptr2->mesh_url_len  );
@@ -472,11 +484,12 @@ UserDB::make_peer_db_msg( UserBridge &n,  const char *sub,  size_t sublen,
           bool     in_mesh = u_ptr->rte.uid_in_mesh->is_member( uid );
           uint32_t hops    = u_ptr->rte.uid_connected.is_member( uid ) ? 0:1;
 
-          submsg.bridge2   ( n2->bridge_id.nonce )
-                .user      ( n2->peer.user.val, n2->peer.user.len )
-                .hops      ( hops                 )
-                .sub_seqno ( n2->sub_seqno        )
-                .link_state( n2->link_state_seqno );
+          submsg.bridge2    ( n2->bridge_id.nonce )
+                .user       ( n2->peer.user.val, n2->peer.user.len )
+                .hops       ( hops                 )
+                .sub_seqno  ( n2->sub_seqno        )
+                .link_state ( n2->link_state_seqno )
+                .hb_skew    ( n2->hb_skew          );
 
           u_ptr2 = n2->user_route_ptr( *this, tport_id );
           if ( u_ptr2->is_valid() ) {

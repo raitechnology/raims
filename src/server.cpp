@@ -257,7 +257,7 @@ main( int argc, char *argv[] )
     }
   }
   else {
-    uint64_t timeout_ns = current_monotonic_time_ns() + SEC_TO_NS;
+    uint64_t timeout_ns = current_monotonic_time_ns() + sec_to_ns( 1 );
     while ( sess.loop() ) {
       if ( sighndl.signaled || current_monotonic_time_ns() > timeout_ns ) {
         if ( poll.quit == 0 )

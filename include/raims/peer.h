@@ -15,6 +15,21 @@ const char *adjacency_request_string( AdjacencyRequest r ) noexcept;
 const char *invalidate_reason_string( InvalidReason r ) noexcept;
 
 static const uint64_t SEC_TO_NS = 1000 * 1000 * 1000;
+template <class Int> static inline uint64_t sec_to_ns( Int sec ) {
+  return (uint64_t) sec * SEC_TO_NS;
+}
+template <class Int> static inline uint64_t ns_to_sec( Int ns ) {
+  return (uint64_t) ns / SEC_TO_NS;
+}
+static inline int64_t min_abs( int64_t ns,  int64_t ns2 ) {
+  int64_t x = ( ns < 0 ? -ns : ns ), y = ( ns2 < 0 ? -ns2 : ns2 );
+  return ( x < y ? ns : ns2 );
+}
+static inline int64_t max_abs( int64_t ns,  int64_t ns2 ) {
+  int64_t x = ( ns < 0 ? -ns : ns ), y = ( ns2 < 0 ? -ns2 : ns2 );
+  return ( x > y ? ns : ns2 );
+}
+
 /* hmac of user + instance nonce */
 struct UserNonce {
   PolyHmacDigest hmac;  /* hmac ( hash_digest( pub key ), user + service ) */
