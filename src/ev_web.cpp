@@ -147,8 +147,11 @@ WebOutput::WebOutput( WebService &str,  WebType type ) :
 HtmlOutput::HtmlOutput( WebService &str,  WebType type ) :
   WebOutput( str, type ), strm_start( 0 ), in_progress( false ) {}
 
+static int sub_counter;
+
 SubOutput::SubOutput( WebService &str ) :
-  WebOutput( str, W_JSON ), next( 0 ), back( 0 ), in_progress( false ) {}
+  WebOutput( str, W_JSON ), next( 0 ), back( 0 ),
+  output_id( sub_counter++ ), in_progress( false ) {}
 
 void
 HtmlOutput::init( WebType type ) noexcept
@@ -184,6 +187,7 @@ WebListen::accept( void ) noexcept
   c->console      = this->console;
   c->http_dir     = this->http_dir;
   c->http_dir_len = this->http_dir_len;
+  /*c->debug_fd     = os_open( "debug.txt", O_APPEND | O_WRONLY | O_CREAT, 0666 );*/
   return c;
 }
 
@@ -263,8 +267,16 @@ HtmlOutput::on_output( const char *buf,  size_t buflen ) noexcept
 bool
 SubOutput::on_output( const char *buf,  size_t buflen ) noexcept
 {
-  if ( ! this->in_progress )
+  if ( ! this->in_progress ) {
+    if ( this->svc.debug_fd != -1 ) {
+      char tmp[ 40 ];
+      int n = ::snprintf( tmp, sizeof( tmp ), "%d -> %d, ", this->output_id,
+                          this->svc.fd );
+      os_write( this->svc.debug_fd, tmp, n );
+      os_write( this->svc.debug_fd, buf, buflen );
+    }
     return true;
+  }
 
   WebSocketFrame ws;
   char         * frame;
@@ -296,11 +308,21 @@ WebService::process_shutdown( void ) noexcept
       q = this->sub_list.pop_hd();
       if ( q->rpc != NULL )
         this->console->stop_rpc( q, q->rpc );
+      if ( this->debug_fd != -1 ) {
+        char tmp[ 40 ];
+        int n = ::snprintf( tmp, sizeof( tmp ), "shutdown %d -> %d\n",
+                            q->output_id, this->fd );
+        os_write( this->debug_fd, tmp, n );
+      }
       ::free( q );
     }
   }
   else {
     this->pushpop( EV_CLOSE, EV_SHUTDOWN );
+  }
+  if ( this->debug_fd != -1 ) {
+    os_close( this->debug_fd );
+    this->debug_fd = -1;
   }
 }
 

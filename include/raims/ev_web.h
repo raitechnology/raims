@@ -65,7 +65,8 @@ struct HtmlOutput : public WebOutput {
 
 struct SubOutput : public WebOutput {
   SubOutput * next, * back;
-  bool   in_progress;
+  int  output_id;
+  bool in_progress;
   void * operator new( size_t, void *ptr ) { return ptr; }
   SubOutput( WebService &str );
   void init( void ) noexcept;
@@ -109,6 +110,7 @@ struct WebService : public ds::EvHttpConnection {
   HtmlOutput   out;
   const char * http_dir;
   size_t       http_dir_len;
+  int          debug_fd;
 
   static const uint32_t MAX_ENTRIES = 64;
   static TarEntry entry[ MAX_ENTRIES ];
@@ -120,7 +122,7 @@ struct WebService : public ds::EvHttpConnection {
 
   WebService( kv::EvPoll &p,  const uint8_t t )
     : ds::EvHttpConnection( p, t ), console( 0 ), out( *this, W_HTML ),
-      http_dir( 0 ), http_dir_len( 0 ) {}
+      http_dir( 0 ), http_dir_len( 0 ), debug_fd( -1 ) {}
 
   uint32_t tar_entry_count( void ) noexcept;
   void process_get( WebReqData &data ) noexcept;

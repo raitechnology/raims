@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <link rel="icon" href="rai_icon.svg" type="image/svg+xml"/>
-<title>MS Nodes</title>
+<title>MS Transports</title>
 <style>
 #container {
   display: flex;
@@ -66,8 +66,9 @@ th, td { padding: 0.25rem; text-align: left; border: 1px solid #ccc; }
 <body>
 <div id="container">
   <div class="row">
-    <table id="peer-container">
-    <summary>User @(user) peers, click user to show on graph</summary>
+    <div id="radio-container"></div>
+    <table id="port-container">
+    <summary>Network transports</summary>
     </table>
   </div>
   <div class="row" id="cy"></div>
@@ -80,7 +81,7 @@ th, td { padding: 0.25rem; text-align: left; border: 1px solid #ccc; }
 <script src="cytoscape-cola-2.5.1.js"></script>
 <script src="graph.js"></script>
 <script src="nodes.js"></script>
-<script src="monitor.js"></script>
+<script src="monport.js"></script>
 <script>
   window.onload = function() {
     let ws = new WebSocket(

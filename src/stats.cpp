@@ -57,7 +57,7 @@ SessionMgr::publish_stats( uint64_t cur_time ) noexcept
     m.reserve( e.sz );
 
     m.open      ( this->user_db.bridge_id.nonce, s.len() )
-     .seqno     ( cache_seqno )
+     .seqno     ( ++this->stats.adj_seqno )
      .stamp     ( cur_time )
      .fmt       ( CABA_TYPE_ID )
      .user      ( this->user.user.val, this->user.user.len );
@@ -172,8 +172,7 @@ SessionMgr::publish_stats( uint64_t cur_time ) noexcept
             n_port_pub_count = 0;
   PortStats all_total,
             all_rate;
-  uint32_t  tport_count = this->user_db.transport_tab.count,
-            all_ref     = 0;
+  uint32_t  tport_count = this->user_db.transport_tab.count;
   all_total = 0;
   all_rate  = 0;
   for ( uint32_t tport_id = 0; tport_id < tport_count; tport_id++ ) {
@@ -200,7 +199,7 @@ SessionMgr::publish_stats( uint64_t cur_time ) noexcept
     PortStats & last = this->stats.last[ tport_id ];
     rate.diff( total, last );
     all_total.sum( total );
-    if ( ! rate.is_zero() ) {
+    if ( ! total.is_zero() && ref > 0 ) {
       last = total;
 
       if ( sub_updated || n_port_subscribed || adj_changed ) {
@@ -220,14 +219,14 @@ SessionMgr::publish_stats( uint64_t cur_time ) noexcept
   }
   PortStats &last = this->stats.last_total;
   all_rate.diff( all_total, last );
-  if ( ! all_rate.is_zero() ) {
+  if ( ! all_total.is_zero() ) {
     uint32_t rcount = 0, ipc_count = 0;
     last = all_total;
 
     if ( sub_updated || n_all_subscribed || adj_changed ) {
       SubjectVar s( N_ALL, N_ALL_SZ, this->user.user.val,
                     this->user.user.len );
-      this->fwd_port_stat_msg( s, NULL, all_rate, all_total, cur_time, all_ref,
+      this->fwd_port_stat_msg( s, NULL, all_rate, all_total, cur_time, 0,
                                this->user_db.uid_auth_count, rcount, ipc_count);
       this->stats.n_all_rcount     = rcount;
       this->stats.n_all_ipc_rcount = ipc_count;
@@ -298,12 +297,19 @@ SessionMgr::fwd_port_stat_msg( SubjectVar &s,  TransportRoute *rte,
    .seqno   ( stats_seqno )
    .stamp   ( cur_time )
    .fmt     ( CABA_TYPE_ID )
-   .user    ( this->user.user.val, this->user.user.len )
-   .peer    ( peer_val, peer_len )
-   .tport   ( tport_val, tport_len )
-   .tportid ( tport_id )
-   .fd_cnt  ( fd_cnt )
-   .uid_cnt ( uid_cnt )
+   .user    ( this->user.user.val, this->user.user.len );
+
+  if ( peer_len != 0 ) {
+    m.peer    ( peer_val, peer_len );
+  }
+
+  if ( tport_len != 0 ) {
+    m.tport   ( tport_val, tport_len )
+     .tportid ( tport_id )
+     .fd_cnt  ( fd_cnt );
+  }
+
+  m.uid_cnt ( uid_cnt )
    .bs      ( rate.bs )
    .br      ( rate.br )
    .ms      ( rate.ms )

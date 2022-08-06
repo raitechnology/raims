@@ -46,7 +46,8 @@ struct SessionStats {
             mono_time,
             n_peer_seqno,
             adjacency_cache_seqno,
-            stats_seqno;
+            stats_seqno,
+            adj_seqno;
   uint32_t  n_port_ipc_rcount,
             n_port_rcount,
             n_peer_ipc_rcount,
