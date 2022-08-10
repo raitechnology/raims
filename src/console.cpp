@@ -330,13 +330,15 @@ bool
 Console::colorize_log( ConsoleOutput *p, const char *buf, size_t len ) noexcept
 {
   const bool is_html = ( p != NULL && p->is_html );
+  const bool is_json = ( p != NULL && p->is_json );
   const char * end = &buf[ len ];
-  bool b = true;
+  bool b = true, first = true;
 
   if ( is_html )
     p->on_output( "<pre>", 5 );
   while ( buf < end ) {
-    const char *ptr = (const char *) ::memchr( buf, '\n', end - buf );
+    len = end - buf;
+    const char *ptr = (const char *) ::memchr( buf, '\n', len );
     if ( ptr == NULL ) {
       ptr = &buf[ len ];
     }
@@ -345,30 +347,54 @@ Console::colorize_log( ConsoleOutput *p, const char *buf, size_t len ) noexcept
         ptr--;
     }
     if ( &buf[ TSHDR_LEN ] < ptr ) {
-      const char * color    = is_html ? html_gc : gc;
-      size_t       color_sz = is_html ? html_gz : gz;
-      const char * no_col   = is_html ? html_nc : nc;
-      size_t       no_sz    = is_html ? html_nz : nz;
+      if ( ! is_json ) {
+        const char * color    = is_html ? html_gc : gc;
+        size_t       color_sz = is_html ? html_gz : gz;
+        const char * no_col   = is_html ? html_nc : nc;
+        size_t       no_sz    = is_html ? html_nz : nz;
 
-      if ( buf[ TSERR_OFF ] != ' ' ) {
-        color    = is_html ? html_rc : rc;
-        color_sz = is_html ? html_rz : rz;
+        if ( buf[ TSERR_OFF ] != ' ' ) {
+          color    = is_html ? html_rc : rc;
+          color_sz = is_html ? html_rz : rz;
+        }
+        size_t off  = 0,
+               sz = ptr - &buf[ TSHDR_LEN ];
+        char * line = this->tmp.make( TSHDR_LEN + color_sz + sz + nz + 1 );
+
+        ::memcpy( line, buf, TSHDR_LEN );                off += TSHDR_LEN;
+        ::memcpy( &line[ off ], color, color_sz );       off += color_sz;
+        ::memcpy( &line[ off ], &buf[ TSHDR_LEN ], sz ); off += sz;
+        ::memcpy( &line[ off ], no_col, no_sz );         off += no_sz;
+        line[ off++ ] = '\n';
+
+        if ( p != NULL )
+          b &= p->on_output( line, off );
+        else {
+          for ( ConsoleOutput *o = this->term_list.hd; o!= NULL; o = o->next )
+            b &= o->on_output( line, off );
+        }
       }
-      size_t off  = 0,
-             sz   = ptr - &buf[ TSHDR_LEN ];
-      char * line = this->tmp.make( TSHDR_LEN + color_sz + sz + nz + 1 );
-
-      ::memcpy( line, buf, TSHDR_LEN );                off += TSHDR_LEN;
-      ::memcpy( &line[ off ], color, color_sz );       off += color_sz;
-      ::memcpy( &line[ off ], &buf[ TSHDR_LEN ], sz ); off += sz;
-      ::memcpy( &line[ off ], no_col, no_sz );         off += no_sz;
-      line[ off++ ] = '\n';
-
-      if ( p != NULL )
-        b &= p->on_output( line, off );
       else {
-        for ( ConsoleOutput *o = this->term_list.hd; o!= NULL; o = o->next )
-          b &= o->on_output( line, off );
+        const char * ln = &buf[ TSERR_OFF ];
+        size_t       sz = ptr - ln;
+        const char * q;
+        #define STR( s ) s, sizeof( s ) - 1
+        b &= p->on_output( first ? "[" : ",", 1 ); first = false;
+        b &= p->on_output( STR(   "{\"time\":\"" ) );
+        b &= p->on_output( buf, TSERR_OFF );
+        b &= p->on_output( STR( "\",\"text\":\"" ) );
+        while ( (q = (char *) ::memchr( ln, '\"', sz )) != NULL ) {
+          size_t seg = q - ln;
+          if ( seg > 0 )
+            b &= p->on_output( ln, seg );
+          p->on_output( "\\\"", 2 );
+          ln = &q[ 1 ];
+          sz = ptr - ln;
+        }
+        if ( sz > 0 )
+          b &= p->on_output( ln, sz );
+        b &= p->on_output( STR( "\"}" ) );
+        #undef STR
       }
     }
     buf = ptr;
@@ -376,6 +402,12 @@ Console::colorize_log( ConsoleOutput *p, const char *buf, size_t len ) noexcept
       buf++;
     if ( buf < end && buf[ 0 ] == '\n' )
       buf++;
+  }
+  if ( is_json ) {
+    if ( first )
+      b &= p->on_output( "[]\n", 3 );
+    else
+      b &= p->on_output( "]\n", 2 );
   }
   return b;
 }
@@ -2374,11 +2406,13 @@ Console::ping_peer( ConsoleOutput *p,  const char *arg,
     }
   }
   if ( rpc->count == 0 ) {
+    const bool   is_json = ( p != NULL && p->is_json );
+    const char * q = ( is_json ? "\"" : "" );
     rpc->complete = true;
     if ( arglen > 0 )
-      this->printf( "no users matched \"%.*s\"\n", (int) arglen, arg );
+      this->printf( "%sno users matched: %.*s%s\n", q, (int) arglen, arg, q );
     else
-      this->printf( "no users\n" );
+      this->printf( "%sno users%s\n", q, q );
   }
   else {
     rpc->reply.zero();
@@ -2393,8 +2427,10 @@ Console::mcast_ping( ConsoleOutput *p ) noexcept
 
   rpc->count = this->user_db.uid_auth_count;
   if ( rpc->count == 0 ) {
+    const bool   is_json = ( p != NULL && p->is_json );
+    const char * q = ( is_json ? "\"" : "" );
     rpc->complete = true;
-    this->printf( "no users\n" );
+    this->printf( "%sno users%s\n", q, q );
   }
   else {
     static const char m_ping[] = _MCAST "." _PING;
@@ -3115,6 +3151,7 @@ Console::show_adjacency( ConsoleOutput *p ) noexcept
   TabPrint * tab = NULL;
   size_t     count, i = 0, sep;
   uint32_t   uid, last_user, last_tport;
+  bool       is_json = ( p != NULL && p->is_json );
 
   count = this->user_db.transport_tab.count;
   last_user = last_tport = -1;
@@ -3220,19 +3257,21 @@ Console::show_adjacency( ConsoleOutput *p ) noexcept
   const char *hdr[ ncols ] = { "user", "adj", "tport", "type", "cost" };
   this->print_table( p, hdr, ncols );
 
-  this->printf( "consistent: %s\n",
-    this->user_db.peer_dist.found_inconsistency ? "false" : "true" );
+  if ( ! is_json ) {
+    this->printf( "consistent: %s\n",
+      this->user_db.peer_dist.found_inconsistency ? "false" : "true" );
 
-  UserBridge * from, * to;
-  while ( this->user_db.peer_dist.find_inconsistent( from, to ) ) {
-    if ( from != NULL ) {
-      if ( to != NULL ) {
-        this->printf( "find_inconsistent from %s.%u to %s.%u\n",
-          from->peer.user.val, from->uid, to->peer.user.val, to->uid );
-      }
-      else {
-        this->printf( "find_inconsistent from %s.%u orphaned\n",
-          from->peer.user.val, from->uid );
+    UserBridge * from, * to;
+    while ( this->user_db.peer_dist.find_inconsistent( from, to ) ) {
+      if ( from != NULL ) {
+        if ( to != NULL ) {
+          this->printf( "find_inconsistent from %s.%u to %s.%u\n",
+            from->peer.user.val, from->uid, to->peer.user.val, to->uid );
+        }
+        else {
+          this->printf( "find_inconsistent from %s.%u orphaned\n",
+            from->peer.user.val, from->uid );
+        }
       }
     }
   }
@@ -4010,13 +4049,57 @@ Console::show_running( ConsoleOutput *p,  int which,  const char *name,
 void
 Console::show_graph( ConsoleOutput *p ) noexcept
 {
-  const bool is_html = ( p != NULL && p->is_html );
+  const bool is_html = ( p != NULL && p->is_html ),
+             is_json = ( p != NULL && p->is_json );
   AdjDistance & peer_dist = this->user_db.peer_dist;
   ArrayOutput out;
   if ( is_html )
     out.s( "<pre>" );
   peer_dist.message_graph_description( out );
-  p->on_output( out.ptr, out.count );
+  if ( ! is_json ) {
+    p->on_output( out.ptr, out.count );
+    return;
+  }
+  const char * buf = out.ptr,
+             * end = &buf[ out.count ];
+  bool first = true;
+
+  while ( buf < end ) {
+    size_t len = end - buf;
+    const char *ptr = (const char *) ::memchr( buf, '\n', len );
+    if ( ptr == NULL ) {
+      ptr = &buf[ len ];
+    }
+    else {
+      if ( ptr > buf && *( ptr - 1 ) == '\r' )
+        ptr--;
+    }
+    const char * ln = buf;
+    size_t       sz = ptr - ln;
+    const char * q;
+    p->on_output( first ? "[" : ",", 1 ); first = false;
+    p->on_output( "\"", 1 );
+    while ( (q = (char *) ::memchr( ln, '\"', sz )) != NULL ) {
+      if ( q > ln )
+        p->on_output( ln, q - ln );
+      p->on_output( "\\\"", 2 );
+      ln = &q[ 1 ];
+      sz = ptr - ln;
+    }
+    if ( sz > 0 )
+      p->on_output( ln, sz );
+    p->on_output( "\"", 1 );
+
+    buf = ptr;
+    if ( buf < end && buf[ 0 ] == '\r' )
+      buf++;
+    if ( buf < end && buf[ 0 ] == '\n' )
+      buf++;
+  }
+  if ( first )
+    p->on_output( "[]\n", 3 );
+  else
+    p->on_output( "]\n", 2 );
 }
 
 int

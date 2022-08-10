@@ -416,6 +416,7 @@ function on_msg( key, msg ) {
 }
 
 function on_close() {
+  on_disconnect();
   for ( let prop in user_rate ) {
     let rate = user_rate[ prop ];
     rate.active = false;

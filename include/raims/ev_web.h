@@ -27,14 +27,16 @@ struct WebReqData {
              * data,         /* file data */
              * mime,         /* mime derived from path */
              * graph,        /* graph computation json */
-             * graph_source; /* graph source description */
+             * graph_source, /* graph source description */
+             * trail;
   size_t       path_len,
                cmd_len,
                template_len,
                data_len,
                mime_len,
                graph_len,
-               graph_source_len;
+               graph_source_len,
+               trail_len;
   char         paren;        /* template variable paren @(var) or @{var} */
   bool         is_immutable; /* data is read only, gzipped */
 
@@ -47,7 +49,7 @@ struct WebOutput : public kv::StreamBuf::BufQueue, public ConsoleOutput {
   WebService & svc;
 
   WebOutput( WebService &str,  WebType type );
-  size_t template_substitute( WebReqData &data ) noexcept;
+  void template_substitute( WebReqData &data ) noexcept;
   bool template_property( const char *var,  size_t varlen,
                           WebReqData &data ) noexcept;
   void make_graph_data( WebReqData &data ) noexcept;
@@ -65,8 +67,10 @@ struct HtmlOutput : public WebOutput {
 
 struct SubOutput : public WebOutput {
   SubOutput * next, * back;
-  int  output_id;
-  bool in_progress;
+  char      * trail;
+  uint32_t    trail_len;
+  bool        in_progress,
+              is_local_cmd;
   void * operator new( size_t, void *ptr ) { return ptr; }
   SubOutput( WebService &str );
   void init( void ) noexcept;
@@ -106,12 +110,14 @@ struct TarEntry {
 
 struct WebService : public ds::EvHttpConnection {
   Console    * console;
-  WebSubList   sub_list;
+  WebSubList   sub_list,
+               free_list;
   HtmlOutput   out;
   const char * http_dir;
   size_t       http_dir_len;
+#if 0
   int          debug_fd;
-
+#endif
   static const uint32_t MAX_ENTRIES = 64;
   static TarEntry entry[ MAX_ENTRIES ];
   static uint32_t entry_count;
@@ -122,7 +128,7 @@ struct WebService : public ds::EvHttpConnection {
 
   WebService( kv::EvPoll &p,  const uint8_t t )
     : ds::EvHttpConnection( p, t ), console( 0 ), out( *this, W_HTML ),
-      http_dir( 0 ), http_dir_len( 0 ), debug_fd( -1 ) {}
+      http_dir( 0 ), http_dir_len( 0 )/*, debug_fd( -1 )*/ {}
 
   uint32_t tar_entry_count( void ) noexcept;
   void process_get( WebReqData &data ) noexcept;

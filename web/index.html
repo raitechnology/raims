@@ -1,49 +1,35 @@
 <!DOCTYPE html>
-<html><head>
+<html>
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <link rel="icon" href="rai_icon.svg" type="image/svg+xml"/>
-<meta http-equiv="Content-Type" content="text/html; charset=UTF8"/>
-<title>@(user).@(service)</title>
+<link rel="stylesheet" href="menu.css" />
+<title>Commands</title>
 </head>
-<style>
-body {
-  background: white;
-  margin-top: 4px;
-  margin-bottom: 2px;
-}
-#menu {
-  margin: 0;
-  padding: 4px 0;
-}
-#menu dt {
-  display: inline;
-  margin: 0;
-}
-#menu dt a {
-  color: green;
-  text-decoration: none;
-  font-weight: bold;
-}
-#menu dt a:hover {
-  color: blue;
-}
-#menu dt a:active {
-  color: blue;
-  background-color: grey;
-}
-#menu dt a:visited {
-  text-decoration: none;
-}
-</style>
 <body>
-<dl id="menu">
-<dt><a href="monitor.html">Monitor Nodes</a></dt>
-  <dd>Monitor the nodes of the network.</dd>
-<dt><a href="monport.html">Monitor Ports</a></dt>
-  <dd>Monitor the transports of the network.</dd>
-<dt><a href="console.html">Console</a></dt>
-  <dd>Examine the config and internals of a node.</dd>
-<dt><a href="graph_nodes.html">Graph Nodes</a></dt>
-  <dd>Graph the network configuration.</dd>
-</dl>
+<div class="grid-container">
+  <header class="header" id="topbar"></header>
+  <main class="main">
+    <div class="main-container">
+      <nav class="nav" id="menu"></nav>
+      <div class="main-work" id="work"></div>
+    </div>
+  </main>
+  <footer></footer>
+</div>
+<script src="menu.js"></script>
+<script src="nodes.js"></script>
+<script src="command.js"></script>
+<script>
+  window.onload = function() {
+    make_topbar( 0, true );
+    let ws = new WebSocket(
+      ( ( window.location.protocol == "https:" ) ? "wss://" : "ws://" ) +
+        window.location.host, "rai" );
+    on_startup( ws );
+    make_menu( @(help), ws );
+  }
+</script>
 </body>
 </html>

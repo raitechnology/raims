@@ -147,11 +147,11 @@ WebOutput::WebOutput( WebService &str,  WebType type ) :
 HtmlOutput::HtmlOutput( WebService &str,  WebType type ) :
   WebOutput( str, type ), strm_start( 0 ), in_progress( false ) {}
 
-static int sub_counter;
+/*static int sub_counter;*/
 
 SubOutput::SubOutput( WebService &str ) :
-  WebOutput( str, W_JSON ), next( 0 ), back( 0 ),
-  output_id( sub_counter++ ), in_progress( false ) {}
+  WebOutput( str, W_JSON ), next( 0 ), back( 0 ), trail( 0 ), trail_len( 0 ),
+  /*output_id( sub_counter++ ),*/ in_progress( false ), is_local_cmd( false ) {}
 
 void
 HtmlOutput::init( WebType type ) noexcept
@@ -168,10 +168,13 @@ void
 SubOutput::init( void ) noexcept
 {
   this->StreamBuf::BufQueue::init( 256, 4 * 1024 );
-  this->rpc         = NULL;
-  this->is_html     = false;
-  this->is_json     = true;
-  this->in_progress = false;
+  this->rpc          = NULL;
+  this->is_html      = false;
+  this->is_json      = true;
+  this->in_progress  = false;
+  this->is_local_cmd = false;
+  this->trail        = NULL;
+  this->trail_len    = 0;
 }
 
 EvSocket *
@@ -194,37 +197,54 @@ WebListen::accept( void ) noexcept
 void
 WebService::process_wsmsg( WSMsg &wmsg ) noexcept
 {
+  SubOutput * q;
   char * cmd  = &wmsg.inptr[ wmsg.inoff ];
   size_t size = wmsg.inlen - wmsg.inoff;
   wmsg.inoff += size;
 
+  if ( ! this->free_list.is_empty() )
+    q = new ( this->free_list.pop_hd() ) SubOutput( *this );
+  else
+    q = new ( ::malloc( sizeof( SubOutput ) ) ) SubOutput( *this );
   if ( size > 4 && ( ::memcmp( cmd, "sub ", 4 ) == 0 ||
                      ::memcmp( cmd, "psub ", 5 ) == 0 ) ) {
-    SubOutput * q = new ( ::malloc( sizeof( SubOutput ) ) ) SubOutput( *this );
     this->sub_list.push_tl( q );
     this->console->on_input( q, cmd, size );
     q->in_progress = true;
   }
   else {
-    WebOutput      q( *this, W_JSON );
     WebSocketFrame ws;
     char         * frame;
 
+    q->in_progress = true;
+    q->is_local_cmd = true;
     if ( size > 9 && ::memcmp( cmd, "template ", 9 ) == 0 ) {
       WebReqData data;
       data.template_buf = &cmd[ 9 ];
       data.template_len = size - 9;
       data.paren = '{';
-      q.template_substitute( data );
+      q->template_substitute( data );
+      if ( q->rpc != NULL && ! q->rpc->complete ) {
+        if ( data.trail_len != 0 ) {
+          q->trail = (char *) ::malloc( data.trail_len );
+          ::memcpy( q->trail, data.trail, data.trail_len );
+          q->trail_len = data.trail_len;
+        }
+      }
     }
     else {
-      this->console->on_input( &q, cmd, size );
+      this->console->on_input( q, cmd, size );
     }
-    ws.set( q.used_size(), 0, WebSocketFrame::WS_TEXT, true );
-    frame = q.prepend_buf( ws.hdr_size() );
+    if ( q->rpc != NULL && ! q->rpc->complete ) {
+      q->is_local_cmd = false;
+      return;
+    }
+    ws.set( q->used_size(), 0, WebSocketFrame::WS_TEXT, true );
+    frame = q->prepend_buf( ws.hdr_size() );
     ws.encode( frame );
-    this->append_iov( q );
+    this->append_iov( *q );
     this->msgs_sent++;
+    this->free_list.push_hd( q );
   }
 }
 
@@ -255,9 +275,14 @@ HtmlOutput::on_output( const char *buf,  size_t buflen ) noexcept
   if ( ! this->in_progress )
     return true;
 
-  static const char templ_trail[] = "</body>\n</html>\n";
-  this->append_bytes( templ_trail, sizeof( templ_trail ) - 1 );
-  this->add_http_header( "text/html", 9 );
+  if ( this->is_html ) {
+    static const char templ_trail[] = "</body>\n</html>\n";
+    this->append_bytes( templ_trail, sizeof( templ_trail ) - 1 );
+    this->add_http_header( "text/html", 9 );
+  }
+  else {
+    this->add_http_header( "application/json", 16 );
+  }
   this->svc.append_iov( *this );
   this->svc.msgs_sent++;
   this->in_progress = false;
@@ -268,6 +293,7 @@ bool
 SubOutput::on_output( const char *buf,  size_t buflen ) noexcept
 {
   if ( ! this->in_progress ) {
+#if 0
     if ( this->svc.debug_fd != -1 ) {
       char tmp[ 40 ];
       int n = ::snprintf( tmp, sizeof( tmp ), "%d -> %d, ", this->output_id,
@@ -275,19 +301,32 @@ SubOutput::on_output( const char *buf,  size_t buflen ) noexcept
       os_write( this->svc.debug_fd, tmp, n );
       os_write( this->svc.debug_fd, buf, buflen );
     }
+#endif
     return true;
   }
+
+  this->append_bytes( buf, buflen );
+  if ( this->is_local_cmd )
+    return true;
 
   WebSocketFrame ws;
   char         * frame;
 
-  this->append_bytes( buf, buflen );
-  ws.set( buflen, 0, WebSocketFrame::WS_TEXT, true );
+  if ( this->trail_len != 0 ) {
+    this->append_bytes( this->trail, this->trail_len );
+    ::free( this->trail );
+    this->trail     = NULL;
+    this->trail_len = 0;
+  }
+  ws.set( this->used_size(), 0, WebSocketFrame::WS_TEXT, true );
   frame = this->prepend_buf( ws.hdr_size() );
   ws.encode( frame );
   this->svc.append_iov( *this );
   this->StreamBuf::BufQueue::reset();
   this->svc.msgs_sent++;
+
+  if ( this->rpc->complete )
+    this->svc.free_list.push_hd( this );
   return this->svc.idle_push_write();
 }
 
@@ -308,22 +347,30 @@ WebService::process_shutdown( void ) noexcept
       q = this->sub_list.pop_hd();
       if ( q->rpc != NULL )
         this->console->stop_rpc( q, q->rpc );
+#if 0
       if ( this->debug_fd != -1 ) {
         char tmp[ 40 ];
         int n = ::snprintf( tmp, sizeof( tmp ), "shutdown %d -> %d\n",
                             q->output_id, this->fd );
         os_write( this->debug_fd, tmp, n );
       }
+#endif
+      ::free( q );
+    }
+    while ( ! this->free_list.is_empty() ) {
+      q = this->free_list.pop_hd();
       ::free( q );
     }
   }
   else {
     this->pushpop( EV_CLOSE, EV_SHUTDOWN );
   }
+#if 0
   if ( this->debug_fd != -1 ) {
     os_close( this->debug_fd );
     this->debug_fd = -1;
   }
+#endif
 }
 
 void
@@ -428,9 +475,10 @@ WebService::process_get_file2( WebReqData &data ) noexcept
       this->msgs_sent++;
       return true;
     }
-    return false;
-    /*if ( this->rpc != NULL && ! this->rpc->complete )
-      return size;*/
+    if ( this->out.rpc == NULL || this->out.rpc->complete )
+      return false;
+    this->out.in_progress = true;
+    return true;
   }
   int num = 0;
   if ( this->http_dir_len != 0 ) {
@@ -612,55 +660,32 @@ WebOutput::template_property( const char *var,  size_t varlen,
       break;
     case 'h':
       if ( varlen == 4 && ::memcmp( "help", var, 4 ) == 0 ) {
-        static const char script[] =
-          "<script>\n"
-          "function jsgo(id, s) { var el = document.getElementById(id);"
-                                " s = \"cmd.html?\" + s + \" \" + el.value;"
-                                " window.location.href = s; }\n"
-          "function jskey(el, s) { if ( event.key != 'Enter' ) return; "
-                                " s = \"cmd.html?\" + s + \" \" + el.value;"
-                                " window.location.href = s; }\n"
-          "</script>\n";
         const ConsoleCmdString *cmds;
         size_t ncmds;
         this->svc.console->get_valid_help_cmds( cmds, ncmds );
         #define STR( s ) s, sizeof( s ) - 1
-        this->append_bytes( STR( script ) );
-        this->append_bytes( STR( "<dl>" ) );
+        this->append_bytes( STR( "[" ) );
         for ( uint32_t i = 0; i < ncmds; i++ ) {
-          if ( cmds[ i ].cmd < CMD_CONNECT ) {
+          if ( cmds[ i ].cmd < CMD_CONNECT &&
+               ( cmds[ i ].cmd < CMD_SHOW_RUN_TPORTS ||
+                 cmds[ i ].cmd > CMD_SHOW_RUN_PARAM ) ) {
             size_t slen = ::strlen( cmds[ i ].str ),
-                   dlen = ::strlen( cmds[ i ].descr );
-            char buf[ 256 ], link[ 128 ];
-            size_t n;
-            this->append_bytes( STR( "\n<dt><a href=\"" ) );
+                   dlen = ::strlen( cmds[ i ].descr ),
+                   alen = ::strlen( cmds[ i ].args );
 
-            if ( cmds[ i ].args[ 0 ] != '\0' ) {
-              n = ::snprintf( link, sizeof( link ),
-                     "javascript:jsgo('t%u', '%s')", i, cmds[ i ].str );
-            }
-            else {
-              n = ::snprintf( link, sizeof( link ), "cmd.html?%s",
-                              cmds[ i ].str);
-            }
-            this->append_bytes( link, n );
-            this->append_bytes( STR( "\">" ) );
+            this->append_bytes( STR( "{cmd:\"" ) );
             this->append_bytes( cmds[ i ].str, slen );
-            this->append_bytes( STR( "</a>" ) );
-
-            if ( cmds[ i ].args[ 0 ] != '\0' ) {
-              n = ::snprintf( buf, sizeof( buf ),
-                " %s: <input id=\"t%u\" type=\"text\" "
-                  "onkeydown=\"jskey(this, '%s')\"></input>",
-                  cmds[ i ].args, i, cmds[ i ].str );
-              this->append_bytes( buf, n );
-            }
-            this->append_bytes( STR( "</dt><dd>" ) );
+            this->append_bytes( STR( "\",args:\"" ) );
+            this->append_bytes( cmds[ i ].args, alen );
+            this->append_bytes( STR( "\",descr:\"" ) );
             this->append_bytes( cmds[ i ].descr, dlen );
-            this->append_bytes( STR( "</dd>" ) );
+            if ( i < ncmds - 1 )
+              this->append_bytes( STR( "\"}," ) );
+            else
+              this->append_bytes( STR( "\"}" ) );
           }
         }
-        this->append_bytes( STR( "</dl>" ) );
+        this->append_bytes( STR( "]" ) );
         #undef STR
         return true;
       }
@@ -671,24 +696,23 @@ WebOutput::template_property( const char *var,  size_t varlen,
   return false;
 }
 
-size_t
+void
 WebOutput::template_substitute( WebReqData &data ) noexcept
 {
   const char   open = ( data.paren == '(' ? '(' : '{' ),
                clos = ( data.paren == '(' ? ')' : '}' );
   const char * m    = data.template_buf,
              * e    = &m[ data.template_len ];
-  size_t       size = 0;
   for (;;) {
     const char * p = (const char *) ::memchr( m, '@', e - m );
     if ( p == NULL ) {
-      size += this->append_bytes( m, e - m );
+      this->append_bytes( m, e - m );
       break;
     }
     if ( &p[ 2 ] < e && p[ 1 ] == open ) {
       const char * s = (const char *) ::memchr( &p[ 2 ], clos, e - &p[ 2 ] );
       if ( s != NULL ) {
-        size += this->append_bytes( m, p - m );
+        this->append_bytes( m, p - m );
         static const char cmd_str[] = "cmd";
         const char * var    = &p[ 2 ];
         size_t       varlen = s - &p[ 2 ];
@@ -709,18 +733,20 @@ WebOutput::template_substitute( WebReqData &data ) noexcept
           }
           if ( run_var ) {
             this->svc.console->on_input( this, var, varlen );
-            if ( this->rpc != NULL && ! this->rpc->complete )
-              return size;
+            if ( this->rpc != NULL && ! this->rpc->complete ) {
+              data.trail = &s[ 1 ];
+              data.trail_len = e - data.trail;
+              return;
+            }
           }
         }
         m = &s[ 1 ];
         continue;
       }
     }
-    size += this->append_bytes( m, &p[ 1 ] - m );
+    this->append_bytes( m, &p[ 1 ] - m );
     m = &p[ 1 ];
   }
-  return size;
 }
 
 void

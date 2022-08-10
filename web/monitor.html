@@ -2,78 +2,84 @@
 <html>
 <head>
 <meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <link rel="icon" href="rai_icon.svg" type="image/svg+xml"/>
-<title>MS Nodes</title>
+<link rel="stylesheet" href="menu.css" />
+<title>Monitor Nodes</title>
 <style>
-#container {
-  display: flex;
-  flex-direction: row;
-}
-.row {
-  flex: 1 55%;
-}
-.row:nth-child(2) {
-  flex: 1 45%;
-}
-.node {
-  stroke: #fff;
-  stroke-width: 1.5px;
-  cursor: move;
-}
-.link {
-  stroke: #999;
-  stroke-width: 3px;
-  stroke-opacity: 1;
-}
-.node-label {
-  fill: white;
-  font-family: Verdana;
-  font-size: 18px;
-  text-anchor: middle;
-  cursor: move;
-}
-.graph-title {
-  fill: black;
-  font-family: Verdana;
-  font-size: 18px;
-  text-anchor: middle;
-}
-.line {
-  fill: none;
-  stroke-width: 1.5px;
-}
-.svg-container {
-  display: inline-block;
-  position: relative;
-  width: 100%;
-  padding-bottom: 100%;
-  vertical-align: top;
-  overflow: hidden;
-}
-.svg-content {
-  display: inline-block;
-  position: absolute;
-  top: 0;
-  left: 0;
-}
-#cy {
-  z-index: 999;
-}
-table { border-collapse: collapse; width: 100%; table-layout: fixed; }
-th, td { padding: 0.25rem; text-align: left; border: 1px solid #ccc; }
+  .container {
+    display: flex;
+    flex-direction: row;
+  }
+  .row {
+    flex: 1 55%;
+  }
+  .row:nth-child(2) {
+    flex: 1 45%;
+  }
+  .node {
+    stroke: #fff;
+    stroke-width: 1.5px;
+    cursor: move;
+  }
+  .link {
+    stroke: #999;
+    stroke-width: 3px;
+    stroke-opacity: 1;
+  }
+  .node-label {
+    fill: white;
+    font-family: Verdana;
+    font-size: 18px;
+    text-anchor: middle;
+    cursor: move;
+  }
+  .graph-title {
+    fill: black;
+    font-family: Verdana;
+    font-size: 18px;
+    text-anchor: middle;
+  }
+  .line {
+    fill: none;
+    stroke-width: 1.5px;
+  }
+  .svg-container {
+    display: inline-block;
+    position: relative;
+    width: 100%;
+    padding-bottom: 100%;
+    vertical-align: top;
+    overflow: hidden;
+  }
+  .svg-content {
+    display: inline-block;
+    position: absolute;
+    top: 0;
+    left: 0;
+  }
+  #cy {
+    z-index: 999;
+  }
+  table { border-collapse: collapse; width: 100%; table-layout: fixed; }
+  th, td { padding: 0.25rem; text-align: left; border: 1px solid #ccc; }
 </style>
 </head>
 <body>
-<div id="container">
-  <div class="row">
-    <table id="peer-container">
-    <summary>User @(user) peers, click user to show on graph</summary>
-    </table>
-  </div>
-  <div class="row" id="cy"></div>
+<div class="grid-container">
+  <header class="header" id="topbar"></header>
+  <main class="main">
+    <div class="container">
+      <div class="row">
+        <table id="peer-container">
+        <summary>User @(user) peers, click user to show on graph</summary>
+        </table>
+      </div>
+      <div class="row" id="cy"></div>
+    </div>
+    <div class="svg-container" id="graph"></div>
+  </main>
 </div>
-<div class="svg-container" id="graph"></div>
-
 <script src="cytoscape-min-3.21.2.js"></script>
 <script src="d3.min-7.4.4.js"></script>
 <script src="cola.min-3.3.8.js"></script>
@@ -81,8 +87,10 @@ th, td { padding: 0.25rem; text-align: left; border: 1px solid #ccc; }
 <script src="graph.js"></script>
 <script src="nodes.js"></script>
 <script src="monitor.js"></script>
+<script src="menu.js"></script>
 <script>
   window.onload = function() {
+    make_topbar( 1, true );
     let ws = new WebSocket(
       ( ( window.location.protocol == "https:" ) ? "wss://" : "ws://" ) +
         window.location.host, "rai" );
