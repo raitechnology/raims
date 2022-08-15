@@ -89,9 +89,20 @@ function on_disconnect() {
   }
 }
 
-function on_menu_click( cmd, ws ) {
+function on_menu_click( cmd, args, ws ) {
 
-  let s = "template { \"" + cmd + "\" : @{" + cmd + "} }";
+  let val = cmd;
+  if ( args == "[P]" )
+    val += " 0";
+  else if ( args == "[U] [W]" ) {
+    update_table( cmd, "select user and subject match, then click " + cmd );
+    return;
+  }
+  else if ( args == "[W]" ) {
+    update_table( cmd, "select subject match, then click " + cmd );
+    return;
+  }
+  let s = "template { \"" + val + "\" : @{" + val + "} }";
   ws.send( s );
 }
 
@@ -102,7 +113,8 @@ function make_menu( help, ws ) {
     a = document.createElement( "a" );
     d = document.createElement( "div" );
 
-    a.onclick   = function() { on_menu_click( help[ i ].cmd, ws ); }
+    a.onclick   = function() {
+      on_menu_click( help[ i ].cmd, help[ i ].args, ws ); }
     a.title     = help[ i ].descr;
     a.className = "menu-item";
     a.appendChild( document.createTextNode( help[ i ].cmd ) );

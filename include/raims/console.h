@@ -250,8 +250,8 @@ struct TabPrint {
     this->typ = t;
     return this[ 1 ];
   }
-  uint32_t width( UserDB &user_db,  char *buf ) noexcept;
-  const char * string( char *buf ) noexcept;
+  uint32_t width( Console &console,  char *buf ) noexcept;
+  const char * string( Console &console,  char *buf ) noexcept;
 };
 
 enum ConsRpcType {
@@ -452,6 +452,18 @@ struct TabOut {
   }
 };
 
+struct LastTimeStamp {
+  static const size_t TS_MON_DAY_LEN  = 5,
+                      TS_FRACTION_OFF = TS_MON_DAY_LEN + 8, /* md H:M:S */
+                      TS_FRACTION_LEN = 3, /* 123 */
+                      TS_LEN          = TS_FRACTION_OFF + 1 + TS_FRACTION_LEN;
+  uint64_t last_secs, last_ms, last_day;
+  char ts[ TS_LEN ];
+
+  LastTimeStamp() : last_secs( 0 ), last_ms( 0 ), last_day( 0 ) {}
+  void update( uint64_t stamp ) noexcept;
+};
+
 struct Console : public md::MDOutput, public SubOnMsg, public ConfigPrinter {
   SessionMgr      & mgr;
   UserDB          & user_db;
@@ -481,13 +493,11 @@ struct Console : public md::MDOutput, public SubOnMsg, public ConfigPrinter {
   uint32_t          next_rotate;
   int               log_status;
   bool              mute_log;
+  LastTimeStamp     log_ts,
+                    stamp_ts;
 
-  static const size_t TS_LEN         = 8, /* H:M:S */
-                      TSFRACTION_LEN = 3, /* 123 */
-                      TSERR_OFF      = TS_LEN + 1 + TSFRACTION_LEN,
-                      TSHDR_LEN      = TS_LEN + 1 + TSFRACTION_LEN + 2;
-  char ts[ TSERR_OFF ];
-  uint64_t last_secs, last_ms;
+  static const size_t TS_ERR_OFF = LastTimeStamp::TS_LEN,
+                      TS_HDR_LEN = LastTimeStamp::TS_LEN + 2;
 
   Console( SessionMgr &mgr ) noexcept;
   bool open_log( const char *fn,  bool add_hdr ) noexcept;
@@ -625,35 +635,35 @@ enum ConsoleCmd {
   CMD_MPING            = 2,  /* mping                      */
   CMD_SHOW             = 3,  /* show ... */
   CMD_SHOW_SUBS        = 4,  /* show subs [U]              */
-  CMD_SHOW_ADJACENCY   = 5,  /* show adjacency             */
-  CMD_SHOW_PEERS       = 6,  /* show peers                 */
-  CMD_SHOW_PORTS       = 7,  /* show ports [T]             */
-  CMD_SHOW_STATUS      = 8,  /* show status [T]            */
-  CMD_SHOW_LINKS       = 9,  /* show links                 */
-  CMD_SHOW_NODES       = 10, /* show nodes                 */
-  CMD_SHOW_ROUTES      = 11, /* show routes                */
-  CMD_SHOW_URLS        = 12, /* show urls                  */
-  CMD_SHOW_TPORTS      = 13, /* show tport [T]             */
-  CMD_SHOW_USERS       = 14, /* show user [U]              */
-  CMD_SHOW_EVENTS      = 15, /* show events                */
-  CMD_SHOW_UNKNOWN     = 16, /* show unknown               */
-  CMD_SHOW_LOG         = 17, /* show log                   */
-  CMD_SHOW_COUNTERS    = 18, /* show counters              */
-  CMD_SHOW_LOSS        = 19, /* show loss                  */
-  CMD_SHOW_SKEW        = 20, /* show skew                  */
-  CMD_SHOW_REACHABLE   = 21, /* show reachable             */
-  CMD_SHOW_TREE        = 22, /* show tree [U]              */
-  CMD_SHOW_PATH        = 23, /* show path [N]              */
-  CMD_SHOW_FDS         = 24, /* show fds                   */
-  CMD_SHOW_BLOOMS      = 25, /* show blooms [N]            */
-  CMD_SHOW_RUN         = 26, /* show running               */
-  CMD_SHOW_RUN_TPORTS  = 27, /* show running transport [T] */
-  CMD_SHOW_RUN_SVCS    = 28, /* show running service [S]   */
-  CMD_SHOW_RUN_USERS   = 29, /* show running user [U]      */
-  CMD_SHOW_RUN_GROUPS  = 30, /* show running group [G]     */
-  CMD_SHOW_RUN_PARAM   = 31, /* show running parameter [P] */
-  CMD_SHOW_GRAPH       = 32, /* show graph                 */
-  CMD_SHOW_SEQNO       = 33, /* show seqno                 */
+  CMD_SHOW_SEQNO       = 5,  /* show seqno                 */
+  CMD_SHOW_ADJACENCY   = 6,  /* show adjacency             */
+  CMD_SHOW_PEERS       = 7,  /* show peers                 */
+  CMD_SHOW_PORTS       = 8,  /* show ports [T]             */
+  CMD_SHOW_STATUS      = 9,  /* show status [T]            */
+  CMD_SHOW_LINKS       = 10, /* show links                 */
+  CMD_SHOW_NODES       = 11, /* show nodes                 */
+  CMD_SHOW_ROUTES      = 12, /* show routes                */
+  CMD_SHOW_URLS        = 13, /* show urls                  */
+  CMD_SHOW_TPORTS      = 14, /* show tport [T]             */
+  CMD_SHOW_USERS       = 15, /* show user [U]              */
+  CMD_SHOW_EVENTS      = 16, /* show events                */
+  CMD_SHOW_UNKNOWN     = 17, /* show unknown               */
+  CMD_SHOW_LOGS        = 18, /* show logs                  */
+  CMD_SHOW_COUNTERS    = 19, /* show counters              */
+  CMD_SHOW_LOSS        = 20, /* show loss                  */
+  CMD_SHOW_SKEW        = 21, /* show skew                  */
+  CMD_SHOW_REACHABLE   = 22, /* show reachable             */
+  CMD_SHOW_TREE        = 23, /* show tree [U]              */
+  CMD_SHOW_PATH        = 24, /* show path [N]              */
+  CMD_SHOW_FDS         = 25, /* show fds                   */
+  CMD_SHOW_BLOOMS      = 26, /* show blooms [N]            */
+  CMD_SHOW_RUN         = 27, /* show running               */
+  CMD_SHOW_RUN_TPORTS  = 28, /* show running transport [T] */
+  CMD_SHOW_RUN_SVCS    = 29, /* show running service [S]   */
+  CMD_SHOW_RUN_USERS   = 30, /* show running user [U]      */
+  CMD_SHOW_RUN_GROUPS  = 31, /* show running group [G]     */
+  CMD_SHOW_RUN_PARAM   = 32, /* show running parameter [P] */
+  CMD_SHOW_GRAPH       = 33, /* show graph                 */
   CMD_CONNECT          = 34, /* connect [T]                */
   CMD_LISTEN           = 35, /* listen [T]                 */
   CMD_SHUTDOWN         = 36, /* shutdown [T]               */
@@ -789,6 +799,7 @@ static const size_t num_console_cmds = ASZ( console_cmd );
 
 static const ConsoleCmdString show_cmd[] = {
   { CMD_SHOW_SUBS      , "subscriptions" ,0,0}, /* request sub tables */
+  { CMD_SHOW_SEQNO     , "seqno"         ,0,0}, /* show seqno */
   { CMD_SHOW_ADJACENCY , "adjacency"     ,0,0}, /* show adjacency */
   { CMD_SHOW_PEERS     , "peers"         ,0,0}, /* show peers */
   { CMD_SHOW_PORTS     , "ports"         ,0,0}, /* show ports tport */
@@ -801,7 +812,7 @@ static const ConsoleCmdString show_cmd[] = {
   { CMD_SHOW_USERS     , "users"         ,0,0}, /* show user concig */
   { CMD_SHOW_EVENTS    , "events"        ,0,0}, /* show events */
   { CMD_SHOW_UNKNOWN   , "unknown"       ,0,0}, /* show unknown */
-  { CMD_SHOW_LOG       , "log"           ,0,0}, /* show log */
+  { CMD_SHOW_LOGS      , "logs"          ,0,0}, /* show logs */
   { CMD_SHOW_COUNTERS  , "counters"      ,0,0}, /* show counters */
   { CMD_SHOW_LOSS      , "loss"          ,0,0}, /* show loss */
   { CMD_SHOW_SKEW      , "skew"          ,0,0}, /* show skew */
@@ -811,8 +822,7 @@ static const ConsoleCmdString show_cmd[] = {
   { CMD_SHOW_FDS       , "fds"           ,0,0}, /* show fds */
   { CMD_SHOW_BLOOMS    , "blooms"        ,0,0}, /* show blooms */
   { CMD_SHOW_RUN       , "running"       ,0,0}, /* show running */
-  { CMD_SHOW_GRAPH     , "graph"         ,0,0}, /* show graph */
-  { CMD_SHOW_SEQNO     , "seqno"         ,0,0}  /* show seqno */
+  { CMD_SHOW_GRAPH     , "graph"         ,0,0}  /* show graph */
 };
 static const size_t num_show_cmds = ASZ( show_cmd );
 
@@ -842,6 +852,7 @@ static const ConsoleCmdString help_cmd[] = {
   { CMD_CONFIGURE_PARAM  , "configure parameter", "P V", "Configure parameter P = V"                 },
   { CMD_SAVE             , "save", "",           "Save current config as startup"                    },
   { CMD_SHOW_SUBS        , "show subs", "[U] [W]", "Show subscriptions of peers"                     },
+  { CMD_SHOW_SEQNO       , "show seqno", "[W]",  "Show subject seqno values for pub and sub"         },
   { CMD_SHOW_ADJACENCY   , "show adjacency", "", "Show the adjacency links"                          },
   { CMD_SHOW_PEERS       , "show peers", "",     "Show active peers"                                 },
   { CMD_SHOW_PORTS       , "show ports", "[T]",  "Show the active ports"                             },
@@ -858,7 +869,7 @@ static const ConsoleCmdString help_cmd[] = {
 #if 0
   { CMD_SHOW_UNKNOWN     , "show unknown", "",   "Show the list of peers yet to be resolved"         },
 #endif
-  { CMD_SHOW_LOG         , "show log", "",       "Show current log buffer"                           },
+  { CMD_SHOW_LOGS        , "show logs", "",      "Show current log buffer"                           },
   { CMD_SHOW_COUNTERS    , "show counters", "",  "Show system seqno and time values"                 },
   { CMD_SHOW_LOSS        , "show loss", "",      "Show message loss counters and time"               },
   { CMD_SHOW_SKEW        , "show skew", "",      "Show peer system clock skews"                      },
@@ -874,7 +885,6 @@ static const ConsoleCmdString help_cmd[] = {
   { CMD_SHOW_RUN_GROUPS  , "show running group","[G]",     "Show groups running config, G or all"    },
   { CMD_SHOW_RUN_PARAM   , "show running parameter","[P]", "Show parameters running config, P or all"},
   { CMD_SHOW_GRAPH       , "show graph", "",     "Show network description for node graph"           },
-  { CMD_SHOW_SEQNO       , "show seqno", "[S]",  "Show subject seqno values for pub and sub"         },
   { CMD_SUB_START        , "sub","[S] [F]",      "Subscribe subject S, output to file F"             },
   { CMD_SUB_STOP         , "unsub","[S] [F]",    "Unsubscribe subject S, stop output file F"         },
   { CMD_PSUB_START       , "psub","[W] [F]",     "Subscribe rv-wildcard W, output to file F"         },

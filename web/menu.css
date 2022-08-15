@@ -150,6 +150,9 @@ body {
 .table-main-caption {
   display: flex;
   flex-direction: row;
+  background-color: #ddd;
+  padding: 1px;
+  gap: 3px;
 }
 .table-main-time {
   flex: 0;
@@ -162,11 +165,20 @@ body {
   text-align: center;
   background-color: #ddd;
   white-space: nowrap;
+  padding: 0 3em;
 }
 .table-main-title:hover {
   background-color: white;
   color: black;
   cursor: pointer;
+}
+.table-main-select {
+  flex: 0;
+  color: black;
+  background-color: white;
+  border-color: black;
+  border-width: 1px;
+  border-style: solid;
 }
 .table-main-barend {
   flex: 0;
@@ -199,7 +211,6 @@ body {
   color: inherit;
   text-decoration: none;
   width: 100%;
-  height: 100%;
 }
 .tr-main {
 }
@@ -214,5 +225,12 @@ body {
   padding: 0.25rem;
   text-align: left;
   white-space: nowrap;
+  border: 1px solid #ccc;
+}
+.td-main-err {
+  padding: 0.25rem;
+  text-align: left;
+  white-space: nowrap;
+  background-color: #e88;
   border: 1px solid #ccc;
 }

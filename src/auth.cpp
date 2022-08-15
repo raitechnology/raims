@@ -85,7 +85,7 @@ UserDB::compare_version( UserBridge &n, MsgHdrDecoder &dec ) noexcept
     size_t fsize = dec.mref[ FID_VERSION ].fsize;
     void * fptr  = dec.mref[ FID_VERSION ].fptr;
     if ( fsize != ver_len || ::memcmp( fptr, ver_str, ver_len ) != 0 ) {
-      n.printf( "version diff: %.*s != %.*s\n", (int) fsize,
+      n.printe( "version diff: %.*s != %.*s\n", (int) fsize,
                 (char *) fptr, (int) ver_len, ver_str );
       return false;
     }

@@ -87,7 +87,7 @@ Console::Console( SessionMgr &m ) noexcept
          type_fmt( ANSI_BLUE "%-10s %3d" ANSI_NORMAL " : " ),
          prompt( 0 ), max_log( 64 * 1024 ), log_index( 0 ), log_ptr( 0 ),
          inbox_num( 0 ), log_filename( 0 ), log_fd( -1 ), next_rotate( 1 ),
-         log_status( 0 ), mute_log( false ), last_secs( 0 ), last_ms( 0 )
+         log_status( 0 ), mute_log( false )
 {
   time_t t = update_tz_offset();
   t += 24 * 60 * 60;
@@ -288,15 +288,27 @@ ConsoleOutput::on_remove( void ) noexcept
 }
 
 void
-Console::log_output( int stream,  uint64_t stamp,  size_t len,
-                     const char *buf ) noexcept
+LastTimeStamp::update( uint64_t stamp ) noexcept
 {
   uint64_t secs, ms;
+  ms     = stamp / (uint64_t) ( 1000 * 1000 );
+  secs   = ms / (uint64_t) 1000;
 
-  stamp += tz_stamp_ns;
-  secs = stamp / (uint64_t) ( 1000 * 1000 * 1000 );
   if ( secs != this->last_secs ) {
-    uint32_t ar[ 3 ], j = 0;
+    uint64_t day = secs / ( 24 * 60 * 60 );
+    if ( day != this->last_day ) {
+      time_t t = (time_t) secs;
+      struct tm x;
+      ::gmtime_r( &t, &x );
+      x.tm_mon++;
+      this->ts[ 0 ] = ( x.tm_mon / 10 ) + '0';
+      this->ts[ 1 ] = ( x.tm_mon % 10 ) + '0';
+      this->ts[ 2 ] = ( x.tm_mday / 10 ) + '0';
+      this->ts[ 3 ] = ( x.tm_mday % 10 ) + '0';
+      this->ts[ 4 ] = ' ';
+      this->last_day = day;
+    }
+    uint32_t ar[ 3 ], j = TS_MON_DAY_LEN;
     ar[ 2 ] = secs % 60,
     ar[ 1 ] = ( secs / 60 ) % 60;
     ar[ 0 ] = ( secs / 3600 ) % 24;
@@ -307,20 +319,27 @@ Console::log_output( int stream,  uint64_t stamp,  size_t len,
     }
     this->last_secs = secs;
   }
-  ms = stamp / (uint64_t) ( 1000 * 1000 );
   if ( ms != this->last_ms ) {
-    this->ts[ TS_LEN+1 ] = ( ( ms / 100 ) % 10 ) + '0';
-    this->ts[ TS_LEN+2 ] = ( ( ms / 10 ) % 10 ) + '0';
-    this->ts[ TS_LEN+3 ] = ( ms % 10 ) + '0';
+    this->ts[ TS_FRACTION_OFF+1 ] = ( ( ms / 100 ) % 10 ) + '0';
+    this->ts[ TS_FRACTION_OFF+2 ] = ( ( ms / 10 ) % 10 ) + '0';
+    this->ts[ TS_FRACTION_OFF+3 ] = ( ms % 10 ) + '0';
     this->last_ms = ms;
   }
+}
 
-  size_t sz = len + TSHDR_LEN;
+void
+Console::log_output( int stream,  uint64_t stamp,  size_t len,
+                     const char *buf ) noexcept
+{
+  stamp += tz_stamp_ns;
+  this->log_ts.update( stamp );
+
+  size_t sz = len + TS_HDR_LEN;
   char * p  = this->log.make( this->log.count + sz );
   p = &p[ this->log.count ];
   this->log.count += sz;
-  ::memcpy( p, this->ts, TSERR_OFF );
-  p = &p[ TSERR_OFF ];
+  ::memcpy( p, this->log_ts.ts, TS_ERR_OFF );
+  p = &p[ TS_ERR_OFF ];
   *p++ = ( stream == 1 ? ' ' : '!' );
   *p++ = ' ';
   ::memcpy( p, buf, len );
@@ -346,25 +365,25 @@ Console::colorize_log( ConsoleOutput *p, const char *buf, size_t len ) noexcept
       if ( ptr > buf && *( ptr - 1 ) == '\r' )
         ptr--;
     }
-    if ( &buf[ TSHDR_LEN ] < ptr ) {
+    if ( &buf[ TS_HDR_LEN ] < ptr ) {
       if ( ! is_json ) {
         const char * color    = is_html ? html_gc : gc;
         size_t       color_sz = is_html ? html_gz : gz;
         const char * no_col   = is_html ? html_nc : nc;
         size_t       no_sz    = is_html ? html_nz : nz;
 
-        if ( buf[ TSERR_OFF ] != ' ' ) {
+        if ( buf[ TS_ERR_OFF ] != ' ' ) {
           color    = is_html ? html_rc : rc;
           color_sz = is_html ? html_rz : rz;
         }
         size_t off  = 0,
-               sz = ptr - &buf[ TSHDR_LEN ];
-        char * line = this->tmp.make( TSHDR_LEN + color_sz + sz + nz + 1 );
+               sz = ptr - &buf[ TS_HDR_LEN ];
+        char * line = this->tmp.make( TS_HDR_LEN + color_sz + sz + nz + 1 );
 
-        ::memcpy( line, buf, TSHDR_LEN );                off += TSHDR_LEN;
-        ::memcpy( &line[ off ], color, color_sz );       off += color_sz;
-        ::memcpy( &line[ off ], &buf[ TSHDR_LEN ], sz ); off += sz;
-        ::memcpy( &line[ off ], no_col, no_sz );         off += no_sz;
+        ::memcpy( line, buf, TS_HDR_LEN );                off += TS_HDR_LEN;
+        ::memcpy( &line[ off ], color, color_sz );        off += color_sz;
+        ::memcpy( &line[ off ], &buf[ TS_HDR_LEN ], sz ); off += sz;
+        ::memcpy( &line[ off ], no_col, no_sz );          off += no_sz;
         line[ off++ ] = '\n';
 
         if ( p != NULL )
@@ -375,13 +394,13 @@ Console::colorize_log( ConsoleOutput *p, const char *buf, size_t len ) noexcept
         }
       }
       else {
-        const char * ln = &buf[ TSERR_OFF ];
+        const char * ln = &buf[ TS_ERR_OFF ];
         size_t       sz = ptr - ln;
         const char * q;
         #define STR( s ) s, sizeof( s ) - 1
         b &= p->on_output( first ? "[" : ",", 1 ); first = false;
         b &= p->on_output( STR(   "{\"time\":\"" ) );
-        b &= p->on_output( buf, TSERR_OFF );
+        b &= p->on_output( buf, TS_ERR_OFF );
         b &= p->on_output( STR( "\",\"text\":\"" ) );
         while ( (q = (char *) ::memchr( ln, '\"', sz )) != NULL ) {
           size_t seg = q - ln;
@@ -1104,7 +1123,7 @@ Console::tab_nonce( const Nonce &nonce,  TabPrint &pr ) noexcept
 }
 
 uint32_t
-TabPrint::width( UserDB &user_db,  char *buf ) noexcept
+TabPrint::width( Console &console,  char *buf ) noexcept
 {
   UserRoute * u_ptr;
   size_t sz = 0;
@@ -1156,8 +1175,8 @@ TabPrint::width( UserDB &user_db,  char *buf ) noexcept
     case PRINT_DIST:
       if ( this->n == NULL )
         return 0;
-      u_ptr = n->primary( user_db );
-      this->len = user_db.peer_dist.calc_transport_cache( this->n->uid,
+      u_ptr = n->primary( console.user_db );
+      this->len = console.user_db.peer_dist.calc_transport_cache( this->n->uid,
                                                        u_ptr->rte.tport_id, 0 );
       if ( this->len == COST_MAXIMUM )
         return 1;
@@ -1194,7 +1213,7 @@ TabPrint::width( UserDB &user_db,  char *buf ) noexcept
     case PRINT_STAMP:
       if ( this->ival == 0 )
         return 0;
-      return Console::TS_LEN + Console::TSFRACTION_LEN + 1;
+      return LastTimeStamp::TS_LEN;
     case PRINT_TPORT_STATE:
     case PRINT_SOCK_STATE:
       return kv_popcountw( this->len );
@@ -1229,7 +1248,7 @@ cat80( char *buf,  size_t off,  uint32_t i )
 }
 
 const char *
-TabPrint::string( char *buf ) noexcept
+TabPrint::string( Console &console,  char *buf ) noexcept
 {
   size_t sz = 0;
   switch ( this->type() ) {
@@ -1367,21 +1386,9 @@ TabPrint::string( char *buf ) noexcept
       if ( this->ival == 0 )
         return "";
       uint64_t stamp = this->ival + tz_stamp_ns;
-      uint64_t secs = stamp / (uint64_t) ( 1000 * 1000 * 1000.0 );
-      uint32_t ar[ 3 ], j = 0;
-      ar[ 2 ] = secs % 60,
-      ar[ 1 ] = ( secs / 60 ) % 60;
-      ar[ 0 ] = ( secs / 3600 ) % 24;
-      for ( int i = 0; i < 3; i++ ) {
-        buf[ j++ ] = ( ar[ i ] / 10 ) + '0';
-        buf[ j++ ] = ( ar[ i ] % 10 ) + '0';
-        buf[ j++ ] = ( i == 2 ? '.' : ':' );
-      }
-      uint64_t ms = this->ival / (uint64_t) ( 1000 * 1000 );
-      buf[ Console::TS_LEN+1 ] = ( ( ms / 100 ) % 10 ) + '0';
-      buf[ Console::TS_LEN+2 ] = ( ( ms / 10 ) % 10 ) + '0';
-      buf[ Console::TS_LEN+3 ] = ( ms % 10 ) + '0';
-      buf[ Console::TS_LEN+4 ] = '\0';
+      console.stamp_ts.update( stamp );
+      ::memcpy( buf, console.stamp_ts.ts, LastTimeStamp::TS_LEN );
+      buf[ LastTimeStamp::TS_LEN ] = '\0';
       return buf;
     }
     case PRINT_TPORT_STATE: {
@@ -1485,7 +1492,6 @@ Console::print_table( ConsoleOutput *p,  const char **hdr,
   uint32_t     i, j,
                tabsz = (uint32_t) this->table.count;
   TabPrint   * tab   = this->table.ptr;
-  UserDB     & u     = this->user_db;
   uint32_t   * width, wbuf[ 16 ];
   char         buf[ 80 ];
   const char * v, * fmt;
@@ -1501,8 +1507,8 @@ Console::print_table( ConsoleOutput *p,  const char **hdr,
       for ( j = 0; j < ncols; j++ ) {
         this->puts( "<td>" );
         if ( tab[ i + j ].type() == PRINT_DIST )
-          tab[ i + j ].width( u, buf );
-        this->puts( tab[ i + j ].string( buf ) );
+          tab[ i + j ].width( *this, buf );
+        this->puts( tab[ i + j ].string( *this, buf ) );
         this->puts( "</td>" );
       }
       this->puts( "</tr>" );
@@ -1523,13 +1529,13 @@ Console::print_table( ConsoleOutput *p,  const char **hdr,
           case PRINT_INT:
           case PRINT_SINT:
           case PRINT_LONG:
-            this->puts( tab[ i + j ].string( buf ) );
+            this->puts( tab[ i + j ].string( *this, buf ) );
             break;
           default:
             if ( tab[ i + j ].type() == PRINT_DIST )
-              tab[ i + j ].width( u, buf );
+              tab[ i + j ].width( *this, buf );
             this->putchar( '\"' );
-            this->puts( tab[ i + j ].string( buf ) );
+            this->puts( tab[ i + j ].string( *this, buf ) );
             this->putchar( '\"' );
             break;
         }
@@ -1557,7 +1563,7 @@ Console::print_table( ConsoleOutput *p,  const char **hdr,
   }
   for ( i = 0; i < tabsz; i += ncols ) {
     for ( j = 0; j < ncols; j++ ) {
-      uint32_t w = tab[ i + j ].width( u, buf );
+      uint32_t w = tab[ i + j ].width( *this, buf );
       width[ j ] = max_int( width[ j ], w );
     }
   }
@@ -1579,7 +1585,7 @@ Console::print_table( ConsoleOutput *p,  const char **hdr,
   for ( i = 0; i < tabsz; i += ncols ) {
     bool overflow = false;
     for ( j = 0; j < ncols; j++ ) {
-      v   = tab[ i + j ].string( buf );
+      v   = tab[ i + j ].string( *this, buf );
       fmt = ( tab[ i + j ].left() ? "%-*s%s" : "%*s%s" );
       this->printf( fmt, width[ j ], v,
                     ( j < ncols - 1 ) ? " | " : "\n" );
@@ -1620,6 +1626,8 @@ Console::print_table( ConsoleOutput *p,  const char **hdr,
 UserBridge *
 Console::find_user( const char *name,  size_t len ) noexcept
 {
+  if ( len == 1 && name[ 0 ] == '*' )
+    len = 0;
   if ( len > 0 ) {
     for ( uint32_t uid = 0; uid < this->user_db.next_uid; uid++ ) {
       UserBridge * n = this->user_db.bridge_tab[ uid ];
@@ -1793,7 +1801,7 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
     case CMD_SHOW_USERS:     this->show_users( p );     break;
     case CMD_SHOW_EVENTS:    this->show_events( p );    break;
     case CMD_SHOW_UNKNOWN:   this->show_unknown( p );   break;
-    case CMD_SHOW_LOG:
+    case CMD_SHOW_LOGS:
       this->colorize_log( p, this->log.ptr, this->log_index );
       break;
     case CMD_SHOW_COUNTERS:  this->show_counters( p );  break;
@@ -1824,7 +1832,6 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
     case CMD_SHOW_RUN_PARAM:
       this->show_running( p, PRINT_PARAMETERS | PRINT_HDR, arg, len ); break;
     case CMD_SHOW_GRAPH:     this->show_graph( p ); break;
-    case CMD_SHOW_SEQNO:     this->show_seqno( p, arg, len ); break;
 
     case CMD_DEBUG:
       if ( len == 0 )
@@ -1890,6 +1897,9 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
         this->printf( "nothing to cancel\n" );
       break;
     }
+    case CMD_SHOW_SEQNO:
+      this->show_seqno( p, arg, len );
+      break;
     case CMD_SHOW_SUBS:
       if ( argc <= 3 ) {
         args[ 3 ] = NULL;
@@ -2338,6 +2348,9 @@ Console::show_subs( ConsoleOutput *p,  const char *arg,
 
   if ( arglen == 1 && arg[ 0 ] == '*' )
     arglen = 0;
+  if ( arglen2 == 1 && arg2[ 0 ] == '*' )
+    arglen2 = 0;
+
   if ( arglen != 0 ) {
     if ( this->user_db.user.user.equals( arg, arglen ) ||
          ( arglen == 4 && ::memcmp( arg, "self", 4 ) == 0 ) )
@@ -2346,6 +2359,7 @@ Console::show_subs( ConsoleOutput *p,  const char *arg,
   else {
     rpc->show_self = true;
   }
+    
   if ( rpc->show_self && arglen2 > 0 )
     rpc->set_match( arg2, arglen2 );
 
@@ -2388,6 +2402,8 @@ Console::ping_peer( ConsoleOutput *p,  const char *arg,
   uint32_t      len;
   ConsolePing * rpc = this->create_rpc<ConsolePing>( p, PING_RPC );
 
+  if ( arglen == 1 && arg[ 0 ] == '*' )
+    arglen = 0;
   for ( uint32_t uid = 0; uid < this->user_db.next_uid; uid++ ) {
     n = this->user_db.bridge_tab[ uid ];
     if ( n != NULL && n->is_set( AUTHENTICATED_STATE ) ) {
@@ -2861,7 +2877,7 @@ Console::show_ports( ConsoleOutput *p, const char *name,  size_t len ) noexcept
   static const uint32_t ncols = 11;
   size_t count = this->user_db.transport_tab.count;
 
-  if ( len == 3 && ::memcmp( name, "all", 3 ) == 0 )
+  if ( len == 1 && name[ 0 ] == '*' )
     len = 0;
   TabOut out( this->table, this->tmp, ncols );
   for ( size_t t = 0; t < count; t++ ) {
@@ -2928,7 +2944,7 @@ Console::show_status( ConsoleOutput *p, const char *name,  size_t len ) noexcept
   static const uint32_t ncols = 6;
   size_t count = this->user_db.transport_tab.count;
 
-  if ( len == 3 && ::memcmp( name, "all", 3 ) == 0 )
+  if ( len == 1 && name[ 0 ] == '*' )
     len = 0;
   TabOut out( this->table, this->tmp, ncols );
   for ( size_t t = 0; t < count; t++ ) {
@@ -2956,7 +2972,7 @@ Console::show_tports( ConsoleOutput *p, const char *name,  size_t len ) noexcept
   size_t           t, count = this->user_db.transport_tab.count;
   TransportRoute * rte;
 
-  if ( len == 3 && ::memcmp( name, "all", 3 ) == 0 )
+  if ( len == 1 && name[ 0 ] == '*' )
     len = 0;
 
   for ( ConfigTree::Transport * tport = this->tree.transports.hd;
@@ -3988,6 +4004,8 @@ Console::show_seqno( ConsoleOutput *p,  const char *arg,
   int        count = 0;
   bool       b;
 
+  if ( arglen == 1 && arg[ 0 ] == '*' )
+    arglen = 0;
   if ( arglen != 0 ) {
     uint32_t h = kv_crc_c( arg, arglen, 0 );
     pub = this->sub_db.pub_tab.find( h, arg, arglen );
