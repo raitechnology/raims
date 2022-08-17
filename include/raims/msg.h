@@ -362,28 +362,29 @@ enum PublishType {
   U_INBOX_SUBS      = 17, /* _I.Nonce.subs */
   U_INBOX_PING      = 18, /* _I.Nonce.ping */
   U_INBOX_PONG      = 19, /* _I.Nonce.pong */
-  U_INBOX_RESUB     = 20, /* _I.Nonce.resub */
-  U_INBOX_REPSUB    = 21, /* _I.Nonce.repsub */
-  U_INBOX_ADD_RTE   = 22, /* _I.Nonce.add_rte */
-  U_INBOX_SYNC_REQ  = 23, /* _I.Nonce.sync_req */
-  U_INBOX_SYNC_RPY  = 24, /* _I.Nonce.sync_rpy */
-  U_INBOX_BLOOM_REQ = 25, /* _I.Nonce.bloom_req */
-  U_INBOX_BLOOM_RPY = 26, /* _I.Nonce.bloom_rpy */
-  U_INBOX_ADJ_REQ   = 27, /* _I.Nonce.adj_req */
-  U_INBOX_ADJ_RPY   = 28, /* _I.Nonce.adj_rpy */
-  U_INBOX_MESH_REQ  = 29, /* _I.Nonce.adj_req */
-  U_INBOX_MESH_RPY  = 30, /* _I.Nonce.adj_rpy */
-  U_INBOX_TRACE     = 31, /* _I.Nonce.trace */
-  U_INBOX_ACK       = 32, /* _I.Nonce.ack */
-  U_INBOX_ANY       = 33, /* _I.Nonce.any */
-  U_INBOX           = 34, /* _I.Nonce.X reply subject, X is integer */
+  U_INBOX_REM       = 20, /* _I.Nonce.rem */
+  U_INBOX_RESUB     = 21, /* _I.Nonce.resub */
+  U_INBOX_REPSUB    = 22, /* _I.Nonce.repsub */
+  U_INBOX_ADD_RTE   = 23, /* _I.Nonce.add_rte */
+  U_INBOX_SYNC_REQ  = 24, /* _I.Nonce.sync_req */
+  U_INBOX_SYNC_RPY  = 25, /* _I.Nonce.sync_rpy */
+  U_INBOX_BLOOM_REQ = 26, /* _I.Nonce.bloom_req */
+  U_INBOX_BLOOM_RPY = 27, /* _I.Nonce.bloom_rpy */
+  U_INBOX_ADJ_REQ   = 28, /* _I.Nonce.adj_req */
+  U_INBOX_ADJ_RPY   = 29, /* _I.Nonce.adj_rpy */
+  U_INBOX_MESH_REQ  = 30, /* _I.Nonce.adj_req */
+  U_INBOX_MESH_RPY  = 31, /* _I.Nonce.adj_rpy */
+  U_INBOX_TRACE     = 32, /* _I.Nonce.trace */
+  U_INBOX_ACK       = 33, /* _I.Nonce.ack */
+  U_INBOX_ANY       = 34, /* _I.Nonce.any */
+  U_INBOX           = 35, /* _I.Nonce.X reply subject, X is integer */
 
-  U_MCAST_PING      = 35, /* _M.ping */
-  U_MCAST           = 36, /* _M.> */
+  U_MCAST_PING      = 36, /* _M.ping */
+  U_MCAST           = 37, /* _M.> */
   /* other subject */
-  U_INBOX_ANY_RTE   = 37, /* _I.Nonce.any, ipc inbox */
-  MCAST_SUBJECT     = 38, /* not _XX subject */
-  UNKNOWN_SUBJECT   = 39  /* init, not resolved */
+  U_INBOX_ANY_RTE   = 38, /* _I.Nonce.any, ipc inbox */
+  MCAST_SUBJECT     = 39, /* not _XX subject */
+  UNKNOWN_SUBJECT   = 40  /* init, not resolved */
 };
 #ifdef INCLUDE_MSG_CONST
 static const char *publish_type_str[] = {
@@ -404,6 +405,7 @@ static const char *publish_type_str[] = {
   "u_inbox_subs",
   "u_inbox_ping",
   "u_inbox_pong",
+  "u_inbox_rem",
   "u_inbox_resub",
   "u_inbox_repsub",
   "u_inbox_add_rte",

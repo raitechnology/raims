@@ -6,7 +6,7 @@ const conn_class = "connected-icon";
 
 function make_topbar( which, is_conn ) {
   let topbar = document.getElementById("topbar");
-  let topbar_links = [ "index.html", "monitor.html",     "monport.html",
+  let topbar_links = [ "index.html", "monitor.html", "monport.html",
                        "graph_nodes.html" ];
   let topbar_descr = [ "Run commands and display result",
                        "Graph the message traffic for all peers",
@@ -90,7 +90,6 @@ function on_disconnect() {
 }
 
 function on_menu_click( cmd, args, ws ) {
-
   let val = cmd;
   if ( args == "[P]" )
     val += " 0";

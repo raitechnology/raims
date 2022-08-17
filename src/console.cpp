@@ -24,6 +24,7 @@
 #include <raims/ev_web.h>
 #include <linecook/linecook.h>
 #include <linecook/ttycook.h>
+#include <raimd/json_msg.h>
 
 namespace rai {
 namespace sassrv {
@@ -546,16 +547,16 @@ Console::flush_log( Logger &log ) noexcept
 #endif
 }
 
-JsonOutput *
-JsonOutput::create( const char *path,  size_t pathlen ) noexcept
+JsonFileOutput *
+JsonFileOutput::create( const char *path,  size_t pathlen ) noexcept
 {
   char fn[ 1024 ];
   int  fnlen = ::snprintf( fn, sizeof( fn ), "%.*s", (int) pathlen, path );
   int  fd    = os_open( fn, O_APPEND | O_WRONLY | O_CREAT, 0666 );
   if ( fd < 0 )
     return NULL;
-  void       * p   = ::malloc( sizeof( JsonOutput ) + fnlen + 1 );
-  JsonOutput * out = new ( p ) JsonOutput( fd );
+  void       * p   = ::malloc( sizeof( JsonFileOutput ) + fnlen + 1 );
+  JsonFileOutput * out = new ( p ) JsonFileOutput( fd );
 
   ::memcpy( (void *) &out[ 1 ], fn, fnlen );
   out->path = (char *) (void *) &out[ 1 ];
@@ -566,7 +567,7 @@ JsonOutput::create( const char *path,  size_t pathlen ) noexcept
 }
 
 bool
-JsonOutput::open( void ) noexcept
+JsonFileOutput::open( void ) noexcept
 {
   int fd = os_open( this->path, O_APPEND | O_WRONLY | O_CREAT, 0666 );
   if ( fd < 0 )
@@ -576,7 +577,7 @@ JsonOutput::open( void ) noexcept
 }
 
 bool
-JsonOutput::on_output( const char *buf,  size_t buflen ) noexcept
+JsonFileOutput::on_output( const char *buf,  size_t buflen ) noexcept
 {
   if ( os_write( this->fd, buf, buflen ) != (ssize_t) buflen ) {
     ::perror( this->path );
@@ -587,7 +588,7 @@ JsonOutput::on_output( const char *buf,  size_t buflen ) noexcept
 }
 
 void
-JsonOutput::on_remove( void ) noexcept
+JsonFileOutput::on_remove( void ) noexcept
 {
   if ( this->fd != -1 ) {
     os_close( this->fd );
@@ -595,10 +596,10 @@ JsonOutput::on_remove( void ) noexcept
   }
 }
 
-JsonOutput *
+JsonFileOutput *
 JsonOutArray::open( const char *path,  size_t pathlen ) noexcept
 {
-  JsonOutput *out = NULL;
+  JsonFileOutput *out = NULL;
   for ( size_t i = 0; i < this->count; i++ ) {
     if ( pathlen == this->ptr[ i ]->pathlen &&
          ::memcmp( path, this->ptr[ i ]->path, pathlen ) == 0 ) {
@@ -609,7 +610,7 @@ JsonOutArray::open( const char *path,  size_t pathlen ) noexcept
     }
   }
   if ( out == NULL ) {
-    out = JsonOutput::create( path, pathlen );
+    out = JsonFileOutput::create( path, pathlen );
     if ( out == NULL )
       return NULL;
   }
@@ -621,7 +622,7 @@ JsonOutArray::open( const char *path,  size_t pathlen ) noexcept
   return out;
 }
 
-JsonOutput *
+JsonFileOutput *
 JsonOutArray::find( const char *path,  size_t pathlen ) noexcept
 {
   for ( size_t i = 0; i < this->count; i++ ) {
@@ -892,7 +893,7 @@ console_complete( struct LineCook_s *state,  const char *buf,  size_t off,
   else if ( type == TPORT_ARG || type == PEER_ARG || type == USER_ARG ||
             type == PARM_ARG || type == SVC_ARG ) {
     if ( type == PEER_ARG ) {
-      for ( uint32_t uid = 0; uid < cons->user_db.next_uid; uid++ ) {
+      for ( uint32_t uid = 1; uid < cons->user_db.next_uid; uid++ ) {
         UserBridge * n = cons->user_db.bridge_tab[ uid ];
         if ( n != NULL && n->is_set( AUTHENTICATED_STATE ) ) {
           lc_add_completion( state, n->peer.user.val, n->peer.user.len );
@@ -1629,7 +1630,7 @@ Console::find_user( const char *name,  size_t len ) noexcept
   if ( len == 1 && name[ 0 ] == '*' )
     len = 0;
   if ( len > 0 ) {
-    for ( uint32_t uid = 0; uid < this->user_db.next_uid; uid++ ) {
+    for ( uint32_t uid = 1; uid < this->user_db.next_uid; uid++ ) {
       UserBridge * n = this->user_db.bridge_tab[ uid ];
       if ( n != NULL && n->is_set( AUTHENTICATED_STATE ) ) {
         if ( n->peer.user.equals( name, len ) )
@@ -1682,7 +1683,7 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
       case CMD_GSUB_START:
         sub_output = this->json_files.open( args[ 2 ], arglen[ 2 ] );
         if ( sub_output == NULL ) {
-          this->printf( "output \"%.*s\" file open error %d\n",
+          this->outf( p, "output (%.*s) file open error %d",
                         (int) arglen[ 2 ], args[ 2 ], errno );
           return true;
         }
@@ -1692,7 +1693,7 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
       case CMD_GSUB_STOP:
         sub_output = this->json_files.find( args[ 2 ], arglen[ 2 ] );
         if ( sub_output == NULL ) {
-          this->printf( "output \"%.*s\" not found\n",
+          this->outf( p, "output (%.*s) not found",
                         (int) arglen[ 2 ], args[ 2 ] );
           return true;
         }
@@ -1838,19 +1839,19 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
         goto help;
       if ( len >= 4 && ::memcmp( arg, "dist", 4 ) == 0 ) {
         this->user_db.peer_dist.invalidate( INVALID_NONE );
-        this->printf( "recalculate peer dist\n" );
+        this->outf( p, "recalculate peer dist" );
       }
       else if ( len >= 2 && ::memcmp( arg, "kv", 2 ) == 0 ) {
         kv_pub_debug = ! kv_pub_debug;
-        this->printf( "kv pub debug %s\n", kv_pub_debug ? "on" : "off" );
+        this->outf( p, "kv pub debug %s", kv_pub_debug ? "on" : "off" );
       }
       else if ( len >= 4 && ::memcmp( arg, "kvps", 4 ) == 0 ) {
         kv_ps_debug = ! kv_ps_debug;
-        this->printf( "kv ps debug %s\n", kv_ps_debug ? "on" : "off" );
+        this->outf( p, "kv ps debug %s", kv_ps_debug ? "on" : "off" );
       }
       else if ( len >= 2 && ::memcmp( arg, "rv", 2 ) == 0 ) {
         sassrv::rv_debug = ! sassrv::rv_debug;
-        this->printf( "rv debug %s\n", sassrv::rv_debug ? "on" : "off" );
+        this->outf( p, "rv debug %s", sassrv::rv_debug ? "on" : "off" );
       }
       else {
         dbg_flags = (int) string_to_uint64( arg, len );
@@ -1865,10 +1866,10 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
         }
         if ( sz > 0 ) {
           buf[ sz ] = '\0';
-          this->printf( "debug flags set to 0x%x (%s)\n", dbg_flags, buf );
+          this->outf( p, "debug flags set to 0x%x (%s)", dbg_flags, buf );
         }
         else {
-          this->printf( "debug flags cleared\n" );
+          this->outf( p, "debug flags cleared" );
         }
       }
       break;
@@ -1890,11 +1891,11 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
         }
       }
       if ( pcount > 0 )
-        this->printf( "%u ping canceled\n", pcount );
+        this->outf( p, "%u ping canceled", pcount );
       if ( scount > 0 )
-        this->printf( "%u subs canceled\n", pcount );
+        this->outf( p, "%u subs canceled", pcount );
       if ( pcount + scount == 0 )
-        this->printf( "nothing to cancel\n" );
+        this->outf( p, "nothing to cancel" );
       break;
     }
     case CMD_SHOW_SEQNO:
@@ -1926,34 +1927,34 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
           sub->set_sub( arg, len );
           sub->start_seqno =
             this->sub_db.console_sub_start( arg, len, sub );
-          this->printf( "start(%.*s) seqno = %" PRIu64 "\n", (int) sub->sublen,
+          this->outf( p, "start(%.*s) seqno = %" PRIu64, (int) sub->sublen,
             sub->sub, sub->start_seqno );
         }
         else {
-          this->printf( "start(%.*s) not found\n", (int) len, arg );
+          this->outf( p, "start(%.*s) not found", (int) len, arg );
         }
       }
       else {
         if ( cmd == CMD_SUB_STOP ) {
           if ( sub->out.remove( sub_output ) ) {
             if ( sub->out.count == 0 ) {
-              this->printf( "stop(%.*s) seqno = %" PRIu64 "\n", (int) len, arg,
+              this->outf( p, "stop(%.*s) seqno = %" PRIu64, (int) len, arg,
                 this->sub_db.console_sub_stop( arg, (uint16_t) len ) );
               sub->complete = true;
             }
             else {
-              this->printf( "stop(%.*s) rem from existing\n", (int) len, arg );
+              this->outf( p, "stop(%.*s) rem from existing", (int) len, arg );
             }
           }
           else {
-            this->printf( "stop(%.*s) not found\n", (int) len, arg );
+            this->outf( p, "stop(%.*s) not found", (int) len, arg );
           }
         }
         else {
           if ( sub->out.add( sub_output ) )
-            this->printf( "sub(%.*s) added to existing\n", (int) len, arg );
+            this->outf( p, "sub(%.*s) added to existing", (int) len, arg );
           else
-            this->printf( "sub(%.*s) exists\n", (int) len, arg );
+            this->outf( p, "sub(%.*s) exists", (int) len, arg );
         }
       }
       break;
@@ -1978,38 +1979,39 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
           sub->set_psub( arg, len, fmt );
           sub->start_seqno =
             this->sub_db.console_psub_start( arg, len, fmt, sub );
-          this->printf( "pstart(%.*s) seqno = %" PRIu64 "\n",
+          this->outf( p, "pstart(%.*s) seqno = %" PRIu64,
             (int) sub->psublen, sub->psub, sub->start_seqno );
         }
         else {
-          this->printf( "pstart(%.*s) not found\n", (int) len, arg );
+          this->outf( p, "pstart(%.*s) not found", (int) len, arg );
         }
       }
       else {
         if ( cmd == CMD_PSUB_STOP || cmd == CMD_GSUB_STOP ) {
           if ( sub->out.remove( sub_output ) ) {
             if ( sub->out.count == 0 ) {
-              this->printf( "pstop(%.*s) seqno = %" PRIu64 "\n", (int) len, arg,
+              this->outf( p, "pstop(%.*s) seqno = %" PRIu64, (int) len, arg,
                 this->sub_db.console_psub_stop( arg, len, fmt ) );
               sub->complete = true;
             }
             else {
-              this->printf( "pstop(%.*s) rem from existing\n", (int) len, arg );
+              this->outf( p, "pstop(%.*s) rem from existing", (int) len, arg );
             }
           }
           else {
-            this->printf( "pstop(%.*s) not found\n", (int) len, arg );
+            this->outf( p, "pstop(%.*s) not found", (int) len, arg );
           }
         }
         else {
           if ( sub->out.add( sub_output ) )
-            this->printf( "psub(%.*s) added to existing\n", (int) len, arg );
+            this->outf( p, "psub(%.*s) added to existing", (int) len, arg );
           else
-            this->printf( "psub(%.*s) exists\n", (int) len, arg );
+            this->outf( p, "psub(%.*s) exists", (int) len, arg );
         }
       }
       break;
     }
+    case CMD_REMOTE:
     case CMD_RPC:
     case CMD_ANY:
     case CMD_PUBLISH:
@@ -2027,8 +2029,11 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
         datalen--;
       if ( datalen == 0 )
         goto help;
-      this->printf( "pub(%.*s) \"%.*s\"\n", 
-        (int) len, arg, (int) datalen, data );
+      if ( cmd == CMD_REMOTE ) {
+        this->send_remote_request( p, arg, len, data, datalen );
+        break;
+      }
+      this->outf( p, "pub(%.*s) (%.*s)", (int) len, arg, (int) datalen, data );
 
       PubMcastData mc( arg, len, data, datalen, MD_STRING );
       if ( cmd != CMD_PUBLISH ) {
@@ -2090,7 +2095,7 @@ Console::find_tport( const char *name,  size_t len,
         tport_id = rte->tport_id;
         if ( rte->is_set( TPORT_IS_SHUTDOWN ) )
           return T_IS_DOWN;
-        this->printf( "transport \"%.*s\" is running tport %u\n",
+        this->printf( "transport (%.*s) is running tport %u\n",
                       (int) len, name, tport_id );
         return T_IS_RUNNING;
       }
@@ -2099,7 +2104,7 @@ Console::find_tport( const char *name,  size_t len,
       return T_CFG_EXISTS;
     }
   }
-  this->printf( "transport \"%.*s\" not found\n", (int) len, name );
+  this->printf( "transport (%.*s) not found\n", (int) len, name );
   return T_NO_EXIST;
 }
 
@@ -2126,9 +2131,9 @@ Console::connect( const char *name,  size_t len ) noexcept
     b = this->mgr.add_transport( this->mgr.svc, *tree_idx, false );
   }
   if ( b )
-    this->printf( "transport \"%.*s\" started connecting\n", (int) len, name );
+    this->printf( "transport (%.*s) started connecting\n", (int) len, name );
   else
-    this->printf( "transport \"%.*s\" connect failed\n", (int) len, name );
+    this->printf( "transport (%.*s) connect failed\n", (int) len, name );
 }
 
 void
@@ -2148,9 +2153,9 @@ Console::listen( const char *name,  size_t len ) noexcept
     b = this->mgr.add_transport( this->mgr.svc, *tree_idx, true );
   }
   if ( b )
-    this->printf( "transport \"%.*s\" started listening\n", (int) len, name );
+    this->printf( "transport (%.*s) started listening\n", (int) len, name );
   else
-    this->printf( "transport \"%.*s\" listen failed\n", (int) len, name );
+    this->printf( "transport (%.*s) listen failed\n", (int) len, name );
 }
 
 void
@@ -2162,15 +2167,15 @@ Console::shutdown( const char *name,  size_t len ) noexcept
   if ( res == T_NO_EXIST )
     return;
   /*if ( res != T_IS_RUNNING ) {
-    this->printf( "transport \"%.*s\" not running\n", (int) len, name );
+    this->printf( "transport (%.*s) not running\n", (int) len, name );
     return;
   }*/
   uint32_t count = this->mgr.shutdown_transport( this->mgr.svc, *tree_idx );
   if ( count > 0 )
-    this->printf( "transport \"%.*s\" shutdown (%u instances down)\n",
+    this->printf( "transport (%.*s) shutdown (%u instances down)\n",
                   (int) len, name, count );
   else
-    this->printf( "no transport \"%.*s\" running\n", (int) len, name );
+    this->printf( "no transport (%.*s) running\n", (int) len, name );
 }
 
 void
@@ -2364,7 +2369,7 @@ Console::show_subs( ConsoleOutput *p,  const char *arg,
     rpc->set_match( arg2, arglen2 );
 
   if ( ! rpc->show_self || arglen == 0 ) {
-    for ( uint32_t uid = 0; uid < this->user_db.next_uid; uid++ ) {
+    for ( uint32_t uid = 1; uid < this->user_db.next_uid; uid++ ) {
       n = this->user_db.bridge_tab[ uid ];
       if ( n != NULL && n->is_set( AUTHENTICATED_STATE ) ) {
         if ( arglen != 0 ) {
@@ -2394,6 +2399,117 @@ Console::show_subs( ConsoleOutput *p,  const char *arg,
 }
 
 void
+Console::send_remote_request( ConsoleOutput *p,  const char *arg,
+                              size_t arglen,  const char *cmd,
+                              size_t cmdlen ) noexcept
+{
+  UserBridge    * n;
+  char            isub[ UserDB::INBOX_BASE_SIZE + sizeof( _REM ) ];
+  uint32_t        len;
+  ConsoleRemote * rpc = this->create_rpc<ConsoleRemote>( p, REMOTE_RPC );
+
+  if ( arglen == 1 && arg[ 0 ] == '*' )
+    arglen = 0;
+  if ( arglen != 0 ) {
+    if ( this->user_db.user.user.equals( arg, arglen ) ||
+         ( arglen == 4 && ::memcmp( arg, "self", 4 ) == 0 ) )
+      rpc->show_self = true;
+  }
+  else {
+    rpc->show_self = true;
+  }
+
+  if ( rpc->show_self && cmdlen > 0 )
+    rpc->set_command( cmd, cmdlen );
+    
+  for ( uint32_t uid = 1; uid < this->user_db.next_uid; uid++ ) {
+    n = this->user_db.bridge_tab[ uid ];
+    if ( n != NULL && n->is_set( AUTHENTICATED_STATE ) ) {
+      if ( arglen != 0 ) {
+        if ( ! n->peer.user.equals( arg, arglen ) )
+          continue;
+      }
+      len = n->make_inbox_subject( isub, _REM );
+
+      PubMcastData mc( isub, len, cmd, cmdlen,
+                       cmdlen == 0 ? MD_NODATA : MD_STRING );
+      mc.reply = rpc->inbox_num;
+      mc.token = rpc->token;
+      this->mgr.publish( mc );
+      rpc->count++;
+      if ( arglen != 0 )
+        break;
+    }
+  }
+  if ( rpc->count == 0 ) {
+    rpc->complete = true;
+    if ( rpc->show_self )
+      this->on_remote( *rpc );
+    else if ( arglen > 0 )
+      this->outf( p, "no users matched: %.*s", (int) arglen, arg );
+    else
+      this->outf( p, "no users" );
+  }
+}
+
+bool
+JsonBufOutput::on_output( const char *buf,  size_t buflen ) noexcept
+{
+  char * p  = this->result.make( this->result.count + buflen );
+  p = &p[ this->result.count ];
+  this->result.count += buflen;
+  ::memcpy( p, buf, buflen );
+  return true;
+}
+
+bool
+Console::recv_remote_request( const MsgFramePublish &,  UserBridge &n,
+                              const MsgHdrDecoder &dec ) noexcept
+{
+  const void * data    = NULL;
+  size_t       datalen = 0;
+  char         ret_buf[ 16 ];
+  const char * suf = dec.get_return( ret_buf, NULL );
+
+  if ( dec.test( FID_DATA ) ) {
+    data    = dec.mref[ FID_DATA ].fptr;
+    datalen = dec.mref[ FID_DATA ].fsize;
+  }
+  if ( suf == NULL || datalen == 0 )
+    return true;
+
+  JsonBufOutput out;
+  out.is_remote = true;
+  this->on_input( &out, (const char *) data, datalen );
+  if ( out.result.count == 0 )
+    out.result.puts( "\"no data\"\n" );
+
+  InboxBuf ibx( n.bridge_id, suf );
+  uint64_t token = 0;
+
+  if ( dec.test( FID_TOKEN ) )
+    cvt_number<uint64_t>( dec.mref[ FID_TOKEN ], token );
+
+  MsgEst e( ibx.len() );
+  e.seqno ()
+   .token ()
+   .data  ( out.result.count );
+
+  MsgCat m;
+  m.reserve( e.sz );
+
+  m.open( this->user_db.bridge_id.nonce, ibx.len() )
+   .seqno( ++n.send_inbox_seqno );
+  if ( token != 0 )
+    m.token( token );
+  m.data( out.result.ptr, out.result.count );
+  uint32_t h = ibx.hash();
+  m.close( e.sz, h, CABA_INBOX );
+  m.sign( ibx.buf, ibx.len(), *this->user_db.session_key );
+  return this->user_db.forward_to_inbox( n, ibx, h, m.msg, m.len(), false );
+}
+
+void
 Console::ping_peer( ConsoleOutput *p,  const char *arg,
                     size_t arglen ) noexcept
 {
@@ -2404,7 +2520,7 @@ Console::ping_peer( ConsoleOutput *p,  const char *arg,
 
   if ( arglen == 1 && arg[ 0 ] == '*' )
     arglen = 0;
-  for ( uint32_t uid = 0; uid < this->user_db.next_uid; uid++ ) {
+  for ( uint32_t uid = 1; uid < this->user_db.next_uid; uid++ ) {
     n = this->user_db.bridge_tab[ uid ];
     if ( n != NULL && n->is_set( AUTHENTICATED_STATE ) ) {
       if ( arglen != 0 ) {
@@ -2422,13 +2538,11 @@ Console::ping_peer( ConsoleOutput *p,  const char *arg,
     }
   }
   if ( rpc->count == 0 ) {
-    const bool   is_json = ( p != NULL && p->is_json );
-    const char * q = ( is_json ? "\"" : "" );
     rpc->complete = true;
     if ( arglen > 0 )
-      this->printf( "%sno users matched: %.*s%s\n", q, (int) arglen, arg, q );
+      this->outf( p, "no users matched: %.*s", (int) arglen, arg );
     else
-      this->printf( "%sno users%s\n", q, q );
+      this->outf( p, "no users" );
   }
   else {
     rpc->reply.zero();
@@ -2443,10 +2557,8 @@ Console::mcast_ping( ConsoleOutput *p ) noexcept
 
   rpc->count = this->user_db.uid_auth_count;
   if ( rpc->count == 0 ) {
-    const bool   is_json = ( p != NULL && p->is_json );
-    const char * q = ( is_json ? "\"" : "" );
     rpc->complete = true;
-    this->printf( "%sno users%s\n", q, q );
+    this->outf( p, "no users" );
   }
   else {
     static const char m_ping[] = _MCAST "." _PING;
@@ -2587,6 +2699,162 @@ Console::on_subs( ConsoleSubs &subs ) noexcept
   }
 }
 
+bool
+Console::print_json_table( ConsoleOutput *p,  const void * data,
+                           size_t datalen ) noexcept
+{
+  MDMsgMem      mem;
+  JsonMsgCtx    ctx;
+  char       ** hdr = NULL;
+  TabPrint    * tab;
+  MDReference   aref;
+  MDMsg       * amsg;
+  MDFieldIter * f;
+  MDReference   mref;
+  MDName        name;
+  TabOut        out( this->table, this->tmp, 0 );
+  size_t        el, num_entries;
+  uint32_t      i = 0, j;
+  bool          b;
+
+  if ( ctx.parse( (void *) data, 0, datalen, NULL, &mem, false ) != 0 )
+    return false;
+  if ( ctx.msg->get_reference( aref ) != 0 )
+    return false;
+  if ( aref.ftype != MD_ARRAY ) {
+    if ( aref.ftype == MD_STRING ) {
+      this->printf( "%.*s\n", (int) aref.fsize, (char *) aref.fptr );
+      return true;
+    }
+    return false;
+  }
+  /* expecting an array of messages */
+  num_entries = aref.fsize;
+  if ( aref.fentrysz > 0 )
+    num_entries /= aref.fentrysz;
+  if ( num_entries == 0 ) {
+    this->printf( "no data\n" );
+    return true;
+  }
+  /* parse each message */
+  for ( el = 0; el < num_entries; el++ ) {
+    if ( ctx.msg->get_array_ref( aref, el, mref ) != 0 ||
+         mref.ftype != MD_MESSAGE ||
+         ctx.msg->get_sub_msg( mref, amsg ) != 0 ||
+         amsg->get_field_iter( f ) != 0 )
+      continue;
+    /* the column headers are the field names of the object */
+    if ( out.ncols == 0 ) {
+      for ( b = ( f->first() == 0 ); b; b = ( f->next() == 0 ) ) {
+        if ( f->get_name( name ) == 0 )
+          out.ncols++;
+      }
+      if ( out.ncols > 0 ) {
+        hdr = (char **) mem.make( sizeof( hdr[ 0 ] ) * out.ncols );
+        j = 0;
+        for ( b = ( f->first() == 0 ); b; b = ( f->next() == 0 ) ) {
+          if ( f->get_name( name ) == 0 )
+            hdr[ j++ ] = (char *) name.fname;
+        }
+      }
+    }
+    if ( out.ncols == 0 )
+      continue;
+    /* place each object as a table row */
+    tab = out.make_row();
+    j = 0;
+    for ( b = ( f->first() == 0 ); b; b = ( f->next() == 0 ) ) {
+      if ( f->get_reference( mref ) != 0 )
+        continue;
+      tab[ i + j ].set_null();
+      if ( mref.ftype == MD_DECIMAL ) {
+        MDDecimal dec;
+        if ( dec.get_decimal( mref ) == 0 ) {
+          if ( dec.hint == MD_DEC_INTEGER )
+            tab[ i + j ].set_long( dec.ival, PRINT_SLONG );
+          else {
+            char * tmp_s = (char *) mem.make( 16 );
+            size_t len = dec.get_string( tmp_s, 16 );
+            tab[ i + j ].set( tmp_s, len );
+          }
+        }
+      }
+      else if ( mref.ftype == MD_STRING ) {
+        tab[ i + j ].set( (char *) mref.fptr, mref.fsize );
+      }
+      if ( ++j == out.ncols )
+        break;
+    }
+    for ( ; j < out.ncols; j++ )
+      tab[ i + j ].set_null();
+    i += out.ncols;
+  }
+  if ( out.ncols > 0 )
+    this->print_table( p, (const char **) hdr, out.ncols );
+  return out.ncols > 0;
+}
+
+void
+Console::on_remote( ConsoleRemote &remote ) noexcept
+{
+  ArrayOutput tmp;
+
+  if ( this->out.count > 0 )
+    this->flush_output( NULL );
+
+  if ( remote.show_self ) {
+    JsonBufOutput out;
+    out.is_remote = true;
+    this->on_input( &out, (const char *) remote.cmd, remote.cmd_len );
+    if ( out.result.count == 0 )
+      out.result.puts( "\"no data\"\n" );
+    remote.append_data( 0, out.result.ptr, out.result.count );
+  }
+  /* for each reply by peers */
+  for ( size_t n = 0; n < remote.out.count; n++ ) {
+    ConsoleOutput * p = remote.out.ptr[ n ];
+
+    for ( size_t num = 0; num < remote.reply.count; num++ ) {
+      RemoteReply & rep     = remote.reply.ptr[ num ];
+      char        * data    = &remote.strings.ptr[ rep.data_off ];
+      size_t        datalen = rep.data_len;
+      UserBridge  * n       = this->user_db.bridge_tab[ rep.uid ];
+      const char  * user    = ( n != NULL ? n->peer.user.val :
+                        ( rep.uid == 0 ? this->user_db.user.user.val : NULL ) );
+
+      if ( p == NULL || ! p->is_json ) {
+        if ( user != NULL )
+          this->printf( "%.*sfrom %s.%u%.*s:\n", cz, cc, user, rep.uid, nz, nc);
+        else
+          this->printf( "%.*sfrom uid %u%.*s:\n", cz, cc, rep.uid, nz, nc );
+
+        if ( ! this->print_json_table( p, data, datalen ) )
+          this->outf( p, "unable to parse" );
+      }
+      else if ( remote.reply.count == 1 ) {
+        p->on_output( data, datalen );
+      }
+      else {
+        if ( num == 0 ) /* { "A" : [ data ], "B" : [ data ] } */
+          tmp.s( "{\"" );
+        else
+          tmp.s( ",\"" );
+        if ( user != NULL )
+          tmp.s( user );
+        else
+          tmp.i( rep.uid );
+        tmp.s( "\":" ).b( data, datalen );
+        if ( num == remote.reply.count - 1 ) {
+          tmp.s( "}\n" );
+          p->on_output( tmp.ptr, tmp.count );
+          tmp.count = 0;
+        }
+      }
+    }
+    this->flush_output( p );
+  }
+}
+
 void
 Console::show_users( ConsoleOutput *p ) noexcept
 {
@@ -2682,7 +2950,7 @@ Console::show_unknown( ConsoleOutput *p ) noexcept
   const AdjPending * u;
 
   if ( this->user_db.adjacency_unknown.is_empty() ) {
-    this->printf( "empty\n" );
+    this->outf( p, "empty" );
     return;
   }
   for ( u = this->user_db.adjacency_unknown.hd; u != NULL; u = u->next ) {
@@ -3088,7 +3356,7 @@ Console::show_peers( ConsoleOutput *p ) noexcept
      .set_null()  /* cost */
      .set_null(); /* ptp */
 
-  for ( uint32_t uid = 0; uid < this->user_db.next_uid; uid++ ) {
+  for ( uint32_t uid = 1; uid < this->user_db.next_uid; uid++ ) {
     UserBridge * n = this->user_db.bridge_tab[ uid ];
     if ( n == NULL || ! n->is_set( AUTHENTICATED_STATE ) )
       continue;
@@ -3218,7 +3486,7 @@ Console::show_adjacency( ConsoleOutput *p ) noexcept
   sep = i;
   last_user = last_tport = -1;
   /* print each users port */
-  for ( uid = 0; uid < this->user_db.next_uid; uid++ ) {
+  for ( uid = 1; uid < this->user_db.next_uid; uid++ ) {
     UserBridge * n = this->user_db.bridge_tab[ uid ];
     if ( n == NULL || ! n->is_set( AUTHENTICATED_STATE ) )
       continue;
@@ -3391,7 +3659,7 @@ Console::show_routes( ConsoleOutput *p ) noexcept
   EvPoll     & poll = this->mgr.poll;
   bool         first_tport;
 
-  for ( uint32_t uid = 0; uid < this->user_db.next_uid; uid++ ) {
+  for ( uint32_t uid = 1; uid < this->user_db.next_uid; uid++ ) {
     UserBridge * n = this->user_db.bridge_tab[ uid ];
     if ( n == NULL || ! n->is_set( AUTHENTICATED_STATE ) )
       continue;
@@ -3497,7 +3765,7 @@ Console::show_urls( ConsoleOutput *p ) noexcept
   EvPoll & poll = this->mgr.poll;
   bool     first_tport;
 
-  for ( uint32_t uid = 0; uid < this->user_db.next_uid; uid++ ) {
+  for ( uint32_t uid = 1; uid < this->user_db.next_uid; uid++ ) {
     UserBridge * n = this->user_db.bridge_tab[ uid ];
     if ( n == NULL || ! n->is_set( AUTHENTICATED_STATE ) )
       continue;
@@ -3605,7 +3873,7 @@ Console::show_counters( ConsoleOutput *p ) noexcept
   while ( i < ncols )
     tab[ i++ ].set_null();
 
-  for ( uint32_t uid = 0; uid < this->user_db.next_uid; uid++ ) {
+  for ( uint32_t uid = 1; uid < this->user_db.next_uid; uid++ ) {
     UserBridge * n = this->user_db.bridge_tab[ uid ];
     if ( n == NULL || ! n->is_set( AUTHENTICATED_STATE ) )
       continue;
@@ -3634,7 +3902,7 @@ Console::show_loss( ConsoleOutput *p ) noexcept
   static const uint32_t ncols = 9;
   TabOut out( this->table, this->tmp, ncols );
 
-  for ( uint32_t uid = 0; uid < this->user_db.next_uid; uid++ ) {
+  for ( uint32_t uid = 1; uid < this->user_db.next_uid; uid++ ) {
     UserBridge * n = this->user_db.bridge_tab[ uid ];
     if ( n == NULL || ! n->is_set( AUTHENTICATED_STATE ) )
       continue;
@@ -3663,7 +3931,7 @@ Console::show_skew( ConsoleOutput *p ) noexcept
   TabOut out( this->table, this->tmp, ncols );
   uint64_t cur_time = current_realtime_ns();
 
-  for ( uint32_t uid = 0; uid < this->user_db.next_uid; uid++ ) {
+  for ( uint32_t uid = 1; uid < this->user_db.next_uid; uid++ ) {
     UserBridge * n = this->user_db.bridge_tab[ uid ];
     if ( n == NULL || ! n->is_set( AUTHENTICATED_STATE ) )
       continue;
@@ -4001,11 +4269,12 @@ Console::show_seqno( ConsoleOutput *p,  const char *arg,
   RouteLoc   loc;
   Pub      * pub;
   SubSeqno * sub;
-  int        count = 0;
+  /*int        count = 0;*/
   bool       b;
 
   if ( arglen == 1 && arg[ 0 ] == '*' )
     arglen = 0;
+#if 0
   if ( arglen != 0 ) {
     uint32_t h = kv_crc_c( arg, arglen, 0 );
     pub = this->sub_db.pub_tab.find( h, arg, arglen );
@@ -4020,6 +4289,7 @@ Console::show_seqno( ConsoleOutput *p,  const char *arg,
     }
   }
   if ( count == 0 ) {
+#endif
     for ( pub = this->sub_db.pub_tab.first( loc, b ); pub != NULL;
           pub = this->sub_db.pub_tab.next( loc, b ) ) {
       if ( arglen == 0 || ::memmem( pub->value, pub->len, arg, arglen ) != NULL)
@@ -4031,7 +4301,9 @@ Console::show_seqno( ConsoleOutput *p,  const char *arg,
       if ( arglen == 0 || ::memmem( sub->value, sub->len, arg, arglen ) != NULL)
         this->tab_seqno( sub, out );
     }
+#if 0
   }
+#endif
   static const char *hdr[ ncols ] =
     { "source", "seqno", "start", "time", "subject" };
   this->print_table( p, hdr, ncols );
@@ -4140,6 +4412,21 @@ Console::printf( const char *fmt, ... ) noexcept
   int n = this->out.vprintf( fmt, args );
   va_end( args );
   return n;
+}
+
+void
+Console::outf( ConsoleOutput *p,  const char *fmt, ... ) noexcept
+{
+  bool is_json = ( p != NULL && p->is_json );
+  if ( is_json )
+    this->out.putchar( '\"' );
+  va_list args;
+  va_start( args, fmt );
+  this->out.vprintf( fmt, args );
+  va_end( args );
+  if ( is_json )
+    this->out.putchar( '\"' );
+  this->out.putchar( '\n' );
 }
 
 void
@@ -4332,6 +4619,41 @@ ConsoleSubs::on_data( const SubMsgData &val ) noexcept
   }
   if ( this->complete )
     this->console.on_subs( *this );
+}
+
+void
+ConsoleRemote::append_data( uint32_t uid,  const char *str,
+                            size_t len ) noexcept
+{
+  size_t        i     = this->reply.count,
+                off   = this->strings.count;
+  RemoteReply & reply = this->reply[ i ];
+  char        * data  = this->strings.make( off + len + 1 );
+  data = &data[ off ];
+  ::memcpy( data, str, len );
+  data[ len ] = '\0';
+  this->strings.count += len + 1;
+
+  reply.uid      = uid;
+  reply.data_off = off;
+  reply.data_len = len;
+}
+
+void
+ConsoleRemote::on_data( const SubMsgData &val ) noexcept
+{
+  if ( this->complete || val.token != this->token || val.src_bridge == NULL )
+    return;
+  const char * str = (const char *) val.data;
+  size_t       len = val.datalen;
+
+  if ( len > 0 )
+    this->append_data( val.src_bridge->uid, str, len );
+
+  if ( ++this->total_recv >= this->count )
+    this->complete = true;
+  if ( this->complete )
+    this->console.on_remote( *this );
 }
 
 void

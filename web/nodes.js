@@ -5,13 +5,20 @@ var cy          = null,
     last_width  = 0,
     last_height = 0;
 
-var user_uid_map = {};
+var my_user        = "@(user)",
+    user_uid_map   = {},
+    active_uid_map = {},
+    active_uid_cnt = 0;
 
 function update_user_uid_map( graph ) {
   let gn = graph.nodes;
+  active_uid_map = {};
+  active_uid_cnt = 0;
   for ( let i = 0; i < gn.length; i++ ) {
     if ( gn[ i ].tports > 0 ) {
       user_uid_map[ gn[ i ].user ] = i;
+      active_uid_map[ gn[ i ].user ] = i;
+      active_uid_cnt++;
     }
   }
 }

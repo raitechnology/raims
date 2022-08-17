@@ -17,31 +17,46 @@ function on_interval( me ) {
 
 function on_table_refresh( key ) {
   let key_container = document.getElementById( key );
-  if ( key_container != null && ! key_container.update_in_progress ) {
-    let val = key;
-    if ( key_container.hasOwnProperty( "path_select" ) ) {
-      let select  = key_container.path_select,
-          new_sel = select.value;
-      val += " " + new_sel.charAt( new_sel.length - 1 );
-    }
-    if ( key_container.hasOwnProperty( "user_select" ) ) {
-      let select  = key_container.user_select,
-          new_sel = select.value;
-      val += " " + new_sel;
-    }
-    if ( key_container.hasOwnProperty( "sub_select" ) ) {
-      let select  = key_container.sub_select,
-          new_sel = select.value.split( " " );
-      if ( new_sel.length == 0 )
-        new_sel = "*";
-      else
-        new_sel = new_sel[ new_sel.length - 1 ];
-      val += " " + new_sel;
-    }
-    let s = "template { \"" + val + "\" : @{" + val + "} }";
-    key_container.update_in_progress = true;
-    ws.send( s );
+  if ( key_container == null || key_container.update_in_progress )
+    return;
+  let val = key;
+  if ( key_container.hasOwnProperty( "path_select" ) ) {
+    let select  = key_container.path_select,
+        new_sel = select.value;
+    val += " " + new_sel.charAt( new_sel.length - 1 );
   }
+  if ( key_container.hasOwnProperty( "user_select" ) ) {
+    let select  = key_container.user_select,
+        new_sel = select.value;
+    if ( key.startsWith( "show subs" ) ) {
+      val += " " + new_sel;
+    }
+    else if ( new_sel != my_user ) {
+      val = "remote " + new_sel + " " + val;
+    }
+  }
+  if ( key_container.hasOwnProperty( "sub_select" ) ) {
+    let select  = key_container.sub_select,
+        new_sel = select.value.split( " " );
+    if ( new_sel.length == 0 )
+      new_sel = "*";
+    else
+      new_sel = new_sel[ new_sel.length - 1 ];
+    val += " " + new_sel;
+  }
+  let s = "template { \"" + val + "\" : @{" + val + "} }";
+  key_container.update_in_progress = true;
+  key_container.update_count++;
+  ws.send( s );
+}
+
+function on_table_user_select( key ) {
+  let key_container = document.getElementById( key );
+  if ( key_container == null || key_container.update_in_progress )
+    return;
+  if ( key_container.update_count > 0 ||
+       ! key_container.hasOwnProperty( "sub_select" ) )
+    on_table_refresh( key );
 }
 
 function on_table_close( key ) {
@@ -104,9 +119,7 @@ function convert_array( obj, ret ) {
 
 function normalize_string( str ) {
   if ( str.match( /^[\w]+$/ ) ) return str;
-  return '"' + escape( str ).replace( /%u/g, "\\u" )
-                            .replace( /%U/g, "\\U" )
-                            .replace( /%/g, "\\x" ) + '"';
+  return '"' + str + '"';
 }
 
 function convert_hash( obj, ret ) {
@@ -129,51 +142,173 @@ function convert_hash( obj, ret ) {
   return ret;
 }
 
-function update_table( key, msg ) {
-  let end = null, user = null, sub = null;
+function document_create( type, clazz ) {
+  let el = document.createElement( type );
+  el.className = clazz;
+  return el;
+}
 
-  let is_show_subs   = false,
-      is_show_seqno  = false,
-      is_show_log    = false,
-      is_show_events = false,
-      is_path_cmd    = false;
-
-  if ( key.startsWith( "show subs" ) )        is_show_subs   = true;
-  else if ( key.startsWith( "show seqno" ) )  is_show_seqno  = true;
-  else if ( key.startsWith( "show log" ) )    is_show_log    = true;
-  else if ( key.startsWith( "show events" ) ) is_show_events = true;
-
-  if ( is_show_subs || is_show_seqno ) {
-    user = "*";
-    sub  = "*";
-    for ( let i = 9; i < key.length; i++ ) {
-      if ( key.charAt( i ) == " " ) {
-        if ( i + 1 == key.length || key.charAt( i + 1 ) != " " ) {
-          if ( i + 1 < key.length )
-            user = key.substr( i + 1, key.length - ( i + 1 ) );
-          break;
-        }
-      }
+function make_table_body( tr, body, msg, invert_order, peer ) {
+  if ( ! tr.hasOwnProperty( "hdr_init" ) ) {
+    tr.hdr_init = true;
+    if ( peer != null ) {
+      let th = document_create( "th", "thead-text" );
+      th.appendChild( document.createTextNode( "peer" ) );
+      tr.appendChild( th );
     }
-    if ( is_show_subs ) {
-      for ( let j = 1; j < user.length; j++ ) {
-        if ( user.charAt( j ) == " " ) {
-          if ( j + 1 == user.length || user.charAt( j + 1 ) != " " ) {
-            if ( j + 1 < user.length )
-              sub = user.substr( j + 1, user.length - ( j + 1 ) );
-            user = user.substr( 0, j );
-            break;
-          }
-        }
+    if ( is_object( msg[ 0 ] ) ) {
+      for ( let prop in msg[ 0 ] ) {
+        let th = document_create( "th", "thead-text" );
+        th.appendChild( document.createTextNode( prop ) );
+        tr.appendChild( th );
       }
-      key = "show subs";
     }
     else {
-      sub  = user;
-      user = null;
-      key  = "show seqno";
+      let th = document_create( "th", "thead-text" );
+      th.appendChild( document.createTextNode( "text" ) );
+      tr.appendChild( th );
     }
   }
+  /* an array of objects */
+  if ( is_object( msg[ 0 ] ) ) {
+    /* normal order */
+    if ( ! invert_order ) {
+      for ( let i = 0; i < msg.length; i++ ) {
+        let values = Object.values( msg[ i ] ),
+            tr     = document_create( "tr", "tr-main" );
+        if ( peer != null ) {
+          let td = document_create( "td", "td-main" );
+          if ( i == 0 ) {
+            td.className = "td-main-peer";
+            td.appendChild( document.createTextNode( peer ) );
+          }
+          tr.appendChild( td );
+        }
+        for ( let j = 0; j < values.length; j++ ) {
+          let td = document_create( "td", "td-main" );
+          td.appendChild( document.createTextNode( values[ j ] ) );
+          tr.appendChild( td );
+        }
+        body.appendChild( tr );
+      }
+    }
+    /* invert log and events, show last first */
+    else {
+      for ( let i = msg.length; i > 0; i-- ) {
+        let values = Object.values( msg[ i-1 ] ),
+            tr     = document_create( "tr", "tr-main" );
+        if ( peer != null ) {
+          let td = document_create( "td", "td-main" );
+          if ( i == msg.length ) {
+            td.className = "td-main-peer";
+            td.appendChild( document.createTextNode( peer ) );
+          }
+          tr.appendChild( td );
+        }
+        for ( let j = 0; j < values.length; j++ ) {
+          let val = values[ j ];
+          let td = document_create( "td", "td-main" );
+          if ( j == 1 && val.charAt( 0 ) == "!" ) { /* highlight errors */
+            val = val.substr( 2, val.length - 2 );
+            td.className = "td-main-err";
+          }
+          td.appendChild( document.createTextNode( val ) );
+          tr.appendChild( td );
+        }
+        body.appendChild( tr );
+      }
+    }
+  }
+  /* an array of strings */
+  else {
+    for ( let j = 0; j < msg.length; j++ ) {
+      let tr = document_create( "tr", "tr-main" ), td;
+      if ( peer != null ) {
+        td = document_create( "td", "td-main" );
+        if ( j == 0 ) {
+          td.className = "td-main-peer";
+          td.appendChild( document.createTextNode( peer ) );
+        }
+        tr.appendChild( td );
+      }
+      td = document_create( "td", "td-main" );
+      td.appendChild( document.createTextNode( msg[ j ] ) );
+      tr.appendChild( td );
+      body.appendChild( tr );
+    }
+  }
+}
+
+function make_table_peer_no_data( body, msg, peer, max_arity )
+{
+  let tr  = document_create( "tr", "tr-main" ),
+      td  = document_create( "td", "td-main-peer" ),
+      txt = "no data";
+  td.appendChild( document.createTextNode( peer ) );
+  tr.appendChild( td );
+  if ( is_array( msg ) ) {
+    if ( msg.length > 0 )
+      if ( is_string( msg[ 0 ] ) )
+        txt = msg[ 0 ];
+  }
+  td = document_create( "td", "td-main" );
+  td.appendChild( document.createTextNode( txt ) );
+  if ( max_arity > 1 )
+    td.colSpan = max_arity;
+  tr.appendChild( td );
+  body.appendChild( tr );
+}
+
+function update_table( key, msg ) {
+  let end = null, show_subs_user = null, sub_match = null, rem = my_user;
+
+  let is_show         = false,
+      is_show_subs    = false,
+      is_show_seqno   = false,
+      is_show_log     = false,
+      is_show_events  = false,
+      is_show_running = false,
+      is_path_cmd     = false;
+
+  /* remote B show loss */
+  if ( key.startsWith( "remote " ) ) {
+    let args = key.split( ' ' );
+    if ( args.length > 2 ) {
+      rem = args[ 1 ];
+      let prefix = 6 + 1 + rem.length + 1;
+      key = key.substr( prefix, key.length - prefix );
+    }
+  }
+  if ( key.startsWith( "show subs" ) )         is_show_subs    = true;
+  else if ( key.startsWith( "show seqno" ) )   is_show_seqno   = true;
+  else if ( key.startsWith( "show log" ) )     is_show_log     = true;
+  else if ( key.startsWith( "show events" ) )  is_show_events  = true;
+  else if ( key.startsWith( "show running" ) ) is_show_running = true;
+  if ( key.startsWith( "show " ) )             is_show         = true;
+
+  /* show subs <user> <match> */
+  /* show seqno <match> */
+  if ( is_show_subs || is_show_seqno ) {
+    let args = key.split( ' ' );
+    show_subs_user = my_user;
+    sub_match = "*";
+    if ( args.length > 2 ) {
+      let prefix = args[ 0 ].length + 1 + args[ 1 ].length;
+      if ( args.length > 3 ) {
+        show_subs_user = args[ 2 ];
+        sub_match = args[ 3 ];
+      }
+      else if ( is_show_subs ) {
+        show_subs_user = args[ 2 ];
+      }
+      else {
+        show_subs_user = rem;
+        sub_match = args[ 2 ];
+      }
+      key = key.substr( 0, prefix );
+    }
+  }
+  /* show blooms 0, show path 1 */
   else if ( key.length > 2 ) {
     end = key.charAt( key.length - 1 );
     if ( ! isNaN( end ) && key.charAt( key.length - 2 ) == " " ) {
@@ -188,8 +323,7 @@ function update_table( key, msg ) {
 
   if ( key_container == null ) {
     let work = document.getElementById( "work" );
-    key_container = document.createElement( "div" );
-    key_container.className = "work-table";
+    key_container = document_create( "div", "work-table" );
     key_container.id = key;
     work.appendChild( key_container );
     if ( c_free < containers.length ) {
@@ -203,7 +337,8 @@ function update_table( key, msg ) {
       containers.push( key_container );
       key_container.index = c_free++;
     }
-    key_container.auto_update = false;
+    key_container.auto_update  = false;
+    key_container.update_count = 0;
     is_new = true;
   }
   else {
@@ -212,16 +347,16 @@ function update_table( key, msg ) {
   }
   key_container.update_in_progress = false;
 
-  let table = document.createElement( "table" ),
-      thead = document.createElement( "thead" ),
-      tr    = document.createElement( "tr" );
+  let table = document_create( "table", "table-main" ),
+      thead = document_create( "thead", "thead-main" ),
+      tr    = document_create( "tr", "tr-main" );
 
-  thead.className = "thead-main";
   thead.appendChild( tr );
-  table.className = "table-main";
   table.appendChild( thead );
   /* make the body of the table */
-  let txt = null;
+  let txt = null,
+      is_multi_user = false,
+      max_arity = 0;
   /* check message is empty array [] */
   if ( is_array( msg ) ) {
     if ( msg.length == 0 )
@@ -231,163 +366,144 @@ function update_table( key, msg ) {
   else if ( is_string( msg ) ) {
     txt = document.createTextNode( msg );
   }
-  /* a complex object, "show running" */
+  /* a complex object, "show running" or multi reply with "remote * cmd" */
   else {
-    txt = document.createElement( "pre" );
-    txt.appendChild(
-      document.createTextNode( convert_json( msg, [] ).join( "\n" ) ) );
+    if ( is_show ) {
+      if ( ! is_show_subs && rem == "*" ) {
+        is_multi_user = true;
+        for ( let prop in msg ) {
+          if ( ! active_uid_map.hasOwnProperty( prop ) ) {
+            is_multi_user = false;
+            break;
+          }
+          let vals = msg[ prop ];
+          if ( is_array( vals ) && vals.length > 0 ) {
+            let len = Object.keys( vals[ 0 ] ).length;
+            if ( len > max_arity )
+              max_arity = len;
+          }
+        }
+      }
+    }
+    if ( ! is_multi_user ) {
+      txt = document.createElement( "pre" );
+      txt.appendChild(
+        document.createTextNode( convert_json( msg, [] ).join( "\n" ) ) );
+    }
   }
   /* if not an array */
   if ( txt != null ) {
-    let td  = document.createElement( "td" );
-    td.className = "td-main";
+    let td  = document_create( "td", "td-main" );
     td.appendChild( txt );
     tr.appendChild( td );
   }
   else {
-    let body = document.createElement( "tbody" );
-    /* an array of objects */
-    if ( is_object( msg[ 0 ] ) ) {
-      for ( let prop in msg[ 0 ] ) {
-        let th = document.createElement( "th" );
-        th.className = "thead-text";
-        th.appendChild( document.createTextNode( prop ) );
-        tr.appendChild( th );
-      }
-
-      if ( ! is_show_log && ! is_show_events ) {
-        for ( let i = 0; i < msg.length; i++ ) {
-          let values = Object.values( msg[ i ] ),
-              tr     = document.createElement( "tr" );
-          tr.className = "tr-main";
-          for ( let j = 0; j < values.length; j++ ) {
-            let td = document.createElement( "td" );
-            td.className = "td-main";
-            td.appendChild( document.createTextNode( values[ j ] ) );
-            tr.appendChild( td );
-          }
-          body.appendChild( tr );
-        }
-      }
-      else {
-        for ( let i = msg.length; i > 0; i-- ) {
-          let values = Object.values( msg[ i-1 ] ),
-              tr     = document.createElement( "tr" );
-          tr.className = "tr-main";
-          for ( let j = 0; j < values.length; j++ ) {
-            let val = values[ j ];
-            let td = document.createElement( "td" );
-            if ( j == 1 && is_show_log &&
-                 val.charAt( 0 ) == "!" ) { /* highlight errors */
-              val = val.substr( 2, val.length - 2 );
-              td.className = "td-main-err";
-            }
-            else
-              td.className = "td-main";
-            td.appendChild( document.createTextNode( val ) );
-            tr.appendChild( td );
-          }
-          body.appendChild( tr );
-        }
-      }
-    }
-    /* an array of strings */
+    let body = document_create( "tbody", "tbody-main" ),
+        invert_order = ( is_show_log || is_show_events );
+    if ( ! is_multi_user )
+      make_table_body( tr, body, msg, invert_order, null );
     else {
-      for ( let j = 0; j < msg.length; j++ ) {
-        let tr = document.createElement( "tr" ),
-            td = document.createElement( "td" );
-        tr.className = "tr-main";
-        td.className = "td-main";
-        td.appendChild( document.createTextNode( msg[ j ] ) );
-        tr.appendChild( td );
-        body.appendChild( tr );
+      let no_data = [];
+      for ( let prop in msg ) {
+        let vals = msg[ prop ];
+        if ( is_array( vals ) && vals.length > 0 &&
+             Object.keys( vals[ 0 ] ).length == max_arity )
+          make_table_body( tr, body, msg[ prop ], invert_order, prop );
+        else
+          no_data.push( prop );
+      }
+      if ( no_data.length != 0 ) {
+        for ( let i = 0; i < no_data.length; i++ ) {
+          let x = no_data[ i ];
+          make_table_peer_no_data( body, msg[ x ], x, max_arity );
+        }
       }
     }
     table.appendChild( body );
   }
   let cap = table.createCaption(),
-      bar = document.createElement( "div" ),
+      bar = document_create( "div", "table-main-caption" ),
       cd, a;
-
-  bar.className = "table-main-caption";
-  cd = document.createElement( "div" );
-  cd.className = "table-main-time";
+  /* make top bar */
+  cd = document_create( "div", "table-main-time" );
   key_container.update_last = Date.now();
   cd.appendChild(
     document.createTextNode( time_fmt.format( key_container.update_last ) ) );
   bar.appendChild( cd );
-
-  cd = document.createElement( "div" );
-  a  = document.createElement( "a" );
+  /* table title, refresh */
+  cd = document_create( "div", "table-main-title" );
+  a  = document_create( "a", "table-link" );
   a.onclick   = function() { on_table_refresh( key ); }
   a.title     = "refresh";
-  a.className = "table-link";
   a.appendChild( document.createTextNode( key ) );
-  cd.className = "table-main-title";
   cd.appendChild( a );
   bar.appendChild( cd );
-
-  if ( is_path_cmd || is_show_subs || is_show_seqno ) {
-    /* make drop down for path or user */
-    if ( is_path_cmd ) { /* path select option */
-      cd = document.createElement( "div" );
-      let sel = document.createElement( "select" );
-
-      for ( let i = 0; i < 4; i++ ) {
-        let opt  = document.createElement( "option" ),
-            ival = i.toString(),
-            txt  = "path " + ival;
-        opt.text  = txt;
-        opt.value = txt;
-        if ( end == ival )
+  /* make user select option */
+  if ( is_show ) {
+    if ( active_uid_cnt > 1 ) {
+      let sel, opt;
+      cd = document_create( "div", "table-main-select" );
+      sel = document.createElement( "select" );
+      if ( ! is_show_running ) {
+        opt = document.createElement( "option" );
+        opt.text  = "*";
+        opt.value = "*";
+        if ( ( ! is_show_subs && rem == "*" ) ||
+             ( is_show_subs && show_subs_user == "*" ) )
           opt.selected = true;
         sel.appendChild( opt );
       }
-      key_container.path_select = sel;
-      sel.onchange = function() { on_table_refresh( key ); }
-      cd.className = "table-main-select";
-      cd.appendChild( sel );
-      bar.appendChild( cd );
-    }
-    else if ( is_show_subs ) { /* user select option */
-      cd = document.createElement( "div" );
-      let sel = document.createElement( "select" ),
-          opt = document.createElement( "option" );
-      opt.text  = "*";
-      opt.value = "*";
-      if ( user == "*" )
-        opt.selected = true;
-      sel.appendChild( opt );
-      for ( let prop in user_uid_map ) {
+      for ( let prop in active_uid_map ) {
         opt = document.createElement( "option" );
         opt.text  = prop;
         opt.value = prop;
-        if ( user == prop )
+        if ( ( ! is_show_subs && rem == prop ) ||
+             ( is_show_subs && show_subs_user == prop ) )
           opt.selected = true;
         sel.appendChild( opt );
       }
+      sel.onchange = function() { on_table_user_select( key ); }
       key_container.user_select = sel;
-      cd.className = "table-main-select";
       cd.appendChild( sel );
       bar.appendChild( cd );
     }
-    if ( is_show_subs || is_show_seqno ) { /* text input for sub */
-      cd = document.createElement( "div" );
-      let inp = document.createElement( "input" );
-      inp.type = "search";
-      inp.value = "match " + sub;
-      key_container.sub_select = inp;
-      cd.className = "table-main-select";
-      cd.appendChild( inp );
-      bar.appendChild( cd );
-    }
   }
+  /* show path N, make path select option */
+  if ( is_path_cmd ) {
+    cd = document_create( "div", "table-main-select" );
+    let sel = document.createElement( "select" );
+
+    for ( let i = 0; i < 4; i++ ) {
+      let opt  = document.createElement( "option" ),
+          ival = i.toString(),
+          txt  = "path " + ival;
+      opt.text  = txt;
+      opt.value = txt;
+      if ( end == ival )
+        opt.selected = true;
+      sel.appendChild( opt );
+    }
+    key_container.path_select = sel;
+    sel.onchange = function() { on_table_refresh( key ); }
+    cd.appendChild( sel );
+    bar.appendChild( cd );
+  }
+  /* show subs <user> <match>, make input for match */
+  if ( is_show_subs || is_show_seqno ) {
+    cd = document_create( "div", "table-main-select" );
+    let inp = document.createElement( "input" );
+    inp.type = "search";
+    inp.value = "match " + sub_match;
+    key_container.sub_select = inp;
+    cd.appendChild( inp );
+    bar.appendChild( cd );
+  }
+  /* create "U" auto update clicker */
   cd = document.createElement( "div" );
-  a  = document.createElement( "a" );
+  a  = document_create( "a", "table-link" );
   key_container.auto_div = cd;
   key_container.auto_a   = a;
   a.onclick   = function() { on_table_auto_update( key ); }
-  a.className = "table-link";
   a.appendChild( document.createTextNode( "U" ) );
   if ( key_container.auto_update ) {
     cd.className = "table-main-barend-clicked";
@@ -399,14 +515,12 @@ function update_table( key, msg ) {
   }
   cd.appendChild( a );
   bar.appendChild( cd );
-
-  cd = document.createElement( "div" );
-  a  = document.createElement( "a" );
+  /* create "X" close clicker */
+  cd = document_create( "div", "table-main-barend" );
+  a  = document_create( "a", "table-link" );
   a.onclick   = function() { on_table_close( key ); }
   a.title     = "close";
-  a.className = "table-link";
   a.appendChild( document.createTextNode( "X" ) );
-  cd.className = "table-main-barend";
   cd.appendChild( a );
   bar.appendChild( cd );
   cap.appendChild( bar );
@@ -461,6 +575,7 @@ function on_startup( webs ) {
   ws.onopen = function( event ) {
     ws.send(
 "template { \"T\": { \"nodes\": @{show nodes}, \"links\": @{show links} } }" );
+    ws.send( "sub _N.ADJ.@(user)" ); /* notify when adjacency chenges */
     timer = setInterval( on_interval, 1000, this );
   };
   ws.onclose = function( event ) {

@@ -161,6 +161,7 @@ HtmlOutput::init( WebType type ) noexcept
   this->rpc         = NULL;
   this->is_html     = ( type == W_HTML );
   this->is_json     = ( type == W_JSON );
+  this->is_remote   = false;
   this->in_progress = false;
 }
 
@@ -171,6 +172,7 @@ SubOutput::init( void ) noexcept
   this->rpc          = NULL;
   this->is_html      = false;
   this->is_json      = true;
+  this->is_remote    = false;
   this->in_progress  = false;
   this->is_local_cmd = false;
   this->trail        = NULL;
@@ -666,9 +668,7 @@ WebOutput::template_property( const char *var,  size_t varlen,
         #define STR( s ) s, sizeof( s ) - 1
         this->append_bytes( STR( "[" ) );
         for ( uint32_t i = 0; i < ncmds; i++ ) {
-          if ( cmds[ i ].cmd < CMD_CONNECT &&
-               ( cmds[ i ].cmd < CMD_SHOW_RUN_TPORTS ||
-                 cmds[ i ].cmd > CMD_SHOW_RUN_PARAM ) ) {
+          if ( cmds[ i ].cmd != CMD_REMOTE && cmds[ i ].cmd <= CMD_SHOW_RUN ) {
             size_t slen = ::strlen( cmds[ i ].str ),
                    dlen = ::strlen( cmds[ i ].descr ),
                    alen = ::strlen( cmds[ i ].args );

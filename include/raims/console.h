@@ -25,10 +25,10 @@ struct ConsoleRPC;
 struct ConsoleOutput {
   ConsoleOutput *next, *back;
   ConsoleRPC * rpc;
-  bool is_html;
-  bool is_json;
-  ConsoleOutput( bool html = false,  bool json = false )
-    : next( 0 ), back( 0 ), rpc( 0 ), is_html( html ), is_json( json ) {}
+  bool is_html, is_json, is_remote;
+  ConsoleOutput( bool html = false,  bool json = false,  bool is_rem = false )
+    : next( 0 ), back( 0 ), rpc( 0 ), is_html( html ), is_json( json ),
+      is_remote( is_rem ) {}
   virtual bool on_output( const char *buf,  size_t buflen ) noexcept;
   virtual void on_prompt( const char *prompt ) noexcept;
   virtual void on_quit( void ) noexcept;
@@ -44,23 +44,30 @@ struct ConsoleOutArray   : public kv::ArrayCount< ConsoleOutput *, 2 > {
   bool remove( ConsoleOutput *p ) noexcept;
 };
 
-struct JsonOutput : public ConsoleOutput {
+struct JsonFileOutput : public ConsoleOutput {
   char   * path;
   uint32_t pathlen;
   int      fd;
   void * operator new( size_t, void *ptr ) { return ptr; }
-  JsonOutput( int fildes )
+  JsonFileOutput( int fildes )
     : ConsoleOutput( false, true ), path( 0 ), pathlen( 0 ), fd( fildes ) {}
-  static JsonOutput *create( const char *path,  size_t pathlen ) noexcept;
+  static JsonFileOutput *create( const char *path,  size_t pathlen ) noexcept;
   bool open( void ) noexcept;
   virtual bool on_output( const char *buf,  size_t buflen ) noexcept;
   virtual void on_remove( void ) noexcept;
 };
 
-struct JsonOutArray : public kv::ArrayCount< JsonOutput *, 2 > {
+struct JsonOutArray : public kv::ArrayCount< JsonFileOutput *, 2 > {
   JsonOutArray() {}
-  JsonOutput * open( const char *path,  size_t pathlen ) noexcept;
-  JsonOutput * find( const char *path,  size_t pathlen ) noexcept;
+  JsonFileOutput * open( const char *path,  size_t pathlen ) noexcept;
+  JsonFileOutput * find( const char *path,  size_t pathlen ) noexcept;
+};
+
+struct JsonBufOutput : public ConsoleOutput {
+  kv::ArrayOutput result;
+  JsonBufOutput() : ConsoleOutput( false, true ) {}
+  ~JsonBufOutput() { this->result.clear(); }
+  virtual bool on_output( const char *buf,  size_t buflen ) noexcept;
 };
 
 struct SessionMgr;
@@ -256,9 +263,10 @@ struct TabPrint {
 
 enum ConsRpcType {
   PING_RPC   = 0,
-  SUBS_RPC   = 1,
-  SUB_START  = 2,
-  PSUB_START = 3
+  REMOTE_RPC = 1,
+  SUBS_RPC   = 2,
+  SUB_START  = 3,
+  PSUB_START = 4
 };
 
 struct Console;
@@ -322,7 +330,7 @@ struct ConsoleSubs : public ConsoleRPC {
   void * operator new( size_t, void *ptr ) { return ptr; }
   void operator delete( void *ptr ) { ::free( ptr ); }
   ConsoleSubs( Console &c ) : ConsoleRPC( c, SUBS_RPC ),
-    match( 0 ), match_len( 0 ) {}
+    match( 0 ), match_len( 0 ), show_self( false ) {}
   virtual void on_data( const SubMsgData &val ) noexcept;
   virtual void init( void ) noexcept {
     this->ConsoleRPC::init();
@@ -336,6 +344,42 @@ struct ConsoleSubs : public ConsoleRPC {
     ::memcpy( this->match, s, l );
     this->match[ l ] = '\0';
     this->match_len = l;
+  }
+};
+
+struct RemoteReply {
+  size_t   data_off;
+  uint32_t data_len,
+           uid;
+};
+
+struct ConsoleRemote : public ConsoleRPC {
+  kv::ArrayCount< char, 8192 >        strings;
+  kv::ArrayCount< RemoteReply, 1024 > reply;
+  uint32_t total_recv;
+  char   * cmd;
+  size_t   cmd_len;
+  bool     show_self;
+
+  void * operator new( size_t, void *ptr ) { return ptr; }
+  void operator delete( void *ptr ) { ::free( ptr ); }
+  ConsoleRemote( Console &c ) : ConsoleRPC( c, REMOTE_RPC ), total_recv( 0 ),
+    cmd( 0 ), cmd_len( 0 ), show_self( false ) {}
+  void append_data( uint32_t uid,  const char *str,  size_t len ) noexcept;
+  virtual void on_data( const SubMsgData &val ) noexcept;
+  virtual void init( void ) noexcept {
+    this->ConsoleRPC::init();
+    this->strings.count = 0;
+    this->reply.count   = 0;
+    this->total_recv    = 0;
+    this->cmd_len       = 0;
+    this->show_self     = false;
+  }
+  void set_command( const char *s,  size_t l ) {
+    this->cmd = (char *) ::realloc( this->cmd, l + 1 );
+    ::memcpy( this->cmd, s, l );
+    this->cmd[ l ] = '\0';
+    this->cmd_len = l;
   }
 };
 
@@ -428,7 +472,7 @@ struct ConsoleOutBuf : public kv::ArrayOutput {};
 struct TabOut {
   TableArray    & table;
   ConsoleOutBuf & tmp;
-  const size_t    ncols;
+  size_t          ncols;
   TabOut( TableArray & t, ConsoleOutBuf & b, size_t n )
       : table( t ), tmp( b ), ncols( n ) {
     t.count = 0;
@@ -557,9 +601,16 @@ struct Console : public md::MDOutput, public SubOnMsg, public ConfigPrinter {
   void show_subs( ConsoleOutput *p,  const char *arg,  size_t arglen,
                   const char *arg2,  size_t arglen2 ) noexcept;
   void ping_peer( ConsoleOutput *p,  const char *arg,  size_t arglen ) noexcept;
+  void send_remote_request( ConsoleOutput *p,  const char *arg,  size_t arglen,
+                            const char *cmd,  size_t cmdlen ) noexcept;
+  bool recv_remote_request( const MsgFramePublish &pub,  UserBridge &n,
+                            const MsgHdrDecoder &dec ) noexcept;
   void mcast_ping( ConsoleOutput *p ) noexcept;
 
   void on_ping( ConsolePing &ping ) noexcept;
+  bool print_json_table( ConsoleOutput *p,  const void * data,
+                         size_t datalen ) noexcept;
+  void on_remote( ConsoleRemote &remote ) noexcept;
   void on_subs( ConsoleSubs &subs ) noexcept;
   void print_msg( md::MDMsg &msg ) noexcept;
   void print_json( md::MDMsg &msg ) noexcept;
@@ -594,6 +645,7 @@ struct Console : public md::MDOutput, public SubOnMsg, public ConfigPrinter {
   int puts( const char *s ) noexcept;
   void putchar( char c ) noexcept;
   virtual int printf( const char *fmt,  ... ) noexcept final __attribute__((format(printf,2,3)));
+  void outf( ConsoleOutput *p,  const char *fmt,  ... ) noexcept __attribute__((format(printf,3,4)));
   void log_output( int stream,  uint64_t stamp,  size_t len,
                    const char *buf ) noexcept;
   void stop_rpc( ConsoleOutput *p,  ConsoleRPC *rpc ) noexcept;
@@ -633,74 +685,75 @@ enum ConsoleCmd {
   CMD_EMPTY            = 0,
   CMD_PING             = 1,  /* ping [U]                   */
   CMD_MPING            = 2,  /* mping                      */
-  CMD_SHOW             = 3,  /* show ... */
-  CMD_SHOW_SUBS        = 4,  /* show subs [U]              */
-  CMD_SHOW_SEQNO       = 5,  /* show seqno                 */
-  CMD_SHOW_ADJACENCY   = 6,  /* show adjacency             */
-  CMD_SHOW_PEERS       = 7,  /* show peers                 */
-  CMD_SHOW_PORTS       = 8,  /* show ports [T]             */
-  CMD_SHOW_STATUS      = 9,  /* show status [T]            */
-  CMD_SHOW_LINKS       = 10, /* show links                 */
-  CMD_SHOW_NODES       = 11, /* show nodes                 */
-  CMD_SHOW_ROUTES      = 12, /* show routes                */
-  CMD_SHOW_URLS        = 13, /* show urls                  */
-  CMD_SHOW_TPORTS      = 14, /* show tport [T]             */
-  CMD_SHOW_USERS       = 15, /* show user [U]              */
-  CMD_SHOW_EVENTS      = 16, /* show events                */
-  CMD_SHOW_UNKNOWN     = 17, /* show unknown               */
-  CMD_SHOW_LOGS        = 18, /* show logs                  */
-  CMD_SHOW_COUNTERS    = 19, /* show counters              */
-  CMD_SHOW_LOSS        = 20, /* show loss                  */
-  CMD_SHOW_SKEW        = 21, /* show skew                  */
-  CMD_SHOW_REACHABLE   = 22, /* show reachable             */
-  CMD_SHOW_TREE        = 23, /* show tree [U]              */
-  CMD_SHOW_PATH        = 24, /* show path [N]              */
-  CMD_SHOW_FDS         = 25, /* show fds                   */
-  CMD_SHOW_BLOOMS      = 26, /* show blooms [N]            */
-  CMD_SHOW_RUN         = 27, /* show running               */
-  CMD_SHOW_RUN_TPORTS  = 28, /* show running transport [T] */
-  CMD_SHOW_RUN_SVCS    = 29, /* show running service [S]   */
-  CMD_SHOW_RUN_USERS   = 30, /* show running user [U]      */
-  CMD_SHOW_RUN_GROUPS  = 31, /* show running group [G]     */
-  CMD_SHOW_RUN_PARAM   = 32, /* show running parameter [P] */
-  CMD_SHOW_GRAPH       = 33, /* show graph                 */
-  CMD_CONNECT          = 34, /* connect [T]                */
-  CMD_LISTEN           = 35, /* listen [T]                 */
-  CMD_SHUTDOWN         = 36, /* shutdown [T]               */
-  CMD_CONFIGURE        = 37, /* configure                  */
-  CMD_CONFIGURE_TPORT  = 38, /* configure transport T      */
-  CMD_CONFIGURE_PARAM  = 39, /* configure parameter P V    */
-  CMD_SAVE             = 40, /* save                       */
-  CMD_SUB_START        = 41, /* sub subject [file]         */
-  CMD_SUB_STOP         = 42, /* unsub subject [file]       */
-  CMD_PSUB_START       = 43, /* psub rv-wildcard [file]    */
-  CMD_PSUB_STOP        = 44, /* punsub rv-wildcard [file]  */
-  CMD_GSUB_START       = 45, /* gsub glob-wildcard [file]  */
-  CMD_GSUB_STOP        = 46, /* gunsub glob-wildcard [file]*/
-  CMD_PUBLISH          = 47, /* pub subject msg            */
-  CMD_TRACE            = 48, /* trace subject msg          */
-  CMD_PUB_ACK          = 49, /* ack subject msg            */
-  CMD_RPC              = 50, /* rpc subject msg            */
-  CMD_ANY              = 51, /* any subject msg            */
-  CMD_DEBUG            = 53, /* debug ival                 */
-  CMD_CANCEL           = 54, /* cancel                     */
-  CMD_MUTE_LOG         = 55, /* mute                       */
-  CMD_UNMUTE_LOG       = 56, /* unmute                     */
-  CMD_QUIT             = 57, /* quit/exit                  */
-  CMD_TPORT_NAME       = 58, /* tport N                    */
-  CMD_TPORT_TYPE       = 59, /* type T                     */
-  CMD_TPORT_LISTEN     = 60, /* listen A                   */
-  CMD_TPORT_CONNECT    = 61, /* connect A                  */
-  CMD_TPORT_PORT       = 62, /* port N                     */
-  CMD_TPORT_TIMEOUT    = 63, /* timeout N                  */
-  CMD_TPORT_MTU        = 64, /* mtu N                      */
-  CMD_TPORT_TXW_SQNS   = 65, /* txw_sqns N                 */
-  CMD_TPORT_RXW_SQNS   = 66, /* rxw_sqns N                 */
-  CMD_TPORT_MCAST_LOOP = 67, /* mcast_loop N               */
-  CMD_TPORT_EDGE       = 68, /* edge B                     */
-  CMD_TPORT_SHOW       = 69, /* show                       */
-  CMD_TPORT_QUIT       = 70, /* quit/exit                  */
-  CMD_BAD              = 71
+  CMD_REMOTE           = 3,  /* remote [U] cmd             */
+  CMD_SHOW             = 4,  /* show ...                   */
+  CMD_SHOW_SUBS        = 5,  /* show subs [U]              */
+  CMD_SHOW_SEQNO       = 6,  /* show seqno                 */
+  CMD_SHOW_ADJACENCY   = 7,  /* show adjacency             */
+  CMD_SHOW_PEERS       = 8,  /* show peers                 */
+  CMD_SHOW_PORTS       = 9,  /* show ports [T]             */
+  CMD_SHOW_STATUS      = 10, /* show status [T]            */
+  CMD_SHOW_LINKS       = 11, /* show links                 */
+  CMD_SHOW_NODES       = 12, /* show nodes                 */
+  CMD_SHOW_ROUTES      = 13, /* show routes                */
+  CMD_SHOW_URLS        = 14, /* show urls                  */
+  CMD_SHOW_TPORTS      = 15, /* show tport [T]             */
+  CMD_SHOW_USERS       = 16, /* show user [U]              */
+  CMD_SHOW_EVENTS      = 17, /* show events                */
+  CMD_SHOW_UNKNOWN     = 18, /* show unknown               */
+  CMD_SHOW_LOGS        = 19, /* show logs                  */
+  CMD_SHOW_COUNTERS    = 20, /* show counters              */
+  CMD_SHOW_LOSS        = 21, /* show loss                  */
+  CMD_SHOW_SKEW        = 22, /* show skew                  */
+  CMD_SHOW_REACHABLE   = 23, /* show reachable             */
+  CMD_SHOW_TREE        = 24, /* show tree [U]              */
+  CMD_SHOW_PATH        = 25, /* show path [N]              */
+  CMD_SHOW_FDS         = 26, /* show fds                   */
+  CMD_SHOW_BLOOMS      = 27, /* show blooms [N]            */
+  CMD_SHOW_GRAPH       = 28, /* show graph                 */
+  CMD_SHOW_RUN         = 29, /* show running               */
+  CMD_SHOW_RUN_TPORTS  = 30, /* show running transport [T] */
+  CMD_SHOW_RUN_SVCS    = 31, /* show running service [S]   */
+  CMD_SHOW_RUN_USERS   = 32, /* show running user [U]      */
+  CMD_SHOW_RUN_GROUPS  = 33, /* show running group [G]     */
+  CMD_SHOW_RUN_PARAM   = 34, /* show running parameter [P] */
+  CMD_CONNECT          = 35, /* connect [T]                */
+  CMD_LISTEN           = 36, /* listen [T]                 */
+  CMD_SHUTDOWN         = 37, /* shutdown [T]               */
+  CMD_CONFIGURE        = 38, /* configure                  */
+  CMD_CONFIGURE_TPORT  = 39, /* configure transport T      */
+  CMD_CONFIGURE_PARAM  = 40, /* configure parameter P V    */
+  CMD_SAVE             = 41, /* save                       */
+  CMD_SUB_START        = 42, /* sub subject [file]         */
+  CMD_SUB_STOP         = 43, /* unsub subject [file]       */
+  CMD_PSUB_START       = 44, /* psub rv-wildcard [file]    */
+  CMD_PSUB_STOP        = 45, /* punsub rv-wildcard [file]  */
+  CMD_GSUB_START       = 46, /* gsub glob-wildcard [file]  */
+  CMD_GSUB_STOP        = 47, /* gunsub glob-wildcard [file]*/
+  CMD_PUBLISH          = 48, /* pub subject msg            */
+  CMD_TRACE            = 49, /* trace subject msg          */
+  CMD_PUB_ACK          = 50, /* ack subject msg            */
+  CMD_RPC              = 51, /* rpc subject msg            */
+  CMD_ANY              = 52, /* any subject msg            */
+  CMD_DEBUG            = 54, /* debug ival                 */
+  CMD_CANCEL           = 55, /* cancel                     */
+  CMD_MUTE_LOG         = 56, /* mute                       */
+  CMD_UNMUTE_LOG       = 57, /* unmute                     */
+  CMD_QUIT             = 58, /* quit/exit                  */
+  CMD_TPORT_NAME       = 59, /* tport N                    */
+  CMD_TPORT_TYPE       = 60, /* type T                     */
+  CMD_TPORT_LISTEN     = 61, /* listen A                   */
+  CMD_TPORT_CONNECT    = 62, /* connect A                  */
+  CMD_TPORT_PORT       = 63, /* port N                     */
+  CMD_TPORT_TIMEOUT    = 64, /* timeout N                  */
+  CMD_TPORT_MTU        = 65, /* mtu N                      */
+  CMD_TPORT_TXW_SQNS   = 66, /* txw_sqns N                 */
+  CMD_TPORT_RXW_SQNS   = 67, /* rxw_sqns N                 */
+  CMD_TPORT_MCAST_LOOP = 68, /* mcast_loop N               */
+  CMD_TPORT_EDGE       = 69, /* edge B                     */
+  CMD_TPORT_SHOW       = 70, /* show                       */
+  CMD_TPORT_QUIT       = 71, /* quit/exit                  */
+  CMD_BAD              = 72
 };
 
 enum ConsoleArgType {
@@ -730,6 +783,7 @@ struct ConsoleCmdType {
 #ifdef IMPORT_CONSOLE_CMDS
 static const ConsoleCmdType command_type[] = {
   { CMD_PING            , PEER_ARG   }, /* ping peers */
+  { CMD_REMOTE          , PEER_ARG   }, /* remote peers <cmd> */
   { CMD_CONNECT         , TPORT_ARG  }, /* connect <tport> */
   { CMD_LISTEN          , TPORT_ARG  }, /* listen <tport> */
   { CMD_SHUTDOWN        , TPORT_ARG  }, /* shutdown <tport> */
@@ -771,6 +825,7 @@ static inline ConsoleArgType console_command_type( ConsoleCmd cmd ) {
 static const ConsoleCmdString console_cmd[] = {
   { CMD_PING       , "ping"         ,0,0}, /* ping peers */
   { CMD_MPING      , "mping"        ,0,0}, /* multicast ping peers */
+  { CMD_REMOTE     , "remote"       ,0,0}, /* remote peer <cmd> */
   { CMD_SHOW       , "show"         ,0,0}, /* show <subcmd> */
   { CMD_CONNECT    , "connect"      ,0,0}, /* connect <tport> */
   { CMD_LISTEN     , "listen"       ,0,0}, /* listen <tport> */
@@ -821,8 +876,8 @@ static const ConsoleCmdString show_cmd[] = {
   { CMD_SHOW_PATH      , "path"          ,0,0}, /* show path */
   { CMD_SHOW_FDS       , "fds"           ,0,0}, /* show fds */
   { CMD_SHOW_BLOOMS    , "blooms"        ,0,0}, /* show blooms */
-  { CMD_SHOW_RUN       , "running"       ,0,0}, /* show running */
-  { CMD_SHOW_GRAPH     , "graph"         ,0,0}  /* show graph */
+  { CMD_SHOW_GRAPH     , "graph"         ,0,0}, /* show graph */
+  { CMD_SHOW_RUN       , "running"       ,0,0}  /* show running */
 };
 static const size_t num_show_cmds = ASZ( show_cmd );
 
@@ -844,6 +899,7 @@ static const size_t num_config_cmds = ASZ( config_cmd );
 static const ConsoleCmdString help_cmd[] = {
   { CMD_PING             , "ping", "[U]",        "Ping peers and display latency of return"          },
   { CMD_MPING            , "mping", "",          "Multicast ping all peers"                          },
+  { CMD_REMOTE           , "remote", "[U] [C]",  "Run remote command on peer"                        },
   { CMD_CONNECT          , "connect", "[T]",     "Start tport connect"                               },
   { CMD_LISTEN           , "listen", "[T]",      "Start tport listener"                              },
   { CMD_SHUTDOWN         , "shutdown", "[T]",    "Shutdown tport"                                    },
@@ -878,13 +934,13 @@ static const ConsoleCmdString help_cmd[] = {
   { CMD_SHOW_PATH        , "show path", "[P]",   "Show multicast path P (0->3)"                      },
   { CMD_SHOW_FDS         , "show fds", "",       "Show fd centric routes"                            },
   { CMD_SHOW_BLOOMS      , "show blooms", "[P]", "Show bloom centric routes for path P (0-3)"        },
+  { CMD_SHOW_GRAPH       , "show graph", "",     "Show network description for node graph"           },
   { CMD_SHOW_RUN         , "show running", "",   "Show current config running"                       },
   { CMD_SHOW_RUN_TPORTS  , "show running transport","[T]", "Show transports running, T or all"       },
   { CMD_SHOW_RUN_SVCS    , "show running service","[S]",   "Show services running config, S or all"  },
   { CMD_SHOW_RUN_USERS   , "show running user","[U]",      "Show users running config, U or all"     },
   { CMD_SHOW_RUN_GROUPS  , "show running group","[G]",     "Show groups running config, G or all"    },
   { CMD_SHOW_RUN_PARAM   , "show running parameter","[P]", "Show parameters running config, P or all"},
-  { CMD_SHOW_GRAPH       , "show graph", "",     "Show network description for node graph"           },
   { CMD_SUB_START        , "sub","[S] [F]",      "Subscribe subject S, output to file F"             },
   { CMD_SUB_STOP         , "unsub","[S] [F]",    "Unsubscribe subject S, stop output file F"         },
   { CMD_PSUB_START       , "psub","[W] [F]",     "Subscribe rv-wildcard W, output to file F"         },

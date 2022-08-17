@@ -184,6 +184,7 @@ SessionMgr::init_session( const CryptPass &pwd ) noexcept
   this->ibx.init( ibx, _SUBS     , U_INBOX_SUBS );
   this->ibx.init( ibx, _PING     , U_INBOX_PING );
   this->ibx.init( ibx, _PONG     , U_INBOX_PONG );
+  this->ibx.init( ibx, _REM      , U_INBOX_REM );
   this->ibx.init( ibx, _RESUB    , U_INBOX_RESUB );
   this->ibx.init( ibx, _REPSUB   , U_INBOX_REPSUB );
   this->ibx.init( ibx, _ADD_RTE  , U_INBOX_ADD_RTE );
@@ -989,6 +990,7 @@ SessionMgr::on_msg( EvPublish &pub ) noexcept
     case U_INBOX_SUBS:      /* _I.Nonce.subs      */
     case U_INBOX_PING:      /* _I.Nonce.ping      */
     case U_INBOX_PONG:      /* _I.Nonce.pong      */
+    case U_INBOX_REM:       /* _I.Nonce.rem       */
     case U_INBOX_RESUB:     /* _I.Nonce.resub     */
     case U_INBOX_REPSUB:    /* _I.Nonce.repsub    */
     case U_INBOX_ADD_RTE:   /* _I.Nonce.add_rte   */
@@ -1015,6 +1017,7 @@ SessionMgr::on_msg( EvPublish &pub ) noexcept
           case U_INBOX_SUBS:      return this->sub_db.recv_subs_request( fpub, n, dec );
           case U_INBOX_PING:      return this->user_db.recv_ping_request( fpub, n, dec );
           case U_INBOX_PONG:      return this->user_db.recv_pong_result( fpub, n, dec );
+          case U_INBOX_REM:       return this->console.recv_remote_request( fpub, n, dec );
           case U_INBOX_RESUB:     return this->sub_db.recv_resub_result( fpub, n, dec );
           case U_INBOX_REPSUB:    return this->sub_db.recv_repsub_result( fpub, n, dec );
           case U_INBOX_ADD_RTE:   return this->user_db.recv_add_route( fpub, n, dec );

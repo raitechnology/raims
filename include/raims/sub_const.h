@@ -39,6 +39,7 @@ namespace ms {
 #define _SUBS           "subs"
 #define _PING           "ping"
 #define _PONG           "pong"
+#define _REM            "rem"
 #define _RESUB          "resub"
 #define _REPSUB         "repsub"
 #define _ADD_RTE        "add_rte"
