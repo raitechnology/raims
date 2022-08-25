@@ -13,6 +13,7 @@ namespace ms {
 #define _SESSION_HELLO  "_X.HELLO"
 #define _SESSION_HB     "_X.HB"
 #define _SESSION_BYE    "_X.BYE"
+#define _SESSION_NAME   "_X.NAME"
 
 /* peer add, del, bloom, adjacency */
 #define _PEER_ADD       "_Z.ADD"
@@ -58,6 +59,7 @@ namespace ms {
 extern const char     X_HELLO[],
                       X_HB[]   ,
                       X_BYE[]  ,
+                      X_NAME[] ,
                       Z_ADD[]  ,
                       Z_DEL[]  ,
                       Z_BLM[]  ,
@@ -74,6 +76,7 @@ extern const char     X_HELLO[],
 extern const uint16_t X_HELLO_SZ,
                       X_HB_SZ   ,
                       X_BYE_SZ  ,
+                      X_NAME_SZ ,
                       Z_ADD_SZ  ,
                       Z_DEL_SZ  ,
                       Z_BLM_SZ  ,
@@ -87,7 +90,7 @@ extern const uint16_t X_HELLO_SZ,
                       N_ADJ_SZ  ,
                       N_ALL_SZ  ;
 /* hashes of above */
-extern uint32_t hello_h, hb_h, bye_h, add_h, del_h, blm_h, adj_h,
+extern uint32_t hello_h, hb_h, bye_h, name_h, add_h, del_h, blm_h, adj_h,
                 join_h, leave_h, psub_h, pstop_h;
 
 #ifdef DECLARE_SUB_CONST
@@ -95,6 +98,7 @@ extern uint32_t hello_h, hb_h, bye_h, add_h, del_h, blm_h, adj_h,
 const char     X_HELLO[]  = _SESSION_HELLO    ,
                X_HB[]     = _SESSION_HB       ,
                X_BYE[]    = _SESSION_BYE      ,
+               X_NAME[]   = _SESSION_NAME     ,
                Z_ADD[]    = _PEER_ADD         ,
                Z_DEL[]    = _PEER_DEL         ,
                Z_BLM[]    = _BLOOM_FILTER     ,
@@ -111,6 +115,7 @@ const char     X_HELLO[]  = _SESSION_HELLO    ,
 const uint16_t X_HELLO_SZ = (uint16_t) sizeof( X_HELLO ) - 1,
                X_HB_SZ    = (uint16_t) sizeof( X_HB    ) - 1,
                X_BYE_SZ   = (uint16_t) sizeof( X_BYE   ) - 1,
+               X_NAME_SZ  = (uint16_t) sizeof( X_NAME  ) - 1,
                Z_ADD_SZ   = (uint16_t) sizeof( Z_ADD   ) - 1,
                Z_DEL_SZ   = (uint16_t) sizeof( Z_DEL   ) - 1,
                Z_BLM_SZ   = (uint16_t) sizeof( Z_BLM   ) - 1,
@@ -124,7 +129,7 @@ const uint16_t X_HELLO_SZ = (uint16_t) sizeof( X_HELLO ) - 1,
                N_ADJ_SZ   = (uint16_t) sizeof( N_ADJ   ) - 1,
                N_ALL_SZ   = (uint16_t) sizeof( N_ALL   ) - 1;
 
-uint32_t       hello_h, hb_h, bye_h, add_h, del_h, blm_h, adj_h,
+uint32_t       hello_h, hb_h, bye_h, name_h, add_h, del_h, blm_h, adj_h,
                join_h, leave_h, psub_h, pstop_h;
 #endif
 

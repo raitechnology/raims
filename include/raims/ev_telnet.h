@@ -9,10 +9,10 @@ namespace rai {
 namespace ms {
 
 struct TelnetListen : public kv::EvTcpListen {
-  Console * console;
+  Console & console;
   void * operator new( size_t, void *ptr ) { return ptr; }
-  TelnetListen( kv::EvPoll &p )
-    : kv::EvTcpListen( p, "telnet_listen", "telnet_sock" ), console( 0 ) {}
+  TelnetListen( kv::EvPoll &p,  Console &c )
+    : kv::EvTcpListen( p, "telnet_listen", "telnet_sock" ), console( c ) {}
 
   virtual EvSocket *accept( void ) noexcept;
 };

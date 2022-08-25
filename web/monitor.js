@@ -31,6 +31,8 @@ function update_msg_rate( msg ) {
   let user_uid = user + "." + uid;
   if ( rate == null ) {
     let tr = document.getElementById( user_uid );
+    if ( tr == null )
+      return;
     rate = new_rate( user, uid, true );
     tr.rate = rate;
       
@@ -63,7 +65,7 @@ function update_msg_rate( msg ) {
     else
       total_m = rate_sum( rate, i, total_m, total_b, mr, ms, br, bs );
   }
-  if ( total_m > max_rate )
+  if ( total_m > max_rate && rate.checked )
     set_max_rate( total_m );
   if ( rate.g == null ) {
     if ( rate.checked )

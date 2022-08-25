@@ -3,6 +3,11 @@
 #include <string.h>
 #include <stdint.h>
 #include <stdarg.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <netdb.h>
 #ifndef _MSC_VER
 #include <unistd.h>
 #else
@@ -18,6 +23,7 @@
 #include <raims/ev_rv_transport.h>
 #include <raims/ev_nats_transport.h>
 #include <raims/ev_redis_transport.h>
+#include <raims/ev_name_svc.h>
 
 using namespace rai;
 using namespace ms;
@@ -249,15 +255,6 @@ SessionMgr::add_startup_transports( ConfigTree::Service &s ) noexcept
 }
 
 bool
-SessionMgr::add_transport( ConfigTree::Service &s,
-                           ConfigTree::Transport &t,
-                           bool is_service ) noexcept
-{
-  TransportRoute * rte;
-  return this->add_transport2( s, t, is_service, rte );
-}
-
-bool
 SessionMgr::add_ipc_transport( ConfigTree::Service &s,  const char *ipc,
                                const char *map,  uint8_t db ) noexcept
 {
@@ -311,11 +308,24 @@ SessionMgr::add_ipc_transport( ConfigTree::Service &s,  const char *ipc,
 }
 
 bool
+SessionMgr::add_transport( ConfigTree::Service &s,
+                           ConfigTree::Transport &t,
+                           bool is_listener ) noexcept
+{
+  TransportRoute * rte;
+  return this->add_transport2( s, t, is_listener, rte );
+}
+
+bool
 SessionMgr::add_transport2( ConfigTree::Service &s,
                             ConfigTree::Transport &t,
-                            bool is_service,
+                            bool is_listener,
                             TransportRoute *&rte ) noexcept
 {
+  uint32_t f = ( is_listener ? TPORT_IS_SVC : 0 );
+  NameSvc * name_svc[ MAX_TCP_HOSTS ];
+  uint32_t  name_svc_count = 0;
+
   if ( ! this->in_list( IN_ACTIVE_LIST ) ) {
     if ( this->init_sock() != 0 )
       return false;
@@ -324,9 +334,18 @@ SessionMgr::add_transport2( ConfigTree::Service &s,
     return this->create_telnet( t );
   if ( t.type.equals( "web" ) )
     return this->create_web( t );
+  if ( t.type.equals( "name" ) )
+    return this->create_name( t );
+  if ( t.type.equals( "mesh" ) ) {
+    const char * dev = NULL;
+    if ( t.get_route_str( "device", dev ) ) {
+      name_svc_count = this->start_name_services( t, name_svc );
+      if ( name_svc_count > 0 )
+        f |= TPORT_IS_DEVICE;
+    }
+  }
 
   ConfigTree::Transport * tptr = &t;
-  uint32_t f = ( is_service ? TPORT_IS_SVC : 0 );
   char svc_name[ 256 ];
   if ( t.type.equals( "rv" ) || t.type.equals( "nats" ) ||
        t.type.equals( "redis" ) ) {
@@ -369,6 +388,10 @@ SessionMgr::add_transport2( ConfigTree::Service &s,
     is_new = true;
   }
 
+  if ( name_svc_count > 0 ) {
+    for ( uint32_t i = 0; i < name_svc_count; i++ )
+      name_svc[ i ]->adverts.push( rte );
+  }
   if ( rte->create_transport( t ) ) {
     if ( is_new )
       this->user_db.add_transport( *rte );
@@ -383,9 +406,9 @@ SessionMgr::shutdown_transport( ConfigTree::Service &s,
                                 ConfigTree::Transport &t ) noexcept
 {
   if ( t.type.equals( "telnet" ) )
-    return this->shutdown_telnet();
+    return this->shutdown_telnet( t );
   if ( t.type.equals( "web" ) )
-    return this->shutdown_web();
+    return this->shutdown_web( t );
 
   uint32_t id,
            count = (uint32_t) this->user_db.transport_tab.count,
@@ -401,10 +424,10 @@ SessionMgr::shutdown_transport( ConfigTree::Service &s,
 
 bool
 SessionMgr::start_transport( TransportRoute &rte,
-                             bool is_service ) noexcept
+                             bool is_listener ) noexcept
 {
   if ( rte.transport.type.equals( "tcp" ) ) {
-    if ( is_service ) {
+    if ( is_listener ) {
       if ( rte.listener != NULL )
         return rte.start_listener( rte.listener, rte.transport );
     }
@@ -425,14 +448,14 @@ SessionMgr::start_transport( TransportRoute &rte,
           return false;
         rte.create_listener_mesh_url();
       }
-      if ( ! is_service )
+      if ( ! is_listener )
         rte.add_mesh_connect( NULL, 0 );
       return true;
     }
   }
   else if ( rte.transport.type.equals( "pgm" ) ) {
     rte.clear( TPORT_IS_LISTEN | TPORT_IS_CONNECT );
-    if ( is_service ) {
+    if ( is_listener ) {
       rte.set( TPORT_IS_LISTEN );
       if ( rte.create_pgm( TPORT_IS_LISTEN, rte.transport ) )
         return true;
@@ -466,6 +489,7 @@ make_mesh_url_from_sock( char buf[ MAX_TCP_HOST_LEN ],
         i = 7;
       else
         i = 4;
+      /*resolve_mesh_host( &buf[ 6 ] );*/
     }
     while ( j < MAX_TCP_HOST_LEN - 1 && i < len )
       buf[ j++ ] = sock.peer_address.buf[ i++ ];
@@ -608,27 +632,24 @@ SessionMgr::add_tcp_accept( TransportRoute &listen_rte,
   return true;
 }
 
+enum {
+  P_REUSEPORT  = 1,
+  P_NB_CONNECT = 2,
+  P_LISTEN     = 4
+};
+
 static void
-parse_tcp_param( EvTcpTransportParameters &parm,  const char *name,
-                 ConfigTree::Transport &tport,  bool reuseport,
-                 bool nb_connect ) noexcept
+parse_tcp_route( const char *name,  ConfigTree::Transport &tport,
+                 ConfigTree::StringPair * el[ MAX_TCP_HOSTS ] ) noexcept
 {
-  char tmp[ MAX_TCP_HOSTS ][ MAX_TCP_HOST_LEN ];
-  size_t len[ MAX_TCP_HOSTS ];
-  size_t nlen = ::strlen( name );
-  const char *host[ MAX_TCP_HOSTS ];
-  int port[ MAX_TCP_HOSTS ], port2 = 0;
-  char n[ MAX_TCP_HOSTS - 1 ][ 16 ];
-  size_t i;
+  size_t i, nlen = ::strlen( name );
 
-  for ( i = 0; i < MAX_TCP_HOSTS - 1; i++ ) /* connect2, connect3, connect4 */
-    ::snprintf( n[ i ], sizeof( n[ i ] ), "%s%d", name, (int) i + 2 );
-
-  ConfigTree::StringPair * el[ MAX_TCP_HOSTS ];
   el[ 0 ] = tport.route.get_pair( name, nlen );
-  for ( i = 1; i < MAX_TCP_HOSTS; i++ )
-    el[ i ] = tport.route.get_pair( n[ i - 1 ], nlen+1 );
-
+  for ( i = 1; i < MAX_TCP_HOSTS; i++ ) {
+    char nbuf[ 16 ]; /* try connect2, connect3, ... */
+    ::snprintf( nbuf, sizeof( nbuf ), "%s%d", name, (int) i + 1 );
+    el[ i ] = tport.route.get_pair( nbuf, nlen+1 );
+  }
   /* parse config that uses array of cost */
   if ( el[ 0 ] != NULL ) {
     for ( i = 0; i < MAX_TCP_HOSTS - 1; i++ ) {
@@ -637,9 +658,30 @@ parse_tcp_param( EvTcpTransportParameters &parm,  const char *name,
       el[ i + 1 ] = el[ i ]->next;
     }
   }
+}
 
+static void
+parse_tcp_param( EvTcpTransportParameters &parm,  ConfigTree::Transport &tport,
+                 int ptype ) noexcept
+{
+  char         tmp[ MAX_TCP_HOSTS ][ MAX_TCP_HOST_LEN ];
+  size_t       len[ MAX_TCP_HOSTS ];
+  const char * host[ MAX_TCP_HOSTS ];
+  int          port[ MAX_TCP_HOSTS ], port2 = 0;
+  bool         ip4, ip6, is_device = false;
+
+  ConfigTree::StringPair * el[ MAX_TCP_HOSTS ];
+  if ( ( ptype & P_LISTEN ) == 0 )
+    parse_tcp_route( "connect", tport, el );
+  else {
+    parse_tcp_route( "listen", tport, el );
+    if ( el[ 0 ] == NULL ) {
+      parse_tcp_route( "device", tport, el );
+      is_device = true;
+    }
+  }
   tport.get_route_int( "port", port2 );
-  for ( i = 0; i < MAX_TCP_HOSTS; i++ ) {
+  for ( size_t i = 0; i < MAX_TCP_HOSTS; i++ ) {
     host[ i ] = ( el[ i ] == NULL ? NULL : el[ i ]->value.val );
     tmp[ i ][ 0 ] = '\0';
     len[ i ] = sizeof( tmp[ i ] );
@@ -657,11 +699,23 @@ parse_tcp_param( EvTcpTransportParameters &parm,  const char *name,
     parm.timeout = 15;
   if ( ! tport.get_route_bool( "edge", parm.edge ) )
     parm.edge = false;
-  if ( reuseport )
+  if ( ! tport.get_route_bool( "ipv4only", ip4 ) )
+    if ( ! tport.get_route_bool( "ip4only", ip4 ) )
+      ip4 = false;
+  if ( ! tport.get_route_bool( "ipv6only", ip6 ) )
+    if ( ! tport.get_route_bool( "ip6only", ip6 ) )
+      ip6 = false;
+  if ( is_device )
+    parm.opts |= OPT_NO_DNS;
+  if ( ip4 )
+    parm.opts = ( parm.opts & ~OPT_AF_INET6 ) | OPT_AF_INET;
+  else if ( ip4 )
+    parm.opts = ( parm.opts & ~OPT_AF_INET ) | OPT_AF_INET6;
+  if ( ( ptype & P_REUSEPORT ) != 0 )
     parm.opts |= kv::OPT_REUSEPORT;
   else
     parm.opts &= ~kv::OPT_REUSEPORT;
-  if ( nb_connect )
+  if ( ( ptype & P_NB_CONNECT ) != 0 )
     parm.opts |= kv::OPT_CONNECT_NB;
   else
     parm.opts &= ~kv::OPT_CONNECT_NB;
@@ -684,7 +738,7 @@ SessionMgr::add_mesh_connect( TransportRoute &mesh_rte ) noexcept
   size_t   url_buf_sz[ MAX_TCP_HOSTS ], i, j;
   uint32_t url_hash[ MAX_TCP_HOSTS ];
 
-  parse_tcp_param( parm, "connect", mesh_rte.transport, false, true );
+  parse_tcp_param( parm, mesh_rte.transport, P_NB_CONNECT );
 
   for ( i = 0; i < MAX_TCP_HOSTS; i++ ) {
     char   * url    = url_buf[ i ];
@@ -692,6 +746,10 @@ SessionMgr::add_mesh_connect( TransportRoute &mesh_rte ) noexcept
     char     pbuf[ 24 ];
     ::memcpy( url, "tcp://", 6 );
     if ( parm.host[ i ] == NULL ) {
+      if ( i == 0 ) {
+        if ( mesh_rte.is_set( TPORT_IS_DEVICE ) )
+          return true;
+      }
       if ( i > 0 )
         break;
       url_sz = EvTcpTransportParameters::copy_host_buf( url, 6, "127.0.0.1" );
@@ -722,22 +780,110 @@ SessionMgr::add_mesh_connect( TransportRoute &mesh_rte ) noexcept
   return this->add_mesh_connect( mesh_rte, mesh_url, url_hash, i );
 }
 
+static const uint32_t MAX_DNS_HOST_ADDR = 128;
+static bool
+match_mesh_host_port( const char *host, int port, uint32_t conn_hash,
+                      uint32_t *dns_cache,  uint32_t &addr_count ) noexcept
+{
+  if ( addr_count != 0 ) {
+    for ( uint32_t i = 0; i < addr_count; i++ )
+      if ( dns_cache[ i ] == conn_hash )
+        return true;
+    return false;
+  }
+  AddrInfo info;
+  struct addrinfo * p = NULL;
+  bool   matched = false;
+
+  int status = info.get_address( host, port, DEFAULT_TCP_CONNECT_OPTS );
+  if ( status != 0 )
+    return false;
+  for ( p = info.ai; p != NULL; p = p->ai_next ) {
+    char url_buf[ MAX_TCP_HOST_LEN ], buf[ MAX_TCP_HOST_LEN ];
+    int n = 0;
+    if ( p->ai_family == AF_INET ) {
+      struct sockaddr_in * p4 = (struct sockaddr_in *) p->ai_addr;
+      inet_ntop( AF_INET, &p4->sin_addr, buf, sizeof( buf ) );
+      n = ::snprintf( url_buf, sizeof( url_buf ), "tcp://%s:%d", buf, port );
+    }
+    else if ( p->ai_family == AF_INET6 ) {
+      struct sockaddr_in6 * p6 = (struct sockaddr_in6 *) p->ai_addr;
+      inet_ntop( AF_INET6, &p6->sin6_addr, buf, sizeof( buf ) );
+      n = ::snprintf( url_buf, sizeof( url_buf ), "tcp://[%s]:%d", buf, port );
+    }
+    if ( n > 0 ) {
+      uint32_t h = kv_crc_c( url_buf, n, 0 );
+      if ( h == conn_hash )
+        matched = true;
+      if ( addr_count < MAX_DNS_HOST_ADDR )
+        dns_cache[ addr_count++ ] = h;
+      d_tran( "match( %s ) %x %s %x\n", url_buf, h,
+              h == conn_hash ? "=" : "!=", conn_hash );
+    }
+  }
+  return matched;
+}
+
+static bool
+match_mesh_hash( const char *url,  uint32_t url_hash,
+                 uint32_t conn_hash,  uint32_t *dns_cache,
+                 uint32_t &addr_count ) noexcept
+{
+  if ( url_hash == conn_hash )
+    return true;
+  if ( url == NULL )
+    return false;
+  d_tran( "match( %s ) %x != %x\n", url, url_hash, conn_hash );
+  if ( addr_count != 0 ) {
+    for ( uint32_t i = 0; i < addr_count; i++ )
+      if ( dns_cache[ i ] == conn_hash )
+        return true;
+    return false;
+  }
+  char tcp_buf[ MAX_TCP_HOST_LEN ];
+  size_t len = sizeof( tcp_buf );
+  int port;
+  port = ConfigTree::Transport::get_host_port( url, tcp_buf, len );
+  return match_mesh_host_port( tcp_buf, port, conn_hash, dns_cache, addr_count );
+}
+#if 0
 TransportRoute *
 SessionMgr::find_mesh_conn( TransportRoute &mesh_rte,  
-                            uint32_t mesh_hash ) noexcept
+                            const char *url,  uint32_t url_hash ) noexcept
 {
   uint32_t count = (uint32_t) this->user_db.transport_tab.count;
+  uint32_t dns_cache[ MAX_DNS_HOST_ADDR ];
+  dns_cache[ 0 ] = 0;
   for ( uint32_t tport_id = 0; tport_id < count; tport_id++ ) {
     TransportRoute *rte = this->user_db.transport_tab.ptr[ tport_id ];
     if ( rte != &mesh_rte && rte->mesh_id == mesh_rte.mesh_id &&
          ! rte->is_set( TPORT_IS_SHUTDOWN ) ) {
-      d_tran( "find_mesh %x (%x)%s\n", rte->mesh_conn_hash, mesh_hash,
-               rte->mesh_conn_hash == mesh_hash ? " found" : "" );
-      if ( rte->mesh_conn_hash == mesh_hash )
+      if ( match_mesh_hash( url, url_hash, rte->mesh_conn_hash,
+                            dns_cache ) )
         return rte;
     }
   }
   return NULL;
+}
+#endif
+bool
+SessionMgr::find_mesh( TransportRoute &mesh_rte,  const char *host,
+                       int port,  uint32_t mesh_hash ) noexcept
+{
+  uint32_t count = (uint32_t) this->user_db.transport_tab.count;
+  uint32_t dns_cache[ MAX_DNS_HOST_ADDR ], addr_count = 0;
+  for ( uint32_t tport_id = 0; tport_id < count; tport_id++ ) {
+    TransportRoute *rte = this->user_db.transport_tab.ptr[ tport_id ];
+    if ( rte != &mesh_rte && rte->mesh_id == mesh_rte.mesh_id &&
+      ! rte->is_set( TPORT_IS_SHUTDOWN ) && ! rte->is_set( TPORT_IS_LISTEN ) ) {
+      if ( rte->mesh_conn_hash == mesh_hash )
+        return true;
+      if ( match_mesh_host_port( host, port, rte->mesh_conn_hash,
+                                 dns_cache, addr_count ) )
+        return true;
+    }
+  }
+  return false;
 }
 
 bool
@@ -755,18 +901,27 @@ SessionMgr::add_mesh_connect( TransportRoute &mesh_rte,  const char **mesh_url,
     printf( " %s (%x)", mesh_url[ i ], mesh_hash[ i ] );
   printf( "\n" );
 
+  count = (uint32_t) this->user_db.transport_tab.count;
   for ( i = 0; i < url_count; i++ ) {
-    if ( mesh_hash[ i ] == mesh_rte.mesh_conn_hash &&
-         mesh_rte.is_set( TPORT_IS_LISTEN ) ) {
+    uint32_t dns_cache[ MAX_DNS_HOST_ADDR ], addr_count = 0;
+    if ( mesh_rte.is_set( TPORT_IS_LISTEN ) &&
+         match_mesh_hash( mesh_url[ i ], mesh_hash[ i ],
+                          mesh_rte.mesh_conn_hash, dns_cache, addr_count ) ) {
       mesh_rte.printf( "not connecting to self (%s)\n", mesh_url[ i ] );
       mesh_url[ i ]  = NULL;
       mesh_hash[ i ] = 0;
       continue;
     }
-    rte = this->find_mesh_conn( mesh_rte, mesh_hash[ i ] );
-    if ( rte != NULL ) {
-      mesh_rte.printf( "already connected (%s)\n", mesh_url[ i ] );
-      return true;
+    for ( tport_id = 0; tport_id < count; tport_id++ ) {
+      rte = this->user_db.transport_tab.ptr[ tport_id ];
+      if ( rte != &mesh_rte && rte->mesh_id == mesh_rte.mesh_id &&
+           ! rte->is_set( TPORT_IS_SHUTDOWN ) ) {
+        if ( match_mesh_hash( mesh_url[ i ], mesh_hash[ i ],
+                              rte->mesh_conn_hash, dns_cache, addr_count ) ) {
+          mesh_rte.printf( "already connected (%s)\n", mesh_url[ i ] );
+          return true;
+        }
+      }
     }
     if ( first_hash == 0 )
       first_hash = mesh_hash[ i ];
@@ -775,7 +930,6 @@ SessionMgr::add_mesh_connect( TransportRoute &mesh_rte,  const char **mesh_url,
     mesh_rte.printf( "no mesh urls to connect\n" );
     return true;
   }
-  count = (uint32_t) this->user_db.transport_tab.count;
   for ( tport_id = 0; tport_id < count; tport_id++ ) {
     rte = this->user_db.transport_tab.ptr[ tport_id ];
     if ( rte->all_set( TPORT_IS_SHUTDOWN | TPORT_IS_MESH ) &&
@@ -821,6 +975,7 @@ SessionMgr::add_mesh_connect( TransportRoute &mesh_rte,  const char **mesh_url,
       int port;
       port = ConfigTree::Transport::get_host_port( mesh_url[ i ], tcp_buf, len);
       parm.set_host_port( tcp_buf, port, mesh_hash[ i ], j );
+      d_tran( "mesh_url[ %u ] = %s:%u\n", i, tcp_buf, port );
       j++;
     }
   }
@@ -1119,10 +1274,7 @@ TransportRoute::create_transport( ConfigTree::Transport &tport ) noexcept
     EvTcpTransportListen *l;
     this->set( TPORT_IS_MESH );
     this->mesh_id = this;
-    if ( this->is_svc() )
-      l = this->create_mesh_listener( tport );
-    else
-      l = this->create_mesh_rendezvous( tport );
+    l = this->create_mesh_listener( tport );
     if ( l == NULL ) {
       this->set( TPORT_IS_SHUTDOWN );
       return false;
@@ -1230,16 +1382,16 @@ TransportRoute::start_listener( EvTcpListen *l,
                                 ConfigTree::Transport &tport ) noexcept
 {
   EvTcpTransportParameters parm;
-  parse_tcp_param( parm, "listen", tport, true, false );
+  parse_tcp_param( parm, tport, P_REUSEPORT | P_LISTEN );
 
   int status = l->listen( parm.host[ 0 ], parm.port[ 0 ], parm.opts );
   if ( status != 0 ) {
-    printf( "%s.%u listen %s:%u failed\n", tport.tport.val, this->tport_id,
-            ConfigTree::Transport::is_wildcard( parm.host[ 0 ] ) ? "*" :
-            parm.host[ 0 ], parm.port[ 0 ] );
+    fprintf( stderr, "%s.%u listen %s:%u failed\n", tport.tport.val,
+             this->tport_id,
+             ConfigTree::Transport::is_wildcard( parm.host[ 0 ] ) ? "*" :
+             parm.host[ 0 ], parm.port[ 0 ] );
     this->mgr.events.on_shutdown( this->tport_id, false );
-    this->clear( TPORT_IS_LISTEN );
-    this->set( TPORT_IS_SHUTDOWN );
+    this->set( TPORT_IS_LISTEN | TPORT_IS_SHUTDOWN );
     return false;
   }
   this->mgr.events.on_connect( this->tport_id, TPORT_IS_LISTEN );
@@ -1314,7 +1466,7 @@ bool
 TransportRoute::create_tcp_connect( ConfigTree::Transport &tport ) noexcept
 {
   EvTcpTransportParameters parm;
-  parse_tcp_param( parm, "connect", tport, false, true );
+  parse_tcp_param( parm, tport, P_NB_CONNECT );
 
   if ( this->connect_mgr.conn == NULL ) {
     uint8_t type = this->mgr.tcp_connect_sock_type;
@@ -1352,95 +1504,170 @@ TransportRoute::create_mesh_listener( ConfigTree::Transport &tport ) noexcept
   return this->create_tcp_listener( tport );
 }
 
-EvTcpTransportListen *
-TransportRoute::create_mesh_rendezvous( ConfigTree::Transport &tport ) noexcept
+static bool
+do_listen_start( ConfigTree::Transport &tport,  EvTcpListen *l,
+                 const char *k ) noexcept
 {
-  return this->create_tcp_listener( tport );
+  EvTcpTransportParameters parm;
+  parse_tcp_param( parm, tport, P_REUSEPORT | P_LISTEN );
+
+  if ( ! l->in_list( IN_ACTIVE_LIST ) ) {
+    if ( l->listen2( parm.host[ 0 ], parm.port[ 0 ], parm.opts, k, -1 ) != 0 ) {
+      fprintf( stderr, "%s: failed to start %s at %s.%d\n", tport.type.val,
+       tport.tport.val, parm.host[ 0 ] ? parm.host[ 0 ] : "*", parm.port[ 0 ] );
+      return false;
+    }
+    printf( "%s: %s start listening on %s\n", tport.type.val, tport.tport.val,
+             l->peer_address.buf );
+  }
+  else {
+    printf( "%s: %s is already active on %s\n", tport.type.val, tport.tport.val,
+            l->peer_address.buf );
+  }
+  return true;
 }
 
 bool
 SessionMgr::create_telnet( ConfigTree::Transport &tport ) noexcept
 {
-  if ( this->telnet == NULL ) {
+  Unrouteable & un = this->unrouteable.upsert( &tport );
+  if ( un.telnet == NULL ) {
     void * p = aligned_malloc( sizeof( TelnetListen ) );
-    this->telnet = new ( p ) TelnetListen( this->poll );
+    un.telnet = new ( p ) TelnetListen( this->poll, this->console );
   }
-  TelnetListen * l = this->telnet;
-  EvTcpTransportParameters parm;
-  parse_tcp_param( parm, "listen", tport, true, false );
-  this->telnet_tport = &tport;
-
-  if ( ! l->in_list( IN_ACTIVE_LIST ) ) {
-    if ( l->listen2( parm.host[ 0 ], parm.port[ 0 ], parm.opts,
-                     "telnet_listen", -1 ) != 0 ) {
-      fprintf( stderr, "failed to start telnet at %s.%d\n",
-               parm.host[ 0 ] ? parm.host[ 0 ] : "*", parm.port[ 0 ] );
-      return false;
-    }
-    l->console = &this->console;
-    printf( "%s listening on %s\n", tport.tport.val, l->peer_address.buf );
+  if ( do_listen_start( tport, un.telnet, "telnet_listen" ) ) {
+    char buf[ 256 ];
+    int len = ::snprintf( buf, sizeof( buf ), "%s.%s", tport.type.val,
+                          tport.tport.val );
+    un.telnet->set_name( buf, len );
+    return true;
   }
-  else {
-    printf( "%s is already active on %s\n", tport.tport.val,
-            l->peer_address.buf );
-  }
-  return true;
+  return false;
 }
 
 bool
 SessionMgr::create_web( ConfigTree::Transport &tport ) noexcept
 {
-  if ( this->web == NULL ) {
+  Unrouteable & un = this->unrouteable.upsert( &tport );
+  if ( un.web == NULL ) {
     void * p = aligned_malloc( sizeof( WebListen ) );
-    this->web = new ( p ) WebListen( this->poll );
-    if ( tport.get_route_str( "http_dir", this->web->http_dir ) &&
-         this->web->http_dir != NULL ) {
-      this->web->http_dir_len = ::strlen( this->web->http_dir );
+    un.web = new ( p ) WebListen( this->poll, this->console );
+    if ( tport.get_route_str( "http_dir", un.web->http_dir ) &&
+         un.web->http_dir != NULL ) {
+      un.web->http_dir_len = ::strlen( un.web->http_dir );
     }
   }
-  WebListen * l = this->web;
-  EvTcpTransportParameters parm;
-  parse_tcp_param( parm, "listen", tport, true, false );
-  this->web_tport = &tport;
+  if ( do_listen_start( tport, un.web, "web_listen" ) ) {
+    char buf[ 256 ];
+    int len = ::snprintf( buf, sizeof( buf ), "%s.%s", tport.type.val,
+                          tport.tport.val );
+    un.web->set_name( buf, len );
+    return true;
+  }
+  return false;
+}
 
-  if ( ! l->in_list( IN_ACTIVE_LIST ) ) {
-    if ( l->listen2( parm.host[ 0 ], parm.port[ 0 ], parm.opts, "web_listen",
-                     -1 ) != 0 ) {
-      fprintf( stderr, "failed to start web at %s.%d\n",
-               parm.host[ 0 ] ? parm.host[ 0 ] : "*", parm.port[ 0 ] );
-      return false;
-    }
-    l->console = &this->console;
-    printf( "%s listening on %s\n", tport.tport.val, l->peer_address.buf );
+bool
+SessionMgr::create_name( ConfigTree::Transport &tport ) noexcept
+{
+  Unrouteable & un = this->unrouteable.upsert( &tport );
+  if ( un.name == NULL ) {
+    void * p = aligned_malloc( sizeof( NameSvc ) );
+    un.name = new ( p ) NameSvc( this->poll, *this, this->user_db, tport );
   }
-  else {
-    printf( "%s is already active on %s\n", tport.tport.val,
-            l->peer_address.buf );
+  if ( ! un.name->is_connected ) {
+    if ( ! un.name->connect() )
+      return false;
   }
   return true;
 }
 
 uint32_t
-SessionMgr::shutdown_telnet( void ) noexcept
+SessionMgr::start_name_services( ConfigTree::Transport &tport,
+                                 NameSvc **name_svc ) noexcept
 {
-  if ( this->telnet == NULL )
-    return 0;
-  TelnetListen * l = this->telnet;
-  if ( l->in_list( IN_ACTIVE_LIST ) ) {
-    l->idle_push( EV_SHUTDOWN );
+  ConfigTree::StringPair * el[ MAX_TCP_HOSTS ];
+  uint32_t count   = 0;
+
+  parse_tcp_route( "device",  tport, el );
+  for ( uint32_t i = 0; i < MAX_TCP_HOSTS; i++ ) {
+    if ( el[ i ] == NULL )
+      continue;
+
+    const char * dev     = el[ i ]->value.val;
+    uint32_t     dev_len = el[ i ]->value.len;
+
+    ConfigTree::Transport *tptr = this->tree.find_transport( dev, dev_len );
+    /* tport: lo
+       type: name
+       route:
+         connect: lo;239.23.22.217
+         port: 8327 */
+    if ( tptr == NULL ) {
+      StringTab & stab = this->user_db.string_tab;
+      char mcast[ 256 ], port[ 8 ];
+      ConfigTree::StringPair *p;
+
+      tptr = stab.make<ConfigTree::Transport>();
+      stab.ref_string( "name", 4, tptr->type );
+      stab.ref_string( dev, dev_len, tptr->tport );
+
+      p = stab.make<ConfigTree::StringPair>();
+      stab.ref_string( "connect", 7, p->name );
+      ::snprintf( mcast, sizeof( mcast ), "%.*s%s", dev_len, dev,
+                  NameSvc::default_name_mcast() );
+      stab.ref_string( mcast, ::strlen( mcast ), p->value );
+      tptr->route.push_tl( p );
+
+      p = stab.make<ConfigTree::StringPair>();
+      stab.ref_string( "port", 4, p->name );
+      ::snprintf( port, sizeof( port ), "%d", NameSvc::default_name_port() );
+      stab.ref_string( port, ::strlen( port ), p->value );
+      tptr->route.push_tl( p );
+
+      tptr->tport_id = this->tree.transport_cnt++;
+      this->tree.transports.push_tl( tptr );
+    }
+    Unrouteable *un = this->unrouteable.find( tptr );
+    if ( un == NULL ) {
+      this->create_name( *tptr );
+      un = this->unrouteable.find( tptr );
+    }
+    if ( un != NULL && un->name != NULL )
+      name_svc[ count++ ] = un->name;
+  }
+  return count;
+}
+
+uint32_t
+SessionMgr::shutdown_telnet( ConfigTree::Transport &tport ) noexcept
+{
+  Unrouteable * un = this->unrouteable.find( &tport );
+  if ( un != NULL && un->telnet != NULL &&
+       un->telnet->in_list( IN_ACTIVE_LIST ) ) {
+    un->telnet->idle_push( EV_SHUTDOWN );
     return 1;
   }
   return 0;
 }
 
 uint32_t
-SessionMgr::shutdown_web( void ) noexcept
+SessionMgr::shutdown_web( ConfigTree::Transport &tport ) noexcept
 {
-  if ( this->web == NULL )
-    return 0;
-  WebListen * l = this->web;
-  if ( l->in_list( IN_ACTIVE_LIST ) ) {
-    l->idle_push( EV_SHUTDOWN );
+  Unrouteable * un = this->unrouteable.find( &tport );
+  if ( un != NULL && un->web != NULL && un->web->in_list( IN_ACTIVE_LIST ) ) {
+    un->web->idle_push( EV_SHUTDOWN );
+    return 1;
+  }
+  return 0;
+}
+
+uint32_t
+SessionMgr::shutdown_name( ConfigTree::Transport &tport ) noexcept
+{
+  Unrouteable * un = this->unrouteable.find( &tport );
+  if ( un != NULL && un->name != NULL && un->name->is_connected ) {
+    un->name->close();
     return 1;
   }
   return 0;
@@ -1599,10 +1826,12 @@ ConnectionMgr::do_connect( void ) noexcept
   EvTcpTransportClient     & client = *this->conn;
   EvTcpTransportParameters & parm   = *this->parameters;
   this->is_shutdown = false;
+
   size_t index;
   for ( index = 0; index < MAX_TCP_HOSTS; index++ ) {
     if ( parm.hash[ index ] != 0 ) {
-      if ( this->rte.mgr.find_mesh_conn( this->rte, parm.hash[ index ] ) ) {
+      if ( this->rte.mgr.find_mesh( this->rte, parm.host[ index ],
+                                    parm.port[ index ], parm.hash[ index ] ) ) {
         const char s[] = "already connected to mesh";
         this->rte.on_shutdown( client, s, sizeof( s ) - 1 );
         this->is_shutdown = true;

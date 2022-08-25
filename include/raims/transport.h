@@ -23,6 +23,7 @@ struct EvInboxTransport;
 struct EvTcpTransportListen;
 struct EvRvTransportListen;
 struct EvNatsTransportListen;
+struct NameSvc;
 
 struct ConnectionMgr : public kv::EvConnectionNotify,
                        public kv::EvTimerCallback {
@@ -90,7 +91,8 @@ enum TransportRouteState {
   TPORT_IS_TCP       = 32,
   TPORT_IS_EDGE      = 64,
   TPORT_IS_IPC       = 128,
-  TPORT_IS_SHUTDOWN  = 256
+  TPORT_IS_SHUTDOWN  = 256,
+  TPORT_IS_DEVICE    = 512
 };
 
 struct IpcRte {
@@ -213,8 +215,6 @@ struct TransportRoute : public kv::EvSocket, public kv::EvConnectionNotify,
   bool create_redis_connect( ConfigTree::Transport &tport ) noexcept;
 
   EvTcpTransportListen *create_mesh_listener(
-                                        ConfigTree::Transport &tport ) noexcept;
-  EvTcpTransportListen *create_mesh_rendezvous( 
                                         ConfigTree::Transport &tport ) noexcept;
   bool create_pgm( int kind,  ConfigTree::Transport &tport ) noexcept;
 

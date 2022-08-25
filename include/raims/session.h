@@ -155,6 +155,7 @@ struct EvTcpTransport;
 struct StringTab;
 struct TelnetListen;
 struct WebListen;
+struct NameSvc;
 struct SessionMgr;
 
 struct IpcRoute : public kv::EvSocket {
@@ -186,45 +187,73 @@ struct ConsoleRoute : public kv::EvSocket {
   virtual void release( void ) noexcept;
 };
 
-struct SessionMgr : public kv::EvSocket {
-  IpcRoute                ipc_rt;         /* network -> rv sub, ds sub, etc */
-  ConsoleRoute            console_rt;     /* rv pub, ds pub -> console sub */
-  ConfigTree            & tree;           /* config db */
-  ConfigTree::User      & user;           /* my user */
-  ConfigTree::Service   & svc;            /* this transport */
-  UScoreTab               u_tab;          /* table of _subscriptions */
-  uint32_t                next_timer,     /* session start gets a timer_id */
-                          timer_id;       /* timer_id for this session */
-  uint64_t                timer_mono_time,/* mono updated at timer expire */
-                          timer_time,     /* real updated at timer expire */
-                          timer_converge_time, /* when publishers convege */
-                          converge_seqno, /* zero seqno of converge */
-                          timer_start_mono,/* start mono */
-                          timer_start,     /* start time */
-                          timer_ival;     /* interval for timer */
-  InboxHash               ibx;            /* match inbox hashes */
-  McastHash               mch;            /* match mcast hashes */
-  UserDB                  user_db;        /* db of user nonce routes */
-  SubDB                   sub_db;         /* track subscriptions */
-  kv::BitSpace            router_set;
-  kv::BloomRef            sys_bloom;
-                          /*router_bloom;*/
-  EventRecord             events;
-  Console                 console;
-  kv::Logger            & log;
+struct Unrouteable {
   TelnetListen          * telnet;
   WebListen             * web;
-  ConfigTree::Transport * telnet_tport,
-                        * web_tport;
-  SessionStats            stats;
-  uint64_t                pub_window_mono_time, /* when pub window expires */
-                          sub_window_mono_time; /* when sub window expires */
-  size_t                  pub_window_size, /* maximum size of pub window */
-                          sub_window_size; /* maximum size of sub window */
-  uint64_t                pub_window_ival, /* pub interval of rotate */
-                          sub_window_ival; /* sub interval of rotate */
-  uint8_t                 tcp_accept_sock_type, /* free list sock types */
-                          tcp_connect_sock_type;
+  NameSvc               * name;
+  ConfigTree::Transport * tport;
+  bool is_active( void ) const;
+};
+
+struct UnrouteableList : public kv::ArrayCount<Unrouteable, 4> {
+  Unrouteable & upsert( ConfigTree::Transport * tport ) {
+    for ( size_t i = 0; i < this->count; i++ ) {
+      if ( tport == this->ptr[ i ].tport )
+        return this->ptr[ i ];
+    }
+    Unrouteable & x = this->push();
+    x.tport = tport;
+    return x;
+  }
+  Unrouteable *find( ConfigTree::Transport * tport ) const {
+    for ( size_t i = 0; i < this->count; i++ ) {
+      if ( tport == this->ptr[ i ].tport )
+        return &this->ptr[ i ];
+    }
+    return NULL;
+  }
+  bool is_active( ConfigTree::Transport * tport ) const {
+    Unrouteable *un = this->find( tport );
+    return ( un != NULL && un->is_active() );
+  }
+};
+
+struct SessionMgr : public kv::EvSocket {
+  IpcRoute              ipc_rt;         /* network -> rv sub, ds sub, etc */
+  ConsoleRoute          console_rt;     /* rv pub, ds pub -> console sub */
+  ConfigTree          & tree;           /* config db */
+  ConfigTree::User    & user;           /* my user */
+  ConfigTree::Service & svc;            /* this transport */
+  UScoreTab             u_tab;          /* table of _subscriptions */
+  uint32_t              next_timer,     /* session start gets a timer_id */
+                        timer_id;       /* timer_id for this session */
+  uint64_t              timer_mono_time,/* mono updated at timer expire */
+                        timer_time,     /* real updated at timer expire */
+                        timer_converge_time, /* when publishers convege */
+                        converge_seqno, /* zero seqno of converge */
+                        timer_start_mono,/* start mono */
+                        timer_start,     /* start time */
+                        timer_ival;     /* interval for timer */
+  InboxHash             ibx;            /* match inbox hashes */
+  McastHash             mch;            /* match mcast hashes */
+  UserDB                user_db;        /* db of user nonce routes */
+  SubDB                 sub_db;         /* track subscriptions */
+  kv::BitSpace          router_set;
+  kv::BloomRef          sys_bloom;
+  EventRecord           events;
+  Console               console;
+  kv::Logger          & log;
+  SessionStats          stats;
+  UnrouteableList       unrouteable;
+  uint64_t              pub_window_mono_time, /* when pub window expires */
+                        sub_window_mono_time, /* when sub window expires */
+                        name_svc_mono_time;
+  size_t                pub_window_size, /* maximum size of pub window */
+                        sub_window_size; /* maximum size of sub window */
+  uint64_t              pub_window_ival, /* pub interval of rotate */
+                        sub_window_ival; /* sub interval of rotate */
+  uint8_t               tcp_accept_sock_type, /* free list sock types */
+                        tcp_connect_sock_type;
 
   SessionMgr( kv::EvPoll &p,  kv::Logger &l,  ConfigTree &c,
               ConfigTree::User &u,  ConfigTree::Service &s,
@@ -232,12 +261,12 @@ struct SessionMgr : public kv::EvSocket {
   int init_sock( void ) noexcept;
   bool init_param( void ) noexcept;
   bool add_transport( ConfigTree::Service &s,  ConfigTree::Transport &t,
-                      bool is_service ) noexcept;
+                      bool is_listener ) noexcept;
   bool add_transport2( ConfigTree::Service &s,  ConfigTree::Transport &t,
-                       bool is_service,  TransportRoute *&rte ) noexcept;
+                       bool is_listener,  TransportRoute *&rte ) noexcept;
   bool add_ipc_transport( ConfigTree::Service &s,  const char *ipc,
                           const char *map,  uint8_t db ) noexcept;
-  bool start_transport( TransportRoute &rte,  bool is_service ) noexcept;
+  bool start_transport( TransportRoute &rte,  bool is_listener ) noexcept;
   bool add_startup_transports( ConfigTree::Service &s ) noexcept;
   uint32_t shutdown_transport( ConfigTree::Service &s,
                                ConfigTree::Transport &t ) noexcept;
@@ -246,8 +275,10 @@ struct SessionMgr : public kv::EvSocket {
   bool add_tcp_accept( TransportRoute &listen_rte,
                        EvTcpTransport &conn ) noexcept;
   bool add_mesh_connect( TransportRoute &mesh_rte ) noexcept;
-  TransportRoute * find_mesh_conn( TransportRoute &mesh_rte,
+  TransportRoute * find_mesh_conn( TransportRoute &mesh_rte, const char *url,
                                    uint32_t mesh_hash ) noexcept;
+  bool find_mesh( TransportRoute &mesh_rte, const char *host,
+                  int port,  uint32_t mesh_hash ) noexcept;
   bool add_mesh_connect( TransportRoute &mesh_rte,  const char **mesh_url,
                          uint32_t *mesh_hash,  uint32_t url_count ) noexcept;
   int init_session( const CryptPass &pwd ) noexcept;
@@ -287,12 +318,14 @@ struct SessionMgr : public kv::EvSocket {
                  const MsgHdrDecoder &dec,  const char *suf ) noexcept;
   bool forward_inbox( kv::EvPublish &pub ) noexcept;
   bool forward_ipc( TransportRoute &src_rte, kv::EvPublish &mc ) noexcept;
-  bool create_telnet( ConfigTree::Transport &t ) noexcept;
-  bool create_web( ConfigTree::Transport &t ) noexcept;
-  uint32_t shutdown_telnet( void ) noexcept;
-  uint32_t shutdown_web( void ) noexcept;
-  /* subscribed data recvd */
-  /*void on_data( const SubMsgData &val ) noexcept;*/
+  bool create_telnet( ConfigTree::Transport &tport ) noexcept;
+  bool create_web( ConfigTree::Transport &tport ) noexcept;
+  bool create_name( ConfigTree::Transport &tport ) noexcept;
+  uint32_t start_name_services( ConfigTree::Transport &tport,
+                                NameSvc **name_svc ) noexcept;
+  uint32_t shutdown_telnet( ConfigTree::Transport &tport ) noexcept;
+  uint32_t shutdown_web( ConfigTree::Transport &tport ) noexcept;
+  uint32_t shutdown_name( ConfigTree::Transport &tport ) noexcept;
 };
 
 }

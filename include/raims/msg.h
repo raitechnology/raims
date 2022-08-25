@@ -726,7 +726,7 @@ static FidTypeName fid_type_name[] = {
 { FID_INTERVAL    , U_SHORT | U_INT             , XCL , 0 ,"interval"        },
 { FID_REF_CNT     , U_SHORT | U_INT             , LIT , 0 ,"ref_cnt"         },
 { FID_TOKEN       , U_SHORT | U_INT | U_LONG    , XCL , 0 ,"token"           },
-{ FID_RET         , U_SHORT | U_INT             , XCL , 0 ,"ret"             },
+{ FID_RET         , U_SHORT | U_INT | U_LONG    , XCL , 0 ,"ret"             },
 { FID_LINK_STATE  , U_SHORT | U_INT | U_LONG    , XCL , 0 ,"link_state"      },
 { FID_START       , U_SHORT | U_INT | U_LONG    , XCL , 0 ,"start"           },
 { FID_END         , U_SHORT | U_INT | U_LONG    , XCL , 0 ,"end"             },

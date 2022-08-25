@@ -80,12 +80,12 @@ struct SubOutput : public WebOutput {
 typedef kv::DLinkList<SubOutput> WebSubList;
 
 struct WebListen : public kv::EvTcpListen {
-  Console    * console;
+  Console    & console;
   const char * http_dir;
   size_t       http_dir_len;
   void * operator new( size_t, void *ptr ) { return ptr; }
-  WebListen( kv::EvPoll &p )
-    : kv::EvTcpListen( p, "web_listen", "web_sock" ), console( 0 ),
+  WebListen( kv::EvPoll &p,  Console &c )
+    : kv::EvTcpListen( p, "web_listen", "web_sock" ), console( c ),
       http_dir( 0 ), http_dir_len( 0 ) {}
 
   virtual EvSocket *accept( void ) noexcept;

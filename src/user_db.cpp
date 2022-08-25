@@ -16,7 +16,7 @@ using namespace md;
 UserDB::UserDB( EvPoll &p,  ConfigTree::User &u,
                 ConfigTree::Service &s,  SubDB &sdb,
                 StringTab &st,  EventRecord &ev ) noexcept
-  : ipc_transport( 0 ), user( u ), svc( s ), sub_db( sdb ),
+  : ipc_transport( 0 ), poll( p ), user( u ), svc( s ), sub_db( sdb ),
     string_tab( st ), events( ev ), session_key( 0 ), hello_key( 0 ),
     cnonce( 0 ), node_ht( 0 ), zombie_ht( 0 ), peer_ht( 0 ),
     peer_key_ht( 0 ), peer_keys( 0 ), peer_bloom( 0, "(peer)", p.g_bloom_db ),
@@ -90,6 +90,8 @@ UserDB::init( const CryptPass &pwd,  uint32_t my_fd,
   this->hb_ival_ns       = 0; /* hb interval in nanos */
   this->hb_ival_mask     = 0; /* hb interval mask, pow2 - 1 > hv_ival_ns */
   this->next_ping_mono   = 0; /* when the next random ping timer expires */
+  this->name_send_count  = 0;
+  this->name_send_time   = 0;
   this->last_auth_mono   = this->start_mono_time;
   this->converge_time    = this->start_time;
   this->net_converge_time= this->start_time;
@@ -1016,12 +1018,36 @@ UserDB::add_user( TransportRoute &rte,  const UserRoute *src,  uint32_t fd,
   rtsz = sizeof( UserRoute ) * UserBridge::USER_ROUTE_BASE;
   size = sizeof( UserBridge ) + rtsz;
   seed = (uint32_t) this->rand.next();
-  n    = this->make_user_bridge( size, peer, rte.poll.g_bloom_db, seed );
+  n    = this->make_user_bridge( size, peer, this->poll.g_bloom_db, seed );
   n->bridge_id = user_bridge_id;
   n->uid       = uid;
   ::memset( (void *) &n[ 1 ], 0, rtsz );
   n->u_buf[ 0 ] = (UserRoute *) (void *) &n[ 1 ];
   this->add_user_route( *n, rte, fd, dec, src );
+  this->bridge_tab[ uid ] = n;
+  this->node_ht->upsert_rsz( this->node_ht, user_bridge_id.nonce, uid );
+
+  return n;
+}
+
+UserBridge *
+UserDB::add_user2( const UserNonce &user_bridge_id,
+                   const PeerEntry &peer,  uint64_t start ) noexcept
+{
+  UserBridge * n;
+  size_t       size, rtsz;
+  uint32_t     uid,
+               seed;
+  uid  = this->new_uid();
+  rtsz = sizeof( UserRoute ) * UserBridge::USER_ROUTE_BASE;
+  size = sizeof( UserBridge ) + rtsz;
+  seed = (uint32_t) this->rand.next();
+  n    = this->make_user_bridge( size, peer, this->poll.g_bloom_db, seed );
+  n->bridge_id  = user_bridge_id;
+  n->uid        = uid;
+  n->start_time = start;
+  ::memset( (void *) &n[ 1 ], 0, rtsz );
+  n->u_buf[ 0 ] = (UserRoute *) (void *) &n[ 1 ];
   this->bridge_tab[ uid ] = n;
   this->node_ht->upsert_rsz( this->node_ht, user_bridge_id.nonce, uid );
 

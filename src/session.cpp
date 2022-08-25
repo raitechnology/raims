@@ -47,10 +47,9 @@ SessionMgr::SessionMgr( EvPoll &p,  Logger &l,  ConfigTree &c,
              user_db( p, u, s, this->sub_db, st, this->events ),
              sub_db( p, this->user_db, *this ),
              sys_bloom( 0, "(sys)", p.g_bloom_db ),
-             console( *this ), log( l ), telnet( 0 ), web( 0 ),
-             telnet_tport( 0 ), web_tport( 0 ),
-             pub_window_mono_time( 0 ),
-             sub_window_mono_time( 0 ),
+             console( *this ), log( l ),
+             pub_window_mono_time( 0 ), sub_window_mono_time( 0 ),
+             name_svc_mono_time( 0 ),
              pub_window_size( 4 * 1024 * 1024 ),
              sub_window_size( 4 * 1024 * 1024 ),
              pub_window_ival( sec_to_ns( 10 ) ),
@@ -62,6 +61,7 @@ SessionMgr::SessionMgr( EvPoll &p,  Logger &l,  ConfigTree &c,
   hello_h = kv_crc_c( X_HELLO, X_HELLO_SZ, 0 );
   hb_h    = kv_crc_c( X_HB,    X_HB_SZ,    0 );
   bye_h   = kv_crc_c( X_BYE,   X_BYE_SZ,   0 );
+  name_h  = kv_crc_c( X_NAME,  X_NAME_SZ,  0 );
   add_h   = kv_crc_c( Z_ADD,   Z_ADD_SZ,   0 );
   del_h   = kv_crc_c( Z_DEL,   Z_DEL_SZ,   0 );
   blm_h   = kv_crc_c( Z_BLM,   Z_BLM_SZ,   0 );
@@ -312,8 +312,8 @@ SessionMgr::timer_expire( uint64_t tid,  uint64_t ) noexcept
            cur_time = this->poll.timer.current_time_ns();
   if ( tid != this->timer_id )
     return false;
-  this->timer_mono_time      = cur_mono;
-  this->timer_time           = cur_time;
+  this->timer_mono_time = cur_mono;
+  this->timer_time      = cur_time;
   if ( this->user_db.net_converge_time > this->timer_converge_time &&
        cur_time >= this->user_db.net_converge_time ) {
     uint64_t seqno = seqno_init( cur_time );
@@ -325,6 +325,16 @@ SessionMgr::timer_expire( uint64_t tid,  uint64_t ) noexcept
   }
   this->user_db.interval_hb( cur_mono, cur_time );
   this->user_db.check_user_timeout( cur_mono, cur_time );
+
+  if ( cur_mono > this->name_svc_mono_time ) {
+    this->name_svc_mono_time = cur_mono + this->user_db.hb_ival_ns;
+    for ( size_t i = 0; i < this->unrouteable.count; i++ ) {
+      NameSvc *name = this->unrouteable.ptr[ i ].name;
+      if ( name != NULL ) {
+        this->user_db.mcast_name( *name );
+      }
+    }
+  }
   if ( this->console.log_rotate_time <= cur_time )
     this->console.rotate_log();
   this->console.on_log( this->log );

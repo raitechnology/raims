@@ -189,7 +189,7 @@ WebListen::accept( void ) noexcept
   if ( ! this->accept2( *c, "web" ) )
     return NULL;
   c->initialize_state();
-  c->console      = this->console;
+  c->console      = &this->console;
   c->http_dir     = this->http_dir;
   c->http_dir_len = this->http_dir_len;
   /*c->debug_fd     = os_open( "debug.txt", O_APPEND | O_WRONLY | O_CREAT, 0666 );*/

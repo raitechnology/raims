@@ -246,7 +246,7 @@ struct MsgBufDigestT : public BMsgBufT<T> {
   T  & interval   ( uint32_t n )  { return this->i( FID_INTERVAL, n ); }
   T  & ref_cnt    ( uint32_t n )  { return this->i( FID_REF_CNT, n ); }
   T  & token      ( uint64_t n )  { return this->u( FID_TOKEN, n ); }
-  T  & ret        ( uint32_t n )  { return this->i( FID_RET, n ); }
+  T  & ret        ( uint64_t n )  { return this->u( FID_RET, n ); }
   T  & link_state ( uint64_t n )  { return this->u( FID_LINK_STATE, n ); }
   T  & start      ( uint64_t n )  { return this->u( FID_START, n ); }
   T  & end        ( uint64_t n )  { return this->u( FID_END, n ); }

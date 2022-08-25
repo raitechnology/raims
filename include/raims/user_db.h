@@ -78,6 +78,8 @@ struct UserStateTest : public StateTest<T> {
 
 struct UserBridge;
 struct UserDB;
+struct NameSvc;
+union  NameInbox;
 struct UserRoute : public UserStateTest<UserRoute> {
   static const uint32_t NO_RTE  = -1;
   static const uint16_t NO_HOPS = -1;
@@ -327,7 +329,7 @@ struct UserRouteList : public kv::DLinkList< UserRoute > {
   UserRouteList() : sys_route_refs( 0 ) {}
 };
 
-struct SourceRouteList : public kv::ArrayCount<UserRouteList, 128> {
+struct SourceRouteList : public kv::ArrayCount< UserRouteList, 128 > {
   bool is_empty( uint32_t fd ) const {
     return fd >= this->count || this->ptr[ fd ].is_empty();
   }
@@ -384,9 +386,10 @@ struct StringTab;
 struct UserDB {
   static const uint32_t MY_UID = 0;      /* bridge_tab[ 0 ] reserved for me */
   /* my transports */
-  TransportTab         transport_tab;    /* transport array */
-  ForwardCache         forward_path[ COST_PATH_COUNT ];/* which tports to fwd */
-  TransportRoute     * ipc_transport;    /* transport[ 0 ], internal routes */
+  TransportTab          transport_tab;    /* transport array */
+  ForwardCache          forward_path[ COST_PATH_COUNT ];/* which tports fwd */
+  TransportRoute      * ipc_transport;    /* transport[ 0 ], internal routes */
+  kv::EvPoll          & poll;
 
   /* my identity */
   ConfigTree::User    & user;            /* my user */
@@ -444,7 +447,8 @@ struct UserDB {
                         uid_auth_count,  /* total trusted nodes */
                         uid_hb_count,    /* total hb / distance zero nones */
                         uid_ping_count,
-                        next_ping_uid;
+                        next_ping_uid,
+                        name_send_count;
   uint64_t              send_peer_seqno, /* a unique seqno for peer multicast */
                         link_state_seqno, /* seqno of adjacency updates */
                         mcast_seqno,      /* seqno of mcast subjects */
@@ -454,7 +458,8 @@ struct UserDB {
                         last_auth_mono,  /* when last uid was authenticated */
                         converge_time,   /* time of convergence */
                         converge_mono,   /* convergence mono time */
-                        net_converge_time; /* time that network agrees */
+                        net_converge_time, /* time that network agrees */
+                        name_send_time;
   kv::rand::xoroshiro128plus rand;       /* used to generate bloom seeds */
 
   /* memory buffers for keys and peer nodes */
@@ -539,6 +544,10 @@ struct UserDB {
     return this->get_min_skew( n, 0 );
   }
   int64_t get_min_skew( UserBridge &n,  uint32_t i ) noexcept;
+  void mcast_name( NameSvc &name ) noexcept;
+  void send_name_advert( NameSvc &name,  TransportRoute &rte,
+                         NameInbox *inbox ) noexcept;
+  void on_name_svc( NameSvc &name,  CabaMsg *msg ) noexcept;
   /* auth.cpp */
   bool compare_version( UserBridge &n, MsgHdrDecoder &dec ) noexcept;
   bool on_inbox_auth( const MsgFramePublish &pub,  UserBridge &n,
@@ -566,6 +575,8 @@ struct UserDB {
                          uint32_t fd,  const UserNonce &b_nonce,
                          const PeerEntry &peer,
                          const MsgHdrDecoder &dec ) noexcept;
+  UserBridge * add_user2( const UserNonce &user_bridge_id,  
+                          const PeerEntry &peer,  uint64_t start ) noexcept;
   void set_ucast_url( UserRoute &u_rte, const MsgHdrDecoder &dec ) noexcept;
   void set_mesh_url( UserRoute &u_rte, const MsgHdrDecoder &dec ) noexcept;
   void find_adjacent_routes( void ) noexcept;

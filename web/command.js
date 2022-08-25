@@ -568,9 +568,16 @@ function on_close() {
 function on_startup( webs ) {
   ws = webs;
   ws.onmessage = function( event ) {
+    /*let t   = Date.now();*/
     let msg = JSON.parse( event.data );
+    /*let t2  = Date.now();*/
     let key = Object.keys( msg )[ 0 ];
+    /*if ( t2 > t )
+      console.log( "parse time " + ( t2 - t ) );*/
     on_msg( key, msg[ key ] );
+    /*let t3  = Date.now();
+    if ( t3 > t2 )
+      console.log( "table time " + ( t3 - t2 ) );*/
   };
   ws.onopen = function( event ) {
     ws.send(

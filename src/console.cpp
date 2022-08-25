@@ -22,6 +22,7 @@
 #include <raims/ev_tcp_transport.h>
 #include <raims/ev_telnet.h>
 #include <raims/ev_web.h>
+#include <raims/ev_name_svc.h>
 #include <linecook/linecook.h>
 #include <linecook/ttycook.h>
 #include <raimd/json_msg.h>
@@ -1403,6 +1404,7 @@ TabPrint::string( Console &console,  char *buf ) noexcept
       if ( this->len & TPORT_IS_EDGE      ) buf[ j++ ] = 'E';
       if ( this->len & TPORT_IS_IPC       ) buf[ j++ ] = 'I';
       if ( this->len & TPORT_IS_SHUTDOWN  ) buf[ j++ ] = '-';
+      if ( this->len & TPORT_IS_DEVICE    ) buf[ j++ ] = 'D';
       buf[ j ] = '\0';
       return buf;
     }
@@ -2214,13 +2216,20 @@ Console::get_active_tports( ConfigTree::TransportArray &listen,
       }
     }
   }
-  if ( this->mgr.telnet != NULL &&
-       this->mgr.telnet->in_list( IN_ACTIVE_LIST ) ) {
-    listen.push( this->mgr.telnet_tport );
-  }
-  if ( this->mgr.web != NULL &&
-       this->mgr.web->in_list( IN_ACTIVE_LIST ) ) {
-    listen.push( this->mgr.web_tport );
+  for ( size_t i = 0; i < this->mgr.unrouteable.count; i++ ) {
+    Unrouteable & un = this->mgr.unrouteable.ptr[ i ];
+    if ( un.telnet != NULL ) {
+      if ( un.telnet->in_list( IN_ACTIVE_LIST ) )
+        listen.push( un.tport );
+    }
+    else if ( un.web != NULL ) {
+      if ( un.web->in_list( IN_ACTIVE_LIST ) )
+        listen.push( un.tport );
+    }
+    else if ( un.name != NULL ) {
+      if ( ! un.name->is_closed )
+        listen.push( un.tport );
+    }
   }
 }
 
@@ -3232,6 +3241,14 @@ Console::show_status( ConsoleOutput *p, const char *name,  size_t len ) noexcept
   this->print_table( p, hdr, ncols );
 }
 
+bool
+Unrouteable::is_active( void ) const
+{
+  return
+    ( ( this->telnet != NULL && this->telnet->in_list( IN_ACTIVE_LIST ) ) ||
+      ( this->web != NULL && this->web->in_list( IN_ACTIVE_LIST ) ) );
+}
+
 void
 Console::show_tports( ConsoleOutput *p, const char *name,  size_t len ) noexcept
 {
@@ -3270,19 +3287,10 @@ Console::show_tports( ConsoleOutput *p, const char *name,  size_t len ) noexcept
     size_t len = sizeof( buf );
     bool   is_accepting = false;
 
-    if ( rte != NULL ) {
+    if ( rte != NULL )
       is_accepting = ( rte->listener != NULL );
-    }
-    else if ( tport == this->mgr.telnet_tport ) {
-      if ( this->mgr.telnet != NULL &&
-           this->mgr.telnet->in_list( IN_ACTIVE_LIST ) )
-        is_accepting = true;
-    }
-    else if ( tport == this->mgr.web_tport ) {
-      if ( this->mgr.web != NULL &&
-           this->mgr.web->in_list( IN_ACTIVE_LIST ) )
-        is_accepting = true;
-    }
+    else if ( this->mgr.unrouteable.is_active( tport ) )
+      is_accepting = true;
     else if ( this->user_db.ipc_transport != NULL ) {
       for ( IpcRte *ext = this->user_db.ipc_transport->ext->list.hd;
             ext != NULL; ext = ext->next ) {

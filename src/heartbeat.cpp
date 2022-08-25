@@ -6,6 +6,7 @@
 #include <math.h>
 #include <raims/session.h>
 #include <raims/transport.h>
+#include <raims/ev_name_svc.h>
 
 using namespace rai;
 using namespace ms;
@@ -644,4 +645,3 @@ UserDB::get_min_skew( UserBridge &n,  uint32_t i ) noexcept
   n.skew_upd = 0;
   return n.clock_skew = skew;
 }
-

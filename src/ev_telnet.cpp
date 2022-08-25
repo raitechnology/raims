@@ -137,8 +137,8 @@ TelnetListen::accept( void ) noexcept
   if ( ! this->accept2( *c, "telnet" ) )
     return NULL;
   c->init_state();
-  c->console = this->console;
-  this->console->term_list.push_tl( c );
+  c->console = &this->console;
+  this->console.term_list.push_tl( c );
   c->start();
   return c;
 }
