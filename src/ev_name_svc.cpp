@@ -299,6 +299,9 @@ UserDB::send_name_advert( NameSvc &name,  TransportRoute &rte,
    .stamp     ()
    .start     ()
    .ret       ()
+   .user      ( this->user.user.len )
+   .create    ( this->user.create.len )
+   .expires   ( this->user.expires.len )
    .tport     ( rte.transport.tport.len )
    .mesh_url  ( rte.mesh_url_len )
    .pk_digest ();
@@ -308,15 +311,22 @@ UserDB::send_name_advert( NameSvc &name,  TransportRoute &rte,
 
   m.open( this->bridge_id.nonce, X_NAME_SZ )
    .user_hmac ( this->bridge_id.hmac     )
-   .seqno     ( this->name_send_count++  )
+   .seqno     ( ++this->name_send_seqno  )
    .stamp     ( stamp                    )
    .start     ( this->start_time         );
   if ( inbox == NULL )
     m.ret     ( name.inbox.val           );
+  m.user      ( this->user.user.val,
+                this->user.user.len      )
+   .create    ( this->user.create.val,
+                this->user.create.len    );
+  if ( this->user.expires.len > 0 )
+    m.expires ( this->user.expires.val,
+                this->user.expires.len   );
   m.tport     ( rte.transport.tport.val,
-                rte.transport.tport.len )
+                rte.transport.tport.len  )
    .mesh_url  ( rte.mesh_url_addr,
-                rte.mesh_url_len        )
+                rte.mesh_url_len         )
    .pk_digest ();
 
   m.close( e.sz, name_h, CABA_HEARTBEAT );
@@ -333,24 +343,27 @@ UserDB::on_name_svc( NameSvc &name,  CabaMsg *msg ) noexcept
   MsgHdrDecoder dec( msg );
   if ( dec.decode_msg() != 0 )
     return;
-  if ( ! dec.test_3( FID_TPORT, FID_MESH_URL, FID_START ) )
+  if ( ! dec.test_4( FID_TPORT, FID_MESH_URL, FID_START, FID_STAMP ) )
     return;
 
   AdvertList & adverts = name.adverts;
   UserNonce    bridge_id;
   UserBridge * n = NULL;
   NameInbox    inbox;
-  size_t       n_pos, p_pos;
-  uint64_t     start;
+  size_t       n_pos;
+  uint64_t     start,
+               stamp;
   const char * tport_name,
              * mesh_url_addr;
-  uint32_t     uid, pid,
+  uint32_t     uid,
                tport_len,
                mesh_url_len;
 
-  if ( ! dec.get_bridge( bridge_id.nonce ) )
+  if ( ! dec.get_bridge( bridge_id.nonce ) ||
+       ! dec.get_ival<uint64_t>( FID_SEQNO, dec.seqno ) )
     return;
   dec.get_ival<uint64_t>( FID_START, start );
+  dec.get_ival<uint64_t>( FID_STAMP, stamp );
   if ( dec.test( FID_RET ) )
     dec.get_ival<uint64_t>( FID_RET, inbox.val );
   else
@@ -360,8 +373,10 @@ UserDB::on_name_svc( NameSvc &name,  CabaMsg *msg ) noexcept
     if ( uid == MY_UID )
       return;
     n = this->bridge_tab[ uid ];
-    if ( n == NULL )
+    if ( n == NULL ) {
+      d_name( "ignoring, nonce is null\n" );
       return;
+    }
     if ( n->is_set( AUTHENTICATED_STATE ) ) {
       if ( ! dec.msg->verify( n->peer_key ) ) {
         fprintf( stderr, "ignoring msg, not verified\n" );
@@ -371,24 +386,37 @@ UserDB::on_name_svc( NameSvc &name,  CabaMsg *msg ) noexcept
   }
   if ( n == NULL || ! n->is_set( AUTHENTICATED_STATE ) ) {
     if ( n == NULL ) {
+      HashDigest hello_key;
       if ( ! dec.get_hmac( FID_USER_HMAC, bridge_id.hmac ) )
         return;
-      if ( ! this->peer_ht->find( bridge_id.hmac, p_pos, pid ) )
-        return;
-      PeerEntry & peer = *this->peer_db[ pid ];
-      if ( ! dec.msg->verify_hb( peer.hello_key ) ) {
+      this->calc_hello_key( start, bridge_id.hmac, hello_key );
+
+      if ( ! dec.msg->verify_hb( hello_key ) ) {
         fprintf( stderr, "ignoring msg, hello not verified\n" );
         return;
       }
-      n = this->add_user2( bridge_id, peer, start );
+      PeerEntry * peer = this->find_peer( dec, bridge_id.hmac );
+      if ( peer != NULL )
+        n = this->add_user2( bridge_id, *peer, start, hello_key );
+      if ( n == NULL ) {
+        fprintf( stderr, "ignoring msg, no user create\n" );
+        return;
+      }
     }
     else {
-      if ( ! dec.msg->verify_hb( n->peer.hello_key ) ) {
+      if ( ! dec.msg->verify_hb( n->peer_hello ) ) {
         fprintf( stderr, "ignoring msg, hello not verified\n" );
         return;
       }
     }
   }
+  if ( dec.seqno <= n->name_recv_seqno || stamp <= n->name_recv_time ) {
+    d_name( "ignoring msg, out of order or replay %lu %lu\n",
+            n->name_recv_seqno, n->name_recv_time );
+    return;
+  }
+  n->name_recv_seqno = dec.seqno;
+  n->name_recv_time  = stamp;
   tport_name    = (const char *) dec.mref[ FID_TPORT ].fptr;
   tport_len     = (uint32_t)     dec.mref[ FID_TPORT ].fsize;
   mesh_url_addr = (const char *) dec.mref[ FID_MESH_URL ].fptr;

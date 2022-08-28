@@ -63,9 +63,8 @@ struct UserNonce {
 };
 /* derived from config or from peer */
 struct PeerEntry {
-  PolyHmacDigest hmac,
-                 secret_hmac;
-  HashDigest     hello_key;
+  PolyHmacDigest hmac;/*,
+                 secret_hmac;*/
   StringVal      user,
                  svc,
                  create,

@@ -43,6 +43,9 @@ UserDB::make_hb( TransportRoute &rte,  const char *sub,  size_t sublen,
    .uid_cnt   ()
    .uid_csum  ()
    .mesh_csum ()
+   .user      ( this->user.user.len )
+   .create    ( this->user.create.len )
+   .expires   ( this->user.expires.len )
    .ucast_url ( rte.ucast_url_len )
    .mesh_url  ( rte.mesh_url_len )
    .cost      ()
@@ -63,7 +66,14 @@ UserDB::make_hb( TransportRoute &rte,  const char *sub,  size_t sublen,
   if ( h != bye_h ) {
     m.interval  ( this->hb_interval      )
      .cnonce    ( rte.hb_cnonce          )
-     .sub_seqno ( this->sub_db.sub_seqno );
+     .sub_seqno ( this->sub_db.sub_seqno )
+     .user      ( this->user.user.val,
+                  this->user.user.len    )
+     .create    ( this->user.create.val,
+                  this->user.create.len  );
+    if ( this->user.expires.len > 0 )
+      m.expires ( this->user.expires.val,
+                  this->user.expires.len );
     if ( h != hello_h ) {
       m.link_state( this->link_state_seqno  )
        .converge  ( this->net_converge_time )

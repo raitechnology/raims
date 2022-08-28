@@ -272,30 +272,15 @@ UserDB::make_peer_session( const MsgFramePublish &pub,  UserBridge &from_n,
                               &user, start ) ) {
     /* if peer not in db, add one */
     if ( user_n == NULL ) {
-      PeerEntry * peer;
-      size_t      p_pos;
-      uint32_t    pid;
-      if ( ! this->peer_ht->find( sync_bridge_id.hmac, p_pos, pid ) ) {
-        /* new peer */
-        pid  = (uint32_t) this->peer_db.count;
-        StringVal user_sv, svc_sv, create_sv, expires_sv;
-        this->string_tab.ref_string( user.user, user.user_len, user_sv );
-        this->string_tab.ref_string( user.service, user.service_len, svc_sv );
-        this->string_tab.ref_string( user.create, user.create_len, create_sv );
-        this->string_tab.ref_string( user.expires, user.expires_len,
-                                     expires_sv );
-        peer = this->make_peer( user_sv, svc_sv, create_sv, expires_sv );
-        this->peer_db[ pid ] = peer;
-        peer->hmac = sync_bridge_id.hmac;
-
-        this->peer_ht->upsert_rsz( this->peer_ht, peer->hmac, pid );
-      }
-      else {
-        peer = this->peer_db[ pid ];
-      }
+      PeerEntry * peer = this->find_peer( user.user, user.user_len,
+                                          user.create, user.create_len,
+                                          user.expires, user.expires_len,
+                                          sync_bridge_id.hmac );
       TransportRoute & rte = from_n.user_route->rte;
+      HashDigest hello;
+      this->calc_hello_key( start, sync_bridge_id.hmac, hello );
       user_n = this->add_user( rte, from_n.user_route, pub.src_route,
-                               sync_bridge_id, *peer, dec );
+                               sync_bridge_id, *peer, start, dec, hello );
     }
     user_n->peer_key = peer_key;
     user_n->start_time = start;

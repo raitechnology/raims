@@ -232,6 +232,7 @@ UserDB::send_challenge( UserBridge &n,  AuthStage stage ) noexcept
   HashDigest challenge_ha1,
              encrypted_ha1;
   TransportRoute & rte = n.user_route->rte;
+  PolyHmacDigest secret_hmac;
   
   this->events.send_challenge( n.uid, n.user_route->rte.tport_id, stage );
   if ( debug_auth )
@@ -265,7 +266,8 @@ UserDB::send_challenge( UserBridge &n,  AuthStage stage ) noexcept
 
   MsgCat m;
   m.reserve( e.sz );
-  challenge_ha1.kdf_challenge_secret( n.peer.secret_hmac, n.bridge_id.nonce,
+  this->calc_secret_hmac( n, secret_hmac );
+  challenge_ha1.kdf_challenge_secret( secret_hmac, n.bridge_id.nonce,
                                       this->bridge_id.nonce,
                                       n.auth[ 0 ].cnonce, n.auth[ 1 ].cnonce,
                                       n.auth[ 0 ].seqno, n.auth[ 0 ].time,
@@ -304,6 +306,7 @@ UserDB::send_challenge( UserBridge &n,  AuthStage stage ) noexcept
   m.close( e.sz, h, CABA_INBOX );
 
   m.sign( ibx.buf, ibx.len(), *this->session_key );
+  secret_hmac.zero();
   encrypted_ha1.zero();
   challenge_ha1.zero();
   return this->forward_to_inbox( n, ibx, h, m.msg, m.len(), false );
@@ -312,11 +315,12 @@ UserDB::send_challenge( UserBridge &n,  AuthStage stage ) noexcept
 bool
 UserDB::recv_challenge( const MsgFramePublish &pub,  UserBridge &n,
                         const MsgHdrDecoder &dec,
-                        AuthStage stage ) const noexcept
+                        AuthStage stage ) noexcept
 {
   HashDigest challenge_ha1,
              encrypted_ha1;
   Nonce      recv_cnonce;
+  PolyHmacDigest secret_hmac;
 
   this->events.recv_challenge( n.uid, pub.rte.tport_id, stage );
   recv_cnonce.copy_from( dec.mref[ FID_CNONCE ].fptr );
@@ -324,7 +328,8 @@ UserDB::recv_challenge( const MsgFramePublish &pub,  UserBridge &n,
     n.printf( "recv stage %u verify(%lu,%lu,0x%08lx)\n", stage,
               n.auth[ 0 ].seqno, n.auth[ 0 ].time,
               n.auth[ 0 ].cnonce.nonce[ 0 ] );
-  challenge_ha1.kdf_challenge_secret( n.peer.secret_hmac,
+  this->calc_secret_hmac( n, secret_hmac );
+  challenge_ha1.kdf_challenge_secret( secret_hmac,
                                       this->bridge_id.nonce,
                                       n.bridge_id.nonce,
                                       n.auth[ 0 ].cnonce, recv_cnonce,
@@ -332,6 +337,7 @@ UserDB::recv_challenge( const MsgFramePublish &pub,  UserBridge &n,
                                       stage );
   encrypted_ha1.copy_from( dec.mref[ FID_AUTH_KEY ].fptr );
   n.peer_key.decrypt_hash( challenge_ha1, encrypted_ha1 );
+  secret_hmac.zero();
   encrypted_ha1.zero();
   challenge_ha1.zero();
 #if 0

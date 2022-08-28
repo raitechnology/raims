@@ -527,7 +527,9 @@ ConfigTree::resolve( const char *us,  User *&usrp,  Service *&svc ) noexcept
       s_len = ::strlen( sv );
     }
     else {
-      u_len = ::strlen( us );
+      s_len = ::strlen( us );
+      sv    = us;
+      us    = NULL;
     }
   }
   svc  = this->find_service( sv, s_len );
@@ -538,8 +540,8 @@ ConfigTree::resolve( const char *us,  User *&usrp,  Service *&svc ) noexcept
     return true;
   if ( svc == NULL )
     fprintf( stderr, "No service %.*s configured\n", (int) s_len, sv );
-  else if ( usrp == NULL )
-    fprintf( stderr, "No user %.*s configured\n", (int) u_len, us );
+  /*else if ( usrp == NULL )
+    fprintf( stderr, "No user %.*s configured\n", (int) u_len, us );*/
   return false;
 }
 

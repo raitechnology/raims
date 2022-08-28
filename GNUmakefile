@@ -435,6 +435,18 @@ $(bind)/dsatest: $(dsatest_objs) $(dsatest_libs) $(lnk_dep)
 all_exes    += $(bind)/dsatest
 all_depends += $(dsatest_deps)
 
+sigtest_files := sigtest
+sigtest_cfile := test/sigtest.cpp
+sigtest_objs  := $(addprefix $(objd)/, $(addsuffix .o, $(sigtest_files)))
+sigtest_deps  := $(addprefix $(dependd)/, $(addsuffix .d, $(sigtest_files)))
+sigtest_libs  :=
+sigtest_lnk   := $(lnk_lib)
+
+$(bind)/sigtest: $(sigtest_objs) $(sigtest_libs) $(lnk_dep)
+
+all_exes    += $(bind)/sigtest
+all_depends += $(sigtest_deps)
+
 shatest_files := shatest
 shatest_cfile := test/shatest.cpp
 shatest_objs  := $(addprefix $(objd)/, $(addsuffix .o, $(shatest_files)))

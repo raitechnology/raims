@@ -2,6 +2,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <unistd.h>
 #define __STDC_FORMAT_MACROS
 #include <inttypes.h>
 #include <raims/crypt.h>
@@ -94,6 +95,30 @@ UserBuf::gen_key( const char *user,  size_t ulen,  const char *svc,
   ECDH ec;
   ec.gen_key();
   return this->put_ecdh( pwd, ec, DO_BOTH );
+}
+
+bool
+UserBuf::gen_tmp_key( const char *usr_svc,  const CryptPass &pwd ) noexcept
+{
+  const char * p,
+             * sv;
+  size_t       u_len,
+               s_len;
+  char         host[ 256 ];
+  if ( (p = ::strchr( usr_svc, '.' )) == NULL ) {
+    if ( ::gethostname( host, sizeof( host ) ) != 0 )
+      return false;
+    sv      = usr_svc;
+    s_len   = ::strlen( sv );
+    usr_svc = host;
+    u_len   = ::strlen( host );
+  }
+  else {
+    sv    = &p[ 1 ];
+    u_len = p - usr_svc;
+    s_len = ::strlen( sv );
+  }
+  return this->gen_key( usr_svc, u_len, sv, s_len, NULL, 0, pwd );
 }
 
 uint64_t
@@ -243,7 +268,7 @@ UserHmacData::decrypt( const CryptPass &pwd,  WhichPubPri get_op ) noexcept
     this->revoke_hmac.zero();
   return true;
 }
-
+#if 0
 bool
 UserHmacData::calc_secret_hmac( UserHmacData &data2,
                                 PolyHmacDigest &secret_hmac ) noexcept
@@ -266,15 +291,18 @@ UserHmacData::calc_secret_hmac( UserHmacData &data2,
 }
 
 void
-UserHmacData::calc_hello_key( ServiceBuf &svc,  HashDigest &ha ) noexcept
+UserHmacData::calc_hello_key( uint64_t start_time,  ServiceBuf &svc,
+                              HashDigest &ha,  DSA &dsa ) noexcept
 {
   PolyHmacDigest svc_hmac;
   ha.kdf_bytes( svc.pub_key, svc.pub_key_len );
   svc_hmac.calc_2( ha, svc.service, svc.service_len, 
                        svc.create, svc.create_len );
   ha.kdf_bytes( svc_hmac.dig, HMAC_SIZE, this->user_hmac.dig, HMAC_SIZE );
+  dsa.gen_key( svc_hmac.dig, HMAC_SIZE, this->user_hmac.dig, HMAC_SIZE,
+               &start_time, sizeof( start_time ) );
 }
-
+#endif
 static void
 print_pkerr( size_t pri_len,  size_t pub_len ) noexcept
 {
@@ -455,9 +483,11 @@ ServiceBuf::load_service( const ConfigTree &tree,
   this->copy( s );
   for ( const ConfigTree::User *u = tree.users.hd; u != NULL;
         u = u->next ) {
-    if ( u->svc.equals( s.svc ) ) {
-      this->add_user( *u );
-      user_cnt++;
+    if ( u->user_id < tree.user_cnt ) {
+      if ( u->svc.equals( s.svc ) ) {
+        this->add_user( *u );
+        user_cnt++;
+      }
     }
   }
   if ( user_cnt == 0 )

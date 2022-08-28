@@ -226,9 +226,23 @@ ed25519_hram( hash_512bits &hram, const ed25519_signature &RS,
 }
 
 void
-ED25519::gen_key( void ) noexcept
+ED25519::gen_key( const void *r,  size_t rlen,
+                  const void *s,  size_t slen,
+                  const void *t,  size_t tlen ) noexcept
 {
-  rand::fill_urandom_bytes( this->sk, 32 );
+  if ( rlen == 0 )
+    rand::fill_urandom_bytes( this->sk, 32 );
+  else {
+    static const size_t keylen = sizeof( this->sk.key );
+    size_t k = 0;
+    this->sk.zero();
+    for ( size_t j = 0; j < rlen; j++ )
+      this->sk.key[ k++ % keylen ] ^= ((const uint8_t *) r)[ j ];
+    for ( size_t j = 0; j < slen; j++ )
+      this->sk.key[ k++ % keylen ] ^= ((const uint8_t *) s)[ j ];
+    for ( size_t j = 0; j < tlen; j++ )
+      this->sk.key[ k++ % keylen ] ^= ((const uint8_t *) t)[ j ];
+  }
   this->publickey();
 }
 

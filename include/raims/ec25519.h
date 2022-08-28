@@ -15,18 +15,18 @@ static const size_t EC25519_KEY_LEN     = 32,
 template <class T, size_t KEY_LEN>
 struct KeyT {
   uint8_t key[ KEY_LEN ];
-  KeyT( const uint8_t *k ) {
+  KeyT( const void *k ) {
     if ( k != NULL )
       ::memcpy( this->key, k, sizeof( this->key ) );
   }
   ~KeyT() {
     this->zero();
   }
-  T & copy_from( const uint8_t *x ) {
+  T & copy_from( const void *x ) {
     ::memcpy( this->key, x, sizeof( this->key ) );
     return (T &) *this;
   }
-  void copy_to( uint8_t *out ) const {
+  void copy_to( void *out ) const {
     ::memcpy( out, this->key, sizeof( this->key ) );
   }
   operator uint8_t *() { return this->key; }
@@ -37,7 +37,7 @@ struct KeyT {
 };
 
 struct ec25519_key : public KeyT<ec25519_key, EC25519_KEY_LEN> {
-  ec25519_key( const uint8_t *k = NULL ) : KeyT( k ) {}
+  ec25519_key( const void *k = NULL ) : KeyT( k ) {}
   ec25519_key & operator=( const uint8_t *x ) { return this->copy_from( x ); }
 };
 
@@ -57,6 +57,8 @@ struct EC25519 {
   static void donna_basepoint( ec25519_key &mypublic,
                                const ec25519_key &secret ) noexcept;
 };
+
+typedef struct EC25519 ECDH;
 
 }
 }

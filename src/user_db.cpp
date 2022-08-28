@@ -48,7 +48,6 @@ UserDB::init( const CryptPass &pwd,  uint32_t my_fd,
 {
   ConfigTree::User *u;
   uint32_t i;
-
   /* load the service and check RSA signatures of users configured */
   this->my_svc.load_service( tree, this->svc );
   if ( ! this->my_svc.check_signatures( pwd ) )
@@ -90,7 +89,7 @@ UserDB::init( const CryptPass &pwd,  uint32_t my_fd,
   this->hb_ival_ns       = 0; /* hb interval in nanos */
   this->hb_ival_mask     = 0; /* hb interval mask, pow2 - 1 > hv_ival_ns */
   this->next_ping_mono   = 0; /* when the next random ping timer expires */
-  this->name_send_count  = 0;
+  this->name_send_seqno  = 0;
   this->name_send_time   = 0;
   this->last_auth_mono   = this->start_mono_time;
   this->converge_time    = this->start_time;
@@ -121,7 +120,7 @@ UserDB::init( const CryptPass &pwd,  uint32_t my_fd,
     return false;
   this->bridge_id.hmac = data.user_hmac;
   /* calc my hello key: kdf( my ECDH pub + my RSA svc pub ) */
-  data.calc_hello_key( this->my_svc, *this->hello_key );
+  this->calc_hello_key( this->start_time, data.user_hmac, *this->hello_key );
   bool b = true;
   i = 0;
   /* calculate keys for each peer configured */
@@ -133,13 +132,13 @@ UserDB::init( const CryptPass &pwd,  uint32_t my_fd,
       /* get the ECDH pub key for peer */
       if ( ! peer_data.decrypt( pwd, DO_PUB ) )
         return false;
+#if 0
       /* do ECDH to calculate secret for this peer: my pri + peer pub */
       if ( ! data.calc_secret_hmac( peer_data, peer.secret_hmac ) )
         return false;
+#endif
       /* peer hmac is based on the ECDH pub key plus name and svc */
       peer.hmac = peer_data.user_hmac;
-      /* hello key is based on peer ECDH pub + RSA pub of service */
-      peer_data.calc_hello_key( this->my_svc, peer.hello_key );
       this->peer_ht->upsert_rsz( this->peer_ht, peer.hmac, i );
       i++;
     }
@@ -154,6 +153,32 @@ UserDB::init( const CryptPass &pwd,  uint32_t my_fd,
   this->peer_bloom.add_route( P_PSUB_SZ, psub_h );
   this->peer_bloom.add_route( P_PSTOP_SZ, pstop_h );
   return b;
+}
+
+void
+UserDB::calc_hello_key( uint64_t start_time,  const HmacDigest &user_hmac,
+                        HashDigest &ha ) noexcept
+{
+  PolyHmacDigest svc_hmac;
+  ha.kdf_bytes( this->my_svc.pub_key, this->my_svc.pub_key_len,
+                &start_time, sizeof( start_time ) );
+  svc_hmac.calc_2( ha, this->my_svc.service, this->my_svc.service_len,
+                       this->my_svc.create, this->my_svc.create_len );
+  ha.kdf_bytes( svc_hmac.dig, HMAC_SIZE, user_hmac.dig, HMAC_SIZE );
+}
+
+void
+UserDB::calc_secret_hmac( UserBridge &n,  PolyHmacDigest &secret_hmac ) noexcept
+{
+  HashDigest ha;
+  if ( n.peer_hello < *this->hello_key ) {
+    ha.kdf_bytes( this->hello_key->dig, HASH_DIGEST_SIZE );
+    secret_hmac.calc_off( ha, 0, n.peer_hello.dig, HASH_DIGEST_SIZE );
+  }
+  else {
+    ha.kdf_bytes( n.peer_hello.dig, HASH_DIGEST_SIZE );
+    secret_hmac.calc_off( ha, 0, this->hello_key->dig, HASH_DIGEST_SIZE );
+  }
 }
 
 bool
@@ -225,6 +250,62 @@ UserDB::make_peer( const StringVal &user,  const StringVal &svc,
   peer->create  = create;
   peer->expires = expires;
   return peer;
+}
+
+PeerEntry *
+UserDB::find_peer( const char *u,  uint32_t ulen,
+                   const char *c,  uint32_t clen,
+                   const char *e,  uint32_t elen,
+                   const HmacDigest &hmac ) noexcept
+{
+  PeerEntry * peer;
+  size_t      p_pos;
+  uint32_t    pid;
+
+  if ( ! this->peer_ht->find( hmac, p_pos, pid ) ) {
+    if ( ulen == 0 || clen == 0 )
+      return NULL;
+    pid = (uint32_t) this->peer_db.count;
+    StringVal user_sv, svc_sv, create_sv, expires_sv;
+    this->string_tab.ref_string( u, ulen, user_sv );
+    this->string_tab.ref_string( c, clen, create_sv );
+    this->string_tab.ref_string( e, elen, expires_sv );
+    peer = this->make_peer( user_sv, this->svc.svc, create_sv, expires_sv );
+    this->peer_db[ pid ] = peer;
+    peer->hmac = (PolyHmacDigest &) hmac;
+    this->peer_ht->upsert_rsz( this->peer_ht, peer->hmac, pid );
+  }
+  else {
+    peer = this->peer_db[ pid ];
+  }
+  return peer;
+}
+
+PeerEntry *
+UserDB::find_peer( const MsgHdrDecoder &dec,
+                   const HmacDigest &hmac ) noexcept
+{
+  const char * user        = NULL,
+             * create      = NULL,
+             * expires     = NULL;
+  uint32_t     user_len    = 0,
+               create_len  = 0,
+               expires_len = 0;
+
+  if ( dec.test( FID_USER ) ) {
+    user     = (const char *) dec.mref[ FID_USER ].fptr;
+    user_len = (uint32_t) dec.mref[ FID_USER ].fsize;
+  }
+  if ( dec.test( FID_CREATE ) ) {
+    create      = (const char *) dec.mref[ FID_CREATE ].fptr;
+    create_len  = (uint32_t) dec.mref[ FID_CREATE ].fsize;
+  }
+  if ( dec.test( FID_EXPIRES ) ) {
+    expires     = (const char *) dec.mref[ FID_EXPIRES ].fptr;
+    expires_len = (uint32_t)     dec.mref[ FID_EXPIRES ].fsize;
+  }
+  return this->find_peer( user, user_len, create, create_len,
+                          expires, expires_len, hmac );
 }
 
 void
@@ -552,23 +633,25 @@ UserDB::lookup_user( MsgFramePublish &pub,  const MsgHdrDecoder &dec ) noexcept
     return n;
   }
   UserNonce user_bridge_id;
-  size_t    p_pos;
-  uint32_t  pid;
+  uint64_t  start;
   /* if no user_bridge_id, no user hmac to lookup peer */
-  if ( ! dec.get_hmac( FID_USER_HMAC, user_bridge_id.hmac ) ) {
+  if ( ! dec.get_hmac( FID_USER_HMAC, user_bridge_id.hmac ) ||
+       ! dec.get_ival<uint64_t>( FID_START, start ) ) {
     pub.status = FRAME_STATUS_NO_USER;
     return NULL;
   }
-  /* if no peer, no auth keys */
-  if ( ! this->peer_ht->find( user_bridge_id.hmac, p_pos, pid ) ) {
+  PeerEntry * peer = this->find_peer( dec, user_bridge_id.hmac );
+  if ( peer == NULL ) {
     pub.status = FRAME_STATUS_NO_USER;
     return NULL;
   }
+  HashDigest  hello;
   user_bridge_id.nonce = bridge;
+  this->calc_hello_key( start, user_bridge_id.hmac, hello );
   pub.status = FRAME_STATUS_NO_AUTH;
   /* new user */
   return this->add_user( pub.rte, NULL, pub.src_route, user_bridge_id,
-                         *this->peer_db[ pid ], dec );
+                         *peer, start, dec, hello );
 }
 
 void
@@ -1008,31 +1091,8 @@ UserDB::closest_peer_route( TransportRoute &rte,  UserBridge &n,
 UserBridge *
 UserDB::add_user( TransportRoute &rte,  const UserRoute *src,  uint32_t fd,
                   const UserNonce &user_bridge_id,  const PeerEntry &peer,
-                  const MsgHdrDecoder &dec ) noexcept
-{
-  UserBridge * n;
-  size_t       size, rtsz;
-  uint32_t     uid,
-               seed;
-  uid  = this->new_uid();
-  rtsz = sizeof( UserRoute ) * UserBridge::USER_ROUTE_BASE;
-  size = sizeof( UserBridge ) + rtsz;
-  seed = (uint32_t) this->rand.next();
-  n    = this->make_user_bridge( size, peer, this->poll.g_bloom_db, seed );
-  n->bridge_id = user_bridge_id;
-  n->uid       = uid;
-  ::memset( (void *) &n[ 1 ], 0, rtsz );
-  n->u_buf[ 0 ] = (UserRoute *) (void *) &n[ 1 ];
-  this->add_user_route( *n, rte, fd, dec, src );
-  this->bridge_tab[ uid ] = n;
-  this->node_ht->upsert_rsz( this->node_ht, user_bridge_id.nonce, uid );
-
-  return n;
-}
-
-UserBridge *
-UserDB::add_user2( const UserNonce &user_bridge_id,
-                   const PeerEntry &peer,  uint64_t start ) noexcept
+                  uint64_t start,  const MsgHdrDecoder &dec,
+                  HashDigest &hello ) noexcept
 {
   UserBridge * n;
   size_t       size, rtsz;
@@ -1046,6 +1106,36 @@ UserDB::add_user2( const UserNonce &user_bridge_id,
   n->bridge_id  = user_bridge_id;
   n->uid        = uid;
   n->start_time = start;
+  n->peer_hello = hello;
+  hello.zero();
+  ::memset( (void *) &n[ 1 ], 0, rtsz );
+  n->u_buf[ 0 ] = (UserRoute *) (void *) &n[ 1 ];
+  this->add_user_route( *n, rte, fd, dec, src );
+  this->bridge_tab[ uid ] = n;
+  this->node_ht->upsert_rsz( this->node_ht, user_bridge_id.nonce, uid );
+
+  return n;
+}
+
+UserBridge *
+UserDB::add_user2( const UserNonce &user_bridge_id,
+                   const PeerEntry &peer,  uint64_t start,
+                   HashDigest &hello ) noexcept
+{
+  UserBridge * n;
+  size_t       size, rtsz;
+  uint32_t     uid,
+               seed;
+  uid  = this->new_uid();
+  rtsz = sizeof( UserRoute ) * UserBridge::USER_ROUTE_BASE;
+  size = sizeof( UserBridge ) + rtsz;
+  seed = (uint32_t) this->rand.next();
+  n    = this->make_user_bridge( size, peer, this->poll.g_bloom_db, seed );
+  n->bridge_id  = user_bridge_id;
+  n->uid        = uid;
+  n->start_time = start;
+  n->peer_hello = hello;
+  hello.zero();
   ::memset( (void *) &n[ 1 ], 0, rtsz );
   n->u_buf[ 0 ] = (UserRoute *) (void *) &n[ 1 ];
   this->bridge_tab[ uid ] = n;

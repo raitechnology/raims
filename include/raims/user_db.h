@@ -140,7 +140,8 @@ struct UserRoute : public UserStateTest<UserRoute> {
 };
 /* peer sessions */
 struct UserBridge : public UserStateTest<UserBridge> {
-  HashDigest         peer_key;            /* peer session key */
+  HashDigest         peer_key,            /* peer session key */
+                     peer_hello;
   const PeerEntry  & peer;                /* configuration entry */
   UserNonce          bridge_id;           /* the user hmac and nonce */
   ForwardCache       forward_path[ COST_PATH_COUNT ]; /* which tports to fwd */
@@ -201,13 +202,16 @@ struct UserBridge : public UserStateTest<UserBridge> {
                      msg_loss_time,       /* multicast message loss */
                      msg_loss_count,      /* count mcast msg loss */
                      inbox_msg_loss_time,
-                     inbox_msg_loss_count; /* inbox message loss */
+                     inbox_msg_loss_count, /* inbox message loss */
+                     name_recv_seqno,
+                     name_recv_time;
   void * operator new( size_t, void *ptr ) { return ptr; }
 
   UserBridge( const PeerEntry &pentry,  kv::BloomDB &db,  uint32_t seed )
       : peer( pentry ), bloom( seed, pentry.user.val, db ) {
     ::memset( this->bloom_rt, 0, sizeof( this->bloom_rt ) );
     this->peer_key.zero();
+    this->peer_hello.zero();
     this->uid_csum.zero();
     this->hb_cnonce.zero();
     ::memset( &this->user_route , 0,
@@ -447,8 +451,7 @@ struct UserDB {
                         uid_auth_count,  /* total trusted nodes */
                         uid_hb_count,    /* total hb / distance zero nones */
                         uid_ping_count,
-                        next_ping_uid,
-                        name_send_count;
+                        next_ping_uid;
   uint64_t              send_peer_seqno, /* a unique seqno for peer multicast */
                         link_state_seqno, /* seqno of adjacency updates */
                         mcast_seqno,      /* seqno of mcast subjects */
@@ -459,6 +462,7 @@ struct UserDB {
                         converge_time,   /* time of convergence */
                         converge_mono,   /* convergence mono time */
                         net_converge_time, /* time that network agrees */
+                        name_send_seqno,
                         name_send_time;
   kv::rand::xoroshiro128plus rand;       /* used to generate bloom seeds */
 
@@ -498,6 +502,9 @@ struct UserDB {
 
   bool init( const CryptPass &pwd,  uint32_t my_fd, ConfigTree &tree ) noexcept;
 
+  void calc_hello_key( uint64_t start_time, const HmacDigest &user_hmac,
+                       HashDigest &ha ) noexcept;
+  void calc_secret_hmac( UserBridge &n,  PolyHmacDigest &secret_hmac ) noexcept;
   /* inbox forwarding */
   bool forward_to( UserBridge &n,  const char *sub,
                    size_t sublen,  uint32_t h,  const void *msg,
@@ -520,6 +527,12 @@ struct UserDB {
   PeerEntry *make_peer( const StringVal &user, const StringVal &svc,
                         const StringVal &create,
                         const StringVal &expires ) noexcept;
+  PeerEntry *find_peer( const char *u,  uint32_t ulen,
+                        const char *c,  uint32_t clen,
+                        const char *e,  uint32_t elen,
+                        const HmacDigest &hmac ) noexcept;
+  PeerEntry * find_peer( const MsgHdrDecoder &dec,
+                         const HmacDigest &hmac ) noexcept;
   void release( void ) noexcept;
 
   /* heartbeat.cpp */
@@ -555,7 +568,7 @@ struct UserDB {
   bool on_bye( const MsgFramePublish &pub,  UserBridge &n,
                const MsgHdrDecoder &dec ) noexcept;
   bool recv_challenge( const MsgFramePublish &pub,  UserBridge &n,
-                    const MsgHdrDecoder &dec, AuthStage stage ) const noexcept;
+                       const MsgHdrDecoder &dec, AuthStage stage ) noexcept;
   bool send_challenge( UserBridge &n,  AuthStage stage ) noexcept;
   bool send_trusted( const MsgFramePublish &pub,  UserBridge &n,
                      MsgHdrDecoder &dec ) noexcept;
@@ -573,10 +586,12 @@ struct UserDB {
                        const UserRoute *src ) noexcept;
   UserBridge * add_user( TransportRoute &rte,  const UserRoute *src,
                          uint32_t fd,  const UserNonce &b_nonce,
-                         const PeerEntry &peer,
-                         const MsgHdrDecoder &dec ) noexcept;
+                         const PeerEntry &peer,  uint64_t start,
+                         const MsgHdrDecoder &dec,
+                         HashDigest &hello ) noexcept;
   UserBridge * add_user2( const UserNonce &user_bridge_id,  
-                          const PeerEntry &peer,  uint64_t start ) noexcept;
+                          const PeerEntry &peer,  uint64_t start,
+                          HashDigest &hello ) noexcept;
   void set_ucast_url( UserRoute &u_rte, const MsgHdrDecoder &dec ) noexcept;
   void set_mesh_url( UserRoute &u_rte, const MsgHdrDecoder &dec ) noexcept;
   void find_adjacent_routes( void ) noexcept;

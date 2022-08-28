@@ -879,7 +879,7 @@ SessionMgr::on_msg( EvPublish &pub ) noexcept
         }
         else {
           /* before authenticated, allow hb to be signed by hello key */
-          if ( dec.msg->verify_hb( n.peer.hello_key ) )
+          if ( dec.msg->verify_hb( n.peer_hello ) )
             fpub.status = FRAME_STATUS_HB_NO_AUTH;
         }
       }

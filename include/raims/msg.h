@@ -6,6 +6,7 @@
 #include <raimd/tib_sass_msg.h>
 #include <raimd/hex_dump.h>
 #include <raims/crypt.h>
+#include <raims/ed25519.h>
 
 namespace rai {
 namespace ms {
@@ -182,6 +183,7 @@ struct CabaMsg : public md::TibSassMsg {
   static void init_auto_unpack( void ) noexcept;
   bool verify( const HashDigest &key ) const noexcept;
   bool verify_hb( const HashDigest &key ) const noexcept;
+  bool verify_sig( const HashDigest &key,  DSA &dsa ) const noexcept;
   uint32_t caba_to_rvmsg( md::MDMsgMem &mem,  void *&data,
                           size_t &datalen ) noexcept;
   void print_hex( void ) const { md::MDOutput mout; mout.print_hex( this ); }
@@ -288,7 +290,8 @@ enum MsgFid {
   FID_STAMP          = 70 , /* time stamp */
   FID_CONVERGE       = 71 , /* network convergence stamp */
   FID_REPLY_STAMP    = 72 , /* reply time stamp */
-  FID_HB_SKEW        = 73
+  FID_HB_SKEW        = 73 , /* hb system clock skew */
+  FID_PK_SIG         = 74   /* pk key signature */
 };
 static const int FID_TYPE_SHIFT = 8,
                  FID_MAX        = 1 << FID_TYPE_SHIFT; /* 256 */
@@ -780,7 +783,8 @@ static FidTypeName fid_type_name[] = {
 { FID_STAMP       , U_SHORT | U_INT | U_LONG    , TIM , 0 ,"stamp"           },
 { FID_CONVERGE    , U_SHORT | U_INT | U_LONG    , XCL , 0 ,"converge"        },
 { FID_REPLY_STAMP , U_SHORT | U_INT | U_LONG    , XCL , 0 ,"reply_stamp"     },
-{ FID_HB_SKEW     , U_SHORT | U_INT | U_LONG    , XCL , 0 ,"hb_skew"         }
+{ FID_HB_SKEW     , U_SHORT | U_INT | U_LONG    , XCL , 0 ,"hb_skew"         },
+{ FID_PK_SIG      , OPAQUE_64                   , XCL , 0 ,"pk_sig"          }
 };
 
 #endif

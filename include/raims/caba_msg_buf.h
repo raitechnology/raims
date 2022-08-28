@@ -132,6 +132,14 @@ struct BMsgBufT {
     this->out += HASH_DIGEST_SIZE;
     return (T &) *this;
   }
+#if 0
+  T &k( uint8_t opt,  const ed25519_signature &sig ) { /* digest out */
+    emit_u16( CLS_OPAQUE_64 | opt );
+    sig.copy_to( this->out );
+    this->out += ED25519_SIG_LEN;
+    return (T &) *this;
+  }
+#endif
   T &x( uint8_t opt,  const HmacDigest &hmac,  const Nonce &nonce ) {
     emit_u16( CLS_OPAQUE_32 | opt );
     ::memcpy( this->out, hmac.dig, HMAC_SIZE );
@@ -288,6 +296,7 @@ struct MsgBufDigestT : public BMsgBufT<T> {
   T  & latency    ( const char *in, size_t in_len ) {
     return this->b( FID_LATENCY, in, (uint16_t) in_len ); }
   void pk_digest  ( void )        { this->out += 2 + HMAC_SIZE; }
+  void pk_sig     ( void )        { this->out += 2 + ED25519_SIG_LEN; }
 
   /* insert sub_fid : subject, opt_fid 1 */
   void insert_subject( const char *subject, size_t sublen ) {
@@ -315,6 +324,19 @@ struct MsgBufDigestT : public BMsgBufT<T> {
                  this->out - &this->dig[ HMAC_SIZE ] );
     this->h( FID_PK_DIGEST, hmac );
   }
+#if 0
+  void insert_dsa_sig( const HashDigest &pk_ha1,  DSA &dsa ) {
+    PolyHmacDigest hmac;
+    this->out -= 2 + ED25519_SIG_LEN;
+    hmac.calc_2( pk_ha1, /* msg -> digest */
+                 this->msg, this->dig - this->msg,
+                 /* digest -> end, skip over digest */
+                 &this->dig[ HMAC_SIZE ],
+                 this->out - &this->dig[ HMAC_SIZE ] );
+    dsa.sign( hmac.digest(), HMAC_SIZE );
+    this->k( FID_PK_SIG, dsa.sig );
+  }
+#endif
   /* sign the message */
   void sign( const char *sub,  size_t sublen,  const HashDigest &ha1 ) {
     this->insert_subject( sub, sublen );
@@ -322,11 +344,20 @@ struct MsgBufDigestT : public BMsgBufT<T> {
   }
   /* sign a hb message */
   void sign_hb( const char *sub,  size_t sublen,  const HashDigest &ha1,
-                const HashDigest &pk_ha1 ) {
+                const HashDigest &pk_ha2 ) {
     this->insert_subject( sub, sublen );
-    this->insert_pk_digest( pk_ha1 );
+    this->insert_pk_digest( pk_ha2 );
     this->insert_digest( ha1 );
   }
+#if 0
+  /* sign a hb message */
+  void sign_dsa( const char *sub,  size_t sublen,  const HashDigest &ha1,
+                 const HashDigest &key,  DSA &dsa ) {
+    this->insert_subject( sub, sublen );
+    this->insert_dsa_sig( key, dsa );
+    this->insert_digest( ha1 );
+  }
+#endif
   void sign_debug( const char *sub,  size_t sublen,  const HashDigest &ha1 ) {
     printf( "sub: %.*s\n", (int) sublen, sub );
     printf( "ha1: " ); ha1.print(); printf( "\n" );
@@ -364,6 +395,7 @@ static inline size_t fid_est( uint32_t fid ) {
     case FID_MESH_CSUM:   return 2 + NONCE_SIZE;
     case FID_AUTH_KEY:
     case FID_SESS_KEY:    return 2 + HASH_DIGEST_SIZE;
+    case FID_PK_SIG:      return 2 + ED25519_SIG_LEN;
     default:              return 2 +  8; /* 64 bit int */
   }
 }
@@ -453,6 +485,7 @@ struct MsgEst {
   MsgEst & latency    ( size_t l ) { sz += fid_est( FID_LATENCY, l ); return *this; }
 
   MsgEst & pk_digest  ( void ) { sz += fid_est( FID_PK_DIGEST ); return *this; }
+  MsgEst & pk_sig     ( void ) { sz += fid_est( FID_PK_SIG ); return *this; }
 };
 
 #endif

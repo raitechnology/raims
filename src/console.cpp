@@ -2879,6 +2879,10 @@ Console::show_users( ConsoleOutput *p ) noexcept
 
   for ( ConfigTree::User *user = this->tree.users.hd; user != NULL;
         user = user->next ) {
+    if ( user->user.equals( this->user_db.user.user ) &&
+         user->svc.equals( this->user_db.user.svc ) &&
+         user->create.equals( this->user_db.user.create ) )
+      continue;
     UserBridge * n = this->find_user( user->user.val, user->user.len );
 
     out.add_row()

@@ -14,9 +14,6 @@ static const size_t MAX_USER_LEN    = 128, /* strlen( user ) */
                     MAX_SERVICE_LEN = 128, /* strlen( service ) */
                     MAX_TIME_LEN    = 32;  /* strlen( create ) */
 
-typedef EC25519 ECDH; /* elliptic curve diffie-hellman */
-typedef ED25519 DSA;  /* digital signature algo */
-
 static const size_t
        ECDH_KEY_LEN            = EC25519_KEY_LEN,
        ECDH_CIPHER_KEY_LEN     = EC25519_KEY_LEN + HMAC_SIZE,
@@ -109,6 +106,7 @@ struct UserBuf {
   /* generate a key pair, pri[] pub[] are encrypted with pass + times */
   bool gen_key( const char *user,  size_t ulen,  const char *svc,  size_t slen,
               const char *expire,  size_t elen, const CryptPass &pwd ) noexcept;
+  bool gen_tmp_key( const char *usr_svc,  const CryptPass &pwd ) noexcept;
   /* encrypt the keys, pub or pri */
   bool put_ecdh( const CryptPass &pwd,  ECDH &ec,
                  WhichPubPri put_op ) noexcept;
@@ -206,9 +204,10 @@ struct UserHmacData {
     this->revoke_hmac.zero();
   }
   bool decrypt( const CryptPass &pwd,  WhichPubPri get_op ) noexcept;
-  bool calc_secret_hmac( UserHmacData &data2,
-                         PolyHmacDigest &secret_hmac ) noexcept;
-  void calc_hello_key( ServiceBuf &svc,  HashDigest &ha ) noexcept;
+  /*bool calc_secret_hmac( UserHmacData &data2,
+                         PolyHmacDigest &secret_hmac ) noexcept;*/
+/*  void calc_hello_key( uint64_t start_time,  ServiceBuf &svc,
+                       HashDigest &ha,  DSA &dsa ) noexcept;*/
 };
 
 typedef kv::SLinkList<UserElem> UserList;
