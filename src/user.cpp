@@ -98,27 +98,35 @@ UserBuf::gen_key( const char *user,  size_t ulen,  const char *svc,
 }
 
 bool
-UserBuf::gen_tmp_key( const char *usr_svc,  const CryptPass &pwd ) noexcept
+UserBuf::gen_tmp_key( const char *usr_svc,  ConfigTree::Service &svc,
+                      const CryptPass &pwd ) noexcept
 {
   const char * p,
+             * us    = NULL,
              * sv;
-  size_t       u_len,
+  size_t       u_len = 0,
                s_len;
   char         host[ 256 ];
-  if ( (p = ::strchr( usr_svc, '.' )) == NULL ) {
+
+  sv    = svc.svc.val;
+  s_len = svc.svc.len;
+  if ( usr_svc != NULL ) {
+    us    = usr_svc;
+    u_len = ::strlen( usr_svc );
+    p     = ::strchr( usr_svc, '.' );
+    if ( p != NULL ) {
+      if ( (size_t) ( &us[ u_len ] - &p[ 1 ] ) == s_len &&
+           ::memcmp( &p[ 1 ], sv, s_len ) == 0 )
+        u_len = p - us;
+    }
+  }
+  if ( us == NULL ) {
     if ( ::gethostname( host, sizeof( host ) ) != 0 )
       return false;
-    sv      = usr_svc;
-    s_len   = ::strlen( sv );
-    usr_svc = host;
-    u_len   = ::strlen( host );
+    us    = host;
+    u_len = ::strlen( host );
   }
-  else {
-    sv    = &p[ 1 ];
-    u_len = p - usr_svc;
-    s_len = ::strlen( sv );
-  }
-  return this->gen_key( usr_svc, u_len, sv, s_len, NULL, 0, pwd );
+  return this->gen_key( us, u_len, sv, s_len, NULL, 0, pwd );
 }
 
 uint64_t

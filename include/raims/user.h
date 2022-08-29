@@ -106,7 +106,8 @@ struct UserBuf {
   /* generate a key pair, pri[] pub[] are encrypted with pass + times */
   bool gen_key( const char *user,  size_t ulen,  const char *svc,  size_t slen,
               const char *expire,  size_t elen, const CryptPass &pwd ) noexcept;
-  bool gen_tmp_key( const char *usr_svc,  const CryptPass &pwd ) noexcept;
+  bool gen_tmp_key( const char *usr_svc,  ConfigTree::Service &svc,
+                    const CryptPass &pwd ) noexcept;
   /* encrypt the keys, pub or pri */
   bool put_ecdh( const CryptPass &pwd,  ECDH &ec,
                  WhichPubPri put_op ) noexcept;

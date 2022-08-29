@@ -97,7 +97,7 @@ main( int argc, char *argv[] )
   static const char cfg_dir[] = "/Users/gchri/rai/build/raims/config";
 #endif*/
   const char * di = get_arg( argc, argv, 1, "-d", cfg_dir ),
-             * us = get_arg( argc, argv, 1, "-u", "A.test" ),
+             * us = get_arg( argc, argv, 1, "-u", NULL ),
              * ti = get_arg( argc, argv, 1, "-t", NULL ),
              * lo = get_arg( argc, argv, 1, "-l", NULL ),
              * fl = get_arg( argc, argv, 1, "-f", NULL ),
@@ -156,7 +156,7 @@ main( int argc, char *argv[] )
     if ( svc == NULL )
       return 1;
     UserBuf user_buf;
-    if ( ! user_buf.gen_tmp_key( us, pwd ) ) {
+    if ( ! user_buf.gen_tmp_key( us, *svc, pwd ) ) {
       fprintf( stderr, "Unable to generate user\n" );
       return 1;
     }

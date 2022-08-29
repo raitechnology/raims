@@ -532,12 +532,15 @@ ConfigTree::resolve( const char *us,  User *&usrp,  Service *&svc ) noexcept
       us    = NULL;
     }
   }
-  svc  = this->find_service( sv, s_len );
+  if ( sv != NULL )
+    svc = this->find_service( sv, s_len );
   usrp = NULL;
   if ( svc != NULL )
     usrp = this->find_user( *svc, us, u_len );
   if ( svc != NULL && usrp != NULL )
     return true;
+  if ( svc == NULL )
+    svc = this->services.hd;
   if ( svc == NULL )
     fprintf( stderr, "No service %.*s configured\n", (int) s_len, sv );
   /*else if ( usrp == NULL )
