@@ -254,24 +254,26 @@ struct SessionMgr : public kv::EvSocket {
                         sub_window_ival; /* sub interval of rotate */
   uint8_t               tcp_accept_sock_type, /* free list sock types */
                         tcp_connect_sock_type;
+  bool                  session_started;
 
   SessionMgr( kv::EvPoll &p,  kv::Logger &l,  ConfigTree &c,
               ConfigTree::User &u,  ConfigTree::Service &s,
               StringTab &st ) noexcept;
   int init_sock( void ) noexcept;
   bool init_param( void ) noexcept;
-  bool add_transport( ConfigTree::Service &s,  ConfigTree::Transport &t,
-                      bool is_listener ) noexcept;
-  bool add_transport2( ConfigTree::Service &s,  ConfigTree::Transport &t,
-                       bool is_listener,  TransportRoute *&rte ) noexcept;
-  bool add_ipc_transport( ConfigTree::Service &s,  const char *ipc,
-                          const char *map,  uint8_t db ) noexcept;
+  bool add_transport( ConfigTree::Transport &t,  bool is_listener ) noexcept;
+  bool add_transport2( ConfigTree::Transport &t,  bool is_listener,
+                       TransportRoute *&rte ) noexcept;
+  bool add_ipc_transport( void ) noexcept;
   bool start_transport( TransportRoute &rte,  bool is_listener ) noexcept;
-  bool add_startup_transports( ConfigTree::Service &s ) noexcept;
-  uint32_t shutdown_transport( ConfigTree::Service &s,
-                               ConfigTree::Transport &t ) noexcept;
+  bool add_startup_transports( void ) noexcept;
+  bool add_rvd_transports( const char *listen,  const char *http,
+                           int flags ) noexcept;
+  uint32_t shutdown_transport( ConfigTree::Transport &t ) noexcept;
   bool add_mesh_accept( TransportRoute &listen_rte,
                         EvTcpTransport &conn ) noexcept;
+  TransportRoute * add_tcp_rte( TransportRoute &src_rte,
+                                uint32_t conn_hash ) noexcept;
   bool add_tcp_accept( TransportRoute &listen_rte,
                        EvTcpTransport &conn ) noexcept;
   bool add_mesh_connect( TransportRoute &mesh_rte ) noexcept;
@@ -286,8 +288,10 @@ struct SessionMgr : public kv::EvSocket {
                 PublishType type ) noexcept;
   uint32_t add_wildcard_rte( const char *prefix, size_t pref_len,
                              PublishType type ) noexcept;
+  void fork_daemon( int err_fd ) noexcept;
   bool loop( void ) noexcept;
   void start( void ) noexcept;
+  void name_hb( uint64_t cur_mono ) noexcept;
   void stop( void ) noexcept;
   bool is_running( void ) {
     return this->timer_id != 0;

@@ -5,6 +5,7 @@
 #include <raims/string_tab.h>
 #include <raikv/bit_set.h>
 #include <raims/adjacency.h>
+#include <raims/ed25519.h>
 
 namespace rai {
 namespace ms {
@@ -63,12 +64,12 @@ struct UserNonce {
 };
 /* derived from config or from peer */
 struct PeerEntry {
-  PolyHmacDigest hmac;/*,
-                 secret_hmac;*/
+  PolyHmacDigest hmac;
   StringVal      user,
                  svc,
                  create,
                  expires;
+  DSA            dsa;
   void * operator new( size_t, void *ptr ) { return ptr; }
   PeerEntry() {
     ::memset( (void *) this, 0, sizeof( *this ) );

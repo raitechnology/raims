@@ -5,10 +5,59 @@
 #include <raims/ed25519.h>
 #include <raims/crypt.h>
 #include <raims/user.h>
+#include <raims/msg.h>
 
 using namespace rai;
 using namespace ms;
 using namespace kv;
+using namespace md;
+
+void
+msg_test( void )
+{
+  DSA dsa;
+  Nonce nonce;
+  HashDigest key, key2;
+  nonce.seed_random();
+  key.kdf_bytes( "xxx", 3 );
+  key2.kdf_bytes( "yyy", 3 );
+  dsa.gen_key();
+  MsgEst e( 4 );
+  e.seqno()
+   .tport( 5 )
+   .tportid()
+   .cost()
+   .cost2()
+   .cost3()
+   .cost4()
+   .pk_sig();
+  MsgCat m;
+  m.reserve( e.sz );
+  m.open( nonce, 4 )
+   .seqno( 1 )
+   .tport( "tport", 5 )
+   .tportid( 1 )
+   .cost( 1000 )
+   .cost2( 1000 )
+   .cost3( 1000 )
+   .cost4( 1000 )
+   .pk_sig();
+  m.close( e.sz, 0x1234, CABA_INBOX );
+  m.sign_dsa( "test", 4, key, key2, dsa );
+
+  MDOutput mout( MD_OUTPUT_OPAQUE_TO_B64 );
+  MDMsgMem mem;
+  MDMsg  * msg;
+
+  msg = CabaMsg::unpack( m.msg, 0, m.len(), 0, MsgFrameDecoder::msg_dict,
+                         &mem );
+  if ( msg != NULL ) {
+    msg->print( &mout );
+
+    printf( "verify: %s\n",
+      ((CabaMsg *) msg)->verify_sig( key2, dsa ) ? "true" : "false" );
+  }
+}
 
 int
 main( void )
@@ -20,6 +69,7 @@ main( void )
   uint8_t plain[ ED25519_SIG_LEN ];
   char buf[ 256 ];
 
+  CabaMsg::init_auto_unpack();
   ha.kdf_bytes( "password", 8 );
   dsa.gen_key();
   hmac.calc_off( ha, 0, str, strlen( str ) );
@@ -51,6 +101,7 @@ main( void )
     t2 = current_monotonic_time_ns();
     printf( "%lu ns per verify\n", ( t2 - t ) / 100 );
   }
+  msg_test();
   return 0;
 }
 

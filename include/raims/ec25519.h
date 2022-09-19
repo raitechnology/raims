@@ -34,6 +34,14 @@ struct KeyT {
   void zero( void ) volatile {
     ::memset( (void *) this->key, 0, sizeof( this->key ) );
   }
+  bool is_zero( void ) const {
+    uint64_t tmp[ KEY_LEN / 8 ];
+    ::memcpy( tmp, this->key, KEY_LEN );
+    uint64_t j = 0;
+    for ( size_t i = 0; i < KEY_LEN / 8; i++ )
+      j |= tmp[ i ];
+    return j == 0;
+  }
 };
 
 struct ec25519_key : public KeyT<ec25519_key, EC25519_KEY_LEN> {
@@ -51,7 +59,7 @@ struct EC25519 {
     this->secret.zero();
   }
   void shared_secret( void ) noexcept;
-  void gen_key( void ) noexcept;
+  void gen_key( const void *r = NULL,  size_t rlen = 0 ) noexcept;
   static void donna( ec25519_key &mypublic, const ec25519_key &secret,
                      const ec25519_key &basepoint ) noexcept;
   static void donna_basepoint( ec25519_key &mypublic,

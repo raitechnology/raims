@@ -685,7 +685,7 @@ GenCfg::export_user_svc( const char *orig_dir,  CryptPass &pass,
   for ( UserElem *u = this->svc.users.hd; u != NULL; u = v ) {
     v = u->next;
     if ( cmp_bytes( u->user.user, u->user.user_len, user, user_len ) == 0 ) {
-      /* user needs a private key to authenticate ECDH exchanges */
+      /* user needs a private key to authenticate DSA exchanges */
       if ( u->user.pri_len == 0 ) {
         fprintf( stderr, "User \"%.*s\" is not configured with a private key\n",
                  (int) user_len, user );

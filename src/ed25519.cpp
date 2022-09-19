@@ -236,12 +236,14 @@ ED25519::gen_key( const void *r,  size_t rlen,
     static const size_t keylen = sizeof( this->sk.key );
     size_t k = 0;
     this->sk.zero();
-    for ( size_t j = 0; j < rlen; j++ )
-      this->sk.key[ k++ % keylen ] ^= ((const uint8_t *) r)[ j ];
-    for ( size_t j = 0; j < slen; j++ )
-      this->sk.key[ k++ % keylen ] ^= ((const uint8_t *) s)[ j ];
-    for ( size_t j = 0; j < tlen; j++ )
-      this->sk.key[ k++ % keylen ] ^= ((const uint8_t *) t)[ j ];
+    do {
+      for ( size_t j = 0; j < rlen; j++ )
+        this->sk.key[ k++ % keylen ] ^= ((const uint8_t *) r)[ j ];
+      for ( size_t j = 0; j < slen; j++ )
+        this->sk.key[ k++ % keylen ] ^= ((const uint8_t *) s)[ j ];
+      for ( size_t j = 0; j < tlen; j++ )
+        this->sk.key[ k++ % keylen ] ^= ((const uint8_t *) t)[ j ];
+    } while ( k < keylen );
   }
   this->publickey();
 }

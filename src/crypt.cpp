@@ -169,6 +169,29 @@ rai::ms::load_secure_file( const char *fn,  void *&mem,  size_t &sz ) noexcept
 }
 
 bool
+rai::ms::load_secure_string( const char *fn,  char *&mem,  size_t &sz ) noexcept
+{
+  MapFile map( fn );
+  if ( ! map.open() ) {
+    ::perror( fn );
+    return false;
+  }
+  sz = map.map_size;
+  /* strip one cr/nl */
+  if ( ((char *) map.map)[ sz - 1 ] == '\n' ) {
+    sz--;
+    if ( ((char *) map.map)[ sz - 1 ] == '\r' )
+      sz--;
+  }
+  /* copy to secure mem */
+  mem = (char *) alloc_secure_mem( sz + 1 );
+  ::memcpy( mem, map.map, sz );
+  mem[ sz ] = '\0';
+
+  return true;
+}
+
+bool
 CryptPass::init_pass_file( const char *path ) noexcept
 {
   void * mem;
@@ -207,6 +230,18 @@ CryptPass::init_pass( const char *pass ) noexcept
     return false;
   this->pass     = (char *) mem;
   this->pass_len = mem_sz;
+  return true;
+}
+
+bool
+CryptPass::init_salt( const char *salt ) noexcept
+{
+  void * mem;
+  size_t mem_sz;
+  if ( ! load_secure_env( "RAI_SALT", "RAI_SALT_UNLINK", salt, mem, mem_sz ) )
+    return false;
+  init_kdf( mem, mem_sz );
+  free_secure_mem( mem, mem_sz );
   return true;
 }
 

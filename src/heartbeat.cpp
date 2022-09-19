@@ -46,8 +46,8 @@ UserDB::make_hb( TransportRoute &rte,  const char *sub,  size_t sublen,
    .user      ( this->user.user.len )
    .create    ( this->user.create.len )
    .expires   ( this->user.expires.len )
-   .ucast_url ( rte.ucast_url_len )
-   .mesh_url  ( rte.mesh_url_len )
+   .ucast_url ( rte.ucast_url.len )
+   .mesh_url  ( rte.mesh_url.len )
    .cost      ()
    .cost2     ()
    .cost3     ()
@@ -85,10 +85,10 @@ UserDB::make_hb( TransportRoute &rte,  const char *sub,  size_t sublen,
         m.mesh_csum( csum );
       }
     }
-    if ( rte.ucast_url_len != 0 )
-      m.ucast_url( rte.ucast_url_addr, rte.ucast_url_len );
-    if ( rte.mesh_url_len != 0 )
-      m.mesh_url( rte.mesh_url_addr, rte.mesh_url_len );
+    if ( rte.ucast_url.len != 0 )
+      m.ucast_url( rte.ucast_url.val, rte.ucast_url.len );
+    if ( rte.mesh_url.len != 0 )
+      m.mesh_url( rte.mesh_url.val, rte.mesh_url.len );
     if ( rte.uid_connected.is_advertised ) {
       m.cost( rte.uid_connected.cost[ 0 ] );
       m.cost2( rte.uid_connected.cost[ 1 ] );

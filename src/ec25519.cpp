@@ -88,9 +88,19 @@ EC25519::shared_secret( void ) noexcept
 }
 
 void
-EC25519::gen_key( void ) noexcept
+EC25519::gen_key( const void *r,  size_t rlen ) noexcept
 {
-  rand::fill_urandom_bytes( this->pri, 32 );
+  if ( rlen == 0 )
+    rand::fill_urandom_bytes( this->pri, 32 );
+  else {
+    static const size_t keylen = sizeof( this->pri.key );
+    size_t k = 0;
+    this->pri.zero();
+    do {
+      for ( size_t j = 0; j < rlen; j++ )
+        this->pri.key[ k++ % keylen ] ^= ((const uint8_t *) r)[ j ];
+    } while ( k < keylen );
+  }
   this->donna_basepoint( this->pub, this->pri );
 }
 

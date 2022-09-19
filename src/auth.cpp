@@ -256,13 +256,17 @@ UserDB::send_challenge( UserBridge &n,  AuthStage stage ) noexcept
    .auth_key   ()
    .cnonce     ()
    .auth_stage ()
+   .user       ( this->user.user.len )
+   .create     ( this->user.create.len )
+   .expires    ( this->user.expires.len )
    .start      ()
-   .ucast_url  ( rte.ucast_url_len )
-   .mesh_url   ( rte.mesh_url_len )
+   .ucast_url  ( rte.ucast_url.len )
+   .mesh_url   ( rte.mesh_url.len )
    .cost       ()
    .cost2      ()
    .cost3      ()
-   .cost4      ();
+   .cost4      ()
+   .pk_sig     ();
 
   MsgCat m;
   m.reserve( e.sz );
@@ -289,22 +293,27 @@ UserDB::send_challenge( UserBridge &n,  AuthStage stage ) noexcept
    .auth_key   ( encrypted_ha1      )
    .cnonce     ( n.auth[ 1 ].cnonce )
    .auth_stage ( stage              )
+   .user       ( this->user.user.val, this->user.user.len )
+   .create     ( this->user.create.val, this->user.create.len )
+   .expires    ( this->user.expires.val, this->user.expires.len )
    .start      ( this->start_time   )
    .version    ( ver_str, ver_len   );
 
-  if ( rte.ucast_url_len != 0 )
-    m.ucast_url( rte.ucast_url_addr, rte.ucast_url_len );
-  if ( rte.mesh_url_len != 0 )
-    m.mesh_url( rte.mesh_url_addr, rte.mesh_url_len );
+  if ( rte.ucast_url.len != 0 )
+    m.ucast_url( rte.ucast_url.val, rte.ucast_url.len );
+  if ( rte.mesh_url.len != 0 )
+    m.mesh_url( rte.mesh_url.val, rte.mesh_url.len );
   if ( rte.uid_connected.is_advertised ) {
     m.cost( rte.uid_connected.cost[ 0 ] );
     m.cost2( rte.uid_connected.cost[ 1 ] );
     m.cost3( rte.uid_connected.cost[ 2 ] );
     m.cost4( rte.uid_connected.cost[ 3 ] );
   }
+  m.pk_sig();
   uint32_t h = ibx.hash();
+  DSA * dsa = ( ! this->svc_dsa->sk.is_zero() ? this->svc_dsa : this->user_dsa );
   m.close( e.sz, h, CABA_INBOX );
-
+  m.sign_dsa( ibx.buf, ibx.len(), *this->session_key, *this->hello_key, *dsa );
   m.sign( ibx.buf, ibx.len(), *this->session_key );
   secret_hmac.zero();
   encrypted_ha1.zero();
@@ -345,6 +354,20 @@ UserDB::recv_challenge( const MsgFramePublish &pub,  UserBridge &n,
                   dec.mref[ FID_DIGEST ].fsize );
   return m.verify( n.peer_key, pub.hmac );
 #endif
+  if ( ! dec.msg->verify_sig( n.peer_hello, *this->svc_dsa ) ) {
+    if ( ! dec.msg->verify_sig( n.peer_hello, n.peer.dsa ) ) {
+      n.printe( "auth msg failed to verify with service %s public key\n",
+                this->my_svc.service );
+      return false;
+    }
+    else {
+      n.printf( "auth msg verified with user public key\n" );
+    }
+  }
+  else {
+    n.printf( "auth msg verified with service %s public key\n",
+              this->my_svc.service );
+  }
   return dec.msg->verify( n.peer_key );
 }
 /* notify peer that it is trusted */

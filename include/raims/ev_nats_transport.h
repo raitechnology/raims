@@ -12,6 +12,8 @@ struct TransportRoute;
 
 struct EvNatsTransportListen : public natsmd::EvNatsListen {
   TransportRoute & rte;
+  const char * service;
+  size_t       service_len;
   EvNatsTransportListen( kv::EvPoll &p,  TransportRoute &r ) noexcept;
   virtual EvSocket *accept( void ) noexcept;
   virtual int listen( const char *ip,  int port,  int opts ) noexcept;

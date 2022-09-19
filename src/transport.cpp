@@ -68,14 +68,14 @@ TransportRoute::TransportRoute( kv::EvPoll &p,  SessionMgr &m,
       poll( p ), mgr( m ), user_db( m.user_db ),
       sub_route( p.sub_route.get_service( svc_name, svc_id, id ) ),
       uid_in_mesh( &this->mesh_connected ),
+      uid_in_device( &this->mesh_connected ),
       mesh_csum( &this->mesh_csum2 ),
       hb_time( 0 ), hb_mono_time( 0 ), hb_seqno( 0 ),
       stats_seqno( 0 ), tport_id( id ), hb_count( 0 ),
       last_hb_count( 0 ), connect_count( 0 ), last_connect_count( 0 ),
-      state( f ), mesh_id( 0 ), listener( 0 ), connect_mgr( *this ),
-      pgm_tport( 0 ), ibx_tport( 0 ), ucast_url_addr( 0 ),
-      mesh_url_addr( 0 ), ucast_url_len( 0 ), mesh_url_len( 0 ), inbox_fd( -1 ),
-      mcast_fd( -1 ), mesh_conn_hash( 0 ), oldest_uid( 0 ),
+      state( f ), mesh_id( 0 ), dev_id( 0 ), listener( 0 ),
+      connect_mgr( *this ), pgm_tport( 0 ), ibx_tport( 0 ), inbox_fd( -1 ),
+      mcast_fd( -1 ), mesh_conn_hash( 0 ), conn_hash( 0 ), oldest_uid( 0 ),
       primary_count( 0 ), ext( 0 ), svc( s ), transport( t )
 {
   uint8_t i;
@@ -216,22 +216,24 @@ TransportRoute::update_cost( UserBridge &n,
 }
 
 bool
-SessionMgr::add_startup_transports( ConfigTree::Service &s ) noexcept
+SessionMgr::add_startup_transports( void ) noexcept
 {
   ConfigTree::Parameters * p;
   ConfigTree::StringPair * sp;
   ConfigTree::Transport  * tport;
-  bool conn;
+  size_t len;
   for ( p = this->tree.parameters.hd; p != NULL; p = p->next ) {
     for ( sp = p->parms.hd; sp != NULL; sp = sp->next ) {
       if ( sp->name.equals( "listen" ) ) {
-        tport = this->tree.find_transport( sp->value.val, sp->value.len,&conn );
+        for ( len = sp->value.len; len > 0 && sp->value.val[ len - 1 ] == ' ';
+          len-- ) ;
+        tport = this->tree.find_transport( sp->value.val, len );
         if ( tport == NULL ) {
-          fprintf( stderr, "startup listen transport %.*s not found\n",
+          fprintf( stderr, "startup listen transport \"%.*s\" not found\n",
                    (int) sp->value.len, sp->value.val );
           return false;
         }
-        if ( ! this->add_transport( s, *tport, true ) )
+        if ( ! this->add_transport( *tport, true ) )
           return false;
       }
     }
@@ -239,24 +241,109 @@ SessionMgr::add_startup_transports( ConfigTree::Service &s ) noexcept
   for ( p = this->tree.parameters.hd; p != NULL; p = p->next ) {
     for ( sp = p->parms.hd; sp != NULL; sp = sp->next ) {
       if ( sp->name.equals( "connect" ) ) {
-        tport = this->tree.find_transport( sp->value.val, sp->value.len,&conn );
+        for ( len = sp->value.len; len > 0 && sp->value.val[ len - 1 ] == ' ';
+          len-- ) ;
+        tport = this->tree.find_transport( sp->value.val, len );
         if ( tport == NULL ) {
-          fprintf( stderr, "startup connect transport %.*s not found\n",
+          fprintf( stderr, "startup connect transport \"%.*s\" not found\n",
                    (int) sp->value.len, sp->value.val );
           return false;
         }
-        if ( ! this->add_transport( s, *tport, false ) )
+        if ( ! this->add_transport( *tport, false ) )
           return false;
       }
     }
   }
-
   return true;
 }
 
 bool
-SessionMgr::add_ipc_transport( ConfigTree::Service &s,  const char *ipc,
-                               const char *map,  uint8_t db ) noexcept
+SessionMgr::add_rvd_transports( const char *listen,  const char *http,
+                                int flags ) noexcept
+{
+  ConfigTree::Transport * rvd, * web;
+  rvd = this->tree.find_transport( "rvd", 3 );
+  if ( rvd == NULL ) {
+    StringTab & stab = this->user_db.string_tab;
+    ConfigTree::StringPair *p;
+
+    rvd = stab.make<ConfigTree::Transport>();
+    stab.ref_string( "rv", 2, rvd->type );
+    stab.ref_string( "rvd", 3, rvd->tport );
+
+    p = stab.make<ConfigTree::StringPair>();
+    stab.ref_string( "listen", 6, p->name );
+    if ( listen == NULL )
+      listen = "7500";
+    stab.ref_string( listen, ::strlen( listen ), p->value );
+    rvd->route.push_tl( p );
+    if ( ( flags & RV_NO_MCAST ) != 0 ) {
+      p = stab.make<ConfigTree::StringPair>();
+      stab.ref_string( "no_mcast", 8, p->name );
+      stab.ref_string( "true", 4, p->value );
+      rvd->route.push_tl( p );
+    }
+    if ( ( flags & RV_NO_PERMINENT ) != 0 ) {
+      p = stab.make<ConfigTree::StringPair>();
+      stab.ref_string( "no_perminent", 12, p->name );
+      stab.ref_string( "true", 4, p->value );
+      rvd->route.push_tl( p );
+    }
+
+    rvd->tport_id = this->tree.transport_cnt++;
+    this->tree.transports.push_tl( rvd );
+  }
+  if ( ! this->add_transport( *rvd, true ) )
+    return false;
+  if ( ( flags & RV_NO_HTTP ) == 0 ) {
+    web = this->tree.find_transport( "web", 3 );
+    if ( web == NULL ) {
+      StringTab & stab = this->user_db.string_tab;
+      ConfigTree::StringPair *p;
+
+      web = stab.make<ConfigTree::Transport>();
+      stab.ref_string( "web", 3, web->type );
+      web->tport = web->type;
+
+      p = stab.make<ConfigTree::StringPair>();
+      stab.ref_string( "listen", 6, p->name );
+
+      char   tmp[ MAX_TCP_HOST_LEN ],
+             buf[ MAX_TCP_HOST_LEN + 16 ];
+      size_t len = sizeof( tmp );
+      if ( http == NULL ) {
+        const char * addr = NULL;
+        if ( rvd->get_route_str( "listen", addr ) ) {
+          int port = web->get_host_port( addr, tmp, len );
+          if ( port != 0 ) {
+            port += 80;
+            if ( web->is_wildcard( tmp ) )
+              ::snprintf( buf, sizeof( buf ), "*:%d", port );
+            else if ( ::strchr( tmp, ':' ) != NULL )
+              ::snprintf( buf, sizeof( buf ), "[%s]:%d", tmp, port );
+            else
+              ::snprintf( buf, sizeof( buf ), "%s:%d", tmp, port );
+            http = buf;
+          }
+        }
+        if ( http == NULL )
+          http = "7580";
+      }
+      stab.ref_string( http, ::strlen( http ), p->value );
+      web->route.push_tl( p );
+
+      web->tport_id = this->tree.transport_cnt++;
+      this->tree.transports.push_tl( web );
+
+      if ( ! this->add_transport( *web, true ) )
+        return false;
+    }
+  }
+  return true;
+}
+
+bool
+SessionMgr::add_ipc_transport( void ) noexcept
 {
   if ( ! this->in_list( IN_ACTIVE_LIST ) ) {
     if ( this->init_sock() != 0 )
@@ -277,7 +364,8 @@ SessionMgr::add_ipc_transport( ConfigTree::Service &s,  const char *ipc,
   }
   uint32_t id = (uint32_t) this->user_db.transport_tab.count;
   void * p = aligned_malloc( sizeof( TransportRoute ) );
-  rte = new ( p ) TransportRoute( this->poll, *this, s, *tptr, "ipc", 0, id, f );
+  rte = new ( p ) TransportRoute( this->poll, *this, this->svc, *tptr,
+                                  "ipc", 0, id, f);
   if ( rte->init() != 0 )
     return false;
 
@@ -287,38 +375,42 @@ SessionMgr::add_ipc_transport( ConfigTree::Service &s,  const char *ipc,
   this->user_db.ipc_transport = rte;
 
   EvShm shm( "ms_server" );
-  const char *ipc_name = ipc;
-  const char *map_name = map;
-  uint32_t    db_num   = db;
+  const char * ipc_name = NULL,
+             * map_name = NULL,
+             * db_num   = NULL;
 
-  if ( ipc_name == NULL )
-    this->tree.find_parameter( "ipc", ipc_name, NULL );
-  if ( map_name == NULL )
-    this->tree.find_parameter( "map", map_name, NULL );
+  this->tree.find_parameter( "map_file", map_name, NULL );
+  this->tree.find_parameter( "ipc_name", ipc_name, NULL );
+  this->tree.find_parameter( "db_num", db_num, NULL );
 
   shm.ipc_name = ipc_name;
-  if ( map_name != NULL )
-    shm.open( map_name, db_num );
-  else
+  if ( map_name != NULL ) {
+    if ( shm.open( map_name, ( db_num ? atoi( db_num ) : 0 ) ) == 0 )
+      printf( "shm opened: %s (db=%s)\n", map_name, db_num ? db_num : "0" );
+    else {
+      fprintf( stderr, "shm failed: %s (db=%s)\n",
+               map_name, db_num ? db_num : "0" );
+      return false;
+    }
+  }
+  else {
     shm.open_rdonly();
-
+  }
   rte->sub_route.init_shm( shm );
   this->user_db.add_transport( *rte );
   return true;
 }
 
 bool
-SessionMgr::add_transport( ConfigTree::Service &s,
-                           ConfigTree::Transport &t,
+SessionMgr::add_transport( ConfigTree::Transport &t,
                            bool is_listener ) noexcept
 {
-  TransportRoute * rte;
-  return this->add_transport2( s, t, is_listener, rte );
+  TransportRoute * rte = NULL;
+  return this->add_transport2( t, is_listener, rte );
 }
 
 bool
-SessionMgr::add_transport2( ConfigTree::Service &s,
-                            ConfigTree::Transport &t,
+SessionMgr::add_transport2( ConfigTree::Transport &t,
                             bool is_listener,
                             TransportRoute *&rte ) noexcept
 {
@@ -336,7 +428,8 @@ SessionMgr::add_transport2( ConfigTree::Service &s,
     return this->create_web( t );
   if ( t.type.equals( "name" ) )
     return this->create_name( t );
-  if ( t.type.equals( "mesh" ) ) {
+  if ( t.type.equals( "mesh" ) || t.type.equals( "tcp" ) ||
+       t.type.equals( "any" ) ) {
     const char * dev = NULL;
     if ( t.get_route_str( "device", dev ) ) {
       name_svc_count = this->start_name_services( t, name_svc );
@@ -352,7 +445,7 @@ SessionMgr::add_transport2( ConfigTree::Service &s,
     StringTab & stab = this->user_db.string_tab;
     f |= TPORT_IS_IPC;
     size_t svc_len =
-      ::snprintf( svc_name, sizeof( svc_name ), "%s.ipc", s.svc.val );
+      ::snprintf( svc_name, sizeof( svc_name ), "%s.ipc", this->svc.svc.val );
     tptr = this->tree.find_transport( svc_name, svc_len );
     if ( tptr == NULL ) {
       tptr = stab.make<ConfigTree::Transport>();
@@ -363,7 +456,8 @@ SessionMgr::add_transport2( ConfigTree::Service &s,
     }
   }
   else {
-    ::snprintf( svc_name, sizeof( svc_name ), "%s.%s", s.svc.val, t.tport.val );
+    ::snprintf( svc_name, sizeof( svc_name ), "%s.%s", this->svc.svc.val,
+                t.tport.val );
   }
   uint32_t id     = (uint32_t) this->user_db.transport_tab.count;
   bool     is_new = false;
@@ -375,8 +469,8 @@ SessionMgr::add_transport2( ConfigTree::Service &s,
 
   if ( rte == NULL ) {
     void * p = aligned_malloc( sizeof( TransportRoute ) );
-    rte = new ( p ) TransportRoute( this->poll, *this, s, *tptr, svc_name, 0,
-                                    id, f );
+    rte = new ( p ) TransportRoute( this->poll, *this, this->svc, *tptr,
+                                    svc_name, 0, id, f );
     if ( rte->init() != 0 )
       return false;
     this->user_db.transport_tab[ id ] = rte;
@@ -388,13 +482,16 @@ SessionMgr::add_transport2( ConfigTree::Service &s,
     is_new = true;
   }
 
-  if ( name_svc_count > 0 ) {
-    for ( uint32_t i = 0; i < name_svc_count; i++ )
-      name_svc[ i ]->adverts.push( rte );
-  }
   if ( rte->create_transport( t ) ) {
     if ( is_new )
       this->user_db.add_transport( *rte );
+    uint32_t i;
+    for ( i = 0; i < name_svc_count; i++ )
+      name_svc[ i ]->adverts.push( rte );
+    if ( this->session_started ) {
+      for ( i = 0; i < name_svc_count; i++ )
+        this->user_db.mcast_name( *name_svc[ i ] );
+    }
     return true;
   }
   rte->set( TPORT_IS_SHUTDOWN );
@@ -402,8 +499,7 @@ SessionMgr::add_transport2( ConfigTree::Service &s,
 }
 
 uint32_t
-SessionMgr::shutdown_transport( ConfigTree::Service &s,
-                                ConfigTree::Transport &t ) noexcept
+SessionMgr::shutdown_transport( ConfigTree::Transport &t ) noexcept
 {
   if ( t.type.equals( "telnet" ) )
     return this->shutdown_telnet( t );
@@ -415,7 +511,7 @@ SessionMgr::shutdown_transport( ConfigTree::Service &s,
            match = 0;
   for ( id = 0; id < count; id++ ) {
     TransportRoute *rte = this->user_db.transport_tab.ptr[ id ];
-    if ( &rte->transport == &t && &rte->svc == &s ) {
+    if ( &rte->transport == &t ) {
       match += rte->shutdown( t );
     }
   }
@@ -471,11 +567,13 @@ SessionMgr::start_transport( TransportRoute &rte,
   return false;
 }
 
-static size_t
-make_mesh_url_from_sock( char buf[ MAX_TCP_HOST_LEN ],
-                         EvSocket &sock ) noexcept
+static void
+make_url_from_sock( StringTab &string_tab,  StringVal &url,
+                    EvSocket &sock ) noexcept
 {
+  char   buf[ MAX_TCP_HOST_LEN ];
   ::memcpy( buf, "tcp://", 6 );
+
   size_t len = get_strlen64( sock.peer_address.buf );
   bool is_ip4_wildcard, is_ip6_wildcard;
   is_ip4_wildcard = ( ::strncmp( sock.peer_address.buf, "0.0.0.0:", 8 ) == 0 );
@@ -489,7 +587,6 @@ make_mesh_url_from_sock( char buf[ MAX_TCP_HOST_LEN ],
         i = 7;
       else
         i = 4;
-      /*resolve_mesh_host( &buf[ 6 ] );*/
     }
     while ( j < MAX_TCP_HOST_LEN - 1 && i < len )
       buf[ j++ ] = sock.peer_address.buf[ i++ ];
@@ -500,8 +597,7 @@ make_mesh_url_from_sock( char buf[ MAX_TCP_HOST_LEN ],
     len += 6;
   }
   buf[ len ] = '\0';
-  d_tran( "mesh_url_from_sock( \"%s\" )\n", buf );
-  return len;
+  string_tab.ref_string( buf, len, url );
 }
 
 bool
@@ -511,15 +607,14 @@ SessionMgr::add_mesh_accept( TransportRoute &listen_rte,
   TransportRoute        * rte;
   ConfigTree::Service   & s = listen_rte.svc;
   ConfigTree::Transport & t = listen_rte.transport;
-  const char            * svc_name = listen_rte.sub_route.service_name;
 
-  d_tran( "add transport %s\n", svc_name );
   //uint32_t id = this->user_db.transport_list.tport_count++;
   uint32_t id,
            count = (uint32_t) this->user_db.transport_tab.count;
   for ( id = 0; id < count; id++ ) {
     rte = this->user_db.transport_tab.ptr[ id ];
-    if ( rte->all_set( TPORT_IS_SHUTDOWN | TPORT_IS_MESH ) &&
+    if ( &t == &rte->transport &&
+         rte->all_set( TPORT_IS_SHUTDOWN | TPORT_IS_MESH ) &&
          rte->mesh_id == conn.rte->mesh_id ) {
       if ( rte->connect_mgr.is_shutdown ) {
         rte->clear_all();
@@ -528,20 +623,19 @@ SessionMgr::add_mesh_accept( TransportRoute &listen_rte,
     }
   }
   if ( id == count ) {
-    void * p = aligned_malloc( sizeof( TransportRoute ) );
-    rte = new ( p ) TransportRoute( this->poll, *this, s, t, svc_name, id, id,
-                                    0 );
+    void       * p    = aligned_malloc( sizeof( TransportRoute ) );
+    const char * name = listen_rte.sub_route.service_name;
+    rte = new ( p ) TransportRoute( this->poll, *this, s, t, name, id, id, 0 );
     if ( rte->init() != 0 )
       return false;
   }
   if ( rte->connect_mgr.conn != NULL )
     rte->connect_mgr.release_conn();
 
-  rte->mesh_url_addr = listen_rte.mesh_url_addr;
-  rte->mesh_url_len  = listen_rte.mesh_url_len;
-  rte->mesh_id       = listen_rte.mesh_id;
-  rte->uid_in_mesh   = listen_rte.uid_in_mesh;
-  rte->mesh_csum     = listen_rte.mesh_csum;
+  rte->mesh_url    = listen_rte.mesh_url;
+  rte->mesh_id     = listen_rte.mesh_id;
+  rte->uid_in_mesh = listen_rte.uid_in_mesh;
+  rte->mesh_csum   = listen_rte.mesh_csum;
   for ( uint8_t i = 0; i < COST_PATH_COUNT; i++ )
     rte->uid_connected.cost[ i ] = listen_rte.uid_connected.cost[ i ];
 
@@ -555,9 +649,8 @@ SessionMgr::add_mesh_accept( TransportRoute &listen_rte,
   conn.notify   = rte;
   conn.route_id = rte->sub_route.route_id;
 
-  printf( "%s.%u add_mesh_accept %s from %s\n",
-        rte->transport.tport.val, rte->tport_id, rte->mesh_url_addr,
-        conn.peer_address.buf );
+  rte->printf( "add_mesh_accept %s from %s\n",
+               rte->mesh_url.val, conn.peer_address.buf );
   if ( id == count ) {
     this->user_db.transport_tab[ id ] = rte;
     this->user_db.add_transport( *rte );
@@ -572,30 +665,41 @@ SessionMgr::add_mesh_accept( TransportRoute &listen_rte,
 void
 TransportRoute::clear_mesh( void ) noexcept
 {
-  this->mesh_url_addr  = NULL;
-  this->mesh_url_len   = 0;
-  this->mesh_id        = 0;
+  this->mesh_url.zero();
+  this->conn_url.zero();
+  this->ucast_url.zero();
+  this->mesh_id        = NULL;
+  this->dev_id         = NULL;
   this->uid_in_mesh    = &this->mesh_connected;
+  this->uid_in_device  = &this->mesh_connected;
   this->mesh_csum      = &this->mesh_csum2;
   this->mesh_conn_hash = 0;
+  this->conn_hash      = 0;
 }
 
-bool
-SessionMgr::add_tcp_accept( TransportRoute &listen_rte,
-                            EvTcpTransport &conn ) noexcept
+TransportRoute *
+SessionMgr::add_tcp_rte( TransportRoute &src_rte,  uint32_t conn_hash ) noexcept
 {
   TransportRoute        * rte;
-  ConfigTree::Service   & s = listen_rte.svc;
-  ConfigTree::Transport & t = listen_rte.transport;
-  const char            * svc_name = listen_rte.sub_route.service_name;
+  ConfigTree::Service   & s = src_rte.svc;
+  ConfigTree::Transport & t = src_rte.transport;
+  bool is_new = false;
 
-  d_tran( "add transport %s\n", svc_name );
   //uint32_t id = this->user_db.transport_list.tport_count++;
   uint32_t id,
            count = (uint32_t) this->user_db.transport_tab.count;
+  if ( conn_hash != 0 ) {
+    for ( id = 0; id < count; id++ ) {
+      rte = this->user_db.transport_tab.ptr[ id ];
+      if ( rte->conn_hash == conn_hash && &t == &rte->transport )
+        return rte;
+    }
+  }
   for ( id = 0; id < count; id++ ) {
     rte = this->user_db.transport_tab.ptr[ id ];
-    if ( rte->all_set( TPORT_IS_SHUTDOWN | TPORT_IS_TCP ) ) {
+    if ( &t == &rte->transport &&
+         rte->all_set( TPORT_IS_SHUTDOWN | TPORT_IS_TCP ) &&
+         rte->dev_id == src_rte.dev_id ) {
       if ( rte->connect_mgr.is_shutdown ) {
         rte->clear_all();
         rte->clear_mesh();
@@ -604,14 +708,33 @@ SessionMgr::add_tcp_accept( TransportRoute &listen_rte,
     }
   }
   if ( id == count ) {
-    void * p = aligned_malloc( sizeof( TransportRoute ) );
-    rte = new ( p ) TransportRoute( this->poll, *this, s, t, svc_name, id,id,0);
+    void       * p    = aligned_malloc( sizeof( TransportRoute ) );
+    const char * name = src_rte.sub_route.service_name;
+    rte = new ( p ) TransportRoute( this->poll, *this, s, t, name, id, id, 0 );
     if ( rte->init() != 0 )
-      return false;
+      return NULL;
+    is_new = true;
   }
   if ( rte->connect_mgr.conn != NULL )
     rte->connect_mgr.release_conn();
+  rte->dev_id        = src_rte.dev_id;
+  rte->uid_in_device = src_rte.uid_in_device;
 
+  if ( is_new ) {
+    this->user_db.transport_tab.push( rte );
+    this->user_db.add_transport( *rte );
+  }
+  return rte;
+}
+
+bool
+SessionMgr::add_tcp_accept( TransportRoute &listen_rte,
+                            EvTcpTransport &conn ) noexcept
+{
+  TransportRoute * rte = this->add_tcp_rte( listen_rte, 0 );
+
+  if ( rte == NULL )
+    return false;
   for ( uint8_t i = 0; i < COST_PATH_COUNT; i++ )
     rte->uid_connected.cost[ i ] = listen_rte.uid_connected.cost[ i ];
   rte->set( TPORT_IS_TCP );
@@ -620,14 +743,11 @@ SessionMgr::add_tcp_accept( TransportRoute &listen_rte,
   conn.notify   = rte;
   conn.route_id = rte->sub_route.route_id;
 
-  printf( "%s.%u add_tcp_accept\n", rte->transport.tport.val, rte->tport_id );
-  if ( id == count ) {
-    this->user_db.transport_tab[ id ] = rte;
-    this->user_db.add_transport( *rte );
-  }
+  rte->printf( "add_tcp_accept\n" );
   this->events.on_connect( rte->tport_id, TPORT_IS_TCP );
   if ( ! rte->connected.test_set( conn.fd ) )
     rte->connect_count++;
+
   d_tran( "%s connect_count %u\n", rte->name, rte->connect_count );
   return true;
 }
@@ -952,8 +1072,7 @@ SessionMgr::add_mesh_connect( TransportRoute &mesh_rte,  const char **mesh_url,
       return false;
   }
 
-  rte->mesh_url_addr  = mesh_rte.mesh_url_addr;
-  rte->mesh_url_len   = mesh_rte.mesh_url_len;
+  rte->mesh_url       = mesh_rte.mesh_url;
   rte->mesh_id        = mesh_rte.mesh_id;
   rte->uid_in_mesh    = mesh_rte.uid_in_mesh;
   rte->mesh_csum      = mesh_rte.mesh_csum;
@@ -979,17 +1098,17 @@ SessionMgr::add_mesh_connect( TransportRoute &mesh_rte,  const char **mesh_url,
       j++;
     }
   }
-
   if ( ! mesh_rte.transport.get_route_int( "timeout", parm.timeout ) )
     parm.timeout = 15;
 
-  if ( rte->connect_mgr.conn == NULL ) {
+  EvTcpTransportClient *c = rte->connect_mgr.conn;
+  if ( c == NULL ) {
     uint8_t type = this->tcp_connect_sock_type;
-    EvTcpTransportClient *c =
-      rte->connect_mgr.alloc_conn<EvTcpTransportClient>( this->poll, type );
-    c->rte = rte;
-    c->route_id = rte->sub_route.route_id;
+    c = rte->connect_mgr.alloc_conn<EvTcpTransportClient>( this->poll, type );
+    rte->connect_mgr.conn = c;
   }
+  c->rte = rte;
+  c->route_id = rte->sub_route.route_id;
   rte->connect_mgr.connect_timeout_secs = parm.timeout;
   rte->connect_mgr.set_parm( parm.copy() );
   if ( ! rte->connect_mgr.do_connect() ) {
@@ -1145,9 +1264,9 @@ TransportRoute::port_status( char *buf,  size_t buflen ) noexcept
 void
 TransportRoute::on_connect( kv::EvSocket &conn ) noexcept
 {
-  printf( "%s connected %s %s using %s fd %u\n", this->transport.tport.val,
-          conn.peer_address.buf, conn.type_string(),
-          this->sub_route.service_name, conn.fd );
+  this->printf( "connected %s %s using %s fd %u\n",
+                conn.peer_address.buf, conn.type_string(),
+                this->sub_route.service_name, conn.fd );
   uint32_t connect_type = 0;
   this->clear( TPORT_IS_SHUTDOWN );
   if ( ! this->is_mcast() ) {
@@ -1196,10 +1315,11 @@ TransportRoute::on_shutdown( EvSocket &conn,  const char *err,
       err = errbuf;
   }
   if ( errlen > 0 )
-    printf( "%s %s (%.*s)\n", s, conn.peer_address.buf, (int) errlen, err );
+    this->printf( "%s %s (%.*s)\n", s, conn.peer_address.buf,
+                  (int) errlen, err );
   else
-    printf( "%s %s (count=%u)\n", s, conn.peer_address.buf,
-            this->connect_count );
+    this->printf( "%s %s (count=%u)\n", s, conn.peer_address.buf,
+                  this->connect_count );
   this->mgr.events.on_shutdown( this->tport_id, conn.fd >= 0 );
   if ( conn.fd >= 0 ) {
     this->user_db.retire_source( *this, conn.fd );
@@ -1220,22 +1340,38 @@ TransportRoute::on_shutdown( EvSocket &conn,  const char *err,
 void
 TransportRoute::create_listener_mesh_url( void ) noexcept
 {
-  char   tmp[ MAX_TCP_HOST_LEN ];
-  size_t len = make_mesh_url_from_sock( tmp, *this->listener );
-  char * url = this->mesh_url_addr;
-  if ( url == NULL )
-    url = (char *) ::malloc( MAX_TCP_HOST_LEN );
-  ::memcpy( url, tmp, len + 1 );
-  this->mesh_url_addr  = url;
-  this->mesh_url_len   = (uint32_t) len;
-  this->mesh_conn_hash = kv_crc_c( url, len, 0 );
-  d_tran( "%s: %s (%x)\n", this->name, url, this->mesh_conn_hash );
+  make_url_from_sock( this->user_db.string_tab, this->mesh_url,
+                      *this->listener );
+  this->mesh_conn_hash = kv_crc_c( this->mesh_url.val, this->mesh_url.len, 0 );
+  d_tran( "%s: %s (%x)\n", this->name, this->mesh_url.val,
+          this->mesh_conn_hash );
+}
+
+void
+TransportRoute::create_listener_conn_url( void ) noexcept
+{
+  make_url_from_sock( this->user_db.string_tab, this->conn_url,
+                      *this->listener );
+  this->conn_hash = kv_crc_c( this->conn_url.val, this->conn_url.len, 0 );
+  d_tran( "%s: %s (%x)\n", this->name, this->conn_url.val,
+          this->conn_hash );
+}
+
+void
+TransportRoute::change_any( const char *type,  NameSvc & ) noexcept
+{
+  StringTab & stab = this->user_db.string_tab;
+  stab.ref_string( type, ::strlen( type ), this->transport.type );
+  this->create_transport( this->transport );
 }
 
 bool
 TransportRoute::create_transport( ConfigTree::Transport &tport ) noexcept
 {
   bool b = false;
+  if ( tport.type.equals( "any" ) ) {
+    return true;
+  }
   if ( tport.type.equals( "rv" ) ) {
     if ( this->is_svc() )
       return this->create_rv_listener( tport );
@@ -1252,8 +1388,13 @@ TransportRoute::create_transport( ConfigTree::Transport &tport ) noexcept
     return false;
   }
   if ( tport.type.equals( "tcp" ) ) {
+    if ( this->is_set( TPORT_IS_DEVICE ) )
+      this->dev_id = this;
+    else
+      this->dev_id = NULL;
     if ( this->is_svc() ) {
       this->listener = this->create_tcp_listener( tport );
+      this->create_listener_conn_url();
       goto out_listen;
     }
     b = this->create_tcp_connect( tport );
@@ -1382,7 +1523,7 @@ TransportRoute::start_listener( EvTcpListen *l,
                                 ConfigTree::Transport &tport ) noexcept
 {
   EvTcpTransportParameters parm;
-  parse_tcp_param( parm, tport, P_REUSEPORT | P_LISTEN );
+  parse_tcp_param( parm, tport, /*P_REUSEPORT |*/ P_LISTEN );
 
   int status = l->listen( parm.host[ 0 ], parm.port[ 0 ], parm.opts );
   if ( status != 0 ) {
@@ -1401,9 +1542,9 @@ TransportRoute::start_listener( EvTcpListen *l,
   else
     this->clear( TPORT_IS_EDGE );
   this->clear( TPORT_IS_SHUTDOWN );
-  printf( "%s.%u listening on %s%s\n", tport.tport.val, this->tport_id,
-          l->peer_address.buf,
-          this->is_set( TPORT_IS_EDGE ) ? " edge is true" : "" );
+  this->printf( "%s listening on %s%s\n", tport.tport.val,
+                l->peer_address.buf,
+                this->is_set( TPORT_IS_EDGE ) ? " edge is true" : "" );
   return true;
 }
 
@@ -1423,9 +1564,13 @@ TransportRoute::create_rv_listener( ConfigTree::Transport &tport ) noexcept
   EvRvTransportListen * l =
     new ( aligned_malloc( sizeof( EvRvTransportListen ) ) )
     EvRvTransportListen( this->poll, *this );
-  bool pref;
-  if ( tport.get_route_bool( "use_service_prefix", pref ) )
-    l->has_service_prefix = pref;
+  bool b;
+  if ( tport.get_route_bool( "use_service_prefix", b ) )
+    l->has_service_prefix = b;
+  if ( tport.get_route_bool( "no_perminent", b ) )
+    l->no_perminent = b;
+  if ( tport.get_route_bool( "no_mcast", b ) )
+    l->no_mcast = b;
   this->start_listener( l, tport );
   if ( l == NULL )
     return false;
@@ -1434,12 +1579,48 @@ TransportRoute::create_rv_listener( ConfigTree::Transport &tport ) noexcept
   return true;
 }
 
+void
+TransportRoute::get_tport_service( ConfigTree::Transport &tport,
+                                   const char *&service,
+                                   size_t &service_len ) noexcept
+{
+  const char * tmp;
+  if ( tport.get_route_str( "service", tmp ) ) {
+    size_t tmplen = ::strlen( tmp );
+    if ( tmp[ 0 ] != '_' || tmp[ tmplen - 1 ] != '.' ) {
+      char * buf = (char *) ::malloc( tmplen + 3 );
+      buf[ 0 ] = '_';
+      if ( tmp[ 0 ] == '_' ) {
+        tmp++;
+        tmplen--;
+      }
+      ::memcpy( &buf[ 1 ], tmp, tmplen );
+      if ( tmp[ tmplen - 1 ] != '.' )
+        buf[ 1 + tmplen++ ] = '.';
+      buf[ 1 + tmplen ] = '\0';
+      tmp = buf;
+    }
+    service     = tmp;
+    service_len = ::strlen( tmp );
+  }
+#if 0
+  else {
+    service     = NULL;
+    service_len = 0;
+  }
+#endif
+  if ( service_len > 0 )
+    this->printf( "%s.%s service: %.*s\n", tport.type.val, tport.tport.val,
+                  (int) service_len - 2, &service[ 1 ] );
+}
+
 bool
 TransportRoute::create_nats_listener( ConfigTree::Transport &tport ) noexcept
 {
   EvNatsTransportListen * l =
     new ( aligned_malloc( sizeof( EvNatsTransportListen ) ) )
     EvNatsTransportListen( this->poll, *this );
+  this->get_tport_service( tport, l->service, l->service_len );
   this->start_listener( l, tport );
   if ( l == NULL )
     return false;
@@ -1454,6 +1635,7 @@ TransportRoute::create_redis_listener( ConfigTree::Transport &tport ) noexcept
   EvRedisTransportListen * l =
     new ( aligned_malloc( sizeof( EvRedisTransportListen ) ) )
     EvRedisTransportListen( this->poll, *this );
+  this->get_tport_service( tport, l->service, l->service_len );
   this->start_listener( l, tport );
   if ( l == NULL )
     return false;
@@ -1466,18 +1648,65 @@ bool
 TransportRoute::create_tcp_connect( ConfigTree::Transport &tport ) noexcept
 {
   EvTcpTransportParameters parm;
+  const char * tmp, * tmp2;
   parse_tcp_param( parm, tport, P_NB_CONNECT );
 
-  if ( this->connect_mgr.conn == NULL ) {
+  EvTcpTransportClient *c = this->connect_mgr.conn;
+  if ( c == NULL ) {
     uint8_t type = this->mgr.tcp_connect_sock_type;
-    EvTcpTransportClient *c =
-      this->connect_mgr.alloc_conn<EvTcpTransportClient>( this->poll, type );
-    c->rte = this;
-    c->route_id = this->sub_route.route_id;
+    c = this->connect_mgr.alloc_conn<EvTcpTransportClient>( this->poll, type );
+    this->connect_mgr.conn = c;
   }
+  c->rte = this;
+  c->route_id = this->sub_route.route_id;
   this->connect_mgr.connect_timeout_secs = parm.timeout;
-  this->connect_mgr.set_parm( parm.copy() );
-  return this->connect_mgr.do_connect();
+  if ( ! tport.get_route_str( "device", tmp ) ||
+       tport.get_route_str( "connect", tmp2 ) ) {
+    this->connect_mgr.set_parm( parm.copy() );
+    return this->connect_mgr.do_connect();
+  }
+  return true;
+}
+
+bool
+TransportRoute::add_tcp_connect( const char *conn_url,
+                                 uint32_t conn_hash ) noexcept
+{
+  d_tran( "add_tcp_connect( %s )\n", conn_url );
+  TransportRoute * rte = this;
+  if ( ! rte->connect_mgr.is_shutdown ) {
+    if ( rte->conn_hash == conn_hash ) {
+      if ( ! rte->connect_mgr.is_reconnecting )
+        return rte->connect_mgr.do_connect();
+      return true;
+    }
+    rte = NULL;
+  }
+  if ( rte == NULL ) {
+    rte = this->mgr.add_tcp_rte( *this, conn_hash );
+
+    if ( rte == NULL )
+      return false;
+    EvTcpTransportClient *c = rte->connect_mgr.conn;
+    if ( c == NULL ) {
+      uint8_t type = this->mgr.tcp_connect_sock_type;
+      c = rte->connect_mgr.alloc_conn<EvTcpTransportClient>( this->poll, type );
+      rte->connect_mgr.conn = c;
+    }
+    c->rte = rte;
+    c->route_id = rte->sub_route.route_id;
+  }
+  EvTcpTransportParameters parm;
+  char tcp_buf[ MAX_TCP_HOST_LEN ];
+  size_t len = sizeof( tcp_buf );
+  int port;
+  port = ConfigTree::Transport::get_host_port( conn_url, tcp_buf, len );
+  parm.set_host_port( tcp_buf, port, 0, 0 );
+  d_tran( "tcp_url = %s:%u\n", tcp_buf, port );
+  rte->connect_mgr.connect_timeout_secs = 1;
+  rte->connect_mgr.set_parm( parm.copy() );
+  rte->conn_hash = conn_hash;
+  return rte->connect_mgr.do_connect();
 }
 
 bool
@@ -1509,7 +1738,7 @@ do_listen_start( ConfigTree::Transport &tport,  EvTcpListen *l,
                  const char *k ) noexcept
 {
   EvTcpTransportParameters parm;
-  parse_tcp_param( parm, tport, P_REUSEPORT | P_LISTEN );
+  parse_tcp_param( parm, tport, /*P_REUSEPORT |*/ P_LISTEN );
 
   if ( ! l->in_list( IN_ACTIVE_LIST ) ) {
     if ( l->listen2( parm.host[ 0 ], parm.port[ 0 ], parm.opts, k, -1 ) != 0 ) {
@@ -1589,7 +1818,7 @@ SessionMgr::start_name_services( ConfigTree::Transport &tport,
   ConfigTree::StringPair * el[ MAX_TCP_HOSTS ];
   uint32_t count   = 0;
 
-  parse_tcp_route( "device",  tport, el );
+  parse_tcp_route( "device", tport, el );
   for ( uint32_t i = 0; i < MAX_TCP_HOSTS; i++ ) {
     if ( el[ i ] == NULL )
       continue;
@@ -1675,7 +1904,8 @@ SessionMgr::shutdown_name( ConfigTree::Transport &tport ) noexcept
 
 static void
 parse_pgm_param( EvPgmTransportParameters &parm,  const char *name,
-                 ConfigTree::Transport &tport,  char net_buf[ 1024 ] ) noexcept
+                 ConfigTree::Transport &tport,  char net_buf[ 1024 ],
+                 UserDB &user_db ) noexcept
 {
   size_t len = 1024;
   int    ival;
@@ -1693,6 +1923,10 @@ parse_pgm_param( EvPgmTransportParameters &parm,  const char *name,
     parm.rxw_sqns = ival;
   if ( tport.get_route_int( "mcast_loop", ival ) )
     parm.mcast_loop = ival;
+  if ( tport.get_route_int( "txw_secs", ival ) )
+    parm.txw_secs = ival;
+  else
+    parm.txw_secs = user_db.reliability;
 }
 
 bool
@@ -1701,7 +1935,7 @@ TransportRoute::create_pgm( int kind,  ConfigTree::Transport &tport ) noexcept
   EvPgmTransportParameters parm;
   char         net_buf[ 1024 ];
   const char * name = ( kind & TPORT_IS_LISTEN ) ? "listen" : "connect";
-  parse_pgm_param( parm, name, tport, net_buf );
+  parse_pgm_param( parm, name, tport, net_buf, this->user_db );
 
   EvPgmTransport * l;
   if ( this->pgm_tport != NULL )
@@ -1735,13 +1969,10 @@ TransportRoute::create_pgm( int kind,  ConfigTree::Transport &tport ) noexcept
     if ( ++i == 0xc000U )
       return false;
   }
-  size_t len = ::strlen( l->pgm.gsr_addr ) + sizeof( "inbox://" ) + 8;
-  char * url = this->ucast_url_addr;
-  if ( url == NULL )
-    url = (char *) ::malloc( 256 );
-  len = ::snprintf( url, len, "inbox://%s:%u", l->pgm.gsr_addr, port );
-  this->ucast_url_addr = url;
-  this->ucast_url_len  = (uint32_t) len;
+  char tmp[ 256 ];
+  int  len = ::snprintf( tmp, sizeof( tmp ), "inbox://%s:%u",
+                         l->pgm.gsr_addr, port );
+  this->user_db.string_tab.ref_string( tmp, len, this->ucast_url );
   this->inbox_fd       = s->fd;
   this->mcast_fd       = l->fd;
   d_tran( "set mcast_fd=%u inbox_route=%u\n", l->fd, s->fd );
@@ -1811,6 +2042,7 @@ ConnectionMgr::setup_reconnect( void ) noexcept
   if ( this->connect_timeout_secs > 0 ) {
     if ( now - this->reconnect_time > (double) this->connect_timeout_secs ) {
       this->is_reconnecting = false;
+      this->is_shutdown = true;
       return false;
     }
   }

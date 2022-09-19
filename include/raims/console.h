@@ -79,6 +79,7 @@ struct IpcRte;
 struct Nonce;
 struct Console;
 struct TabOut;
+struct Unrouteable;
 
 enum PortFlags {
   P_IS_LOCAL  = 1,
@@ -102,12 +103,16 @@ struct PortOutput {
   int              fd,
                    flags;
   kv::PeerStats    stats;
+  Unrouteable    * unrouteable;
 
   PortOutput( Console &c,  TabOut &o,  uint32_t t ) noexcept;
+  PortOutput( Console &c,  TabOut &o,  Unrouteable *u ) noexcept;
 
   void init( TransportRoute *rte,  int fl,  int fd,
              UserBridge *user = NULL ) noexcept;
   void init( TransportRoute *rte,  IpcRte *ext ) noexcept;
+
+  void init( ConfigTree::Transport &tport,  int fl,  int fd ) noexcept;
 
   void local_addr( const char *buf,  uint32_t len = 0 ) {
     this->local.val = buf;
@@ -514,7 +519,6 @@ struct Console : public md::MDOutput, public SubOnMsg, public ConfigPrinter {
   SubDB           & sub_db;
   ConfigTree      & tree;
   StringTab       & string_tab;
-  ConfigTree::PairList    free_pairs;
   ConfigTree::Transport * cfg_tport;
   ConfigChangeList  changes;
   const char      * fname_fmt,
@@ -530,8 +534,10 @@ struct Console : public md::MDOutput, public SubOnMsg, public ConfigPrinter {
   size_t            max_log,
                     log_index,
                     log_ptr;
-  uint32_t          inbox_num;
-  uint64_t          log_rotate_time;
+  uint32_t          inbox_num,
+                    log_max_rotate;
+  uint64_t          log_rotate_time,
+                    log_max_size;
   char            * log_filename;
   int               log_fd;
   uint32_t          next_rotate;
@@ -958,7 +964,7 @@ static const ConsoleCmdString help_cmd[] = {
   { CMD_DEBUG            , "debug","[I]",        "Set debug flags to ival I, bit mask of:\n"
                            " 1=tcp,     2=pgm,      4=inbox,  8=tport,   0x10=user,  0x20=link, 0x40=peer,\n"
                            " 0x80=auth, 0x100=sess, 0x200=hb, 0x400=sub, 0x800=mrcv, 0x1000=msghex,\n"
-                           " 0x2000=telnet, 0x4000=rv, 0x8000=nats"                                  },
+                           " 0x2000=telnet, 0x4000=name, dist, kvpub, kvps, rv"                      },
   { CMD_QUIT             , "quit/exit","",       "Exit console"                                      }
 };
 

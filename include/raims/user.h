@@ -13,16 +13,20 @@ namespace ms {
 static const size_t MAX_USER_LEN    = 128, /* strlen( user ) */
                     MAX_SERVICE_LEN = 128, /* strlen( service ) */
                     MAX_TIME_LEN    = 32;  /* strlen( create ) */
-
+#ifdef INCLUDE_TAGS
+static const char dsa_tag[ 4 ] = {'D','S','A','1'},
+                  sig_tag[ 4 ] = {'S','I','G','1'};
+#endif
 static const size_t
+       CIPHER_TAG_SIZE         = 4,
        ECDH_KEY_LEN            = EC25519_KEY_LEN,
-       ECDH_CIPHER_KEY_LEN     = EC25519_KEY_LEN + HMAC_SIZE,
+       ECDH_CIPHER_KEY_LEN     = EC25519_KEY_LEN + HMAC_SIZE + CIPHER_TAG_SIZE,
        ECDH_CIPHER_B64_LEN     = KV_BASE64_SIZE( ECDH_CIPHER_KEY_LEN ),
        DSA_KEY_LEN             = ED25519_KEY_LEN,
        DSA_SIGN_LEN            = ED25519_SIG_LEN,
-       DSA_CIPHER_KEY_LEN      = DSA_KEY_LEN + HMAC_SIZE,
+       DSA_CIPHER_KEY_LEN      = DSA_KEY_LEN + HMAC_SIZE + CIPHER_TAG_SIZE,
        DSA_CIPHER_B64_LEN      = KV_BASE64_SIZE( DSA_CIPHER_KEY_LEN ),
-       DSA_CIPHER_SIGN_LEN     = DSA_SIGN_LEN + HMAC_SIZE,
+       DSA_CIPHER_SIGN_LEN     = DSA_SIGN_LEN + HMAC_SIZE + CIPHER_TAG_SIZE,
        DSA_CIPHER_SIGN_B64_LEN = KV_BASE64_SIZE( DSA_CIPHER_SIGN_LEN );
 #if 0
 static const size_t 
@@ -38,6 +42,8 @@ static inline void copy_max( char *out,  size_t &out_len,   size_t max_len,
                              const void *in,  size_t in_len ) {
   if ( in_len > max_len ) in_len = max_len;
   ::memcpy( out, in, in_len );
+  if ( in_len < max_len )
+    out[ in_len ] = '\0';
   out_len = in_len;
 }
 
@@ -70,8 +76,10 @@ struct UserBuf {
          create[ MAX_TIME_LEN ],
          expires[ MAX_TIME_LEN ],
          revoke[ MAX_TIME_LEN ],
-         pri[ KV_ALIGN( ECDH_CIPHER_B64_LEN, 4 ) ],
-         pub[ KV_ALIGN( ECDH_CIPHER_B64_LEN, 4 ) ];
+         pri[ KV_ALIGN( DSA_CIPHER_B64_LEN, 4 ) ],
+         pub[ KV_ALIGN( DSA_CIPHER_B64_LEN, 4 ) ];
+         /*pri[ KV_ALIGN( ECDH_CIPHER_B64_LEN, 4 ) ],
+         pub[ KV_ALIGN( ECDH_CIPHER_B64_LEN, 4 ) ];*/
   size_t user_len,
          service_len,
          create_len,
@@ -106,7 +114,9 @@ struct UserBuf {
   /* generate a key pair, pri[] pub[] are encrypted with pass + times */
   bool gen_key( const char *user,  size_t ulen,  const char *svc,  size_t slen,
               const char *expire,  size_t elen, const CryptPass &pwd ) noexcept;
-  bool gen_tmp_key( const char *usr_svc,  const CryptPass &pwd ) noexcept;
+  bool gen_tmp_key( const char *usr_svc,  const char *num,
+                    ConfigTree::Service &svc,  const CryptPass &pwd ) noexcept;
+#if 0
   /* encrypt the keys, pub or pri */
   bool put_ecdh( const CryptPass &pwd,  ECDH &ec,
                  WhichPubPri put_op ) noexcept;
@@ -114,6 +124,14 @@ struct UserBuf {
   bool get_ecdh( const CryptPass &pwd,  ECDH &ec,
                  WhichPubPri get_op,  void *pub_key_out = NULL,
                  size_t *pub_key_len = NULL ) const noexcept;
+#endif
+  /* encrypt the keys, pub or pri */
+  bool put_dsa( const CryptPass &pwd,  DSA &dsa,
+                WhichPubPri put_op ) noexcept;
+  /* decrypt the keys, pub or pri */
+  bool get_dsa( const CryptPass &pwd,  DSA &dsa,
+                WhichPubPri get_op,  void *pub_key_out = NULL,
+                size_t *pub_key_len = NULL ) const noexcept;
   /* print for config */
   bool print_yaml( int indent,  const char *fn = NULL,
                    bool include_pri = false ) noexcept;
@@ -188,13 +206,13 @@ struct RevokeElem {
 };
 
 struct UserHmacData {
-  ECDH           ec;
+  DSA          & dsa;
   UserBuf      & user;
   HashDigest     kdf_hash;
   PolyHmacDigest user_hmac,
                  revoke_hmac;
 
-  UserHmacData( UserBuf &u ) : user( u ) {}
+  UserHmacData( UserBuf &u,  DSA &d ) : dsa( d ), user( u ) {}
   ~UserHmacData() {
     this->zero();
   }
@@ -204,10 +222,6 @@ struct UserHmacData {
     this->revoke_hmac.zero();
   }
   bool decrypt( const CryptPass &pwd,  WhichPubPri get_op ) noexcept;
-  /*bool calc_secret_hmac( UserHmacData &data2,
-                         PolyHmacDigest &secret_hmac ) noexcept;*/
-/*  void calc_hello_key( uint64_t start_time,  ServiceBuf &svc,
-                       HashDigest &ha,  DSA &dsa ) noexcept;*/
 };
 
 typedef kv::SLinkList<UserElem> UserList;
@@ -302,17 +316,21 @@ struct HmacKdf {
 template< size_t MAX_CIPHER_LEN, size_t MAX_PLAIN_LEN >
 struct HmacDecrypt : public HmacKdf {
   uint8_t cipher[ MAX_CIPHER_LEN ], /* base64 -> encrypted binary */
-          plain[ MAX_PLAIN_LEN ];   /* ecrypted binary -> plain */
+          plain[ MAX_PLAIN_LEN + CIPHER_TAG_SIZE ];
   size_t  cipher_len,
           plain_len;
+  char    tag[ CIPHER_TAG_SIZE ];
 
-  HmacDecrypt( uint64_t & c ) : HmacKdf( c ), cipher_len( 0 ), plain_len( 0 ) {
+  HmacDecrypt( uint64_t & c,  const char *tag_str )
+      : HmacKdf( c ), cipher_len( 0 ), plain_len( 0 ) {
     this->zero();
+    ::memcpy( this->tag, tag_str, CIPHER_TAG_SIZE );
   }
   ~HmacDecrypt() { this->zero(); }
   void zero( void ) volatile {
     ::memset( (void *) this->cipher, 0, sizeof( this->cipher ) );
     ::memset( (void *) this->plain, 0, sizeof( this->plain ) );
+    ::memset( (void *) this->tag, 0, sizeof( this->tag ) );
     this->HmacKdf::zero();
   }
 
@@ -337,7 +355,12 @@ struct HmacDecrypt : public HmacKdf {
       fprintf( stderr, "Bad hmac check for \"%.*s\", pass may be wrong\n", l,n);
       return false;
     }
-    this->plain_len = this->cipher_len - HMAC_SIZE;
+    this->plain_len = this->cipher_len - ( HMAC_SIZE + CIPHER_TAG_SIZE );
+    if ( ::memcmp( &this->plain[ this->plain_len ], this->tag,
+                   CIPHER_TAG_SIZE ) != 0 ) {
+      fprintf( stderr, "Cipher tag doesn't match: %.*s\n",
+               (int) CIPHER_TAG_SIZE, this->tag );
+    }
     return true;
   }
 };
@@ -345,23 +368,32 @@ struct HmacDecrypt : public HmacKdf {
 template< size_t MAX_CIPHER_LEN, size_t MAX_PLAIN_LEN >
 struct HmacEncrypt : public HmacKdf {
   uint8_t    cipher[ MAX_CIPHER_LEN ], /* encrypted binary -> base64 */
-             plain[ MAX_PLAIN_LEN ];   /* plain -> encrypted binary */
+             plain[ MAX_PLAIN_LEN + CIPHER_TAG_SIZE ];
   size_t     cipher_len,
              plain_len;
+  char       tag[ CIPHER_TAG_SIZE ];
 
-  HmacEncrypt( uint64_t & c ) : HmacKdf( c ), cipher_len( 0 ), plain_len( 0 ) {
+  HmacEncrypt( uint64_t & c,  const char *tag_str )
+      : HmacKdf( c ), cipher_len( 0 ), plain_len( 0 ) {
     this->zero();
+    ::memcpy( this->tag, tag_str, CIPHER_TAG_SIZE );
   }
   ~HmacEncrypt() { this->zero(); }
   void zero( void ) volatile {
     ::memset( (void *) this->cipher, 0, sizeof( this->cipher ) );
     ::memset( (void *) this->plain, 0, sizeof( this->plain ) );
+    ::memset( (void *) this->tag, 0, sizeof( this->tag ) );
     this->HmacKdf::zero();
   }
   bool encrypt( void *out,  size_t &out_size ) {
-    this->kdf_pwd.encrypt_hmac( this->plain, this->plain_len, this->cipher,
-                                this->ctr );
-    this->cipher_len = this->plain_len + HMAC_SIZE;
+    if ( this->plain_len + CIPHER_TAG_SIZE > sizeof( this->plain ) ) {
+      fprintf( stderr, "plain len %u to large\n", (uint32_t) this->plain_len );
+      return false;
+    }
+    ::memcpy( &this->plain[ this->plain_len ], this->tag, CIPHER_TAG_SIZE );
+    this->kdf_pwd.encrypt_hmac( this->plain, this->plain_len + CIPHER_TAG_SIZE,
+                                this->cipher, this->ctr );
+    this->cipher_len = this->plain_len + ( HMAC_SIZE + CIPHER_TAG_SIZE );
     if ( KV_BASE64_SIZE( this->cipher_len ) > out_size ) {
       fprintf( stderr, "base64 sz %u > %u\n",
                (uint32_t) this->cipher_len, (uint32_t) out_size );

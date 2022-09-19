@@ -13,7 +13,8 @@ using namespace kv;
 
 EvRedisTransportListen::EvRedisTransportListen( kv::EvPoll &p,
                                                 TransportRoute &r ) noexcept
-    : EvRedisListen( p, r.sub_route ), rte( r )
+    : EvRedisListen( p, r.sub_route ), rte( r ),
+      service( "_redis." ), service_len( 7 )
 {
   this->notify = &r;
 }
@@ -22,8 +23,14 @@ EvSocket *
 EvRedisTransportListen::accept( void ) noexcept
 {
   EvSocket *c = this->EvRedisListen::accept();
-  if ( c != NULL )
+  if ( c != NULL ) {
     this->rte.set_peer_name( *c, "redis.acc" );
+    EvRedisService * svc = (EvRedisService *) c;
+    if ( this->service_len <= sizeof( svc->prefix ) ) {
+      ::memcpy( svc->prefix, this->service, this->service_len );
+      svc->prefix_len = this->service_len;
+    }
+  }
   return c;
 }
 

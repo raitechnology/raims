@@ -34,6 +34,7 @@ EvPgmTransport::connect( EvPgmTransportParameters &p,
   this->pgm.mtu        = p.mtu;
   this->pgm.txw_sqns   = p.txw_sqns;
   this->pgm.rxw_sqns   = p.rxw_sqns;
+  this->pgm.txw_secs   = p.txw_secs;
   this->pgm.mcast_loop = p.mcast_loop;
   if ( this->pgm.mcast_loop )
     this->pgm.mcast_loop = 2;

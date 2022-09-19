@@ -55,6 +55,7 @@ int
 main( int argc, char *argv[] )
 {
   const char * dir_name = get_arg( argc, argv, 1, "-d", "config" ),
+             * out_file = get_arg( argc, argv, 1, "-o", NULL ),
              * new_user = get_arg( argc, argv, 1, "-u", NULL ),
              * rev_user = get_arg( argc, argv, 1, "-k", NULL ),
              * exp_user = get_arg( argc, argv, 1, "-x", NULL ),
@@ -66,9 +67,11 @@ main( int argc, char *argv[] )
              * force    = get_arg( argc, argv, 0, "-f", NULL ),
              * help     = get_arg( argc, argv, 0, "-h", NULL );
   if ( help != NULL ) {
-    printf( "%s [-d dir] [-u|-r|-x user1 [user2 ...]] [-s svc] [-e expires] "
-               "[-t] [-y] [-f] [-p]\n"
+    printf(
+    "%s [-d dir] [-o file ] [-u|-r|-x user1 [user2 ...]] [-s svc] [-e expires] "
+       "[-t] [-y] [-f] [-p]\n"
             "   -d dir     : config dir name (default: config)\n"
+            "   -o file    : output config in dir to a single file\n"
             "   -u user    : add user name(s)\n"
             "   -k user    : revoke user name(s)\n"
             "   -x user    : export user name(s)\n"
@@ -105,7 +108,7 @@ main( int argc, char *argv[] )
   bool         ok = true;
 
   if ( svc_name != NULL ) {
-    switch ( cfg.check_dir( dir_name, has_new_users,
+    switch ( cfg.check_dir( dir_name, true/*has_new_users*/,
                             "the configure directory" ) ) {
       case -1: return 1;
       case 0:
@@ -148,19 +151,17 @@ main( int argc, char *argv[] )
         printf( "- Signatures ok\n" );
         if ( ! has_user ) {
           print_users( cfg.svc );
-          return 0;
+          goto done;
         }
       }
-      else if ( ! has_new_users ) {
+      /*else if ( ! has_new_users ) {
         fprintf( stderr, "Service \"%s\" not found\n", svc_name );
         return 1;
-      }
+      }*/
     }
     else {
       i = 0;
       for ( s = tree->services.hd; s != NULL; s = s->next ) {
-        if ( i++ > 0 )
-          printf( "\n" );
         printf( "- Loading Service \"%.*s\"\n", (int) s->svc.len, s->svc.val );
         cfg.svc.load_service( *tree, *s );
         if ( cfg.svc.check_signatures( pass ) ) {
@@ -168,7 +169,7 @@ main( int argc, char *argv[] )
           print_users( cfg.svc );
         }
       }
-      return 0;
+      goto done;
     }
   }
   /* if no keys, generate */
@@ -208,11 +209,16 @@ main( int argc, char *argv[] )
     }
   }
   /* generate new configs */
-  if ( ok && ( has_new_users || has_delete_users || has_revoke_users ) ) {
-    ok = cfg.svc.sign_users( NULL, pass ) &&
-         cfg.populate_service( dir_name, true );
-    if ( ok && ( has_new_users || has_revoke_users ) )
-      ok = cfg.populate_user_set( dir_name );
+  if ( ok ) {
+    if ( has_new_users || has_delete_users || has_revoke_users ) {
+      ok = cfg.svc.sign_users( NULL, pass ) &&
+           cfg.populate_service( dir_name, true );
+      if ( ok && ( has_new_users || has_revoke_users ) )
+        ok = cfg.populate_user_set( dir_name );
+    }
+    else {
+      ok = cfg.populate_service( dir_name, true );
+    }
   }
 
   if ( ok && has_export_users ) {
@@ -228,9 +234,42 @@ main( int argc, char *argv[] )
   }
   if ( ok )
     cfg.ask_commit( auto_yes != NULL );
-  else
+  else {
     cfg.abort();
+    return 1;
+  }
+done:;
+  if ( out_file != NULL ) {
+    ConfigErrPrinter err;
+    tree = ConfigDB::parse_dir( dir_name, st, err );
+    if ( tree == NULL )
+      return 1;
+    int which = 0;
+    const char * salt_file = NULL,
+               * pass_file = NULL;
+    char salt_path[ 1024 ], pass_path[ 1024 ];
+    char * salt_data = NULL, * pass_data = NULL;
+    size_t salt_size = 0, pass_size = 0;
 
+    tree->find_parameter( "salt", salt_file, ".salt" );
+    tree->find_parameter( "pass", pass_file, ".pass" );
+    ::snprintf( salt_path, sizeof( salt_path ), "%s/%s", dir_name, salt_file );
+    ::snprintf( pass_path, sizeof( pass_path ), "%s/%s", dir_name, pass_file );
+    if ( load_secure_string( salt_path, salt_data, salt_size ) ) {
+      tree->set_parameter( st, "salt_data", salt_data );
+      tree->remove_parameter( "salt" );
+    }
+    if ( load_secure_string( pass_path, pass_data, pass_size ) ) {
+      tree->set_parameter( st, "pass_data", pass_data );
+      tree->remove_parameter( "pass" );
+    }
+    printf( "- Output config to \"%s\"\n", out_file );
+    ConfigFilePrinter p;
+    if ( p.open( out_file ) != 0 )
+      return 1;
+    tree->print_y( p, which, PRINT_ALL );
+    p.close();
+  }
   return 0;
 }
 

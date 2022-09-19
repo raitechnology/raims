@@ -169,6 +169,7 @@ struct PgmSock {
   PktGeom                 geom;                /* hdr + unfragmented size */
   uint32_t                mtu,                 /* ip + udp + pgm + data */
                           rxw_sqns,            /* receive widnow */
+                          txw_secs,            /* send window timer */
                           ambient_spm,         /* SPM at this interval */
                           heartbeat_spm[ 9 ],  /* HB after sends */
                           peer_expiry,         /* peers expire after last pkt/SPM */

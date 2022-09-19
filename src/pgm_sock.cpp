@@ -24,14 +24,15 @@ PgmSock::PgmSock() noexcept
       timeout_usecs ( 0 ),
       len           ( 0 ),
       skb_count     ( 0 ),
-      txw_sqns      ( 16 * 1024 ),
+      txw_sqns      ( 4 * 1024 ),
       pending       ( 0 ),
       lost_tstamp   ( 0 ),
       lost_count    ( 0 ),
       pgm_err       ( 0 ),
       res           ( 0 ),
       mtu           ( 16 * 1024 ),
-      rxw_sqns      ( 16 * 1024 ),
+      rxw_sqns      ( 4 * 1024 ),
+      txw_secs      ( 60 ),
       ambient_spm   ( pgm_secs( 5 ) ),
       peer_expiry   ( pgm_secs( 60 ) ),
       spmr_expiry   ( pgm_msecs( 100 ) ),
@@ -112,8 +113,6 @@ PgmSock::start_pgm( const char *network,  int svc,  int &fd ) noexcept
     return false;
   }
   bool b;
-  uint32_t rcvbufsz = 16 * 1024 *
-             ( this->rxw_sqns < 64 * 1024 ? this->rxw_sqns : 64 * 1024 );
   b = pgm_setsockopt( this->sock, IPPROTO_PGM, PGM_UDP_ENCAP_UCAST_PORT,
                       &svc, sizeof( svc ) );
   b&= pgm_setsockopt( this->sock, IPPROTO_PGM, PGM_UDP_ENCAP_MCAST_PORT,
@@ -127,6 +126,9 @@ PgmSock::start_pgm( const char *network,  int svc,  int &fd ) noexcept
                       &is_uncontrolled, sizeof( is_uncontrolled ) );
   b&= pgm_setsockopt( this->sock, IPPROTO_PGM, PGM_UNCONTROLLED_RDATA,
                       &is_uncontrolled, sizeof( is_uncontrolled ) );
+  int txw_secs = (int) this->txw_secs;
+  b&= pgm_setsockopt( this->sock, IPPROTO_PGM, PGM_TXW_SECS, &txw_secs,
+                      sizeof( txw_secs ) );
   int txw_size = (int) this->txw_sqns;
   b&= pgm_setsockopt( this->sock, IPPROTO_PGM, PGM_TXW_SQNS, &txw_size,
                       sizeof( txw_size ) );
@@ -150,6 +152,8 @@ PgmSock::start_pgm( const char *network,  int svc,  int &fd ) noexcept
                       &this->nak_data_retry, sizeof( this->nak_data_retry ) );
   b&= pgm_setsockopt( this->sock, IPPROTO_PGM, PGM_NAK_NCF_RETRIES,
                       &this->nak_ncf_retry, sizeof( this->nak_ncf_retry ) );
+  uint32_t rcvbufsz = 16 * 1024 *
+             ( this->rxw_sqns < 1024 ? this->rxw_sqns : 1024 );
   b&= pgm_setsockopt( this->sock, SOL_SOCKET, SO_RCVBUF,
                       &rcvbufsz, sizeof( rcvbufsz ) );
 #if 0

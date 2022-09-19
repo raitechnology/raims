@@ -153,11 +153,16 @@ ConfigDB::parse_jsfile( const char *fn,  StringTab &st,
   InodeStack   ino;
   ConfigDB     db( *tree, st.mem, &ino, st );
   StringVal    ref;
+  uint32_t     match;
 
   db.filename = fn;
 
-  if ( db.parse_glob( fn ) != 0 || ! db.check_strings( err ) ) {
+  if ( db.parse_glob( fn, match ) != 0 || ! db.check_strings( err ) ) {
     fprintf( stderr, "Parse failed \"%s\"\n", fn );
+    return NULL;
+  }
+  if ( match == 0 ) {
+    fprintf( stderr, "Config not found: \"%s\"\n", fn );
     return NULL;
   }
   return tree;
@@ -165,9 +170,9 @@ ConfigDB::parse_jsfile( const char *fn,  StringTab &st,
 
 #ifndef _MSC_VER
 struct Glob {
-  glob_t g;
-  size_t i;
-  int    status;
+  glob_t   g;
+  uint32_t i;
+  int      status;
   Glob( const char *spec ) : i( 0 ) {
     this->status = ::glob( spec, GLOB_MARK | GLOB_TILDE, NULL, &this->g );
   }
@@ -194,8 +199,9 @@ struct Glob {
   const char * dir;
   int          dirlen;
   char         buf[ _MAX_PATH ];
+  uint32_t     i;
   
-  Glob( const char *spec ) {
+  Glob( const char *spec ) : i( 0 ) {
     this->ptr = _findfirst( spec, &this->fileinfo );
     this->dir = ::strrchr( spec, '/' );
     if ( this->dir == NULL )
@@ -222,6 +228,7 @@ struct Glob {
   const char *first( void ) {
     if ( this->ptr == -1 )
       return NULL;
+    this->i++;
     return this->get_path();
   }
   const char *next( void ) {
@@ -229,13 +236,14 @@ struct Glob {
       return NULL;
     if ( _findnext( this->ptr, &this->fileinfo ) != 0 )
       return NULL;
+    this->i++;
     return this->get_path();
   }
 };
 #endif
 
 int
-ConfigDB::parse_glob( const char *fn ) noexcept
+ConfigDB::parse_glob( const char *fn,  uint32_t &match ) noexcept
 {
   int status = 0;
   Glob g( fn );
@@ -247,6 +255,7 @@ ConfigDB::parse_glob( const char *fn ) noexcept
         break;
     } while ( (path = g.next()) != NULL );
   }
+  match = g.i;
   return status;
 }
 
@@ -339,8 +348,9 @@ ConfigDB::parse_include( MDMsg &msg, MDName &, MDReference &mref ) noexcept
                       (int) len, buf );
     if ( n > 0 && (size_t) n < sizeof( inc_file ) ) {
       const char *old = this->filename;
+      uint32_t    match;
       this->filename = inc_file;
-      status = this->parse_glob( inc_file );
+      status = this->parse_glob( inc_file, match );
       this->filename = old;
     }
     else {
@@ -351,11 +361,48 @@ ConfigDB::parse_include( MDMsg &msg, MDName &, MDReference &mref ) noexcept
   return status;
 }
 
-struct FilePrinter : public ConfigPrinter {
+int
+ConfigFilePrinter::open( const char *path ) noexcept
+{
+  this->fp = fopen( path, "w" );
+  if ( this->fp == NULL ) {
+    fprintf( stderr, "unable to write %s: %d/%s\n", path, errno,
+             strerror( errno ) );
+    return -1;
+  }
+  return 0;
+}
+
+int
+ConfigFilePrinter::printf( const char *fmt,  ... ) noexcept
+{
+  va_list args;
+  va_start( args, fmt );
+  int n = ::vfprintf( this->fp, fmt, args );
+  va_end( args );
+  return n;
+}
+
+void
+ConfigFilePrinter::close( void ) noexcept
+{
+  if ( this->fp != NULL ) {
+    fclose( this->fp );
+    this->fp = NULL;
+  }
+}
+
+ConfigFilePrinter::~ConfigFilePrinter() noexcept
+{
+  this->close();
+}
+
+
+struct ConfigSaver : public ConfigPrinter {
   const StringVal & dir_name;
   FILE * fp;
-  FilePrinter( const StringVal &d ) : dir_name( d ), fp( 0 ) {}
-  ~FilePrinter() {
+  ConfigSaver( const StringVal &d ) : dir_name( d ), fp( 0 ) {}
+  ~ConfigSaver() {
     if ( this->fp != NULL )
       fclose( this->fp );
   }
@@ -364,7 +411,7 @@ struct FilePrinter : public ConfigPrinter {
 };
 
 int
-FilePrinter::open( const char *kind,  const StringVal &sv ) noexcept
+ConfigSaver::open( const char *kind,  const StringVal &sv ) noexcept
 {
   const char * sep = "/";
   char path[ 1024 ];
@@ -387,7 +434,7 @@ FilePrinter::open( const char *kind,  const StringVal &sv ) noexcept
 }
 
 int
-FilePrinter::printf( const char *fmt,  ... ) noexcept
+ConfigSaver::printf( const char *fmt,  ... ) noexcept
 {
   va_list args;
   va_start( args, fmt );
@@ -399,7 +446,7 @@ FilePrinter::printf( const char *fmt,  ... ) noexcept
 int
 ConfigTree::save_tport( const ConfigTree::Transport &tport ) const noexcept
 {
-  FilePrinter out( this->dir_name );
+  ConfigSaver out( this->dir_name );
   if ( out.open( "tport_", tport.tport ) != 0 )
     return -1;
   tport.print_y( out, 0 );
@@ -410,7 +457,7 @@ int
 ConfigTree::save_parameters( const TransportArray &listen,
                              const TransportArray &connect ) const noexcept
 {
-  FilePrinter    out( this->dir_name ),
+  ConfigSaver    out( this->dir_name ),
                  out2( this->dir_name );
   StringVal      mt;
   TransportArray mta;
@@ -532,12 +579,22 @@ ConfigTree::resolve( const char *us,  User *&usrp,  Service *&svc ) noexcept
       us    = NULL;
     }
   }
-  svc  = this->find_service( sv, s_len );
   usrp = NULL;
+  if ( sv != NULL )
+    svc = this->find_service( sv, s_len ); /* us == service */
   if ( svc != NULL )
-    usrp = this->find_user( *svc, us, u_len );
+    usrp = this->find_user( *svc, us, u_len ); /* user.service */
   if ( svc != NULL && usrp != NULL )
     return true;
+
+  if ( svc == NULL ) {
+    svc = this->services.hd;
+    if ( usrp == NULL ) {
+      usrp = this->find_user( *svc, sv, s_len ); /* us == user, service = default */
+      if ( usrp != NULL )
+        return true;
+    }
+  }
   if ( svc == NULL )
     fprintf( stderr, "No service %.*s configured\n", (int) s_len, sv );
   /*else if ( usrp == NULL )
@@ -1541,7 +1598,7 @@ ConfigTree::print_y( ConfigPrinter &p,  int &did_which,  int which,
                      const char *name,  size_t namelen ) const noexcept
 {
   int x = 0;
-  if ( ( which & PRINT_USERS ) != 0 ) {
+  if ( ( which & ( PRINT_USERS | PRINT_ALL ) ) != 0 ) {
     const User *u = this->users.hd;
     if ( u != NULL || ( which & PRINT_HDR ) ) {
       p.printf( "users:\n" );
@@ -1551,7 +1608,7 @@ ConfigTree::print_y( ConfigPrinter &p,  int &did_which,  int which,
           u->print_y( p, 4 );
     }
   }
-  if ( ( which & PRINT_SERVICES ) != 0 ) {
+  if ( ( which & ( PRINT_SERVICES | PRINT_ALL ) ) != 0 ) {
     const Service *s = this->services.hd;
     if ( s != NULL || ( which & PRINT_HDR ) ) {
       p.printf( "services:\n" );
@@ -1561,7 +1618,7 @@ ConfigTree::print_y( ConfigPrinter &p,  int &did_which,  int which,
           s->print_y( p, 4 );
     }
   }
-  if ( ( which & PRINT_TRANSPORTS ) != 0 ) {
+  if ( ( which & ( PRINT_TRANSPORTS | PRINT_ALL ) ) != 0 ) {
     const Transport *t = this->transports.hd;
     if ( t != NULL || ( which & PRINT_HDR ) ) {
       p.printf( "transports:\n" );
@@ -1574,7 +1631,7 @@ ConfigTree::print_y( ConfigPrinter &p,  int &did_which,  int which,
       }
     }
   }
-  if ( ( which & PRINT_GROUPS ) != 0 ) {
+  if ( ( which & ( PRINT_GROUPS | PRINT_ALL ) ) != 0 ) {
     const Group *g = this->groups.hd;
     if ( g != NULL || ( which & PRINT_HDR ) ) {
       p.printf( "groups:\n" );
@@ -1605,6 +1662,19 @@ ConfigTree::print_y( ConfigPrinter &p,  int &did_which,  int which,
             sp = sp->print_ylist( p, 2 );
           else
             sp = sp->next;
+        }
+      }
+    }
+  }
+  else if ( ( which & PRINT_ALL ) != 0 ) {
+    const Parameters *pa = this->parameters.hd;
+    if ( pa != NULL ) {
+      p.printf( "parameters:\n" );
+      x |= PRINT_PARAMETERS;
+      for ( ; pa != NULL; pa = pa->next ) {
+        const StringPair *sp = pa->parms.hd;
+        for ( ; sp != NULL; ) {
+          sp = sp->print_ylist( p, 2 );
         }
       }
     }
@@ -1811,26 +1881,31 @@ ConfigTree::Service::print_js( ConfigPrinter &p,  int i ) const noexcept
   if ( ! this->pri.is_null() ) {
     p.printf( "%*s\"pri\" : ", i, "" ); this->pri.print_js( p ); p.printf( ",\n" );
   }
-  p.printf( "%*s\"pub\" : ", i, "" ); this->pub.print_js( p ); p.printf( ",\n" );
-  StringPair *sp = this->users.hd;
-  if ( sp != NULL ) {
-    p.printf( "%*s\"users\" : {\n%*s  ", i, "", i, "" );
-    sp->print_js( p );
-    for ( sp = sp->next; sp != NULL; sp = sp->next ) {
-      p.printf( ",\n%*s  ", i, "" );
+  p.printf( "%*s\"pub\" : ", i, "" ); this->pub.print_js( p );
+  if ( this->users.hd == NULL && this->revoke.hd == NULL )
+    p.printf( "\n" );
+  else {
+    StringPair *sp = this->users.hd;
+    p.printf( ",\n" );
+    if ( sp != NULL ) {
+      p.printf( "%*s\"users\" : {\n%*s  ", i, "", i, "" );
       sp->print_js( p );
+      for ( sp = sp->next; sp != NULL; sp = sp->next ) {
+        p.printf( ",\n%*s  ", i, "" );
+        sp->print_js( p );
+      }
+      p.printf( "\n%*s}\n", i, "" );
     }
-    p.printf( "\n%*s}\n", i, "" );
-  }
-  sp = this->revoke.hd;
-  if ( sp != NULL ) {
-    p.printf( "%*s\"revoke\" : {\n%*s  ", i, "", i, "" );
-    sp->print_js( p );
-    for ( sp = sp->next; sp != NULL; sp = sp->next ) {
-      p.printf( ",\n%*s  ", i, "" );
+    sp = this->revoke.hd;
+    if ( sp != NULL ) {
+      p.printf( "%*s\"revoke\" : {\n%*s  ", i, "", i, "" );
       sp->print_js( p );
+      for ( sp = sp->next; sp != NULL; sp = sp->next ) {
+        p.printf( ",\n%*s  ", i, "" );
+        sp->print_js( p );
+      }
+      p.printf( "\n%*s}\n", i, "" );
     }
-    p.printf( "\n%*s}\n", i, "" );
   }
 }
 
@@ -2071,19 +2146,110 @@ ConfigTree::Transport::is_wildcard( const char *host ) noexcept
          ( host[ 0 ] == '0' && host[ 1 ] == '\0' );
 }
 
+ConfigTree::StringPair *
+ConfigTree::get_free_pair( StringTab &st ) noexcept
+{
+  ConfigTree::StringPair *sp;
+  if ( this->free_pairs.is_empty() )
+    sp = st.make<ConfigTree::StringPair>();
+  else {
+    sp = this->free_pairs.pop_hd();
+    sp->name.zero();
+    sp->value.zero();
+  }
+  return sp;
+}
+
+void
+ConfigTree::set_route_str( ConfigTree::Transport &t,  StringTab &st,
+                           const char *name,  const char *value,
+                           size_t value_len ) noexcept
+{
+  ConfigTree::StringPair * sp;
+  size_t name_len = ::strlen( name );
+  if ( (sp = t.route.get_pair( name, name_len )) == NULL ) {
+    sp = this->get_free_pair( st );
+    st.ref_string( name, name_len, sp->name );
+    t.route.push_tl( sp );
+  }
+  st.ref_string( value, value_len, sp->value );
+}
+#if 0
+void
+ConfigTree::Transport::set_route_int( StringTab &st,  const char *name,
+                                      int value ) noexcept
+{
+  char buf[ 16 ];
+  int n = int32_to_string( value, buf );
+  return this->set_route_str( st, name, buf, n );
+}
+#endif
+ConfigTree::StringPair *
+ConfigTree::find_parameter_sp( const char *name ) noexcept
+{
+  for ( Parameters *p = this->parameters.hd; p != NULL; p = p->next ) {
+    for ( StringPair *sp = p->parms.hd; sp != NULL; sp = sp->next ) {
+      if ( sp->name.equals( name ) )
+        return sp;
+    }
+  }
+  return NULL;
+}
+
 bool
 ConfigTree::find_parameter( const char *name,  const char *&value,
                             const char *def_value ) noexcept
 {
+  StringPair * sp = this->find_parameter_sp( name );
+  if ( sp != NULL )
+    value = sp->value.val;
+  else
+    value = def_value;
+  return sp != NULL;
+}
+
+void
+ConfigTree::set_parameter( StringTab &st,  const char *name,
+                           const char *value ) noexcept
+{
+  StringPair * sp = this->find_parameter_sp( name );
+  Parameters * p;
+  if ( sp == NULL ) {
+    if ( (p = this->parameters.tl) == NULL ) {
+      p = st.make<ConfigTree::Parameters>();
+      this->parameters.push_tl( p );
+    }
+    sp = this->get_free_pair( st );
+    p->parms.push_tl( sp );
+    st.ref_string( name, ::strlen( name ), sp->name );
+  }
+  st.ref_string( value, ::strlen( value ), sp->value );
+}
+
+bool
+ConfigTree::remove_parameter( const char *name ) noexcept
+{
   for ( Parameters *p = this->parameters.hd; p != NULL; p = p->next ) {
-    for ( StringPair *sp = p->parms.hd; sp != NULL; sp = sp->next ) {
+    StringPair *last = NULL;
+    for ( StringPair *sp = p->parms.hd; sp != NULL; ) {
       if ( sp->name.equals( name ) ) {
-        value = sp->value.val;
+        if ( last == NULL ) {
+          p->parms.hd = sp->next;
+          if ( p->parms.hd == NULL )
+            p->parms.tl = NULL;
+        }
+        else {
+          last->next = sp->next;
+          if ( p->parms.tl == sp )
+            p->parms.tl = last;
+        }
+        this->free_pairs.push_tl( sp );
         return true;
       }
+      last = sp;
+      sp = sp->next;
     }
   }
-  value = def_value;
   return false;
 }
 

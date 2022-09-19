@@ -492,8 +492,19 @@ AdjDistance::push_link( AdjacencySpace *set ) noexcept
         /* order by start time */
         do {
           set2 = *ptr;
-          if ( this->adjacency_start( set->uid ) <
-               this->adjacency_start( set2->uid ) )
+          if ( set->uid == set2->uid ) {
+            if ( set->tport_type.cmp( set2->tport_type ) < 0 )
+              break;
+            if ( set->tport_type.equals( set2->tport_type ) ) {
+              if ( set->tport.cmp( set2->tport ) < 0 )
+                break;
+              if ( set->tport.equals( set2->tport ) )
+                if ( set->tport_id < set2->tport_id )
+                  break;
+            }
+          }
+          else if ( this->adjacency_start( set->uid ) <
+                    this->adjacency_start( set2->uid ) )
             break;
           ptr = &set2->next_link;
         } while ( set2->next_link != NULL );
@@ -624,6 +635,8 @@ AdjDistance::calc_forward_cache( ForwardCache &fwd,  uint32_t src_uid,
   for ( tport_id = 0; tport_id < fwd.tport_count; tport_id++ ) {
     TransportRoute * rte = this->user_db.transport_tab.ptr[ tport_id ];
     if ( rte->uid_connected.clock == clk ) {
+      /*printf( "fwd_cache(%u) path %u -> tport_id %u\n", src_uid,
+              path_select, tport_id );*/
       fwd.add( tport_id );
       fwd.fwd_count++;
     }
@@ -631,7 +644,7 @@ AdjDistance::calc_forward_cache( ForwardCache &fwd,  uint32_t src_uid,
 }
 
 void
-AdjDistance::calc_path( uint8_t path_select ) noexcept
+AdjDistance::calc_path( ForwardCache &fwd,  uint8_t path_select ) noexcept
 {
   uint64_t   & seqno = this->x[ path_select ].seqno;
   UidSrcPath * path  = this->x[ path_select ].path;
@@ -656,9 +669,39 @@ AdjDistance::calc_path( uint8_t path_select ) noexcept
     if ( ! found )
       path[ uid ].zero();
   }
+  this->update_forward_cache( fwd, 0, path_select );
   for ( uid = 1; uid < this->max_uid; uid++ ) {
     if ( path[ uid ].cost == 0 )
       continue;
+
+    uint32_t tport_id,
+             tport_count = this->user_db.transport_tab.count,
+             min_cost    = COST_MAXIMUM,
+             uid_src     = path[ uid ].src_uid;
+
+    found = false;
+    for ( tport_id = 0; tport_id < tport_count; tport_id++ ) {
+      TransportRoute * rte = this->user_db.transport_tab.ptr[ tport_id ];
+      uint32_t cost = rte->uid_connected.cost[ path_select ];
+      if ( rte->uid_connected.is_member( uid_src ) &&
+           fwd.is_member( tport_id ) ) {
+        if ( cost < min_cost ) {
+          min_cost          = cost;
+          path[ uid ].tport = tport_id;
+          path[ uid ].cost  = cost;
+          found = true;
+        }
+      }
+    }
+    if ( ! found ) {
+      path[ uid ].zero();
+    }
+    /*else {
+      printf( "path uid %u cost %u tport %u src_uid %u\n",
+              uid, path[ uid ].cost, path[ uid ].tport, path[ uid ].src_uid );
+    }*/
+  }
+#if 0
     uint32_t tport_id,
              tport_count = this->user_db.transport_tab.count,
              min_cost    = COST_MAXIMUM,
@@ -669,9 +712,6 @@ AdjDistance::calc_path( uint8_t path_select ) noexcept
       TransportRoute * rte = this->user_db.transport_tab.ptr[ tport_id ];
       uint32_t cost = rte->uid_connected.cost[ path_select ];
       if ( rte->uid_connected.is_member( uid_src ) ) {
-        /*printf( "vec tport %.*s cost %u\n",
-                 (int) rte->uid_connected.tport.len,
-                 rte->uid_connected.tport.val, cost );*/
         if ( cost <= min_cost ) {
           if ( cost < min_cost ) {
             equal_paths       = 0;
@@ -689,11 +729,16 @@ AdjDistance::calc_path( uint8_t path_select ) noexcept
     if ( ! found ) {
       path[ uid ].zero();
     }
-    /*else {
+    else {
       printf( "path uid %u cost %u tport %u src_uid %u\n",
-              uid, vec_cost[ uid ], vec[ uid ], uid_src );
-    }*/
+              uid, path[ uid ].cost, path[ uid ].tport, path[ uid ].src_uid );
+    }
   }
+  ForwardCache fwd;
+  for ( uint8_t p = 0; p < COST_PATH_COUNT; p++ ) {
+    this->calc_forward_cache( fwd, 0, p );
+  }
+#endif
 }
 
 uint32_t

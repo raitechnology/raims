@@ -4,10 +4,14 @@
 #include <stdint.h>
 #define __STDC_FORMAT_MACROS
 #include <inttypes.h>
+#include <raikv/os_file.h>
 #define DECLARE_SUB_CONST
 #define INCLUDE_FRAME_CONST
 #include <raims/session.h>
 #include <raims/transport.h>
+#include <raims/ev_name_svc.h>
+#include <raims/ev_web.h>
+#include <raims/ev_telnet.h>
 
 using namespace rai;
 using namespace ms;
@@ -53,7 +57,8 @@ SessionMgr::SessionMgr( EvPoll &p,  Logger &l,  ConfigTree &c,
              pub_window_size( 4 * 1024 * 1024 ),
              sub_window_size( 4 * 1024 * 1024 ),
              pub_window_ival( sec_to_ns( 10 ) ),
-             sub_window_ival( sec_to_ns( 10 ) )
+             sub_window_ival( sec_to_ns( 10 ) ),
+             session_started( false )
 {
   this->sock_opts = OPT_NO_POLL;
   this->tcp_accept_sock_type = p.register_type( "ev_tcp_tport" );
@@ -85,12 +90,13 @@ static const char pub_w[] = "pub-window-size",
                   pub_t[] = "pub-window-time",
                   sub_t[] = "sub-window-time",
                   hb_t[]  = "heartbeat",
+                  rel_t[] = "reliability",
                   tz_s[]  = "timestamp";
 bool
 SessionMgr::init_param( void ) noexcept
 {
   const char *s = "", *val = NULL;
-  uint64_t hb_ival;
+  uint64_t hb_ival, rel_ival;
 
   if ( this->tree.find_parameter( s = pub_w, val, NULL ) &&
        ! ConfigTree::string_to_bytes( val, this->pub_window_size ) ) goto fail;
@@ -103,6 +109,10 @@ SessionMgr::init_param( void ) noexcept
   if ( this->tree.find_parameter( s = hb_t, val, NULL ) ) {
     if ( ! ConfigTree::string_to_secs( val, hb_ival ) ) goto fail;
     this->user_db.hb_interval = (uint32_t) hb_ival;
+  }
+  if ( this->tree.find_parameter( s = rel_t, val, NULL ) ) {
+    if ( ! ConfigTree::string_to_secs( val, rel_ival ) ) goto fail;
+    this->user_db.reliability = (uint32_t) rel_ival;
   }
   if ( this->tree.find_parameter( s = tz_s, val, NULL ) ) {
     if ( val != NULL &&
@@ -263,6 +273,64 @@ SessionMgr::add_wildcard_rte( const char *prefix,  size_t pref_len,
 }
 
 void
+SessionMgr::fork_daemon( int err_fd ) noexcept
+{
+  if ( err_fd > 0 ) {
+    char buf[ 256 ];
+    size_t i;
+    int n;
+    if ( this->user_db.transport_tab.count > 0 &&
+         this->user_db.transport_tab.ptr[ 0 ]->ext != NULL ) {
+      IpcRte * ipc = this->user_db.transport_tab.ptr[ 0 ]->ext->list.hd;
+      for ( ; ipc != NULL; ipc = ipc->next ) {
+        n = ::snprintf( buf, sizeof( buf ), "%s running at %s\n",
+                        ipc->transport.tport.val,
+                        ipc->listener->peer_address.buf );
+        if ( n > 0 )
+          os_write( err_fd, buf, n );
+      }
+    }
+    for ( i = 0; i < this->unrouteable.count; i++ ) {
+      Unrouteable & u = this->unrouteable.ptr[ i ];
+      const char  * addr;
+      if ( u.telnet != NULL )
+        addr = u.telnet->peer_address.buf;
+      else if ( u.web != NULL )
+        addr = u.web->peer_address.buf;
+      else
+        addr = u.name->mcast_recv.peer_address.buf;
+      n = ::snprintf( buf, sizeof( buf ), "%s running at %s\n",
+                      u.tport->tport.val, addr );
+      if ( n > 0 )
+        os_write( err_fd, buf, n );
+    }
+    for ( i = 1; i < this->user_db.transport_tab.count; i++ ) {
+      TransportRoute * rte = this->user_db.transport_tab.ptr[ i ];
+      if ( rte->listener != NULL ) {
+        n = ::snprintf( buf, sizeof( buf ), "%s running at %s\n",
+                        rte->name, rte->listener->peer_address.buf );
+      }
+      else {
+        n = ::snprintf( buf, sizeof( buf ), "%s running\n",
+                        rte->name );
+      }
+      if ( n > 0 )
+        os_write( err_fd, buf, n );
+    }
+    static char status_line[] = "moving to background daemon\n";
+    os_write( err_fd, status_line, sizeof( status_line ) - 1 );
+  }
+  if ( ::fork() > 0 )
+    ::exit( 0 );
+  ::chdir( "/" );
+  ::setsid();
+  ::umask( 0 );
+  if ( ::fork() > 0 )
+    ::exit( 0 );
+  printf( "running background deamon PID: %u\n", ::getpid() );
+}
+
+void
 SessionMgr::start( void ) noexcept
 {
   printf( "%s: %lu bytes\n", pub_w, this->pub_window_size );
@@ -270,10 +338,10 @@ SessionMgr::start( void ) noexcept
   printf( "%s: %lu secs\n", pub_t, ns_to_sec( this->pub_window_ival ) );
   printf( "%s: %lu secs\n", sub_t, ns_to_sec( this->sub_window_ival ) );
   printf( "%s: %u secs\n", hb_t, this->user_db.hb_interval );
+  printf( "%s: %u secs\n", rel_t, this->user_db.reliability );
 
   uint64_t cur_mono = this->poll.timer.current_monotonic_time_ns(),
            cur_time = this->poll.timer.current_time_ns();
-  this->user_db.hello_hb();
   this->timer_id             = ++this->next_timer;
   this->timer_mono_time      = cur_mono;
   this->timer_time           = cur_time;
@@ -296,6 +364,21 @@ SessionMgr::start( void ) noexcept
     this->user_db.hb_ival_mask |= ( this->user_db.hb_ival_mask >> i );
   this->poll.timer.add_timer_nanos( this->fd, (uint32_t) this->timer_ival,
                                     this->timer_id, 0 );
+  this->session_started = true;
+  this->user_db.hello_hb();
+  this->name_hb( cur_mono );
+}
+
+void
+SessionMgr::name_hb( uint64_t cur_mono ) noexcept
+{
+  this->name_svc_mono_time = cur_mono + this->user_db.hb_ival_ns;
+  for ( size_t i = 0; i < this->unrouteable.count; i++ ) {
+    NameSvc *name = this->unrouteable.ptr[ i ].name;
+    if ( name != NULL ) {
+      this->user_db.mcast_name( *name );
+    }
+  }
 }
 
 void
@@ -325,16 +408,9 @@ SessionMgr::timer_expire( uint64_t tid,  uint64_t ) noexcept
   }
   this->user_db.interval_hb( cur_mono, cur_time );
   this->user_db.check_user_timeout( cur_mono, cur_time );
+  if ( cur_mono > this->name_svc_mono_time )
+    this->name_hb( cur_mono );
 
-  if ( cur_mono > this->name_svc_mono_time ) {
-    this->name_svc_mono_time = cur_mono + this->user_db.hb_ival_ns;
-    for ( size_t i = 0; i < this->unrouteable.count; i++ ) {
-      NameSvc *name = this->unrouteable.ptr[ i ].name;
-      if ( name != NULL ) {
-        this->user_db.mcast_name( *name );
-      }
-    }
-  }
   if ( this->console.log_rotate_time <= cur_time )
     this->console.rotate_log();
   this->console.on_log( this->log );
@@ -892,11 +968,11 @@ SessionMgr::on_msg( EvPublish &pub ) noexcept
       if ( ! n.is_set( INBOX_ROUTE_STATE ) ) 
         this->user_db.add_inbox_route( n, NULL ); /* need an inbox */
     }
-    /* authorize user by verifying the ECDH key exchange */
+    /* authorize user by verifying the DSA key exchange */
     if ( type == U_INBOX_AUTH && fpub.status == FRAME_STATUS_INBOX_AUTH )
       return this->user_db.on_inbox_auth( fpub, n, dec );
 
-    /* maybe authorize if needed by starting ECDH exchange */
+    /* maybe authorize if needed by starting DSA exchange */
     if ( ( type == U_SESSION_HELLO || type == U_SESSION_HB ) &&
          ( fpub.status == FRAME_STATUS_OK ||
            fpub.status == FRAME_STATUS_HB_NO_AUTH ) )
@@ -1361,6 +1437,7 @@ SessionMgr::forward_inbox( EvPublish &fwd ) noexcept
      .close( e.sz, h, fl );
 
     m.sign( ibx.buf, ibx.len(), *this->user_db.session_key );
+    d_sess( "forward inbox %.*s\n", (int) fwd.subject_len, fwd.subject );
     this->user_db.forward_to_inbox( *n, ibx, h, m.msg, m.len(), true );
     if ( ++cnt == any->set_count )
       break;
@@ -1375,26 +1452,19 @@ is_ipc_inbox( const char *subject,  size_t subject_len )
   static const char    inbox[] = "_INBOX.";
   static const size_t  inbox_len = sizeof( inbox ) - 1;
 
-  if ( subject_len > inbox_len && subject[ 0 ] == '_' ) {
-    /* check for _1234._INBOX. */
-    if ( subject[ 1 ] >= '0' && subject[ 1 ] <= '9' ) {
-      for ( size_t i = 2; i < subject_len - inbox_len; i++ ) {
-        if ( subject[ i ] >= '0' && subject[ i ] <= '9' )
-          continue;
-        if ( subject[ i++ ] != '.' )
-          return false;
-        if ( subject_len > i + inbox_len ) {
-          if ( ::memcmp( &subject[ i ], inbox, inbox_len ) == 0 )
-            return true;
-        }
-        return false;
-      }
-    }
-    /* check for _INBOX. */
-    else if ( subject[ 1 ] == 'I' ) {
-      if ( ::memcmp( &subject[ 2 ], &inbox[ 2 ], inbox_len - 2 ) == 0 )
+  /* check for _INBOX.a or _XYZ._INBOX.a */
+  if ( subject_len > inbox_len + 1 && subject[ 0 ] == '_' ) {
+    subject++; subject_len--;
+    if ( subject[ 0 ] == 'I' ) { /* NBOX. */
+      if ( ::memcmp( &subject[ 1 ], &inbox[ 2 ], inbox_len - 2 ) == 0 )
         return true;
     }
+    /* _XYZ._INBOX. */
+    const char *p = (const char *)
+      ::memchr( subject, '.', subject_len - inbox_len );
+    if ( p != NULL )
+      return &subject[ subject_len ] > &p[ inbox_len + 1 ] &&
+             ::memcmp( &p[ 1 ], inbox, inbox_len ) == 0;
   }
   return false;
 }
@@ -1471,6 +1541,7 @@ SessionMgr::forward_ipc( TransportRoute &src_rte,  EvPublish &pub ) noexcept
                        rte->sub_route, this->fd, pub.subj_hash,
                        CABA_TYPE_ID, 'p' );
         evp.shard = path_select;
+
         b &= rte->sub_route.forward_except( evp, this->router_set );
       }
     } while ( forward.next( tport_id ) );

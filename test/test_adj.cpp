@@ -132,9 +132,10 @@ main( int argc, char *argv[] )
         }
       }
     }
+    ForwardCache fwd[ COST_PATH_COUNT ];
     /* primary ports */
     for ( path_sel = 0; path_sel < COST_PATH_COUNT; path_sel++ ) {
-      peer_dist.update_path( path_sel );
+      peer_dist.update_path( fwd[ path_sel ], path_sel );
       for ( uid = 1; uid < user_db.next_uid; uid++ ) {
         UidSrcPath path    = peer_dist.x[ path_sel ].path[ uid ];
         uint32_t tport_id  = path.tport,

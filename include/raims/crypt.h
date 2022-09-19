@@ -38,6 +38,7 @@ struct CryptPass {
 
   CryptPass() : pass( 0 ), pass_len( 0 ) {}
   bool init_pass( const char *pass ) noexcept;
+  bool init_salt( const char *salt ) noexcept;
   void clear_pass( void ) noexcept;
   bool gen_pass( void ) noexcept;
   static void *gen_salt( size_t &salt_len ) noexcept;
@@ -77,6 +78,7 @@ void free_secure_mem( void *p,  size_t len ) noexcept;
 bool load_secure_env( const char *env,  const char *unlnk_env,
                       const char *data,  void *&mem,  size_t &mem_sz ) noexcept;
 bool load_secure_file( const char *fn,  void *&mem,  size_t &sz ) noexcept;
+bool load_secure_string( const char *fn,  char *&mem,  size_t &sz ) noexcept;
 /* used internally to init if not already init */
 bool init_kdf( const void *mem = NULL,  size_t mem_sz = 0 ) noexcept;
 

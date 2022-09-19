@@ -16,14 +16,14 @@ struct EvPgmTransportParameters {
   uint32_t     mtu,        /* max size of a pgm data frame */
                txw_sqns,   /* size in sequences of the send window */
                rxw_sqns,   /* size in sequences of the recv window */
+               txw_secs,   /* size of send window in secs */
                mcast_loop; /* if send loops back to the recv port permitted */
-  bool         preferred;
 
   void * operator new( size_t, void *ptr ) { return ptr; }
   EvPgmTransportParameters( const char *n = NULL,  int p = 9000 )
     : network( n ), port( p ),
-      mtu( 16384 ), txw_sqns( 16 * 1024 ), rxw_sqns( 16 * 1024 ), mcast_loop( 0 ),
-      preferred( false ) {}
+      mtu( 16384 ), txw_sqns( 4 * 1024 ), rxw_sqns( 4 * 1024 ),
+      txw_secs( 60 ), mcast_loop( 0 ) {}
 };
 
 struct EvPgmTransport : public kv::EvSocket {

@@ -46,10 +46,11 @@ struct EvNameConnect : public kv::EvUdp {
 struct Advert {
   TransportRoute *rte;
   uint64_t        last_start_time[ 2 ];
-
+  uint32_t        ad_counter;
   void init( TransportRoute *r ) {
     this->rte = r;
     this->last_start_time[ 0 ] = this->last_start_time[ 1 ] = 0;
+    this->ad_counter = 0;
   }
   void update_start_recv( uint64_t start ) { /* when new publishes are recvd */
     if ( start > this->last_start_time[ 0 ] )

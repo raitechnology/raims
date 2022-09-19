@@ -6,6 +6,7 @@
 #define __STDC_FORMAT_MACROS
 #include <inttypes.h>
 #include <raims/crypt.h>
+#define INCLUDE_TAGS
 #include <raims/user.h>
 #include <raimd/md_types.h>
 
@@ -19,18 +20,34 @@ rai::ms::init_pass( ConfigTree *tree,  CryptPass &pass,
                     const char *dir_name ) noexcept
 {
   const char * pass_file = NULL,
-             * salt_file = NULL;
+             * salt_file = NULL,
+             * pass_data = NULL,
+             * salt_data = NULL;
   char         path[ 1024 ];
   if ( tree == NULL )
     return false;
-  tree->find_parameter( "salt", salt_file, ".salt" );
-  if ( ! make_path( path, sizeof( path ), "%s/%s", dir_name, salt_file ) ||
-       ! pass.init_salt_file( path ) )
-    return false;
-  tree->find_parameter( "pass", pass_file, ".pass" );
-  if ( ! make_path( path, sizeof( path ), "%s/%s", dir_name, pass_file ) ||
-       ! pass.init_pass_file( path ) )
-    return false;
+  if ( dir_name == NULL )
+    dir_name = ".";
+  if ( tree->find_parameter( "salt_data", salt_data, NULL ) ) {
+    if ( ! pass.init_salt( salt_data ) )
+      return false;
+  }
+  else {
+    tree->find_parameter( "salt", salt_file, ".salt" );
+    if ( ! make_path( path, sizeof( path ), "%s/%s", dir_name, salt_file ) ||
+         ! pass.init_salt_file( path ) )
+      return false;
+  }
+  if ( tree->find_parameter( "pass_data", pass_data, NULL ) ) {
+    if ( ! pass.init_pass( pass_data ) )
+      return false;
+  }
+  else {
+    tree->find_parameter( "pass", pass_file, ".pass" );
+    if ( ! make_path( path, sizeof( path ), "%s/%s", dir_name, pass_file ) ||
+         ! pass.init_pass_file( path ) )
+      return false;
+  }
   return true;
 }
 
@@ -46,9 +63,9 @@ UserBuf::copy( const ConfigTree::User &u ) noexcept
             u.expires.len );
   copy_max( this->revoke, this->revoke_len, MAX_TIME_LEN, u.revoke.val,
             u.revoke.len );
-  copy_max( this->pri, this->pri_len, ECDH_CIPHER_B64_LEN,
+  copy_max( this->pri, this->pri_len, DSA_CIPHER_B64_LEN,
             u.pri.val, u.pri.len );
-  copy_max( this->pub, this->pub_len, ECDH_CIPHER_B64_LEN,
+  copy_max( this->pub, this->pub_len, DSA_CIPHER_B64_LEN,
             u.pub.val, u.pub.len );
   if ( this->pri_len == 0 )
     this->pri[ 0 ] = '\0';
@@ -56,10 +73,10 @@ UserBuf::copy( const ConfigTree::User &u ) noexcept
     this->pub[ 0 ] = '\0';
   if ( this->pri_len != u.pri.len )
     fprintf( stderr, "pri len %u > %" PRIu64 "\n", u.pri.len,
-             ECDH_CIPHER_B64_LEN );
+             DSA_CIPHER_B64_LEN );
   if ( this->pub_len != u.pub.len )
     fprintf( stderr, "pub len %u > %" PRIu64 "\n", u.pub.len,
-             ECDH_CIPHER_B64_LEN );
+             DSA_CIPHER_B64_LEN );
 }
 
 static size_t
@@ -92,33 +109,52 @@ UserBuf::gen_key( const char *user,  size_t ulen,  const char *svc,
   copy_max( this->expires, this->expires_len, MAX_TIME_LEN, expire, elen );
   this->create_len = timestamp_now( this->create, sizeof( this->create ) );
 
-  ECDH ec;
-  ec.gen_key();
-  return this->put_ecdh( pwd, ec, DO_BOTH );
+  DSA dsa;
+  dsa.gen_key();
+  return this->put_dsa( pwd, dsa, DO_BOTH );
 }
 
 bool
-UserBuf::gen_tmp_key( const char *usr_svc,  const CryptPass &pwd ) noexcept
+UserBuf::gen_tmp_key( const char *usr_svc,  const char *num,
+                      ConfigTree::Service &svc,
+                      const CryptPass &pwd ) noexcept
 {
   const char * p,
+             * us    = NULL,
              * sv;
-  size_t       u_len,
+  size_t       u_len = 0,
                s_len;
   char         host[ 256 ];
-  if ( (p = ::strchr( usr_svc, '.' )) == NULL ) {
+
+  sv    = svc.svc.val;
+  s_len = svc.svc.len;
+  if ( usr_svc != NULL ) {
+    us    = usr_svc;
+    u_len = ::strlen( usr_svc );
+    p     = ::strchr( usr_svc, '.' );
+    if ( p != NULL ) {
+      if ( (size_t) ( &us[ u_len ] - &p[ 1 ] ) == s_len &&
+           ::memcmp( &p[ 1 ], sv, s_len ) == 0 )
+        u_len = p - us;
+    }
+  }
+  if ( us == NULL || u_len == 0 ) {
     if ( ::gethostname( host, sizeof( host ) ) != 0 )
       return false;
-    sv      = usr_svc;
-    s_len   = ::strlen( sv );
-    usr_svc = host;
-    u_len   = ::strlen( host );
+    us    = host;
+    u_len = ::strlen( host );
   }
-  else {
-    sv    = &p[ 1 ];
-    u_len = p - usr_svc;
-    s_len = ::strlen( sv );
+  if ( num != NULL && ::strlen( num ) + 1 + u_len < sizeof( host ) ) {
+    if ( us != host ) {
+      ::memcpy( host, us, u_len );
+      us = host;
+    }
+    host[ u_len++ ] = '_';
+    while ( (host[ u_len ] = *num) != '\0' ) {
+      u_len++; num++;
+    }
   }
-  return this->gen_key( usr_svc, u_len, sv, s_len, NULL, 0, pwd );
+  return this->gen_key( us, u_len, sv, s_len, NULL, 0, pwd );
 }
 
 uint64_t
@@ -156,24 +192,24 @@ UserBuf::get_revoke( void ) const noexcept
 }
 
 bool
-UserBuf::put_ecdh( const CryptPass &pwd,  ECDH &ec,
-                   WhichPubPri put_op ) noexcept
+UserBuf::put_dsa( const CryptPass &pwd,  DSA &dsa,
+                  WhichPubPri put_op ) noexcept
 {
   uint64_t ctr = 0;
-  HmacEncrypt< ECDH_CIPHER_KEY_LEN, ECDH_KEY_LEN > cipher( ctr );
+  HmacEncrypt< DSA_CIPHER_KEY_LEN, DSA_KEY_LEN > cipher( ctr, dsa_tag );
 
   cipher.init_kdf( *this, pwd );
   if ( (put_op & DO_PUB) != 0 ) {
-    ec.pub.copy_to( cipher.plain );
-    cipher.plain_len = ECDH_KEY_LEN;
+    dsa.pk.copy_to( cipher.plain );
+    cipher.plain_len = DSA_KEY_LEN;
     this->pub_len = sizeof( this->pub );
     if ( ! cipher.encrypt( this->pub, this->pub_len ) )
       return false;
   }
   if ( (put_op & DO_PRI) != 0 ) {
-    ec.pri.copy_to( cipher.plain );
-    cipher.plain_len = ECDH_KEY_LEN;
-    ctr = aes_ctr_off( ECDH_CIPHER_KEY_LEN );
+    dsa.sk.copy_to( cipher.plain );
+    cipher.plain_len = DSA_KEY_LEN;
+    ctr = aes_ctr_off( DSA_CIPHER_KEY_LEN );
     this->pri_len = sizeof( this->pri );
     if ( ! cipher.encrypt( this->pri, this->pri_len ) )
       return false;
@@ -182,11 +218,11 @@ UserBuf::put_ecdh( const CryptPass &pwd,  ECDH &ec,
 }
 
 bool
-UserBuf::get_ecdh( const CryptPass &pwd,  ECDH &ec,  WhichPubPri get_op,
-                   void *pub_key, size_t *pub_key_len ) const noexcept
+UserBuf::get_dsa( const CryptPass &pwd,  DSA &dsa,  WhichPubPri get_op,
+                  void *pub_key, size_t *pub_key_len ) const noexcept
 {
   uint64_t ctr = 0;
-  HmacDecrypt< ECDH_CIPHER_KEY_LEN, ECDH_KEY_LEN > cipher( ctr );
+  HmacDecrypt< DSA_CIPHER_KEY_LEN, DSA_KEY_LEN > cipher( ctr, dsa_tag );
 
   cipher.init_kdf( *this, pwd );
   if ( (get_op & DO_PUB) != 0 ) {
@@ -194,7 +230,7 @@ UserBuf::get_ecdh( const CryptPass &pwd,  ECDH &ec,  WhichPubPri get_op,
       return false;
     if ( ! cipher.decrypt( *this, this->pub, this->pub_len ) )
       return false;
-    ec.pub = cipher.plain;
+    dsa.pk = cipher.plain;
     if ( pub_key != NULL ) {
       if ( *pub_key_len < cipher.plain_len )
         return false;
@@ -205,10 +241,10 @@ UserBuf::get_ecdh( const CryptPass &pwd,  ECDH &ec,  WhichPubPri get_op,
   if ( (get_op & DO_PRI) != 0 ) {
     if ( this->pri_len == 0 )
       return false;
-    ctr += aes_ctr_off( ECDH_CIPHER_KEY_LEN );
+    ctr += aes_ctr_off( DSA_CIPHER_KEY_LEN );
     if ( ! cipher.decrypt( *this, this->pri, this->pri_len ) )
       return false;
-    ec.pri = cipher.plain;
+    dsa.sk = cipher.plain;
   }
   return true;
 }
@@ -243,10 +279,10 @@ cmp_revoke_elem( const RevokeElem &x,  const RevokeElem &y ) noexcept
 bool
 UserHmacData::decrypt( const CryptPass &pwd,  WhichPubPri get_op ) noexcept
 {
-  uint8_t pub_key[ ECDH_KEY_LEN ];
+  uint8_t pub_key[ DSA_KEY_LEN ];
   size_t  pub_len = sizeof( pub_key );
 
-  if ( ! this->user.get_ecdh( pwd, this->ec, get_op, pub_key, &pub_len ) ) {
+  if ( ! this->user.get_dsa( pwd, this->dsa, get_op, pub_key, &pub_len ) ) {
     fprintf( stderr, "Unable to get key for user \"%.*s\"\n",
              (int) this->user.user_len, this->user.user );
     return false;
@@ -268,41 +304,7 @@ UserHmacData::decrypt( const CryptPass &pwd,  WhichPubPri get_op ) noexcept
     this->revoke_hmac.zero();
   return true;
 }
-#if 0
-bool
-UserHmacData::calc_secret_hmac( UserHmacData &data2,
-                                PolyHmacDigest &secret_hmac ) noexcept
-{
-  HashDigest ha;
-  ECDH       tmp;
 
-  tmp.pri = this->ec.pri;
-  tmp.pub = data2.ec.pub;
-  tmp.shared_secret();
-  ha.kdf_bytes( tmp.secret, sizeof( tmp.secret ) );
-
-  if ( this->user_hmac < data2.user_hmac )
-    secret_hmac.calc_2( ha, this->user_hmac.dig, HMAC_SIZE,
-                            data2.user_hmac.dig, HMAC_SIZE );
-  else
-    secret_hmac.calc_2( ha, data2.user_hmac.dig, HMAC_SIZE,
-                            this->user_hmac.dig, HMAC_SIZE );
-  return true;
-}
-
-void
-UserHmacData::calc_hello_key( uint64_t start_time,  ServiceBuf &svc,
-                              HashDigest &ha,  DSA &dsa ) noexcept
-{
-  PolyHmacDigest svc_hmac;
-  ha.kdf_bytes( svc.pub_key, svc.pub_key_len );
-  svc_hmac.calc_2( ha, svc.service, svc.service_len, 
-                       svc.create, svc.create_len );
-  ha.kdf_bytes( svc_hmac.dig, HMAC_SIZE, this->user_hmac.dig, HMAC_SIZE );
-  dsa.gen_key( svc_hmac.dig, HMAC_SIZE, this->user_hmac.dig, HMAC_SIZE,
-               &start_time, sizeof( start_time ) );
-}
-#endif
 static void
 print_pkerr( size_t pri_len,  size_t pub_len ) noexcept
 {
@@ -320,16 +322,16 @@ print_pkerr( size_t pri_len,  size_t pub_len ) noexcept
 bool
 UserBuf::test_user( const CryptPass &pwd,  const ConfigTree::User &u ) noexcept
 {
-  ECDH    ec;
+  DSA     dsa;
   UserBuf user( u );
 
-  if ( ! user.get_ecdh( pwd, ec, DO_PUB ) ) {
+  if ( ! user.get_dsa( pwd, dsa, DO_PUB ) ) {
     fprintf( stderr, "Unable to get public key for user \"%.*s\"\n",
              (int) user.user_len, user.user );
     print_pkerr( user.pri_len, user.pub_len );
     return false;
   }
-  if ( ! user.get_ecdh( pwd, ec, DO_PRI ) ) {
+  if ( ! user.get_dsa( pwd, dsa, DO_PRI ) ) {
     fprintf( stderr, "Unable to get private key for user \"%.*s\"\n",
              (int) user.user_len, user.user );
     print_pkerr( user.pri_len, user.pub_len );
@@ -387,11 +389,10 @@ ServiceBuf::gen_key( const char *svc,  size_t slen,
 bool
 ServiceBuf::sign_users( DSA *dsa,  const CryptPass &pwd ) noexcept
 {
-  ECDH           ec;
   DSA            dsa_buf;
   PolyHmacDigest hmac;
   uint64_t       ctr;
-  HmacEncrypt< DSA_CIPHER_SIGN_LEN, DSA_SIGN_LEN > sig( ctr );
+  HmacEncrypt< DSA_CIPHER_SIGN_LEN, DSA_SIGN_LEN > sig( ctr, sig_tag );
 
   if ( dsa == NULL ) {
     if ( ! this->get_dsa( pwd, dsa_buf, DO_BOTH ) ) {
@@ -410,7 +411,8 @@ ServiceBuf::sign_users( DSA *dsa,  const CryptPass &pwd ) noexcept
   this->revoke.sort<cmp_revoke_elem>();
   /* get the hmacs and sign them */
   for ( UserElem *u = this->users.hd; u != NULL; u = u->next ) {
-    UserHmacData data( u->user );
+    DSA          u_dsa_buf;
+    UserHmacData data( u->user, u_dsa_buf );
     if ( ! data.decrypt( pwd, DO_PUB ) )
       return false;
 
@@ -442,7 +444,7 @@ ServiceBuf::put_dsa( const CryptPass &pwd,  DSA &dsa,
                      WhichPubPri put_op ) noexcept
 {
   uint64_t ctr = 0;
-  HmacEncrypt< DSA_CIPHER_KEY_LEN, DSA_KEY_LEN > cipher( ctr );
+  HmacEncrypt< DSA_CIPHER_KEY_LEN, DSA_KEY_LEN > cipher( ctr, dsa_tag );
 
   cipher.init_kdf( *this, pwd );
   if ( (put_op & DO_PUB) != 0 ) {
@@ -535,11 +537,10 @@ ServiceBuf::load_service( const ConfigTree &tree,
 bool
 ServiceBuf::check_signatures( const CryptPass &pwd ) noexcept
 {
-  ECDH           ec;
   DSA            dsa;
   PolyHmacDigest hmac;
   uint64_t       ctr;
-  HmacDecrypt< DSA_CIPHER_SIGN_LEN, DSA_SIGN_LEN > sig( ctr );
+  HmacDecrypt< DSA_CIPHER_SIGN_LEN, DSA_SIGN_LEN > sig( ctr, sig_tag );
 
   if ( ! this->get_dsa( pwd, dsa, DO_PUB ) ) {
     fprintf( stderr, "Unable to get keys for svc \"%.*s\"\n",
@@ -552,7 +553,8 @@ ServiceBuf::check_signatures( const CryptPass &pwd ) noexcept
   ctr += aes_ctr_off( DSA_KEY_LEN );
 
   for ( UserElem *u = this->users.hd; u != NULL; u = u->next ) {
-    UserHmacData data( u->user );
+    DSA          u_dsa_buf;
+    UserHmacData data( u->user, u_dsa_buf );
     if ( ! data.decrypt( pwd, DO_PUB ) )
       return false;
 
@@ -611,7 +613,7 @@ ServiceBuf::get_dsa( const CryptPass &pwd,  DSA &dsa,
                      WhichPubPri get_op ) noexcept
 {
   uint64_t ctr = 0;
-  HmacDecrypt< DSA_CIPHER_KEY_LEN, DSA_KEY_LEN > cipher( ctr );
+  HmacDecrypt< DSA_CIPHER_KEY_LEN, DSA_KEY_LEN > cipher( ctr, dsa_tag );
   cipher.init_kdf( *this, pwd );
 
   if ( (get_op & DO_PUB) != 0 ) {
@@ -638,10 +640,10 @@ bool
 UserBuf::change_pass( const CryptPass &old_pwd,
                       const CryptPass &new_pwd ) noexcept
 {
-  ECDH    ec;
-  bool    has_pri = false;
+  DSA  dsa;
+  bool has_pri = false;
 
-  if ( ! this->get_ecdh( old_pwd, ec, DO_PUB ) ) {
+  if ( ! this->get_dsa( old_pwd, dsa, DO_PUB ) ) {
     fprintf( stderr, "Unable to get public key for user \"%.*s\"\n",
              (int) this->user_len, this->user );
     print_pkerr( this->pri_len, this->pub_len );
@@ -649,7 +651,7 @@ UserBuf::change_pass( const CryptPass &old_pwd,
   }
   if ( this->pri_len != 0 ) {
     has_pri = true;
-    if ( ! this->get_ecdh( old_pwd, ec, DO_PRI ) ) {
+    if ( ! this->get_dsa( old_pwd, dsa, DO_PRI ) ) {
       fprintf( stderr, "Unable to get private key for user \"%.*s\"\n",
                (int) this->user_len, this->user );
       print_pkerr( this->pri_len, this->pub_len );
@@ -657,7 +659,7 @@ UserBuf::change_pass( const CryptPass &old_pwd,
     }
   }
   WhichPubPri op = ( has_pri ? DO_BOTH : DO_PUB );
-  if ( ! this->put_ecdh( new_pwd, ec, op ) )
+  if ( ! this->put_dsa( new_pwd, dsa, op ) )
     return false;
   return true;
 }
@@ -667,8 +669,8 @@ ServiceBuf::change_pass( const CryptPass &old_pwd,
                          const CryptPass &new_pwd ) noexcept
 {
   uint64_t ctr;
-  HmacDecrypt< DSA_CIPHER_SIGN_LEN, DSA_SIGN_LEN > old_sig( ctr );
-  HmacEncrypt< DSA_CIPHER_SIGN_LEN, DSA_SIGN_LEN > new_sig( ctr );
+  HmacDecrypt< DSA_CIPHER_SIGN_LEN, DSA_SIGN_LEN > old_sig( ctr, sig_tag );
+  HmacEncrypt< DSA_CIPHER_SIGN_LEN, DSA_SIGN_LEN > new_sig( ctr, sig_tag );
   DSA      dsa;
   bool     has_pri = false;
 

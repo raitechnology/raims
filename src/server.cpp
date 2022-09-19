@@ -91,43 +91,121 @@ TermCallback::on_close( void ) noexcept
 int
 main( int argc, char *argv[] )
 {
-/*#ifndef _MSC_VER*/
+  const char * cfg         = NULL,
+             * rv_file     = NULL,
+             * user        = NULL,
+             * tports      = NULL,
+             * log_file    = NULL,
+             * log_rotate  = NULL,
+             * log_max_rot = NULL,
+             * no_perm     = NULL,
+             * foreground  = NULL,
+             * listen      = NULL,
+             * no_http     = NULL,
+             * http        = NULL,
+             * no_mcast    = NULL,
+             * debug       = NULL,
+             * ipc_name    = NULL,
+             * map_file    = NULL,
+             * db_num      = NULL,
+             * use_console = NULL,
+             * reliability = NULL,
+             * get_help    = NULL;
   static const char cfg_dir[] = "config";
-/*#else
-  static const char cfg_dir[] = "/Users/gchri/rai/build/raims/config";
-#endif*/
-  const char * di = get_arg( argc, argv, 1, "-d", cfg_dir ),
-             * us = get_arg( argc, argv, 1, "-u", "A.test" ),
-             * ti = get_arg( argc, argv, 1, "-t", NULL ),
-             * lo = get_arg( argc, argv, 1, "-l", NULL ),
-             * fl = get_arg( argc, argv, 1, "-f", NULL ),
-             * ip = get_arg( argc, argv, 1, "-i", NULL ),
-             * ma = get_arg( argc, argv, 1, "-m", NULL ),
-             * db = get_arg( argc, argv, 1, "-D", NULL ),
-             * co = get_arg( argc, argv, 0, "-c", NULL ),
-             * he = get_arg( argc, argv, 0, "-h", NULL );
-  if ( he != NULL ) {
-    printf( "%s [-d dir] -u user.svc -t tport.listen [...]\n"
-            "   -d dir        : config dir (default: config)\n"
-            "   -u user.svc   : user + service name\n"
-            "   -t tport.list : transport name + listen or connect\n"
-            "   -l file       : log to file\n"
-            "   -f flags      : debug flags to set\n"
-            "   -i name       : connect with ipc name\n"
-            "   -m map        : attach to kv shm map\n"
-            "   -D dbnum      : default db num\n"
-            "   -c            : run with console\n"
-            "Connect or listen user to service on transports\n"
-            "RaiMS version %s\n",
-            argv[ 0 ], ms_get_version() );
+  const char *program = ::strrchr( argv[ 0 ], '/' );
+  program = ( program != NULL ? program + 1 : argv[ 0 ] );
+  bool is_rvd = ::strcmp( program, "rvd" ) == 0;
+  char path[ 1024 ];
+  ::readlink( "/proc/self/exe", path, sizeof( path ) );
+  if ( is_rvd ) {
+    char * slash = ::strrchr( path, '/' );
+    if ( slash != NULL && &slash[ 8 ] <= &path[ 1024 ] ) {
+      ::memcpy( slash+1, "rv.yaml", 8 );
+      rv_file = path;
+    }
+  }
+  if ( ! is_rvd ) {
+    for ( int i = 1; i < argc; i++ ) {
+      if ( argv[ i ][ 0 ] == '-' && ::strlen( argv[ i ] ) > 2 ) {
+        is_rvd = true;
+        break;
+      }
+    }
+  }
+
+  if ( is_rvd ) {
+  #define RVD_HELP \
+  "   -cfg               : config dir/file\n" \
+  "   -reliability       : seconds of reliability\n" \
+  "   -log               : log file\n" \
+  "   -log-rotate        : rotate file size limit\n" \
+  "   -log-max-rotations : max log file rotations\n" \
+  "   -no-perminent      : exit when no clients\n" \
+  "   -foreground        : run in foreground\n" \
+  "   -listen            : rv listen port\n" \
+  "   -no-http           : no http service\n" \
+  "   -http              : port for http service\n" \
+  "   -no-mcast          : no multicast\n" \
+  "   -console           : run with console\n"
+    cfg         = get_arg( argc, argv, 1, "-cfg", rv_file );
+    reliability = get_arg( argc, argv, 1, "-reliability", NULL );
+    log_file    = get_arg( argc, argv, 1, "-log", NULL );
+    if ( log_file == NULL )
+      log_file = get_arg( argc, argv, 1, "-logfile", NULL );
+    log_rotate  = get_arg( argc, argv, 1, "-log-rotate", NULL );
+    if ( log_rotate == NULL )
+      log_rotate = get_arg( argc, argv, 1, "-log-max-size", NULL );
+    log_max_rot = get_arg( argc, argv, 1, "-log-max-rotations", NULL );
+    no_perm     = get_arg( argc, argv, 0, "-no-perminent", NULL );
+    foreground  = get_arg( argc, argv, 0, "-foreground", NULL );
+    listen      = get_arg( argc, argv, 1, "-listen", "7500" );
+    no_http     = get_arg( argc, argv, 0, "-no-http", NULL );
+    http        = get_arg( argc, argv, 1, "-http", NULL );
+    no_mcast    = get_arg( argc, argv, 0, "-no-multicast", NULL );
+    use_console = get_arg( argc, argv, 0, "-console", NULL );
+    if ( use_console != NULL )
+      foreground = use_console;
+    get_help    = get_arg( argc, argv, 0, "-help", NULL );
+  }
+  else {
+  #define MS_SERVER_HELP \
+  "[-d dir] [-a file] -u user.svc -t tport.listen [...]\n" \
+  "   -d dir        : config dir/file (default: config)\n" \
+  "   -u user.svc   : user + service name\n" \
+  "   -t tport.list : transport name + listen or connect\n" \
+  "   -l file       : log to file\n" \
+  "   -f flags      : debug flags to set\n" \
+  "   -i name       : connect with ipc name\n" \
+  "   -m map        : attach to kv shm map\n" \
+  "   -D dbnum      : default db num\n" \
+  "   -c            : run with console\n"
+
+    cfg         = get_arg( argc, argv, 1, "-d", cfg_dir );
+    user        = get_arg( argc, argv, 1, "-u", NULL );
+    tports      = get_arg( argc, argv, 1, "-t", NULL );
+    log_file    = get_arg( argc, argv, 1, "-l", NULL );
+    debug       = get_arg( argc, argv, 1, "-f", NULL );
+    ipc_name    = get_arg( argc, argv, 1, "-i", NULL );
+    map_file    = get_arg( argc, argv, 1, "-m", NULL );
+    db_num      = get_arg( argc, argv, 1, "-D", NULL );
+    use_console = get_arg( argc, argv, 0, "-c", NULL );
+    get_help    = get_arg( argc, argv, 0, "-h", NULL );
+  }
+  if ( get_help != NULL ) {
+    if ( is_rvd )
+      printf( "%s " RVD_HELP "RaiMS version %s\n",
+              argv[ 0 ], ms_get_version() );
+    else
+      printf( "%s " MS_SERVER_HELP "RaiMS version %s\n",
+              argv[ 0 ], ms_get_version() );
     return 0;
   }
   int err_fd = os_dup( STDERR_FILENO );
 
-  if ( lo != NULL ) {
-    if ( ::freopen( lo, "a", stderr ) == NULL ) {
+  if ( log_file != NULL ) {
+    if ( ::freopen( log_file, "a", stderr ) == NULL ) {
       const char *err = ::strerror( errno );
-      os_write( err_fd, lo, ::strlen( lo ) );
+      os_write( err_fd, log_file, ::strlen( log_file ) );
       os_write( err_fd, ": ", 2 );
       os_write( err_fd, err, ::strlen( err ) );
       os_write( err_fd, "\n", 1 );
@@ -136,27 +214,54 @@ main( int argc, char *argv[] )
     ::setvbuf( stderr, NULL, _IOLBF, 1024 );
     Console::log_header( STDERR_FILENO );
   }
-  if ( fl != NULL )
-    dbg_flags = (int) string_to_uint64( fl, ::strlen( fl ) );
+  if ( debug != NULL )
+    dbg_flags = (int) string_to_uint64( debug, ::strlen( debug ) );
   MDMsgMem         mem;
   StringTab        st( mem );
   ConfigErrPrinter err;
-  ConfigTree     * tree = ConfigDB::parse_dir( di, st, err );
+  ConfigTree     * tree;
   CryptPass        pwd;
+  os_stat          stbuf;
   bool             conn;
 
-  if ( tree == NULL || ! init_pass( tree, pwd, di ) )
+  if ( os_fstat( cfg, &stbuf ) < 0 || ( stbuf.st_mode & S_IFDIR ) == 0 )
+    tree = ConfigDB::parse_jsfile( cfg, st, err );
+  else
+    tree = ConfigDB::parse_dir( cfg, st, err );
+  if ( tree == NULL || ! init_pass( tree, pwd, cfg ) )
     return 1;
+
+  if ( map_file != NULL )
+    tree->set_parameter( st, "map_file", map_file );
+  if ( db_num != NULL )
+    tree->set_parameter( st, "db_num", db_num );
+  if ( ipc_name != NULL )
+    tree->set_parameter( st, "ipc_name", ipc_name );
+  if ( reliability != NULL )
+    tree->set_parameter( st, "reliability", reliability );
 
   ConfigTree::User      * usr   = NULL;
   ConfigTree::Service   * svc   = NULL;
   ConfigTree::Transport * tport = NULL;
+  char host[ 256 ];
 
-  if ( ! tree->resolve( us, usr, svc ) ) {
+  /* make a user with the hostname */
+  if ( user == NULL )
+    if ( ::gethostname( host, sizeof( host ) ) == 0 )
+      user = host;
+
+  if ( ! tree->resolve( user, usr, svc ) ) {
     if ( svc == NULL )
       return 1;
     UserBuf user_buf;
-    if ( ! user_buf.gen_tmp_key( us, pwd ) ) {
+    const char * rv_port_num = NULL;
+    if ( listen != NULL ) {
+      if ( (rv_port_num = ::strrchr( listen, ':' )) != NULL )
+        rv_port_num++;
+      else
+        rv_port_num = listen;
+    }
+    if ( ! user_buf.gen_tmp_key( user, rv_port_num, *svc, pwd ) ) {
       fprintf( stderr, "Unable to generate user\n" );
       return 1;
     }
@@ -186,15 +291,19 @@ main( int argc, char *argv[] )
   MySessionMgr sess( poll, log, *tree, *usr, *svc, st );
   EvTerminal   term( poll, cb );
 
-  if ( lo != NULL ) {
-    sess.console.open_log( lo, false );
+  if ( log_file != NULL ) {
+    sess.console.open_log( log_file, false );
+    if ( log_rotate != NULL )
+      sess.console.log_max_size = strtol( log_rotate, NULL, 0 );
+    if ( log_max_rot != NULL )
+      sess.console.log_max_rotate = atoi( log_max_rot );
 
     if ( err_fd >= 0 ) { /* errs go to log */
       ::close( err_fd );
       err_fd = -1;
     }
   }
-  if ( co != NULL ) {
+  if ( use_console != NULL ) {
     sess.console.term_list.push_tl( &cb );
     term.term.prompt = ""; /* no prompt until after init */
     cb.mgr     = &sess;
@@ -227,40 +336,49 @@ main( int argc, char *argv[] )
     log.start_ev( poll );
   }
   int status = 0;
-  if ( ! sess.init_param() ||
-       ! sess.add_ipc_transport( *svc, ip, ma, db ? atoi( db ) : 0 ) )
+  if ( ! sess.init_param() || ! sess.add_ipc_transport() )
     status = -1;
-  if ( status == 0 && ti != NULL ) {
-    tport = tree->find_transport( ti, ::strlen( ti ), &conn );
+  if ( status == 0 && tports != NULL ) {
+    tport = tree->find_transport( tports, ::strlen( tports ), &conn );
     if ( tport == NULL ) {
-      fprintf( stderr, "transport %s not found\n", ti );
+      fprintf( stderr, "transport %s not found\n", tports );
       status = -1;
     }
     for ( int i = 2; status == 0; i++ ) {
-      if ( ! sess.add_transport( *svc, *tport, ! conn ) ) {
+      if ( ! sess.add_transport( *tport, ! conn ) ) {
         status = -1;
         break;
       }
-      ti = get_arg( argc, argv, i, "-t", NULL );
-      if ( ti == NULL || ti[ 0 ] == '-' )
+      tports = get_arg( argc, argv, i, "-t", NULL );
+      if ( tports == NULL || tports[ 0 ] == '-' )
         break;
-      tport = tree->find_transport( ti, ::strlen( ti ), &conn );
+      tport = tree->find_transport( tports, ::strlen( tports ), &conn );
       if ( tport == NULL ) {
-        fprintf( stderr, "transport %s not found\n", ti );
+        fprintf( stderr, "transport %s not found\n", tports );
         status = -1;
       }
     }
   }
   if ( status == 0 ) {
-    if ( ! sess.add_startup_transports( *svc ) )
+    if ( ! sess.add_startup_transports() )
       status = -1;
+    if ( is_rvd && status == 0 ) {
+      int flags = ( no_perm ? RV_NO_PERMINENT : 0 ) |
+                  ( no_http ? RV_NO_HTTP : 0 ) |
+                  ( no_mcast ? RV_NO_MCAST : 0 );
+      if ( ! sess.add_rvd_transports( listen, http, flags ) )
+        status = -1;
+    }
   }
   if ( status == 0 )
     status = sess.init_session( pwd );
   pwd.clear_pass(); /* no longer need pass */
   if ( status == 0 ) {
-    if ( co != NULL ) {
+    if ( use_console != NULL ) {
       lc_tty_set_prompt( term.term.tty, TTYP_PROMPT1, sess.console.prompt );
+    }
+    else if ( is_rvd && foreground == NULL ) {
+      sess.fork_daemon( err_fd );
     }
     sess.start();
     while ( sess.loop() ) {
@@ -287,9 +405,9 @@ main( int argc, char *argv[] )
     }
   }
   sess.console.flush_log( log );
-  if ( co != NULL )
+  if ( use_console != NULL )
     term.finish();
-  else if ( lo == NULL ) {
+  else if ( log_file == NULL || is_rvd ) {
     if ( status != 0 && sess.console.log_index > 0 && err_fd >= 0 )
       os_write( err_fd, sess.console.log.ptr, sess.console.log_index );
   }

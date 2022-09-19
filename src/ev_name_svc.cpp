@@ -279,7 +279,8 @@ UserDB::mcast_name( NameSvc &name ) noexcept
   for ( size_t i = 0; i < adverts.count; i++ ) {
     Advert &ad = adverts.ptr[ i ];
     if ( ! ad.rte->is_set( TPORT_IS_SHUTDOWN ) ) {
-      if ( ad.is_newer( this->start_time ) )
+      if ( ( ad.ad_counter++ % 4 ) == 0 ||
+             ad.is_newer( this->start_time ) )
         this->send_name_advert( name, *ad.rte, NULL );
     }
     ad.rotate_start_recv();
@@ -303,7 +304,9 @@ UserDB::send_name_advert( NameSvc &name,  TransportRoute &rte,
    .create    ( this->user.create.len )
    .expires   ( this->user.expires.len )
    .tport     ( rte.transport.tport.len )
-   .mesh_url  ( rte.mesh_url_len )
+   .tport_type( rte.transport.type.len )
+   .mesh_url  ( rte.mesh_url.len )
+   .conn_url  ( rte.conn_url.len )
    .pk_digest ();
 
   MsgCat m;
@@ -325,9 +328,15 @@ UserDB::send_name_advert( NameSvc &name,  TransportRoute &rte,
                 this->user.expires.len   );
   m.tport     ( rte.transport.tport.val,
                 rte.transport.tport.len  )
-   .mesh_url  ( rte.mesh_url_addr,
-                rte.mesh_url_len         )
-   .pk_digest ();
+   .tport_type( rte.transport.type.val,
+                rte.transport.type.len   );
+  if ( rte.is_set( TPORT_IS_MESH ) )
+    m.mesh_url( rte.mesh_url.val, 
+                rte.mesh_url.len         );
+  else if ( rte.is_set( TPORT_IS_LISTEN ) )
+    m.conn_url( rte.conn_url.val, 
+                rte.conn_url.len         );
+  m.pk_digest ();
 
   m.close( e.sz, name_h, CABA_HEARTBEAT );
   m.sign_hb( X_NAME, X_NAME_SZ, *this->session_key, *this->hello_key );
@@ -343,7 +352,7 @@ UserDB::on_name_svc( NameSvc &name,  CabaMsg *msg ) noexcept
   MsgHdrDecoder dec( msg );
   if ( dec.decode_msg() != 0 )
     return;
-  if ( ! dec.test_4( FID_TPORT, FID_MESH_URL, FID_START, FID_STAMP ) )
+  if ( ! dec.test_4( FID_TPORT, FID_TPORT_TYPE, FID_START, FID_STAMP ) )
     return;
 
   AdvertList & adverts = name.adverts;
@@ -354,10 +363,14 @@ UserDB::on_name_svc( NameSvc &name,  CabaMsg *msg ) noexcept
   uint64_t     start,
                stamp;
   const char * tport_name,
-             * mesh_url_addr;
+             * type_name,
+             * mesh_url_addr,
+             * conn_url_addr;
   uint32_t     uid,
                tport_len,
-               mesh_url_len;
+               type_len,
+               mesh_url_len,
+               conn_url_len;
 
   if ( ! dec.get_bridge( bridge_id.nonce ) ||
        ! dec.get_ival<uint64_t>( FID_SEQNO, dec.seqno ) )
@@ -419,28 +432,99 @@ UserDB::on_name_svc( NameSvc &name,  CabaMsg *msg ) noexcept
   n->name_recv_time  = stamp;
   tport_name    = (const char *) dec.mref[ FID_TPORT ].fptr;
   tport_len     = (uint32_t)     dec.mref[ FID_TPORT ].fsize;
-  mesh_url_addr = (const char *) dec.mref[ FID_MESH_URL ].fptr;
-  mesh_url_len  = (uint32_t)     dec.mref[ FID_MESH_URL ].fsize;
+  type_name     = (const char *) dec.mref[ FID_TPORT_TYPE ].fptr;
+  type_len      = (uint32_t)     dec.mref[ FID_TPORT_TYPE ].fsize;
 
-  for ( size_t i = 0; i < adverts.count; i++ ) {
-    Advert &ad = adverts.ptr[ i ];
-    if ( ad.rte->is_set( TPORT_IS_SHUTDOWN ) ||
-         ! ad.rte->transport.tport.equals( tport_name, tport_len ) )
-      continue;
-    /* advert is already added to mesh */
-    if ( ad.rte->uid_in_mesh->is_member( n->uid ) ) {
-      ad.update_start_recv( start );
-      continue;
-    }
-    /* if peer is newer, it does the connect */
-    if ( this->start_time < start ) {
-      if ( inbox.val != 0 )
+  if ( type_len == 3 && ::memcmp( type_name, "any", 3 ) == 0 ) {
+    for ( size_t i = 0; i < adverts.count; i++ ) {
+      Advert &ad = adverts.ptr[ i ];
+      if ( ad.rte->is_set( TPORT_IS_SHUTDOWN ) ||
+           ! ad.rte->transport.tport.equals( tport_name, tport_len ) )
+        continue;
+      if ( ad.rte->transport.type.equals( "any", 3 ) )
+        continue;
+      if ( inbox.val != 0 && ad.rte->is_set( TPORT_IS_LISTEN ) )
         this->send_name_advert( name, *ad.rte, &inbox );
     }
-    /* connect to this mesh */
+  }
+  else if ( dec.test( FID_MESH_URL ) ) {
+    mesh_url_addr = (const char *) dec.mref[ FID_MESH_URL ].fptr;
+    mesh_url_len  = (uint32_t)     dec.mref[ FID_MESH_URL ].fsize;
+
+    for ( size_t i = 0; i < adverts.count; i++ ) {
+      Advert &ad = adverts.ptr[ i ];
+      bool   type_change = false;
+      if ( ad.rte->is_set( TPORT_IS_SHUTDOWN ) ||
+           ! ad.rte->transport.tport.equals( tport_name, tport_len ) )
+        continue;
+      if ( ad.rte->transport.type.equals( "any", 3 ) ) {
+        ad.rte->change_any( "mesh", name );
+        type_change = true;
+      }
+      if ( ! ad.rte->transport.type.equals( type_name, type_len ) )
+        continue;
+      /* advert is already added to mesh */
+      if ( ad.rte->uid_in_mesh->is_member( n->uid ) ) {
+        ad.update_start_recv( start );
+        continue;
+      }
+      /* if peer is newer, it does the connect */
+      if ( this->start_time < start ) {
+        if ( inbox.val != 0 )
+          this->send_name_advert( name, *ad.rte, &inbox );
+        else if ( type_change )
+          this->send_name_advert( name, *ad.rte, NULL );
+      }
+      /* connect to this mesh */
+      else {
+        this->mesh_pending.update( *ad.rte, mesh_url_addr, mesh_url_len, 0,
+                                   bridge_id.nonce, true );
+      }
+    }
+  }
+  else {
+    if ( dec.test( FID_CONN_URL ) ) {
+      conn_url_addr = (const char *) dec.mref[ FID_CONN_URL ].fptr;
+      conn_url_len  = (uint32_t)     dec.mref[ FID_CONN_URL ].fsize;
+    }
     else {
-      this->mesh_pending.update( *ad.rte, mesh_url_addr, mesh_url_len, 0,
-                                 bridge_id.nonce );
+      conn_url_addr = NULL;
+      conn_url_len  = 0;
+    }
+    for ( size_t i = 0; i < adverts.count; i++ ) {
+      Advert &ad = adverts.ptr[ i ];
+      bool type_change = false;
+      if ( ad.rte->is_set( TPORT_IS_SHUTDOWN ) ||
+           ! ad.rte->transport.tport.equals( tport_name, tport_len ) )
+        continue;
+      if ( ad.rte->transport.type.equals( "any", 3 ) ) {
+        ad.rte->change_any( "tcp", name );
+        type_change = true;
+      }
+      if ( ! ad.rte->transport.type.equals( type_name, type_len ) )
+        continue;
+      /* advert is already added to mesh */
+      if ( ad.rte->uid_in_device->is_member( n->uid ) ) {
+        ad.update_start_recv( start );
+        continue;
+      }
+      /* if peer is connector */
+      if ( ad.rte->is_set( TPORT_IS_LISTEN ) ) {
+        if ( inbox.val != 0 && conn_url_addr == NULL )
+          this->send_name_advert( name, *ad.rte, &inbox );
+        else if ( type_change )
+          this->send_name_advert( name, *ad.rte, NULL );
+        else
+          ad.update_start_recv( start );
+      }
+      /* connect to this tcp listener */
+      else if ( conn_url_addr != NULL ) {
+        this->mesh_pending.update( *ad.rte, conn_url_addr, conn_url_len, 0,
+                                   bridge_id.nonce, false );
+      }
+      else {
+        ad.update_start_recv( start );
+      }
     }
   }
 }

@@ -308,15 +308,16 @@ struct AdjDistance : public md::MDMsgMem {
   AdjacencySpace *coverage_link( uint32_t target_uid ) noexcept;
   uint32_t calc_coverage( uint32_t src_uid,  uint8_t path_select ) noexcept;
 
-  void update_path( uint8_t path_select ) {
+  void update_path( ForwardCache &fwd,  uint8_t path_select ) {
     this->clear_cache_if_dirty();
     if ( this->x[ path_select ].seqno != this->update_seqno )
-      this->calc_path( path_select );
+      this->calc_path( fwd, path_select );
   }
-  void calc_path( uint8_t path_select ) noexcept;
+  void calc_path( ForwardCache &fwd,  uint8_t path_select ) noexcept;
 
-  bool get_path( uint32_t uid,  uint8_t path_select,  UidSrcPath &path ) {
-    this->update_path( path_select );
+  bool get_path( ForwardCache &fwd,  uint32_t uid,  uint8_t path_select,
+                 UidSrcPath &path ) {
+    this->update_path( fwd, path_select );
     if ( uid >= this->max_uid )
       return false;
     path = this->x[ path_select ].path[ uid ];

@@ -88,7 +88,8 @@ Console::Console( SessionMgr &m ) noexcept
          cfg_tport( 0 ), fname_fmt( ANSI_GREEN "%-18s" ANSI_NORMAL " : " ),
          type_fmt( ANSI_BLUE "%-10s %3d" ANSI_NORMAL " : " ),
          prompt( 0 ), max_log( 64 * 1024 ), log_index( 0 ), log_ptr( 0 ),
-         inbox_num( 0 ), log_filename( 0 ), log_fd( -1 ), next_rotate( 1 ),
+         inbox_num( 0 ), log_max_rotate( 0 ), log_rotate_time( 0 ),
+         log_max_size( 0 ), log_filename( 0 ), log_fd( -1 ), next_rotate( 1 ),
          log_status( 0 ), mute_log( false )
 {
   time_t t = update_tz_offset();
@@ -1137,8 +1138,11 @@ TabPrint::width( Console &console,  char *buf ) noexcept
       return min_int<uint32_t>( this->len + 2, 79 );
 
     case PRINT_ID:
-      return (uint32_t) min_int<size_t>( ::strlen( this->val ) + 1 +
-                                         uint32_digits( this->len ), 79 );
+      if ( this->len != 0xffffffffU ) {
+        return (uint32_t) min_int<size_t>( ::strlen( this->val ) + 1 +
+                                           uint32_digits( this->len ), 79 );
+      }
+      return (uint32_t) min_int<size_t>( ::strlen( this->val ), 79 );
 
     case PRINT_USER:
       return (uint32_t) min_int<size_t>( this->n->peer.user.len + 1 +
@@ -1270,8 +1274,10 @@ TabPrint::string( Console &console,  char *buf ) noexcept
       return buf;
     case PRINT_ID:
       sz = cat80( buf, 0, this->val, ::strlen( this->val ) );
-      sz = cat80( buf, sz, "." );
-      sz = cat80( buf, sz, this->len );
+      if ( this->len != 0xffffffffU ) {
+        sz = cat80( buf, sz, "." );
+        sz = cat80( buf, sz, this->len );
+      }
       buf[ sz ] = '\0';
       return buf;
     case PRINT_USER:
@@ -1836,46 +1842,58 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
       this->show_running( p, PRINT_PARAMETERS | PRINT_HDR, arg, len ); break;
     case CMD_SHOW_GRAPH:     this->show_graph( p ); break;
 
-    case CMD_DEBUG:
+    case CMD_DEBUG: {
+      int dist_dbg = 0;
       if ( len == 0 )
         goto help;
-      if ( len >= 4 && ::memcmp( arg, "dist", 4 ) == 0 ) {
+      dbg_flags        = 0;
+      kv_pub_debug     = 0;
+      kv_ps_debug      = 0;
+      sassrv::rv_debug = 0;
+
+      for ( size_t i = 0; i < debug_str_count; i++ ) {
+        size_t dlen = ::strlen( debug_str[ i ] );
+        if ( ::memmem( arg, len, debug_str[ i ], dlen ) != NULL )
+          dbg_flags |= ( 1 << i );
+      }
+      if ( len >= 4 && ::memmem( arg, len, "dist", 4 ) != NULL )
+        dist_dbg = 1;
+      if ( len >= 2 && ::memmem( arg, len, "kvpub", 5 ) != NULL )
+        kv_pub_debug = 1;
+      if ( len >= 4 && ::memmem( arg, len, "kvps", 4 ) != NULL )
+        kv_ps_debug = 1;
+      if ( len >= 2 && ::memmem( arg, len, "rv", 2 ) != NULL )
+        sassrv::rv_debug = 1;
+      if ( dbg_flags == 0 && len > 0 && arg[ 0 ] >= '0' && arg[ 0 ] <= '9' )
+        dbg_flags = (int) string_to_uint64( arg, len );
+      char buf[ 80 ];
+      size_t sz = 0;
+      for ( size_t i = 0; i < debug_str_count; i++ ) {
+        if ( ( dbg_flags & ( 1 << i ) ) != 0 ) {
+          if ( sz > 0 )
+            sz = cat80( buf, sz, "," );
+          sz = cat80( buf, sz, debug_str[ i ] );
+        }
+      }
+      if ( sz > 0 ) {
+        buf[ sz ] = '\0';
+        this->outf( p, "debug flags set to 0x%x (%s)", dbg_flags, buf );
+      }
+      else {
+        this->outf( p, "debug flags cleared" );
+      }
+      if ( dist_dbg ) {
         this->user_db.peer_dist.invalidate( INVALID_NONE );
         this->outf( p, "recalculate peer dist" );
       }
-      else if ( len >= 2 && ::memcmp( arg, "kv", 2 ) == 0 ) {
-        kv_pub_debug = ! kv_pub_debug;
-        this->outf( p, "kv pub debug %s", kv_pub_debug ? "on" : "off" );
-      }
-      else if ( len >= 4 && ::memcmp( arg, "kvps", 4 ) == 0 ) {
-        kv_ps_debug = ! kv_ps_debug;
-        this->outf( p, "kv ps debug %s", kv_ps_debug ? "on" : "off" );
-      }
-      else if ( len >= 2 && ::memcmp( arg, "rv", 2 ) == 0 ) {
-        sassrv::rv_debug = ! sassrv::rv_debug;
-        this->outf( p, "rv debug %s", sassrv::rv_debug ? "on" : "off" );
-      }
-      else {
-        dbg_flags = (int) string_to_uint64( arg, len );
-        char buf[ 80 ];
-        size_t sz = 0;
-        for ( size_t i = 0; i < debug_str_count; i++ ) {
-          if ( ( dbg_flags & ( 1 << i ) ) != 0 ) {
-            if ( sz > 0 )
-              sz = cat80( buf, sz, "," );
-            sz = cat80( buf, sz, debug_str[ i ] );
-          }
-        }
-        if ( sz > 0 ) {
-          buf[ sz ] = '\0';
-          this->outf( p, "debug flags set to 0x%x (%s)", dbg_flags, buf );
-        }
-        else {
-          this->outf( p, "debug flags cleared" );
-        }
-      }
+      if ( kv_pub_debug )
+        this->outf( p, "kv pub debug on" );
+      if ( kv_ps_debug )
+        this->outf( p, "kv ps debug on" );
+      if ( sassrv::rv_debug )
+        this->outf( p, "rv debug on" );
       break;
-
+    }
     case CMD_CANCEL: {
       uint32_t pcount = 0, scount = 0;
       for ( ConsoleRPC *rpc = this->rpc_list.hd; rpc != NULL; rpc = rpc->next ){
@@ -2130,7 +2148,7 @@ Console::connect( const char *name,  size_t len ) noexcept
     b = this->mgr.start_transport( *rte, false );
   }
   else {
-    b = this->mgr.add_transport( this->mgr.svc, *tree_idx, false );
+    b = this->mgr.add_transport( *tree_idx, false );
   }
   if ( b )
     this->printf( "transport (%.*s) started connecting\n", (int) len, name );
@@ -2152,7 +2170,7 @@ Console::listen( const char *name,  size_t len ) noexcept
     b = this->mgr.start_transport( *rte, true );
   }
   else {
-    b = this->mgr.add_transport( this->mgr.svc, *tree_idx, true );
+    b = this->mgr.add_transport( *tree_idx, true );
   }
   if ( b )
     this->printf( "transport (%.*s) started listening\n", (int) len, name );
@@ -2172,7 +2190,7 @@ Console::shutdown( const char *name,  size_t len ) noexcept
     this->printf( "transport (%.*s) not running\n", (int) len, name );
     return;
   }*/
-  uint32_t count = this->mgr.shutdown_transport( this->mgr.svc, *tree_idx );
+  uint32_t count = this->mgr.shutdown_transport( *tree_idx );
   if ( count > 0 )
     this->printf( "transport (%.*s) shutdown (%u instances down)\n",
                   (int) len, name, count );
@@ -2269,7 +2287,7 @@ Console::config_param( const char *param, size_t plen,
         this->string_tab.reref_string( value, vlen, sp->value );
       else {
         p->parms.unlink( sp );
-        this->free_pairs.push_tl( sp );
+        this->tree.free_pairs.push_tl( sp );
       }
       return;
     }
@@ -2278,11 +2296,8 @@ Console::config_param( const char *param, size_t plen,
     this->printf( "notfound: %.*s\n", (int) plen, param );
   }
   else {
-    p = this->string_tab.make<ConfigTree::Parameters>();
-    if ( this->free_pairs.is_empty() )
-      sp = this->string_tab.make<ConfigTree::StringPair>();
-    else
-      sp = this->free_pairs.pop_hd();
+    p  = this->string_tab.make<ConfigTree::Parameters>();
+    sp = this->tree.get_free_pair( this->string_tab );
     this->string_tab.ref_string( param, plen, sp->name );
     this->string_tab.ref_string( value, vlen, sp->value );
     p->parms.push_tl( sp );
@@ -2333,17 +2348,14 @@ Console::config_tport_route( const char *param, size_t plen,
       if ( vlen != 0 && ( next == NULL || ! next->name.equals( param, plen ) ) )
         break;
       route.unlink( sp );
-      this->free_pairs.push_tl( sp );
+      this->tree.free_pairs.push_tl( sp );
       if ( vlen == 0 && ( next == NULL || ! next->name.equals( param, plen ) ) )
         return;
       sp = next;
     }
   }
   if ( sp == NULL ) {
-    if ( this->free_pairs.is_empty() )
-      sp = this->string_tab.make<ConfigTree::StringPair>();
-    else
-      sp = this->free_pairs.pop_hd();
+    sp = this->tree.get_free_pair( this->string_tab );
     route.push_tl( sp );
   }
   this->string_tab.reref_string( param, plen, sp->name );
@@ -2986,7 +2998,12 @@ Console::show_unknown( ConsoleOutput *p ) noexcept
 }
 
 PortOutput::PortOutput( Console &c,  TabOut &o,  uint32_t t ) noexcept :
-    console( c ), mgr( c.mgr ), user_db( c.user_db ), out( o ), tport_id( t ) {}
+    console( c ), mgr( c.mgr ), user_db( c.user_db ), out( o ), tport_id( t ),
+    unrouteable( 0 ) {}
+
+PortOutput::PortOutput( Console &c,  TabOut &o,  Unrouteable *u ) noexcept :
+    console( c ), mgr( c.mgr ), user_db( c.user_db ), out( o ),
+    tport_id( 0xffffffffU ), unrouteable( u ) {}
 
 void
 PortOutput::init( TransportRoute *rte,  int fl,  int fd,
@@ -2998,6 +3015,21 @@ PortOutput::init( TransportRoute *rte,  int fl,  int fd,
   this->tport = &rte->transport.tport;
   this->state = rte->state;
   this->n     = user;
+  this->fd    = fd;
+  this->flags = fl;
+  this->local.zero();
+  this->remote.zero();
+}
+
+void
+PortOutput::init( ConfigTree::Transport &tport,  int fl,  int fd ) noexcept
+{
+  this->stats.zero(); 
+  this->rte   = NULL;
+  this->type  = &tport.type;
+  this->tport = &tport.tport;
+  this->state = TPORT_IS_SVC;
+  this->n     = NULL;
   this->fd    = fd;
   this->flags = fl;
   this->local.zero();
@@ -3025,72 +3057,109 @@ PortOutput::output( void ( PortOutput::*put )( void ) ) noexcept
   uint32_t mcast_fd, ucast_fd;
   EvPoll & poll = this->mgr.poll;
 
-  TransportRoute *rte = this->user_db.transport_tab.ptr[ this->tport_id ];
-  if ( rte->is_set( TPORT_IS_SHUTDOWN ) ) {
-    this->init( rte, P_IS_DOWN, -1 );
-    (this->*put)();
-  }
-  else if ( rte->is_set( TPORT_IS_IPC ) ) {
-    for ( IpcRte * ext = rte->ext->list.hd; ext != NULL; ext = ext->next ) {
-      this->init( rte, ext );
-      ext->listener->client_stats( this->stats );
-      this->local_addr( ext->listener->peer_address.buf );
+  if ( this->tport_id != 0xffffffffU ) {
+    TransportRoute *rte = this->user_db.transport_tab.ptr[ this->tport_id ];
+    if ( rte->is_set( TPORT_IS_SHUTDOWN ) ) {
+      this->init( rte, P_IS_DOWN, -1 );
       (this->*put)();
     }
-  }
-  else if ( rte->listener != NULL ) {
-    this->init( rte, P_IS_LOCAL, rte->listener->fd );
-    rte->listener->client_stats( this->stats );
-    this->local_addr( rte->listener->peer_address.buf );
-    (this->*put)();
-  }
-  else if ( rte->is_mcast() ) {
-    mcast_fd = rte->mcast_fd;
-    ucast_fd = rte->inbox_fd;
-    this->init( rte, P_IS_LOCAL, mcast_fd );
-
-    if ( mcast_fd <= poll.maxfd && poll.sock[ mcast_fd ] != NULL ) {
-      this->local_addr( poll.sock[ mcast_fd ]->peer_address.buf );
-      poll.sock[ mcast_fd ]->client_stats( this->stats );
+    else if ( rte->is_set( TPORT_IS_IPC ) ) {
+      for ( IpcRte * ext = rte->ext->list.hd; ext != NULL; ext = ext->next ) {
+        this->init( rte, ext );
+        ext->listener->client_stats( this->stats );
+        this->local_addr( ext->listener->peer_address.buf );
+        (this->*put)();
+      }
     }
-    (this->*put)();
-    this->init( rte, P_IS_LOCAL | P_IS_INBOX, ucast_fd );
-    if ( ucast_fd <= poll.maxfd && poll.sock[ ucast_fd ] != NULL ) {
-      this->local_addr( poll.sock[ ucast_fd ]->peer_address.buf );
-      poll.sock[ ucast_fd ]->client_stats( this->stats );
+    else if ( rte->listener != NULL ) {
+      this->init( rte, P_IS_LOCAL, rte->listener->fd );
+      rte->listener->client_stats( this->stats );
+      this->local_addr( rte->listener->peer_address.buf );
+      (this->*put)();
     }
-    (this->*put)();
-  }
+    else if ( rte->is_mcast() ) {
+      mcast_fd = rte->mcast_fd;
+      ucast_fd = rte->inbox_fd;
+      this->init( rte, P_IS_LOCAL, mcast_fd );
 
-  uint32_t uid;
-  for ( bool ok = rte->uid_connected.first( uid ); ok;
-        ok = rte->uid_connected.next( uid ) ) {
-    UserBridge * n = this->user_db.bridge_tab[ uid ];
-    if ( n == NULL || ! n->is_set( AUTHENTICATED_STATE ) )
-      continue;
-    UserRoute * u_ptr = n->user_route_ptr( this->user_db, this->tport_id );
-    if ( rte->is_mcast() ) {
-      ucast_fd = u_ptr->inbox_fd;
-      this->init( rte, P_IS_REMOTE | P_IS_INBOX, ucast_fd, n );
-      this->stats.bytes_sent = u_ptr->bytes_sent;
-      this->stats.msgs_sent  = u_ptr->msgs_sent;
-      if ( u_ptr->is_set( UCAST_URL_STATE ) ) {
-        const char *addr = u_ptr->ucast_url;
-        uint32_t    len  = u_ptr->ucast_url_len;
-        if ( len > sizeof( "inbox://" ) &&
-             ::memcmp( "inbox://", addr, 8 ) == 0 ) {
-          len -= 8; addr += 8;
-        }
-        this->remote_addr( addr, len );
+      if ( mcast_fd <= poll.maxfd && poll.sock[ mcast_fd ] != NULL ) {
+        this->local_addr( poll.sock[ mcast_fd ]->peer_address.buf );
+        poll.sock[ mcast_fd ]->client_stats( this->stats );
+      }
+      (this->*put)();
+      this->init( rte, P_IS_LOCAL | P_IS_INBOX, ucast_fd );
+      if ( ucast_fd <= poll.maxfd && poll.sock[ ucast_fd ] != NULL ) {
+        this->local_addr( poll.sock[ ucast_fd ]->peer_address.buf );
+        poll.sock[ ucast_fd ]->client_stats( this->stats );
       }
       (this->*put)();
     }
-    else {
-      mcast_fd = u_ptr->mcast_fd;
-      this->init( rte, P_IS_REMOTE, mcast_fd, n );
-      if ( mcast_fd <= poll.maxfd && poll.sock[ mcast_fd ] != NULL ) {
-        this->remote_addr( poll.sock[ mcast_fd ]->peer_address.buf );
-        poll.sock[ mcast_fd ]->client_stats( this->stats );
+    else if ( rte->transport.type.equals( "any" ) ) {
+      this->init( rte, P_IS_DOWN, -1 );
+      (this->*put)();
+    }
+
+    uint32_t uid;
+    for ( bool ok = rte->uid_connected.first( uid ); ok;
+          ok = rte->uid_connected.next( uid ) ) {
+      UserBridge * n = this->user_db.bridge_tab[ uid ];
+      if ( n == NULL || ! n->is_set( AUTHENTICATED_STATE ) )
+        continue;
+      UserRoute * u_ptr = n->user_route_ptr( this->user_db, this->tport_id );
+      if ( rte->is_mcast() ) {
+        ucast_fd = u_ptr->inbox_fd;
+        this->init( rte, P_IS_REMOTE | P_IS_INBOX, ucast_fd, n );
+        this->stats.bytes_sent = u_ptr->bytes_sent;
+        this->stats.msgs_sent  = u_ptr->msgs_sent;
+        if ( u_ptr->is_set( UCAST_URL_STATE ) ) {
+          const char *addr = u_ptr->ucast_url.val;
+          uint32_t    len  = u_ptr->ucast_url.len;
+          if ( len > sizeof( "inbox://" ) &&
+               ::memcmp( "inbox://", addr, 8 ) == 0 ) {
+            len -= 8; addr += 8;
+          }
+          this->remote_addr( addr, len );
+        }
+        (this->*put)();
+      }
+      else {
+        mcast_fd = u_ptr->mcast_fd;
+        this->init( rte, P_IS_REMOTE, mcast_fd, n );
+        if ( mcast_fd <= poll.maxfd && poll.sock[ mcast_fd ] != NULL ) {
+          this->remote_addr( poll.sock[ mcast_fd ]->peer_address.buf );
+          poll.sock[ mcast_fd ]->client_stats( this->stats );
+        }
+        (this->*put)();
+      }
+    }
+  }
+  else if ( this->unrouteable != NULL ) {
+    Unrouteable &u = *this->unrouteable;
+    int fd = -1, fd2 = -1;
+    if ( u.telnet != NULL )
+      fd = u.telnet->fd;
+    else if ( u.web != NULL )
+      fd = u.web->fd;
+    else if ( u.name != NULL ) {
+      fd  = u.name->mcast_recv.fd;
+      fd2 = u.name->mcast_send.fd;
+    }
+    if ( fd != -1 && (uint32_t) fd <= poll.maxfd && poll.sock[ fd ] != NULL ) {
+      this->init( *u.tport, P_IS_LOCAL, fd );
+      poll.sock[ fd ]->client_stats( this->stats );
+      if ( fd2 != -1 && (uint32_t) fd2 <= poll.maxfd &&
+           poll.sock[ fd2 ] != NULL ) {
+        char * tmp =
+          this->console.tmp.make( this->console.tmp.count + 256 );
+        PeerAddrStr paddr;
+        paddr.set_sock_addr( fd2 );
+        int n = ::snprintf( tmp, 256, "%s;%s", paddr.buf,
+                            poll.sock[ fd ]->peer_address.buf );
+        this->local_addr( tmp, (uint32_t) n );
+        poll.sock[ fd2 ]->client_stats( this->stats );
+      }
+      else {
+        this->local_addr( poll.sock[ fd ]->peer_address.buf );
       }
       (this->*put)();
     }
@@ -3107,7 +3176,10 @@ PortOutput::put_show_ports( void ) noexcept
     type = "inbox";
   tab[ i++ ].set( *this->tport, this->tport_id, PRINT_ID );
   tab[ i++ ].set( type ); /* type */
-  tab[ i++ ].set_int( this->rte->uid_connected.cost[ 0 ] ); /* cost */
+  if ( this->rte != NULL && ! this->rte->is_set( TPORT_IS_IPC ) )
+    tab[ i++ ].set_int( this->rte->uid_connected.cost[ 0 ] ); /* cost */
+  else
+    tab[ i++ ].set_null();
   if ( ( this->flags & P_IS_DOWN ) == 0 )
     tab[ i++ ].set_int( this->fd ); /* fd */
   else
@@ -3171,6 +3243,10 @@ Console::show_ports( ConsoleOutput *p, const char *name,  size_t len ) noexcept
         continue;
     }
     PortOutput port( *this, out, (uint32_t) t );
+    port.output( &PortOutput::put_show_ports );
+  }
+  for ( size_t u = 0; u < this->mgr.unrouteable.count; u++ ) {
+    PortOutput port( *this, out, &this->mgr.unrouteable.ptr[ u ] );
     port.output( &PortOutput::put_show_ports );
   }
   static const char *hdr[ ncols ] = { "tport", "type", "cost", "fd", "bs", "br",
@@ -3420,16 +3496,16 @@ Console::show_peers( ConsoleOutput *p ) noexcept
           break;
         }
         case UCAST_URL_STATE:
-          ptp.set( u_ptr->ucast_url, u_ptr->ucast_url_len ); /* ptp */
+          ptp.set( u_ptr->ucast_url.val, u_ptr->ucast_url.len ); /* ptp */
           break;
         case UCAST_URL_SRC_STATE: {
           const UserRoute & u_src = *u_ptr->ucast_src;
           ptp.set_url_dest( &u_src.n, NULL, /* address */
-                            u_src.ucast_url, u_src.ucast_url_len, PRINT_UADDR );
+                        u_src.ucast_url.val, u_src.ucast_url.len, PRINT_UADDR );
           break;
         }
         case MESH_URL_STATE:
-          ptp.set( u_ptr->mesh_url, u_ptr->mesh_url_len ); /* ptp */
+          ptp.set( u_ptr->mesh_url.val, u_ptr->mesh_url.len ); /* ptp */
           break;
       }
     }
@@ -3714,7 +3790,7 @@ Console::show_routes( ConsoleOutput *p ) noexcept
                               MESH_URL_STATE ) ) {
         case MESH_URL_STATE:
           if ( cost == 1 ) {
-            tab[ i++ ].set( u_ptr->mesh_url, u_ptr->mesh_url_len ); /* ptp */
+            tab[ i++ ].set( u_ptr->mesh_url.val, u_ptr->mesh_url.len ); /* ptp */
             break;
           }
           /* fall through */
@@ -3741,7 +3817,7 @@ Console::show_routes( ConsoleOutput *p ) noexcept
           break;
         }
         case UCAST_URL_STATE:
-          tab[ i++ ].set( u_ptr->ucast_url, u_ptr->ucast_url_len ); /* ptp */
+          tab[ i++ ].set( u_ptr->ucast_url.val, u_ptr->ucast_url.len ); /* ptp */
           tab = out.make_row();
 
           mcast_fd = rte->mcast_fd;
@@ -3757,7 +3833,7 @@ Console::show_routes( ConsoleOutput *p ) noexcept
         case UCAST_URL_SRC_STATE: {
           const UserRoute & u_src = *u_ptr->ucast_src;
           tab[ i++ ].set_url_dest( &u_src.n, NULL, /* ptp */
-                          u_src.ucast_url, u_src.ucast_url_len, PRINT_UADDR );
+                        u_src.ucast_url.val, u_src.ucast_url.len, PRINT_UADDR );
           break;
         }
       }
@@ -3824,7 +3900,7 @@ Console::show_urls( ConsoleOutput *p ) noexcept
         case MESH_URL_STATE:
         default:
           if ( u_ptr->is_set( MESH_URL_STATE ) )
-            tab[ i++ ].set( u_ptr->mesh_url, u_ptr->mesh_url_len ); /* ptp */
+            tab[ i++ ].set( u_ptr->mesh_url.val, u_ptr->mesh_url.len ); /* ptp */
           else
             tab[ i++ ].set_null();
           ucast_fd = u_ptr->inbox_fd;
@@ -3844,13 +3920,13 @@ Console::show_urls( ConsoleOutput *p ) noexcept
           break;
 
         case UCAST_URL_STATE:
-          tab[ i++ ].set( u_ptr->ucast_url, u_ptr->ucast_url_len ); /* ptp */
+          tab[ i++ ].set( u_ptr->ucast_url.val, u_ptr->ucast_url.len ); /* ptp */
           /* fallthru */
           if ( 0 ) {
         case UCAST_URL_SRC_STATE:
             const UserRoute & u_src = *u_ptr->ucast_src;
             tab[ i++ ].set_url_dest( &u_src.n, NULL, /* ptp */
-                           u_src.ucast_url, u_src.ucast_url_len, PRINT_UADDR );
+                        u_src.ucast_url.val, u_src.ucast_url.len, PRINT_UADDR );
           }
           ucast_fd = u_ptr->inbox_fd;
           if ( ucast_fd <= poll.maxfd && poll.sock[ ucast_fd ] != NULL ) {
@@ -4045,10 +4121,13 @@ Console::show_path( ConsoleOutput *p,  uint8_t path_select ) noexcept
 {
   static const uint32_t ncols = 4;
   TabOut out( this->table, this->tmp, ncols );
-  AdjDistance & peer_dist = this->user_db.peer_dist;
 
   path_select &= ( COST_PATH_COUNT - 1 );
-  peer_dist.update_path( path_select );
+
+  AdjDistance  & peer_dist = this->user_db.peer_dist;
+  ForwardCache & forward   = this->user_db.forward_path[ path_select ];
+
+  peer_dist.update_path( forward, path_select );
 
   uint32_t count = peer_dist.max_uid;
   for ( uint32_t uid = 1; uid < count; uid++ ) {

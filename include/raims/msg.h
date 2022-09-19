@@ -291,7 +291,9 @@ enum MsgFid {
   FID_CONVERGE       = 71 , /* network convergence stamp */
   FID_REPLY_STAMP    = 72 , /* reply time stamp */
   FID_HB_SKEW        = 73 , /* hb system clock skew */
-  FID_PK_SIG         = 74   /* pk key signature */
+  FID_PK_SIG         = 74 , /* pk key signature */
+  FID_CONN_URL       = 75 , /* connect url spec */
+  FID_CONN_PORT      = 76   /* connect port */
 };
 static const int FID_TYPE_SHIFT = 8,
                  FID_MAX        = 1 << FID_TYPE_SHIFT; /* 256 */
@@ -784,7 +786,9 @@ static FidTypeName fid_type_name[] = {
 { FID_CONVERGE    , U_SHORT | U_INT | U_LONG    , XCL , 0 ,"converge"        },
 { FID_REPLY_STAMP , U_SHORT | U_INT | U_LONG    , XCL , 0 ,"reply_stamp"     },
 { FID_HB_SKEW     , U_SHORT | U_INT | U_LONG    , XCL , 0 ,"hb_skew"         },
-{ FID_PK_SIG      , OPAQUE_64                   , XCL , 0 ,"pk_sig"          }
+{ FID_PK_SIG      , OPAQUE_64                   , XCL , 0 ,"pk_sig"          },
+{ FID_CONN_URL    , SHORT_STRING                , XCL , 0 ,"conn_url"        },
+{ FID_CONN_PORT   , U_SHORT                     , XCL , 0 ,"conn_port"       }
 };
 
 #endif

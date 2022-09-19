@@ -27,6 +27,11 @@ struct StringVal {
       return true;
     return this->equals( sv.val, sv.len );
   }
+  int cmp( const StringVal &sv ) const {
+    if ( sv.id == this->id && this->id != 0 )
+      return 0;
+    return ::strcmp( this->val, sv.val );
+  }
   bool is_null( void ) const {
     return this->len == 0;
   }

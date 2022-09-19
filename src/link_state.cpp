@@ -308,6 +308,11 @@ UserDB::push_user_route( UserBridge &n,  UserRoute &u_rte ) noexcept
                       rte.mesh_csum->to_base64_str( buf ) );
         }
       }
+      else if ( rte.dev_id != NULL ) {
+        rte.uid_in_device->add( n.uid );
+        if ( debug_lnk )
+          n.printf( "add to dev %s\n", rte.transport.tport.val );
+      }
       if ( ! rte.uid_connected.test_set( n.uid ) ) {
         this->peer_dist.invalidate( PUSH_ROUTE_INV );
         this->adjacency_change.append( n.bridge_id.nonce, n.uid, rte.tport_id,
@@ -373,6 +378,11 @@ UserDB::pop_user_route( UserBridge &n,  UserRoute &u_rte ) noexcept
             n.printf( "rm from mesh %s [%s]\n", rte.transport.tport.val,
                       rte.mesh_csum->to_base64_str( buf ) );
         }
+      }
+      else if ( rte.dev_id != NULL ) {
+        rte.uid_in_device->remove( n.uid );
+        if ( debug_lnk )
+          n.printf( "rm from dev %s\n", rte.transport.tport.val );
       }
       if ( rte.is_mcast() && rte.ibx_tport != NULL ) {
         if ( u_rte.is_set( UCAST_URL_STATE ) ) {

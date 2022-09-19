@@ -132,14 +132,12 @@ struct BMsgBufT {
     this->out += HASH_DIGEST_SIZE;
     return (T &) *this;
   }
-#if 0
   T &k( uint8_t opt,  const ed25519_signature &sig ) { /* digest out */
     emit_u16( CLS_OPAQUE_64 | opt );
     sig.copy_to( this->out );
     this->out += ED25519_SIG_LEN;
     return (T &) *this;
   }
-#endif
   T &x( uint8_t opt,  const HmacDigest &hmac,  const Nonce &nonce ) {
     emit_u16( CLS_OPAQUE_32 | opt );
     ::memcpy( this->out, hmac.dig, HMAC_SIZE );
@@ -216,6 +214,8 @@ struct MsgBufDigestT : public BMsgBufT<T> {
     return this->b( FID_UCAST_URL, in, (uint16_t) in_len ); }
   T  & mesh_url   ( const char *in, size_t in_len ) {
     return this->b( FID_MESH_URL, in, (uint16_t) in_len ); }
+  T  & conn_url   ( const char *in, size_t in_len ) {
+    return this->b( FID_CONN_URL, in, (uint16_t) in_len ); }
   T  & tport      ( const char *in, size_t in_len ) {
     return this->b( FID_TPORT, in, (uint16_t) in_len ); }
   T  & tport_type ( const char *in, size_t in_len ) {
@@ -271,6 +271,7 @@ struct MsgBufDigestT : public BMsgBufT<T> {
 
   T  & auth_stage ( uint16_t n )  { return this->i2( FID_AUTH_STAGE, n ); }
   T  & link_add   ( uint8_t n )   { return this->y( FID_LINK_ADD, n ); }
+  T  & conn_port  ( uint16_t n )  { return this->i2( FID_CONN_PORT, n ); }
 
   T  & fd_cnt     ( uint32_t n )  { return this->i( FID_FD_CNT, n ); }
   T  & ms_tot     ( uint64_t n )  { return this->u( FID_MS_TOT, n ); }
@@ -324,7 +325,6 @@ struct MsgBufDigestT : public BMsgBufT<T> {
                  this->out - &this->dig[ HMAC_SIZE ] );
     this->h( FID_PK_DIGEST, hmac );
   }
-#if 0
   void insert_dsa_sig( const HashDigest &pk_ha1,  DSA &dsa ) {
     PolyHmacDigest hmac;
     this->out -= 2 + ED25519_SIG_LEN;
@@ -336,7 +336,6 @@ struct MsgBufDigestT : public BMsgBufT<T> {
     dsa.sign( hmac.digest(), HMAC_SIZE );
     this->k( FID_PK_SIG, dsa.sig );
   }
-#endif
   /* sign the message */
   void sign( const char *sub,  size_t sublen,  const HashDigest &ha1 ) {
     this->insert_subject( sub, sublen );
@@ -349,7 +348,6 @@ struct MsgBufDigestT : public BMsgBufT<T> {
     this->insert_pk_digest( pk_ha2 );
     this->insert_digest( ha1 );
   }
-#if 0
   /* sign a hb message */
   void sign_dsa( const char *sub,  size_t sublen,  const HashDigest &ha1,
                  const HashDigest &key,  DSA &dsa ) {
@@ -357,7 +355,6 @@ struct MsgBufDigestT : public BMsgBufT<T> {
     this->insert_dsa_sig( key, dsa );
     this->insert_digest( ha1 );
   }
-#endif
   void sign_debug( const char *sub,  size_t sublen,  const HashDigest &ha1 ) {
     printf( "sub: %.*s\n", (int) sublen, sub );
     printf( "ha1: " ); ha1.print(); printf( "\n" );
@@ -417,6 +414,7 @@ struct MsgEst {
   MsgEst & reply      ( size_t l ) { sz += fid_est( FID_REPLY, l ); return *this; }
   MsgEst & ucast_url  ( size_t l ) { sz += fid_est( FID_UCAST_URL, l ); return *this; }
   MsgEst & mesh_url   ( size_t l ) { sz += fid_est( FID_MESH_URL, l ); return *this; }
+  MsgEst & conn_url   ( size_t l ) { sz += fid_est( FID_CONN_URL, l ); return *this; }
   MsgEst & tport      ( size_t l ) { sz += fid_est( FID_TPORT, l ); return *this; }
   MsgEst & tport_type ( size_t l ) { sz += fid_est( FID_TPORT_TYPE, l ); return *this; }
   MsgEst & user       ( size_t l ) { sz += fid_est( FID_USER, l ); return *this; }
@@ -461,6 +459,7 @@ struct MsgEst {
 
   MsgEst & auth_stage ( void ) { sz += fid_est( FID_AUTH_STAGE ); return *this; }
   MsgEst & link_add   ( void ) { sz += fid_est( FID_LINK_ADD ); return *this; }
+  MsgEst & conn_port  ( void ) { sz += fid_est( FID_CONN_PORT ); return *this; }
 
   MsgEst & fd_cnt     ( void ) { sz += fid_est( FID_FD_CNT ); return *this; }
   MsgEst & ms_tot     ( void ) { sz += fid_est( FID_MS_TOT ); return *this; }

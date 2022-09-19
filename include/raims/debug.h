@@ -21,16 +21,14 @@ enum DbgFlags {
   MSG_RECV_DBG   =  0x800, /* show msgs recvd */
   MSG_HEX_DBG    = 0x1000, /* show msghex recvd */
   TELNET_DBG     = 0x2000, /* ev_telnet */
-  RV_DBG         = 0x4000,
-  NATS_DBG       = 0x8000,
-  NAME_DBG       = 0x10000
+  NAME_DBG       = 0x4000
 };
 extern int dbg_flags;
 
 #ifdef IMPORT_DEBUG_STRINGS
 static const char *debug_str[] = {
   "tcp", "pgm", "ibx", "transport", "user", "link_state", "peer", "auth",
-  "session", "hb", "sub", "msg_recv", "msg_hex", "telnet", "rv", "nats", "name"
+  "session", "hb", "sub", "msg_recv", "msg_hex", "telnet", "name"
 };
 static const size_t debug_str_count =
   sizeof( debug_str ) / sizeof( debug_str[ 0 ] );
@@ -51,8 +49,6 @@ static const size_t debug_str_count =
 #define debug_msgh kv_unlikely( (dbg_flags & MSG_HEX_DBG   ) != 0 )
 #define debug_msg  ( debug_msgr || debug_msgh )
 #define debug_tel  kv_unlikely( (dbg_flags & TELNET_DBG    ) != 0 )
-#define debug_rv   kv_unlikely( (dbg_flags & RV_DBG        ) != 0 )
-#define debug_nats kv_unlikely( (dbg_flags & NATS_DBG      ) != 0 )
 #define debug_name kv_unlikely( (dbg_flags & NAME_DBG      ) != 0 )
 
 #define d_tcp( ... )  do { if ( debug_tcp  ) printf( __VA_ARGS__ ); } while( 0 )
@@ -67,8 +63,6 @@ static const size_t debug_str_count =
 #define d_hb( ... )   do { if ( debug_hb   ) printf( __VA_ARGS__ ); } while( 0 )
 #define d_sub( ... )  do { if ( debug_sub  ) printf( __VA_ARGS__ ); } while( 0 )
 #define d_tel( ... )  do { if ( debug_tel  ) printf( __VA_ARGS__ ); } while( 0 )
-#define d_rv( ... )   do { if ( debug_rv   ) printf( __VA_ARGS__ ); } while( 0 )
-#define d_nats( ... ) do { if ( debug_nats ) printf( __VA_ARGS__ ); } while( 0 )
 #define d_name( ... ) do { if ( debug_name ) printf( __VA_ARGS__ ); } while( 0 )
 
 }

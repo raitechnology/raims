@@ -95,6 +95,12 @@ enum TransportRouteState {
   TPORT_IS_DEVICE    = 512
 };
 
+enum RvOptions {
+  RV_NO_PERMINENT = 1,
+  RV_NO_HTTP      = 2,
+  RV_NO_MCAST     = 4
+};
+
 struct IpcRte {
   IpcRte                * next,
                         * back;
@@ -136,7 +142,8 @@ struct TransportRoute : public kv::EvSocket, public kv::EvConnectionNotify,
   kv::BitSpace            connected,      /* which fds are connected */
                           connected_auth, /* which fds are authenticated */
                           mesh_connected, /* shared with uid_in_mesh */
-                        * uid_in_mesh;    /* all tports point to one mesh */
+                        * uid_in_mesh,    /* all tports point to one mesh */
+                        * uid_in_device;  /* all tports point to one device */
   AdjacencySpace          uid_connected;  /* which uids are connected */
   Nonce                 * mesh_csum,
                           mesh_csum2,     /* mesh csum of nodes connected */
@@ -152,18 +159,19 @@ struct TransportRoute : public kv::EvSocket, public kv::EvConnectionNotify,
                           connect_count,  /* count of connections */
                           last_connect_count, /* sends hb when new conn */
                           state;          /* TPORT_IS_... */
-  TransportRoute        * mesh_id;        /* mesh listener */
+  TransportRoute        * mesh_id,        /* mesh listener */
+                        * dev_id;         /* device listener */
   kv::EvTcpListen       * listener;       /* the listener if svc */
   ConnectionMgr           connect_mgr;    /* if connnect manager */
   EvPgmTransport        * pgm_tport;      /* if pgm mcast */
   EvInboxTransport      * ibx_tport;      /* if pgm, point-to-point ucast */
-  char                  * ucast_url_addr, /* url address of ucast ptp */
-                        * mesh_url_addr;  /* url address of mesh listener */
-  uint16_t                ucast_url_len,  /* len of urls */
-                          mesh_url_len;
+  StringVal               ucast_url,      /* url address of ucast ptp */
+                          mesh_url,       /* url address of mesh listener */
+                          conn_url;       /* url address of connection */
   uint32_t                inbox_fd,       /* fd of ucast ptp */
                           mcast_fd,       /* fd of mcast pgm */
                           mesh_conn_hash, /* hash of mesh url */
+                          conn_hash,      /* hash of conn url */
                           oldest_uid,     /* which uid is oldest connect */
                           primary_count;
   IpcRteList            * ext;      
@@ -196,15 +204,20 @@ struct TransportRoute : public kv::EvSocket, public kv::EvConnectionNotify,
   virtual bool on_msg( kv::EvPublish &pub ) noexcept;
 
   void create_listener_mesh_url( void ) noexcept;
+  void create_listener_conn_url( void ) noexcept;
   bool create_transport( ConfigTree::Transport &tport ) noexcept;
+  void change_any( const char *type,  NameSvc &name ) noexcept;
 
   void clear_mesh( void ) noexcept;
   bool add_mesh_connect( const char *mesh_url,  uint32_t mesh_hash ) noexcept;
+  bool add_tcp_connect( const char *conn_url,  uint32_t conn_hash ) noexcept;
 
   EvTcpTransportListen *create_tcp_listener(
                                         ConfigTree::Transport &tport ) noexcept;
   bool create_tcp_connect( ConfigTree::Transport &tport ) noexcept;
 
+  void get_tport_service( ConfigTree::Transport &tport,
+                          const char *&service,  size_t &service_len ) noexcept;
   bool create_rv_listener( ConfigTree::Transport &tport ) noexcept;
   bool create_rv_connect( ConfigTree::Transport &tport ) noexcept;
 

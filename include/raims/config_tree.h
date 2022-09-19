@@ -20,6 +20,14 @@ struct ConfigErrPrinter : public ConfigPrinter {
   virtual int printf( const char *fmt,  ... ) noexcept
     __attribute__((format(printf,2,3)));
 };
+struct ConfigFilePrinter : public ConfigPrinter {
+  FILE * fp;
+  ConfigFilePrinter() : fp( 0 ) {}
+  ~ConfigFilePrinter() noexcept;
+  int open( const char *path ) noexcept;
+  void close( void ) noexcept;
+  virtual int printf( const char *fmt,  ... ) noexcept;
+};
 
 enum WhichYaml {
   PRINT_USERS           = 1,
@@ -30,7 +38,8 @@ enum WhichYaml {
   PRINT_NORMAL          = 31,
   PRINT_HDR             = 32,
   PRINT_STARTUP         = 64,
-  PRINT_EXCLUDE_STARTUP = 128
+  PRINT_EXCLUDE_STARTUP = 128,
+  PRINT_ALL             = 256
 };
 
 struct ConfigTree {
@@ -163,6 +172,14 @@ struct ConfigTree {
     bool get_route_bool( const char *name,  bool &value ) {
       return this->route.get_bool( name, value );
     }
+#if 0
+    void set_route_int( StringTab &st,  const char *name, int value ) noexcept;
+    void set_route_bool( StringTab &st,  const char *name,
+                         bool value ) noexcept {
+      this->set_route_str( st, name, value ? "true" : "false",
+                           value ? 4 : 5 );
+    }
+#endif
     static int get_host_port( const char *&hostp,  char *host,
                               size_t &len ) noexcept;
     static bool is_wildcard( const char *host ) noexcept;
@@ -204,6 +221,7 @@ struct ConfigTree {
   TransportList  transports;    /* transports : [ Transport array ] */
   GroupList      groups;        /* groups : [ Group array ] */
   ParametersList parameters;    /* parameters : { string list } */
+  PairList       free_pairs;
   uint32_t       user_cnt,      /* count of user[] */
                  service_cnt,   /* count of service[] */
                  transport_cnt, /* count of transport[] */
@@ -234,8 +252,19 @@ struct ConfigTree {
   User      * find_user( Service &svc,  const char *usr,  size_t len ) noexcept;
   Transport * find_transport( const char *tport,  size_t len,
                               bool *conn = NULL ) noexcept;
+  StringPair* find_parameter_sp( const char *name ) noexcept;
   bool        find_parameter( const char *name,  const char *&value,
                               const char *def_value = NULL ) noexcept;
+  void        set_parameter( StringTab &st,  const char *name,
+                             const char *value ) noexcept;
+  void        set_parameter( StringTab &st,  const char *name, bool value ) {
+    this->set_parameter( st, name, value ? "true" : "false" );
+  }
+  bool        remove_parameter( const char *name ) noexcept;
+  StringPair* get_free_pair( StringTab &st ) noexcept;
+  void set_route_str( ConfigTree::Transport &t,  StringTab &st,
+                      const char *name,  const char *value,
+                      size_t value_len ) noexcept;
   static bool string_to_bytes( const char *s,  uint64_t &bytes ) noexcept;
   static bool string_to_secs( const char *s,  uint64_t &secs ) noexcept;
   static bool string_to_nanos( const char *s,  uint64_t &nanos ) noexcept;

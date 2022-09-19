@@ -185,6 +185,24 @@ CabaMsg::verify_hb( const HashDigest &key ) const noexcept
   return hmac == hmac2;
 }
 
+bool
+CabaMsg::verify_sig( const HashDigest &key,  DSA &dsa ) const noexcept
+{
+  size_t          off = this->msg_off,
+                  end = this->msg_end - ( ED25519_SIG_LEN + 2 );
+  const uint8_t * buf = (uint8_t *) this->msg_buf;
+  static const size_t digest_off = 8 + 2 + NONCE_SIZE + 2;
+  PolyHmacDigest hmac;
+  if ( this->msg_end < 48 + HMAC_SIZE + 2 )
+    return false;
+  dsa.sig.copy_from( &buf[ end + 2 ] );
+  hmac.calc_2( key,
+    /* msg -> digest */ &buf[ off ], digest_off,
+    /* digest -> end */ &buf[ off + digest_off + HMAC_SIZE ],
+                        end - ( off + digest_off + HMAC_SIZE ) );
+  return dsa.verify( hmac.digest(), HMAC_SIZE );
+}
+
 MsgFrameDecoder::MsgFrameDecoder()
 {
   this->init();

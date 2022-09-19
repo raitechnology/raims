@@ -15,7 +15,8 @@
 namespace rai {
 namespace ms {
 
-static const uint32_t HB_DEFAULT_INTERVAL = 10; /* seconds */
+static const uint32_t HB_DEFAULT_INTERVAL = 10, /* seconds */
+                      DEFAULT_RELIABILITY = 15; /* seconds */
 /* random ms mod for pending peer add request (65ms) */
 static const uint64_t PEER_RAND_DELAY_NS  = 64 * 1024 * 1024;
 
@@ -88,21 +89,19 @@ struct UserRoute : public UserStateTest<UserRoute> {
   uint32_t          mcast_fd,      /* fd src, tcp fd or pgm fd */
                     inbox_fd;      /* inbox fd */
   uint16_t          hops,          /* number of links away */
-                    state,         /* whether in route list */
-                    ucast_url_len, /* if has ucast */
-                    mesh_url_len;  /* if has mesh */
+                    state;         /* whether in route list */
   uint32_t          url_hash,      /* hash of ucast_url, mesh_url */
                     hb_seqno;      /* hb sequence on this transport */
   uint64_t          bytes_sent,    /* bytes sent ptp */
                     msgs_sent;     /* msgs sent ptp */
-  char            * ucast_url,     /* the address of a ptp link */
-                  * mesh_url;      /* the address of a mesh link */
+  StringVal         ucast_url,
+                    mesh_url;
   const UserRoute * ucast_src;     /* route through url on another route */
   UserRoute       * next,          /* link in route list */
                   * back;
   void * operator new( size_t, void *ptr ) { return ptr; }
   UserRoute( UserBridge &u,  TransportRoute &r )
-    : n( u ), rte( r ), ucast_url( 0 ), mesh_url( 0 ), next( 0 ), back( 0 ) {
+    : n( u ), rte( r ), next( 0 ), back( 0 ) {
     this->reset();
   }
   bool is_init( void ) const {
@@ -116,21 +115,13 @@ struct UserRoute : public UserStateTest<UserRoute> {
     this->inbox_fd      = NO_RTE;
     this->hops          = NO_HOPS;
     this->state         = IS_INIT_STATE;
-    this->ucast_url_len = 0;
-    this->mesh_url_len  = 0;
+    this->ucast_url.zero();
+    this->mesh_url.zero();
     this->url_hash      = 0;
     this->hb_seqno      = 0;
     this->bytes_sent    = 0;
     this->msgs_sent     = 0;
     this->ucast_src     = NULL;
-    if ( this->ucast_url != NULL ) {
-      ::free( this->ucast_url );
-      this->ucast_url = NULL;
-    }
-    if ( this->mesh_url != NULL ) {
-      ::free( this->mesh_url );
-      this->mesh_url = NULL;
-    }
   }
   void set_ucast( UserDB &user_db,  const void *p,  size_t len,
                   const UserRoute *src ) noexcept;
@@ -142,7 +133,7 @@ struct UserRoute : public UserStateTest<UserRoute> {
 struct UserBridge : public UserStateTest<UserBridge> {
   HashDigest         peer_key,            /* peer session key */
                      peer_hello;
-  const PeerEntry  & peer;                /* configuration entry */
+  PeerEntry        & peer;                /* configuration entry */
   UserNonce          bridge_id;           /* the user hmac and nonce */
   ForwardCache       forward_path[ COST_PATH_COUNT ]; /* which tports to fwd */
   kv::BloomRoute   * bloom_rt[ COST_PATH_COUNT ];
@@ -207,7 +198,7 @@ struct UserBridge : public UserStateTest<UserBridge> {
                      name_recv_time;
   void * operator new( size_t, void *ptr ) { return ptr; }
 
-  UserBridge( const PeerEntry &pentry,  kv::BloomDB &db,  uint32_t seed )
+  UserBridge( PeerEntry &pentry,  kv::BloomDB &db,  uint32_t seed )
       : peer( pentry ), bloom( seed, pentry.user.val, db ) {
     ::memset( this->bloom_rt, 0, sizeof( this->bloom_rt ) );
     this->peer_key.zero();
@@ -351,14 +342,15 @@ struct MeshRoute {
                     url_hash;
   uint64_t          conn_mono_time,
                     start_mono_time;
-  bool              is_connected;
+  bool              is_mesh,
+                    is_connected;
   void * operator new( size_t, void *ptr ) { return ptr; }
   void operator delete( void *ptr ) { ::free( ptr ); }
   MeshRoute( TransportRoute &r,  const char *url,  uint32_t len,
-             uint32_t h,  const Nonce &n )
+             uint32_t h,  const Nonce &n,  bool is_me )
     : next( 0 ), back( 0 ), rte( r ), b_nonce( n ), mesh_url( url ),
       mesh_url_len( len ), url_hash( h ), conn_mono_time( 0 ),
-      start_mono_time( 0 ), is_connected( false ) {}
+      start_mono_time( 0 ), is_mesh( is_me ), is_connected( false ) {}
 };
 
 struct MeshDirectList : public kv::DLinkList< MeshRoute > {
@@ -366,7 +358,8 @@ struct MeshDirectList : public kv::DLinkList< MeshRoute > {
   MeshDirectList() : last_process_mono( 0 ) {}
   /*void update( UserRoute *u ) noexcept;*/
   void update( TransportRoute &rte,  const char *url,  uint32_t len,
-               uint32_t h,  const Nonce &b_nonce ) noexcept;
+               uint32_t h,  const Nonce &b_nonce,
+               bool is_mesh = true ) noexcept;
 };
 
 typedef struct kv::PrioQueue< UserBridge *,
@@ -405,6 +398,8 @@ struct UserDB {
                         start_time;      /* set on initialization, used widely*/
   /* my instance */
   UserNonce             bridge_id;       /* user hmac + session nonce */
+  DSA                 * svc_dsa,
+                      * user_dsa;
   HashDigest          * session_key,     /* session key */
                       * hello_key;       /* svc + user key */
   CnonceRandom        * cnonce;          /* random nonce generator */
@@ -445,6 +440,7 @@ struct UserDB {
 
   /* counters, seqnos */
   uint32_t              hb_interval,     /* seconds between _X.HB publish */
+                        reliability,     /* seconds of send/recv window */
                         next_uid,        /* next_uid available */
                         free_uid_count,  /* num uids freed */
                         my_src_fd,       /* my src fd */
@@ -490,7 +486,7 @@ struct UserDB {
   Obj *make_secure_obj( void ) {
     return new ( this->alloc( sizeof( Obj ) ) ) Obj();
   }
-  UserBridge *make_user_bridge( size_t len,  const PeerEntry &peer,
+  UserBridge *make_user_bridge( size_t len,  PeerEntry &peer,
                                 kv::BloomDB &db,  uint32_t seed ) {
     return new ( this->alloc( len ) ) UserBridge( peer, db, seed );
   }
@@ -586,11 +582,11 @@ struct UserDB {
                        const UserRoute *src ) noexcept;
   UserBridge * add_user( TransportRoute &rte,  const UserRoute *src,
                          uint32_t fd,  const UserNonce &b_nonce,
-                         const PeerEntry &peer,  uint64_t start,
+                         PeerEntry &peer,  uint64_t start,
                          const MsgHdrDecoder &dec,
                          HashDigest &hello ) noexcept;
   UserBridge * add_user2( const UserNonce &user_bridge_id,  
-                          const PeerEntry &peer,  uint64_t start,
+                          PeerEntry &peer,  uint64_t start,
                           HashDigest &hello ) noexcept;
   void set_ucast_url( UserRoute &u_rte, const MsgHdrDecoder &dec ) noexcept;
   void set_mesh_url( UserRoute &u_rte, const MsgHdrDecoder &dec ) noexcept;

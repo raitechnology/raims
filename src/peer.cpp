@@ -37,8 +37,8 @@ UserDB::make_peer_sync_msg( UserBridge &dest,  UserBridge &n,
          svc_len       = n.peer.svc.len,
          create_len    = n.peer.create.len,
          expires_len   = n.peer.expires.len,
-         ucast_url_len = n.user_route->ucast_url_len,
-         mesh_url_len  = n.user_route->mesh_url_len/*,
+         ucast_url_len = n.user_route->ucast_url.len,
+         mesh_url_len  = n.user_route->mesh_url.len/*,
          mesh_db_len   = ( in_mesh ? this->mesh_db_size( rte ) : 0 )*/;
   BloomCodec code;
   n.bloom.encode( code );
@@ -91,9 +91,9 @@ UserDB::make_peer_sync_msg( UserBridge &dest,  UserBridge &n,
    .hb_skew    ( n.hb_skew )
    .bloom      ( code.ptr       , code.code_sz * 4 );
   if ( ucast_url_len != 0 && hops == 0 )
-    m.ucast_url( n.user_route->ucast_url, ucast_url_len );
+    m.ucast_url( n.user_route->ucast_url.val, ucast_url_len );
   if ( mesh_url_len != 0 && in_mesh )
-    m.mesh_url( n.user_route->mesh_url, mesh_url_len );
+    m.mesh_url( n.user_route->mesh_url.val, mesh_url_len );
   this->adjacency_submsg( &n, m );
   /*if ( mesh_db_len != 0 && in_mesh )
     this->mesh_db_submsg( rte, m );*/
@@ -441,8 +441,8 @@ UserDB::make_peer_db_msg( UserBridge &n,  const char *sub,  size_t sublen,
              .hb_skew    ();
 
           if ( u_ptr2->is_valid() )
-            pdb.ucast_url( u_ptr2->ucast_url_len )
-               .mesh_url ( u_ptr2->mesh_url_len  );
+            pdb.ucast_url( u_ptr2->ucast_url.len )
+               .mesh_url ( u_ptr2->mesh_url.len  );
           count++;
         }
       }
@@ -478,10 +478,10 @@ UserDB::make_peer_db_msg( UserBridge &n,  const char *sub,  size_t sublen,
 
           u_ptr2 = n2->user_route_ptr( *this, tport_id );
           if ( u_ptr2->is_valid() ) {
-            if ( u_ptr2->ucast_url_len != 0 && hops == 0 )
-              submsg.ucast_url( u_ptr2->ucast_url, u_ptr2->ucast_url_len );
-            if ( u_ptr2->mesh_url_len != 0 && in_mesh )
-              submsg.mesh_url( u_ptr2->mesh_url, u_ptr2->mesh_url_len );
+            if ( u_ptr2->ucast_url.len != 0 && hops == 0 )
+              submsg.ucast_url( u_ptr2->ucast_url.val, u_ptr2->ucast_url.len );
+            if ( u_ptr2->mesh_url.len != 0 && in_mesh )
+              submsg.mesh_url( u_ptr2->mesh_url.val, u_ptr2->mesh_url.len );
           }
         }
       }
@@ -633,8 +633,8 @@ UserDB::send_peer_add( UserBridge &n,
         }
         this->events.send_add_route( n.uid, (uint32_t) i, hops );
 
-        size_t ucast_url_len = n.user_route->ucast_url_len,
-               mesh_url_len  = n.user_route->mesh_url_len,
+        size_t ucast_url_len = n.user_route->ucast_url.len,
+               mesh_url_len  = n.user_route->mesh_url.len,
                user_len      = n.peer.user.len;
 
         MsgEst e( Z_ADD_SZ );
@@ -660,9 +660,9 @@ UserDB::send_peer_add( UserBridge &n,
          .link_state ( n.link_state_seqno );
 
         if ( ucast_url_len != 0 && hops == 0 )
-          m.ucast_url( n.user_route->ucast_url, ucast_url_len );
+          m.ucast_url( n.user_route->ucast_url.val, ucast_url_len );
         if ( mesh_url_len != 0 && in_mesh )
-          m.mesh_url( n.user_route->mesh_url, mesh_url_len );
+          m.mesh_url( n.user_route->mesh_url.val, mesh_url_len );
 
         m.close( e.sz, add_h, CABA_RTR_ALERT );
         m.sign( Z_ADD, Z_ADD_SZ, *this->session_key );
@@ -868,7 +868,7 @@ UserDB::mesh_db_size( TransportRoute &rte,  MeshDBFilter &filter ) noexcept
           if ( ! is_matched ) {
             e.user    ( n->peer.user.len )
              .bridge2 ()
-             .mesh_url( u_ptr->mesh_url_len );
+             .mesh_url( u_ptr->mesh_url.len );
             filter.return_count++;
           }
         }
@@ -931,7 +931,7 @@ UserDB::mesh_db_submsg( TransportRoute &rte,  MeshDBFilter &filter,
           if ( ! filter.filter_hash( u_ptr->url_hash ) ) {
             s.user    ( n->peer.user.val, n->peer.user.len )
              .bridge2 ( n->bridge_id.nonce )
-             .mesh_url( u_ptr->mesh_url, u_ptr->mesh_url_len );
+             .mesh_url( u_ptr->mesh_url.val, u_ptr->mesh_url.len );
           }
         }
       }
