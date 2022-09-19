@@ -596,6 +596,8 @@ ConfigTree::resolve( const char *us,  User *&usrp,  Service *&svc ) noexcept
     }
   }
   if ( svc == NULL )
+    svc = this->services.hd;
+  if ( svc == NULL )
     fprintf( stderr, "No service %.*s configured\n", (int) s_len, sv );
   /*else if ( usrp == NULL )
     fprintf( stderr, "No user %.*s configured\n", (int) u_len, us );*/
