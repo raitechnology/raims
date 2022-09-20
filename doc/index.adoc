@@ -21,6 +21,8 @@ include::loss.adoc[]
 
 include::protocol.adoc[]
 
+include::rvd.adoc[]
+
 include::console.adoc[]
 
 include::monitoring.adoc[]

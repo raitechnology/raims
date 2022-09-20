@@ -1,0 +1,176 @@
+[[rvd]]
+rvd Compatibility
+-----------------
+
+rvd Arguments
+~~~~~~~~~~~~~
+
+If `ms_server` is started in `rvd` compatible mode, it will automatically start
+a rv protocol on 7500 and a web service on 7580 unless arguments are present
+that modify this.  The protocol that is used between daemons is not compatible
+with `rvd`, but it does allow `rv` clients to connect and communicate.  In
+other words, the client side is compatible, but the network side is not.
+
+These arguments are recognized:
+
+----
+$ ms_server -help
+   -cfg               : config dir/file (default: exe_path/rv.yaml)
+   -reliability       : seconds of reliability (default: 15)
+   -user user.svc     : user name (default: hostname)
+   -log               : log file
+   -log-rotate        : rotate file size limit
+   -log-max-rotations : max log file rotations
+   -no-perminent      : exit when no clients
+   -foreground        : run in foreground
+   -listen            : rv listen port
+   -no-http           : no http service
+   -http              : port for http service (default: listen + 80)
+   -no-mcast          : no multicast
+   -console           : run with console
+----
+
+Service Key Configuration
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Without any arguments, the config file `rv.yaml` is loaded from the directory
+that `ms_server` is installed.  This config file can be generated with the
+`ms_gen_key` program.  It should be the same for each instance that is joining
+the same network and service, since it contains the service key pair that
+authenticates the daemon with other daemons located on the network.
+
+If `ms_server` is installed in `/usr/local/bin` then this can generate the
+default config file for it in `rvd` mode:
+
+----
+$ ms_gen_key -y -s rvd -o /usr/local/bin/rv.yaml
+create dir  config                  -- the configure directory
+create file config/.salt            -- generate new salt
+create file config/.pass            -- generated a new password
+create file config/config.yaml      -- base include file
+create file config/param.yaml       -- parameters file
+create file config/svc_rvd.yaml     -- defines the service and signs users
+done
+- Output config to "/usr/local/bin/rv.yaml"
+----
+
+The `/usr/local/bin/rv.yaml` file must be installed on every machine that
+connects to the network and expects to communicate with the initial machine.
+The contents define the service key pair:
+
+----
+$ cat /usr/local/bin/rv.yaml
+services:
+  - svc: rvd
+    create: 1663653977.579093187
+    pri: QQ5FR17BZktlJnxW/Ln3YExIoq12rf725FEysQwjGJRSNmgskzUA70fQCivq...
+    pub: IskYDB7cvb1TIiaGZQ7ZAtWAlwhvGa/7rEfyiRKVp2U10sH3Yl6Eo19c0J1V...
+parameters:
+  salt_data: hDqyoJ9JSXEEBpiueoNPDEqxy3nsEOt7uoDrSvn4DlSvrLZDNQKG3fmK...
+  pass_data: M+ALrLzVLaf/2OlRd7FTstX6pzAF66KQR86EhCxlwXY
+----
+
+The above service key pair is unique for every `ms_gen_key` execution.  The
+private key is used to sign the authentication messages exchanged between
+daemons, and the public key is used to verify that the peer is allowed to
+exchange messages on the network.  Unauthenticated peers will be ignored.
+
+Starting in rvd Compatibility Mode
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+If the `ms_server` is linked to `rvd` and run that way, it will run in
+compatability mode:
+
+----
+$ ln -s /usr/local/bin/ms_server /usr/local/bin/rvd
+$ /usr/local/bin/rvd
+rvd running at [::]:7500
+web running at [::]:7580
+moving to background daemon
+----
+
+Unless the -foreground or the -console options are used, it forks itself to
+release from the terminal that it is started.  `ms_server` will also run in
+compatibity mode when an argument above is used, for example, `ms_server
+-listen 7501 -http 7581 -reliabilty 60` will run in compatible mode.
+
+If there is already a `rvd` running on port 7500, it will fail to start and
+exit:
+
+----
+$ rvd
+0919 23:13:08.635! rvd.0 listen *:7500 failed
+0919 23:13:08.635! web: failed to start web at *.7580
+----
+
+A HUP signal will cause it to exit:
+
+----
+$ killall -HUP rvd
+----
+
+Connecting to Networks
+~~~~~~~~~~~~~~~~~~~~~~
+
+The network paramenter that the client specifies controls which network that
+the `ms_server` joins.  It can specify a multicast address, tcp connections, or
+a tcp mesh.  Only daemons which connect to the same network will communicate.
+
+The formats of these are:
+
+[options="header"]
+|=============================================
+|   Network          | Description
+| eth0;239.192.0.1   | PGM multicast address
+| eth0;mesh          | Mesh network
+| eth0;tcp.listen    | TCP listen
+| eth0;tcp.connect   | TCP connect
+|=============================================
+
+A mesh network causes all the daemons to connect with one another by listening
+to a random port and multicasting that port to eth0.  When other daemons
+receive this message, they will establish TCP connections with each other
+daemon.
+
+A TCP network causes the listeners to multicast their random ports to eth0.
+When daemons that have tcp.connect as a network receive this message, they will
+connect to the listener.  Multiple TCP listeners can exist on the same network.
+The result of having two "eth0;tcp.listen" specifications and two
+"eth0;tcp.connect" would be that both connectors will establish connections to
+both of the listeners.
+
+The PGM multicast address uses UDP encapsulated multicast on the service port
+using OpenPGM and a UDP point to point protocol for inbox messaging.
+
+The sockets will be bound to the eth0 interface with random ports, except for
+the PGM socket, which uses a wildcard address for joining the multicast and the
+service port for sending messages.  Multiple services can join the same
+network, so -service 7500 and -service 7600 can coexist using the same network
+specification.
+
+When two `ms_server` instances are using the network "eth0;mesh" on service
+7500 and service 7600, the ports console command will show these networks:
+
+----
+host1_7500.rv[+u7D0t7Cf5MP2USlooBtyA]@host1[632]> ports
+   tport  | type | cost | fd | ... |  fl  |                   address
+----------+------+------+----+-----+------+-------------------------------------------
+    rvd.0 |   rv |      | 13 |     |  SLI |                             rv://[::]:7500
+rv_7500.1 | mesh | 1000 | 19 |     | SLXD |                     mesh://10.88.0.2:37277
+rv_7500.2 | mesh | 1000 | 21 |     |    X |        host2_7500.1@mesh://10.88.0.3:37720
+rv_7600.3 | mesh | 1000 | 24 |     | SLXD |                     mesh://10.88.0.2:37109
+rv_7600.4 | mesh | 1000 | 26 |     |    X |        host2_7500.1@mesh://10.88.0.3:42620
+      web |  web |      | 14 |     |    S |                            web://[::]:7580
+10.88.0.2 | name |      | 17 |     |    S |  name://10.88.0.2:59432;239.23.22.217:8327
+----
+
+The Peer Names
+~~~~~~~~~~~~~~
+
+Each `ms_server` instance uses the hostname of the machine to identify itself
+unless the -user argument is used to specify another name.  The daemon port
+is appended to the user name so that multiple daemons appear as hostname_7500
+and hostname_7600 when -listen 7500 and -listen 7600 are used for two different
+daemon instances.
+
+

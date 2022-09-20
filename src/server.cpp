@@ -135,6 +135,7 @@ main( int argc, char *argv[] )
 
   if ( is_rvd ) {
   #define RVD_HELP \
+  "\n" \
   "   -cfg               : config dir/file (default: exe_path/rv.yaml)\n" \
   "   -reliability       : seconds of reliability (default: 15)\n" \
   "   -user user.svc     : user name (default: hostname)\n" \
