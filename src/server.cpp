@@ -135,8 +135,9 @@ main( int argc, char *argv[] )
 
   if ( is_rvd ) {
   #define RVD_HELP \
-  "   -cfg               : config dir/file\n" \
-  "   -reliability       : seconds of reliability\n" \
+  "   -cfg               : config dir/file (default: exe_path/rv.yaml)\n" \
+  "   -reliability       : seconds of reliability (default: 15)\n" \
+  "   -user user.svc     : user name (default: hostname)\n" \
   "   -log               : log file\n" \
   "   -log-rotate        : rotate file size limit\n" \
   "   -log-max-rotations : max log file rotations\n" \
@@ -144,11 +145,12 @@ main( int argc, char *argv[] )
   "   -foreground        : run in foreground\n" \
   "   -listen            : rv listen port\n" \
   "   -no-http           : no http service\n" \
-  "   -http              : port for http service\n" \
+  "   -http              : port for http service (default: listen + 80)\n" \
   "   -no-mcast          : no multicast\n" \
   "   -console           : run with console\n"
     cfg         = get_arg( argc, argv, 1, "-cfg", rv_file );
     reliability = get_arg( argc, argv, 1, "-reliability", NULL );
+    user        = get_arg( argc, argv, 1, "-user", NULL );
     log_file    = get_arg( argc, argv, 1, "-log", NULL );
     if ( log_file == NULL )
       log_file = get_arg( argc, argv, 1, "-logfile", NULL );
@@ -171,7 +173,7 @@ main( int argc, char *argv[] )
   #define MS_SERVER_HELP \
   "[-d dir] [-a file] -u user.svc -t tport.listen [...]\n" \
   "   -d dir        : config dir/file (default: config)\n" \
-  "   -u user.svc   : user + service name\n" \
+  "   -u user.svc   : user name (default: hostname)\n" \
   "   -t tport.list : transport name + listen or connect\n" \
   "   -l file       : log to file\n" \
   "   -f flags      : debug flags to set\n" \
