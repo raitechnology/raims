@@ -23,7 +23,7 @@ EvRvTransportListen::EvRvTransportListen( kv::EvPoll &p,
                                           TransportRoute &r ) noexcept
     : EvRvListen( p, r.sub_route ), rte( r ),
       last_active_mono( 0 ), active_cnt( 0 ), no_mcast( false ),
-      no_perminent( false )
+      no_permanent( false )
 {
   static kv_atom_uint64_t rv_timer_id;
   this->notify = &r;
@@ -46,7 +46,7 @@ EvRvTransportListen::listen( const char *ip,  int port,  int opts ) noexcept
   int res = this->EvRvListen::listen( ip, port, opts );
   if ( res == 0 ) {
     this->rte.set_peer_name( *this, "rv.list" );
-    if ( this->no_perminent ) {
+    if ( this->no_permanent ) {
       this->poll.timer.add_timer_seconds( this->fd, RV_TIMEOUT_SECS,
                                           this->timer_id, RV_START_TIMER );
     }
@@ -393,7 +393,7 @@ EvRvTransportListen::stop_host( RvHost &host ) noexcept
     hr->last_active_mono = cur_mono;
     hr->is_active = false;
   }
-  if ( --this->active_cnt == 0 && this->no_perminent ) {
+  if ( --this->active_cnt == 0 && this->no_permanent ) {
     this->last_active_mono = cur_mono;
     this->poll.timer.add_timer_seconds( this->fd, RV_TIMEOUT_SECS,
                                         this->timer_id, RV_STOP_TIMER );

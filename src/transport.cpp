@@ -283,9 +283,9 @@ SessionMgr::add_rvd_transports( const char *listen,  const char *http,
       stab.ref_string( "true", 4, p->value );
       rvd->route.push_tl( p );
     }
-    if ( ( flags & RV_NO_PERMINENT ) != 0 ) {
+    if ( ( flags & RV_NO_PERMANENT ) != 0 ) {
       p = stab.make<ConfigTree::StringPair>();
-      stab.ref_string( "no_perminent", 12, p->name );
+      stab.ref_string( "no_permanent", 12, p->name );
       stab.ref_string( "true", 4, p->value );
       rvd->route.push_tl( p );
     }
@@ -831,6 +831,8 @@ parse_tcp_param( EvTcpTransportParameters &parm,  ConfigTree::Transport &tport,
     parm.opts = ( parm.opts & ~OPT_AF_INET6 ) | OPT_AF_INET;
   else if ( ip4 )
     parm.opts = ( parm.opts & ~OPT_AF_INET ) | OPT_AF_INET6;
+  if ( ( ptype & P_LISTEN ) != 0 )
+    parm.opts |= kv::OPT_REUSEADDR;
   if ( ( ptype & P_REUSEPORT ) != 0 )
     parm.opts |= kv::OPT_REUSEPORT;
   else
@@ -1567,8 +1569,8 @@ TransportRoute::create_rv_listener( ConfigTree::Transport &tport ) noexcept
   bool b;
   if ( tport.get_route_bool( "use_service_prefix", b ) )
     l->has_service_prefix = b;
-  if ( tport.get_route_bool( "no_perminent", b ) )
-    l->no_perminent = b;
+  if ( tport.get_route_bool( "no_permanent", b ) )
+    l->no_permanent = b;
   if ( tport.get_route_bool( "no_mcast", b ) )
     l->no_mcast = b;
   this->start_listener( l, tport );

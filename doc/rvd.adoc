@@ -125,6 +125,8 @@ The formats of these are:
 | eth0;mesh          | Mesh network
 | eth0;tcp.listen    | TCP listen
 | eth0;tcp.connect   | TCP connect
+| eth0               | ANY connect
+| (empty)            | no network
 |=============================================
 
 A mesh network causes all the daemons to connect with one another by listening
@@ -163,6 +165,16 @@ rv_7600.4 | mesh | 1000 | 26 |     |    X |        host2_7500.1@mesh://10.88.0.3
       web |  web |      | 14 |     |    S |                            web://[::]:7580
 10.88.0.2 | name |      | 17 |     |    S |  name://10.88.0.2:59432;239.23.22.217:8327
 ----
+
+The ANY specifier can either connect to a mesh or a TCP listener, depending
+which is present.
+
+The empty network does not attept to connect to anything, but it will find
+other services through existing connections.
+
+If there exists a rv_7500 transport in the configuration (configured in rv.yaml
+or the -cfg argument), this overrides any client specified network connection
+for service 7500, so the client network argument is ignored.
 
 The Peer Names
 ~~~~~~~~~~~~~~

@@ -96,7 +96,7 @@ enum TransportRouteState {
 };
 
 enum RvOptions {
-  RV_NO_PERMINENT = 1,
+  RV_NO_PERMANENT = 1,
   RV_NO_HTTP      = 2,
   RV_NO_MCAST     = 4
 };

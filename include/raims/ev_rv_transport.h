@@ -61,7 +61,7 @@ struct EvRvTransportListen : public sassrv::EvRvListen {
   uint64_t         last_active_mono;
   uint32_t         active_cnt;
   bool             no_mcast,
-                   no_perminent;
+                   no_permanent;
   EvRvTransportListen( kv::EvPoll &p,  TransportRoute &r ) noexcept;
 
   ConfigTree::Transport *get_rv_transport( sassrv::RvHost &host,

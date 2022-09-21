@@ -116,13 +116,18 @@ main( int argc, char *argv[] )
   program = ( program != NULL ? program + 1 : argv[ 0 ] );
   bool is_rvd = ::strcmp( program, "rvd" ) == 0;
   char path[ 1024 ];
-  ::readlink( "/proc/self/exe", path, sizeof( path ) );
-  if ( is_rvd ) {
+  ssize_t n = ::readlink( "/proc/self/exe", path, sizeof( path ) );
+  path[ sizeof( path ) - 1 ] = '\0';
+  if ( n > 0 && (size_t) n < sizeof( path ) - 1 ) {
     char * slash = ::strrchr( path, '/' );
-    if ( slash != NULL && &slash[ 8 ] <= &path[ 1024 ] ) {
+    if ( slash != NULL && &slash[ 9 ] <= &path[ 1024 ] ) {
       ::memcpy( slash+1, "rv.yaml", 8 );
       rv_file = path;
     }
+  }
+  if ( rv_file == NULL ) {
+    fprintf( stderr, "exe path length bad: %ld\n", n );
+    return 1;
   }
   if ( ! is_rvd ) {
     for ( int i = 1; i < argc; i++ ) {
@@ -142,7 +147,7 @@ main( int argc, char *argv[] )
   "   -log               : log file\n" \
   "   -log-rotate        : rotate file size limit\n" \
   "   -log-max-rotations : max log file rotations\n" \
-  "   -no-perminent      : exit when no clients\n" \
+  "   -no-permanent      : exit when no clients\n" \
   "   -foreground        : run in foreground\n" \
   "   -listen            : rv listen port\n" \
   "   -no-http           : no http service\n" \
@@ -159,7 +164,7 @@ main( int argc, char *argv[] )
     if ( log_rotate == NULL )
       log_rotate = get_arg( argc, argv, 1, "-log-max-size", NULL );
     log_max_rot = get_arg( argc, argv, 1, "-log-max-rotations", NULL );
-    no_perm     = get_arg( argc, argv, 0, "-no-perminent", NULL );
+    no_perm     = get_arg( argc, argv, 0, "-no-permanent", NULL );
     foreground  = get_arg( argc, argv, 0, "-foreground", NULL );
     listen      = get_arg( argc, argv, 1, "-listen", "7500" );
     no_http     = get_arg( argc, argv, 0, "-no-http", NULL );
@@ -366,7 +371,7 @@ main( int argc, char *argv[] )
     if ( ! sess.add_startup_transports() )
       status = -1;
     if ( is_rvd && status == 0 ) {
-      int flags = ( no_perm ? RV_NO_PERMINENT : 0 ) |
+      int flags = ( no_perm ? RV_NO_PERMANENT : 0 ) |
                   ( no_http ? RV_NO_HTTP : 0 ) |
                   ( no_mcast ? RV_NO_MCAST : 0 );
       if ( ! sess.add_rvd_transports( listen, http, flags ) )
