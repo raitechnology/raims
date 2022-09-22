@@ -53,6 +53,8 @@ struct ec25519_key : public KeyT<ec25519_key, EC25519_KEY_LEN> {
 struct EC25519 {
   ec25519_key pub, pri, secret;
 
+  void * operator new( size_t, void *ptr ) { return ptr; }
+  EC25519() {}
   void zero( void ) volatile {
     this->pub.zero();
     this->pri.zero();

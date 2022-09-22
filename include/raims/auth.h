@@ -15,9 +15,9 @@ namespace ms {
 struct MsgHdrDecoder;
 struct TransportRoute;
 struct StageAuth {
-  Nonce    cnonce; /* the challenge nonce */
-  uint64_t seqno;  /* seqno of hb or auth message */
-  uint64_t time;   /* time of hb or auth message */
+  Nonce       cnonce; /* the challenge nonce */
+  uint64_t    seqno;  /* seqno of hb or auth message */
+  uint64_t    time;   /* time of hb or auth message */
 
   StageAuth& operator=( const StageAuth &x ) {
     this->cnonce = x.cnonce;

@@ -80,7 +80,7 @@ The listen and connect addresses act similarily, two peers using different
 methods will communicate if the multicast send address matches one of the
 receive addresses and the inboxes are connected.
 
-[options="header"]
+[%autowidth,options="header",grid="cols",stripes="even"]
 |======================================================
 | Field      |   Default    | Description              
 | listen     | ;239.192.0.1 | Multicast address        
@@ -117,7 +117,7 @@ The timeout parameter causes the connecting peer to retry for this amount of
 time.  When the timeout expires, the transport will not try to connect until
 told to do so again.
 
-[options="header"]
+[%autowidth,options="header",grid="cols",stripes="even"]
 |======================================================
 | Field      |   Default    | Description              
 | listen     | *            | Passive listener         
@@ -147,7 +147,7 @@ the passive peer to pool the connections on a single transport, similar to
 a multicast transport.  This should only be done when the connectors do not
 route messages, they only have one connection to the network.
 
-[options="header"]
+[%autowidth,options="header",grid="cols",stripes="even"]
 |======================================================
 | Field      |   Default    | Description              
 | listen     | *            | Passive listener         
@@ -196,7 +196,7 @@ service 7600, they will route publishes to each other.  The only way to
 segregate RV traffic by service number is to run multiple instances of the
 Rai MS `ms_server`.
 
-[options="header"]
+[%autowidth,options="header",grid="cols",stripes="even"]
 |======================================================
 | Field      |   Default    | Description              
 | listen     | *            | Passive listener  
@@ -223,7 +223,7 @@ only the pub/sub and queue groups.  NATS does not have an inbox point-to-point
 publish scheme, it relies on the client to create a unique subject for this
 functionality.
 
-[options="header"]
+[%autowidth,options="header",grid="cols",stripes="even"]
 |======================================================
 | Field      |   Default    | Description              
 | listen     | *            | Passive listener  
@@ -252,7 +252,7 @@ available when a shared memory key value segment created and passed as an
 argment to the server (example: -m sysv:raikv.shm), or defined as a value in
 the parameters section of the config (example: map: "sysv:raikv.shm").
 
-[options="header"]
+[%autowidth,options="header",grid="cols",stripes="even"]
 |======================================================
 | Field      |   Default    | Description              
 | listen     | *            | Passive listener  
@@ -278,8 +278,7 @@ by network configuration tools to install a configuration remotely.  A telnet
 client signals the service that it has terminal capabilities which enables
 command line editing.  
 
-
-[options="header"]
+[%autowidth,options="header",grid="cols",stripes="even"]
 |======================================================
 | Field      |   Default    | Description              
 | listen     | *            | Passive listener  
@@ -304,7 +303,7 @@ application that can be used to graph activity and show internal tables.  The
 web application is compiled into the server, so no external file access is
 necessary.
 
-[options="header"]
+[%autowidth,options="header",grid="cols",stripes="even"]
 |======================================================
 | Field      |   Default    | Description              
 | listen     | *            | Passive listener  

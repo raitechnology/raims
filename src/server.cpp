@@ -222,8 +222,10 @@ main( int argc, char *argv[] )
     ::setvbuf( stderr, NULL, _IOLBF, 1024 );
     Console::log_header( STDERR_FILENO );
   }
-  if ( debug != NULL )
-    dbg_flags = (int) string_to_uint64( debug, ::strlen( debug ) );
+  if ( debug != NULL ) {
+    int dbg_dist = 0; /* dummy arg, can't set this yet */
+    Console::parse_debug_flags( debug, ::strlen( debug ), dbg_dist );
+  }
   MDMsgMem         mem;
   StringTab        st( mem );
   ConfigErrPrinter err;

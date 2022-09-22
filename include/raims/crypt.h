@@ -26,6 +26,7 @@
  */
 #include <raikv/key_hash.h>
 #include <raims/poly1305.h>
+#include <raims/ec25519.h>
 #include <raikv/util.h>
 #include <raikv/atom.h>
 

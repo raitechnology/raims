@@ -37,6 +37,7 @@ UserDB::make_hb( TransportRoute &rte,  const char *sub,  size_t sublen,
    .start     ()
    .interval  ()
    .cnonce    ()
+   .pubkey    ()
    .sub_seqno ()
    .link_state()
    .converge  ()
@@ -66,6 +67,7 @@ UserDB::make_hb( TransportRoute &rte,  const char *sub,  size_t sublen,
   if ( h != bye_h ) {
     m.interval  ( this->hb_interval      )
      .cnonce    ( rte.hb_cnonce          )
+     .pubkey    ( this->hb_keypair->pub  )
      .sub_seqno ( this->sub_db.sub_seqno )
      .user      ( this->user.user.val,
                   this->user.user.len    )
@@ -199,17 +201,19 @@ bool
 UserDB::on_heartbeat( const MsgFramePublish &pub,  UserBridge &n,
                       MsgHdrDecoder &dec ) noexcept
 {
-  Nonce    cnonce;
-  uint64_t time, seqno, uptime, start, old_hb_seqno, current_mono_time;
-  uint32_t cost[ COST_PATH_COUNT ] = { COST_DEFAULT, COST_DEFAULT,
-                                       COST_DEFAULT, COST_DEFAULT },
+  Nonce       cnonce;
+  ec25519_key pubkey;
+  uint64_t    time, seqno, uptime, start, old_hb_seqno, current_mono_time;
+  uint32_t    cost[ COST_PATH_COUNT ] = { COST_DEFAULT, COST_DEFAULT,
+                                          COST_DEFAULT, COST_DEFAULT },
            ival;
   if ( ! dec.get_ival<uint64_t>( FID_UPTIME, uptime ) ||
        ! dec.get_ival<uint64_t>( FID_SEQNO, seqno ) ||
        ! dec.get_ival<uint64_t>( FID_TIME, time ) ||
        ! dec.get_ival<uint64_t>( FID_START, start ) ||
        ! dec.get_ival<uint32_t>( FID_INTERVAL, ival ) ||
-       ! dec.get_nonce( FID_CNONCE, cnonce ) )
+       ! dec.get_nonce( FID_CNONCE, cnonce ) ||
+       ! dec.get_pubkey( FID_PUBKEY, pubkey ) )
     return true;
 
   uint64_t cur_time = current_realtime_ns();
@@ -284,6 +288,7 @@ UserDB::on_heartbeat( const MsgFramePublish &pub,  UserBridge &n,
     current_mono_time = current_monotonic_time_ns();
     n.hb_mono_time    = current_mono_time;
     n.hb_cnonce       = cnonce;
+    n.hb_pubkey       = pubkey;
     /*n.printf( "HB %.*s\n", (int) pub.subject_len, pub.subject );*/
     /* challenge the peer for auth, both client and server use this */
     if ( ! n.is_set( AUTHENTICATED_STATE | CHALLENGE_STATE ) ) {
@@ -319,7 +324,7 @@ UserDB::on_heartbeat( const MsgFramePublish &pub,  UserBridge &n,
       }
       if ( do_challenge ) {
         this->compare_version( n, dec );
-        n.auth[ 0 ].construct( n.hb_time, n.hb_seqno, n.hb_cnonce );
+        n.auth[ 0 ].construct( time, seqno, cnonce );
         n.auth[ 1 ].construct( cur_time, ++n.send_inbox_seqno,
                                this->cnonce->calc() );
         this->send_challenge( n, AUTH_FROM_HELLO );

@@ -209,6 +209,32 @@ Console::rotate_log( void ) noexcept
   return true;
 }
 
+void
+Console::parse_debug_flags( const char *arg,  size_t len,
+                            int &dist_dbg ) noexcept
+{
+  dbg_flags        = 0;
+  kv_pub_debug     = 0;
+  kv_ps_debug      = 0;
+  sassrv::rv_debug = 0;
+
+  for ( size_t i = 0; i < debug_str_count; i++ ) {
+    size_t dlen = ::strlen( debug_str[ i ] );
+    if ( ::memmem( arg, len, debug_str[ i ], dlen ) != NULL )
+      dbg_flags |= ( 1 << i );
+  }
+  if ( len >= 4 && ::memmem( arg, len, "dist", 4 ) != NULL )
+    dist_dbg = 1;
+  if ( len >= 2 && ::memmem( arg, len, "kvpub", 5 ) != NULL )
+    kv_pub_debug = 1;
+  if ( len >= 4 && ::memmem( arg, len, "kvps", 4 ) != NULL )
+    kv_ps_debug = 1;
+  if ( len >= 2 && ::memmem( arg, len, "rv", 2 ) != NULL )
+    sassrv::rv_debug = 1;
+  if ( dbg_flags == 0 && len > 0 && arg[ 0 ] >= '0' && arg[ 0 ] <= '9' )
+    dbg_flags = (int) string_to_uint64( arg, len );
+}
+
 char *
 cat_prompt( char *p,  char *e,  const char *s1,  const char *s2 = NULL,
             const char *s3 = NULL ) noexcept
@@ -1843,31 +1869,12 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
     case CMD_SHOW_GRAPH:     this->show_graph( p ); break;
 
     case CMD_DEBUG: {
-      int dist_dbg = 0;
+      int    dist_dbg = 0;
+      char   buf[ 80 ];
+      size_t sz = 0;
       if ( len == 0 )
         goto help;
-      dbg_flags        = 0;
-      kv_pub_debug     = 0;
-      kv_ps_debug      = 0;
-      sassrv::rv_debug = 0;
-
-      for ( size_t i = 0; i < debug_str_count; i++ ) {
-        size_t dlen = ::strlen( debug_str[ i ] );
-        if ( ::memmem( arg, len, debug_str[ i ], dlen ) != NULL )
-          dbg_flags |= ( 1 << i );
-      }
-      if ( len >= 4 && ::memmem( arg, len, "dist", 4 ) != NULL )
-        dist_dbg = 1;
-      if ( len >= 2 && ::memmem( arg, len, "kvpub", 5 ) != NULL )
-        kv_pub_debug = 1;
-      if ( len >= 4 && ::memmem( arg, len, "kvps", 4 ) != NULL )
-        kv_ps_debug = 1;
-      if ( len >= 2 && ::memmem( arg, len, "rv", 2 ) != NULL )
-        sassrv::rv_debug = 1;
-      if ( dbg_flags == 0 && len > 0 && arg[ 0 ] >= '0' && arg[ 0 ] <= '9' )
-        dbg_flags = (int) string_to_uint64( arg, len );
-      char buf[ 80 ];
-      size_t sz = 0;
+      parse_debug_flags( arg, len, dist_dbg );
       for ( size_t i = 0; i < debug_str_count; i++ ) {
         if ( ( dbg_flags & ( 1 << i ) ) != 0 ) {
           if ( sz > 0 )

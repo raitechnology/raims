@@ -553,6 +553,8 @@ struct Console : public md::MDOutput, public SubOnMsg, public ConfigPrinter {
   bool open_log( const char *fn,  bool add_hdr ) noexcept;
   static bool log_header( int fd ) noexcept;
   bool rotate_log( void ) noexcept;
+  static void parse_debug_flags( const char *arg,  size_t len,
+                                 int &dist_dbg ) noexcept;
   size_t make_prompt( const char *where = NULL,  size_t wsz = 0 ) noexcept;
   void update_prompt( const char *where = NULL,  size_t wsz = 0 ) noexcept;
   void change_prompt( const char *where = NULL,  size_t wsz = 0 ) noexcept;
@@ -962,9 +964,10 @@ static const ConsoleCmdString help_cmd[] = {
   { CMD_MUTE_LOG         , "mute","",            "Mute the log output"                               },
   { CMD_UNMUTE_LOG       , "unmute","",          "Unmute the log output"                             },
   { CMD_DEBUG            , "debug","[I]",        "Set debug flags to ival I, bit mask of:\n"
-                           " 1=tcp,     2=pgm,      4=inbox,  8=tport,   0x10=user,  0x20=link, 0x40=peer,\n"
-                           " 0x80=auth, 0x100=sess, 0x200=hb, 0x400=sub, 0x800=mrcv, 0x1000=msghex,\n"
-                           " 0x2000=telnet, 0x4000=name, dist, kvpub, kvps, rv"                      },
+                           " 1=tcp,  2=pgm,  4=ibx,  8=transport,  0x10=user,  0x20=link_state,\n"
+                           " 0x40=peer,  0x80=auth,  0x100=session,  0x200=hb,  0x400=sub,\n"
+                           " 0x800=msg_recv,  0x1000=msg_hex,  0x2000=telnet,  0x4000=name,\n"
+                           " dist,  kvpub,  kvps,  rv"                                               },
   { CMD_QUIT             , "quit/exit","",       "Exit console"                                      }
 };
 

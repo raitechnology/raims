@@ -142,6 +142,7 @@ struct UserBridge : public UserStateTest<UserBridge> {
   AdjacencyTab       adjacency;           /* what nonce routes are adjacent */
   Nonce              uid_csum,            /* current xor of adjacency */
                      hb_cnonce;           /* last cnonce used for hb */
+  ec25519_key        hb_pubkey;           /* last pubkey used for hb */
   UserRoute        * user_route;          /* the routes for this user */
   uint32_t           state,               /* UserNonceState bits */
                      uid,                 /* unique id for route */
@@ -205,6 +206,7 @@ struct UserBridge : public UserStateTest<UserBridge> {
     this->peer_hello.zero();
     this->uid_csum.zero();
     this->hb_cnonce.zero();
+    this->hb_pubkey.zero();
     ::memset( &this->user_route , 0,
               (char *) (void *) &this[ 1 ] -
               (char *) (void *) &this->user_route );
@@ -403,6 +405,7 @@ struct UserDB {
   HashDigest          * session_key,     /* session key */
                       * hello_key;       /* svc + user key */
   CnonceRandom        * cnonce;          /* random nonce generator */
+  EC25519             * hb_keypair;      /* session keypair for auth */
   Nonce                 uid_csum;        /* xor of link_state nonces */
 
   /* indexes of node instances */

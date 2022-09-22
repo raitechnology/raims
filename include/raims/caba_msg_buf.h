@@ -138,6 +138,12 @@ struct BMsgBufT {
     this->out += ED25519_SIG_LEN;
     return (T &) *this;
   }
+  T &k( uint8_t opt,  const ec25519_key &key ) { /* digest out */
+    emit_u16( CLS_OPAQUE_32 | opt );
+    key.copy_to( this->out );
+    this->out += EC25519_KEY_LEN;
+    return (T &) *this;
+  }
   T &x( uint8_t opt,  const HmacDigest &hmac,  const Nonce &nonce ) {
     emit_u16( CLS_OPAQUE_32 | opt );
     ::memcpy( this->out, hmac.dig, HMAC_SIZE );
@@ -203,6 +209,8 @@ struct MsgBufDigestT : public BMsgBufT<T> {
     return this->k( FID_AUTH_KEY, key ); }
   T  & sess_key   ( const HashDigest &key ) {
     return this->k( FID_SESS_KEY, key ); }
+  T  & pubkey     ( const ec25519_key &key ) {
+    return this->k( FID_PUBKEY, key ); }
 
   T  & subject    ( const char *in, size_t in_len ) {
     return this->b( FID_SUBJECT, in, (uint16_t) in_len ); }
@@ -393,6 +401,7 @@ static inline size_t fid_est( uint32_t fid ) {
     case FID_AUTH_KEY:
     case FID_SESS_KEY:    return 2 + HASH_DIGEST_SIZE;
     case FID_PK_SIG:      return 2 + ED25519_SIG_LEN;
+    case FID_PUBKEY:      return 2 + EC25519_KEY_LEN;
     default:              return 2 +  8; /* 64 bit int */
   }
 }
@@ -408,6 +417,7 @@ struct MsgEst {
   MsgEst & user_hmac  ( void ) { sz += fid_est( FID_USER_HMAC ); return *this; }
   MsgEst & auth_key   ( void ) { sz += fid_est( FID_AUTH_KEY ); return *this; }
   MsgEst & sess_key   ( void ) { sz += fid_est( FID_SESS_KEY ); return *this; }
+  MsgEst & pubkey     ( void ) { sz += fid_est( FID_PUBKEY ); return *this; }
 
   MsgEst & subject    ( size_t l ) { sz += fid_est( FID_SUBJECT, l ); return *this; }
   MsgEst & pattern    ( size_t l ) { sz += fid_est( FID_PATTERN, l ); return *this; }

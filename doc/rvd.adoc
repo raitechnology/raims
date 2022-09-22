@@ -118,7 +118,7 @@ a tcp mesh.  Only daemons which connect to the same network will communicate.
 
 The formats of these are:
 
-[options="header"]
+[%autowidth,options="header",grid="cols",stripes="even"]
 |=============================================
 |   Network          | Description
 | eth0;239.192.0.1   | PGM multicast address

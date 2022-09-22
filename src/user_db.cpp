@@ -18,9 +18,9 @@ UserDB::UserDB( EvPoll &p,  ConfigTree::User &u,
                 StringTab &st,  EventRecord &ev ) noexcept
   : ipc_transport( 0 ), poll( p ), user( u ), svc( s ), sub_db( sdb ),
     string_tab( st ), events( ev ), svc_dsa( 0 ), user_dsa( 0 ),
-    session_key( 0 ), hello_key( 0 ), cnonce( 0 ), node_ht( 0 ),
-    zombie_ht( 0 ), peer_ht( 0 ), peer_key_ht( 0 ), peer_keys( 0 ),
-    peer_bloom( 0, "(peer)", p.g_bloom_db ),
+    session_key( 0 ), hello_key( 0 ), cnonce( 0 ), hb_keypair( 0 ),
+    node_ht( 0 ), zombie_ht( 0 ), peer_ht( 0 ), peer_key_ht( 0 ),
+    peer_keys( 0 ), peer_bloom( 0, "(peer)", p.g_bloom_db ),
     hb_interval( HB_DEFAULT_INTERVAL ), reliability( DEFAULT_RELIABILITY ),
     next_uid( 0 ), free_uid_count( 0 ), my_src_fd( -1 ), uid_auth_count( 0 ),
     uid_hb_count( 0 ), send_peer_seqno( 0 ), link_state_seqno( 0 ),
@@ -65,7 +65,9 @@ UserDB::init( const CryptPass &pwd,  uint32_t my_fd,
   this->session_key  = this->make_secure_obj<HashDigest>();
   this->hello_key    = this->make_secure_obj<HashDigest>();
   this->cnonce       = this->make_secure_obj<CnonceRandom>();
+  this->hb_keypair   = this->make_secure_obj<EC25519>();
   this->peer_keys    = this->make_secure_obj<PeerKeyCache>();
+  this->hb_keypair->gen_key();
   if ( ! this->my_svc.get_dsa( pwd, *this->svc_dsa, DO_BOTH ) ) {
     printf( "service %s public key loaded\n", this->my_svc.service );
     this->svc_dsa->sk.zero();
@@ -191,14 +193,32 @@ void
 UserDB::calc_secret_hmac( UserBridge &n,  PolyHmacDigest &secret_hmac ) noexcept
 {
   HashDigest ha;
+  EC25519 ec;
+  ec.pri = this->hb_keypair->pri;
+  ec.pub = n.hb_pubkey;
+  ec.shared_secret();
+
   if ( n.peer_hello < *this->hello_key ) {
     ha.kdf_bytes( this->hello_key->dig, HASH_DIGEST_SIZE );
-    secret_hmac.calc_off( ha, 0, n.peer_hello.dig, HASH_DIGEST_SIZE );
+    secret_hmac.calc_2( ha, n.peer_hello.dig, HASH_DIGEST_SIZE,
+                            ec.secret.key, EC25519_KEY_LEN );
   }
   else {
     ha.kdf_bytes( n.peer_hello.dig, HASH_DIGEST_SIZE );
-    secret_hmac.calc_off( ha, 0, this->hello_key->dig, HASH_DIGEST_SIZE );
+    secret_hmac.calc_2( ha, this->hello_key->dig, HASH_DIGEST_SIZE,
+                            ec.secret.key, EC25519_KEY_LEN );
   }
+
+#if 0
+  char buf[ EC25519_KEY_B64_LEN + 1 ];
+  buf[ EC25519_KEY_B64_LEN ] = '\0';
+  kv::bin_to_base64( ec.pri.key, EC25519_KEY_LEN, buf, false );
+  printf( "pri: %s\n", buf );
+  kv::bin_to_base64( ec.pub.key, EC25519_KEY_LEN, buf, false );
+  printf( "pub: %s\n", buf );
+  kv::bin_to_base64( ec.secret.key, EC25519_KEY_LEN, buf, false );
+  printf( "secret: %s\n", buf );
+#endif
 }
 
 bool
@@ -379,6 +399,7 @@ UserDB::release( void ) noexcept
   this->bridge_id.zero();
   this->session_key = NULL;
   this->cnonce      = NULL;
+  this->hb_keypair  = NULL;
   this->uid_csum.zero();
   this->release_alloc();
 }

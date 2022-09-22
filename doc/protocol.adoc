@@ -1,4 +1,208 @@
 Protocol
 --------
 
-Protocol.
+Type Length Value
+~~~~~~~~~~~~~~~~~
+
+Each field in a message is encoded with a type and length.  This allows new
+fields to be added without disrupting the message parsing.  The first 16 bits
+encodes the type, length and field id.  The rest of the field encodes the
+value.  All integers are encoded in big endian.
+
+----
+fid = BRIDGE(3), type = OPAQUE_16(4) ( opaque 16 bytes )            144
+|-+-+-+-+-+-+-+-|-+-+-+-+-+-+-+-|-+-+-+-+-+-+-+-|-+-+-+-+-+-+-+-|-+.. +
+|1 1 x x 0 1 0 0 0 0 0 0 0 0 1 1|                                     |
+ ^ ^     ^.....^ ^.............^ ^....................................
+ | |         |        |                        |
+ | primitive type(4)  fid(3)               128 bit bridge
+ fixed
+----
+
+The types defined are bool (size:1), unsigned int (size:2,4,8), opaque
+(size:16,32,64), string (max size:64k), long opaque (max size:4G).
+
+The first two bits, fixed and primitive, indicate whether the type has a fixed
+length, and whether the value is a field (primitive) or a message (not
+primitive).  A message is another group of fields and is always encoded as a
+long opaque with the primitive bit set to 0.  A message payload is always
+encoded as a long opaque with the primitive bit set to 1.
+
+The types are enumerated as:
+
+[%autowidth,options="header",grid="cols",stripes="even"]
+|=============================================
+| Type           | Value      | Size
+| bool           | 0          | 1 byte
+| unsigned short | 1          | 2 bytes
+| unsigned int   | 2          | 4 bytes
+| unsigned long  | 3          | 8 bytes
+| opaque 16      | 4          | 16 bytes
+| opaque 32      | 5          | 32 bytes
+| opaque 64      | 6          | 64 bytes
+| string         | 7          | 16 bit length + up to 64K bytes
+| long opaque    | 8          | 32 bit length + up to 4G bytes
+|=============================================
+
+The TLV header is aligned on 2 byte boundaries, so the value is padded one byte
+when the value size is odd.  There are currently 76 different field ids (fid)
+and a maximum of 256 (defined in the header file `msg.h`).
+
+Message Framing
+~~~~~~~~~~~~~~~
+
+A message frame includes 5 header fields and 3 Type Length Value fields that
+are always present and use two bytes.
+
+These fields are:
+
+[%autowidth,options="header",grid="cols",stripes="even"]
+|=============================
+| Field          | Size       
+| Version        | 1 bit      
+| Message Type   | 2 bits     
+| Message Option | 5 bits     
+| Message Size   | 3 bytes    
+| Subject Hash   | 4 bytes    
+| Bridge         | 2 byte TLV + 16 bytes
+| Message Digest | 2 byte TLV + 16 bytes
+| Subject        | 2 byte TLV + 16 bit length + up to 64K
+|=============================
+
+The first 4 bytes encoded as:
+
+----
+bytes 0 -> 3 are ver(1), type(2), opt(5), message size (24)
+ 1               8               16              24              32
+|-+-+-+-+-+-+-+-|-+-+-+-+-+-+-+-|-+-+-+-+-+-+-+-|-+-+-+-+-+-+-+-|
+|1|0 0|0 0 0 0 0|0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 0 0 0 0|
+ ^ ^.^ ^.......^ ^.............................................^
+ |    \    |                         |
+ver(1)|   opt(0)                24 bit size(160)
+     type(0)
+----
+
+The Message Type encodes 4 classes of messages:
+
+[%autowidth,options="header",grid="cols",stripes="even"]
+|==========================================
+| Type         | Value | Description
+| Mcast        | 0     | Multicast message with routable payload
+| Inbox        | 1     | Point to point message
+| Router Alert | 2     | System link state or subscription update
+| Heartbeat    | 3     | Neighbor link keep alive
+|==========================================
+
+A message that has routable data always has the Multicast or Inbox type set.
+The Inbox type message is also used for RPC style communication between peers.
+The Router Alert type message alters the routing database by modifying the link
+state or the subscription state.  A Heartbeat type is a periodic presence
+update.  The peers which are directly connected are responsible for detecting
+link failures.
+
+The Option Flags is a bit mask that encodes options for messages with Multicast
+and Inbox types that are routing data payloads to endpoints.
+These are:
+
+[%autowidth,options="header",grid="cols",stripes="even"]
+|==========================================
+| Option  | Value | Description
+| Ack     | 1     | Endpoints ack the reception
+| Trace   | 2     | All peers along the route ack the reception
+| Any     | 4     | Message is an anycast, destination is one endpoint of many
+| MC0     | 0     | Message is using multicast path 0
+| MC1     | 8     | Message is using multicast path 1
+| MC2     | 16    | Message is using multicast path 2
+| MC3     | 24    | Message is using multicast path 3
+|==========================================
+
+The message size does not include the first 8 bytes, so the message frame size
+is 8 + the message size field.  If the size is greater than 24 bits, then the
+next 32 bits are used to encode the size and the subject hash is calculated
+from the subject.
+
+The Bridge, Message Digest and Subject are encoded in Type Length Value format.
+The Bridge is a 128 bit identity of the sender.  The Message Digest is the
+authentication field.  The receiving peer will authenticate that the message is
+valid by using the Bridge to look up the 512 bit session key of the sender and
+calculate an HMAC using the message data with the session key and compare it
+to the value contained in the Message Digest.  In addition, there are sequence
+numbers and timestamps present that prevent the replay of each message frame.
+
+The 4 multicast path options will select the one of the equal cost paths
+calculated from the current link state.  Every peer can calculate these paths
+using the same replicated link state database, this results in 4 forwarding
+trees to the same destinations if there are enough redundent links.
+
+System Subjects
+~~~~~~~~~~~~~~~
+
+The peers exchange messages to authenticate new peers, synchronize the link
+state of the network, subscription updates, and heartbeats to maintain neighbor
+links.  These types of messages have unique subject prefixes as well as bits in
+the message type header indicating whether it is special.
+
+There are 7 classes subject prefixes used:
+
+[%autowidth,options="header",grid="cols",stripes="even"]
+|==========================================
+| Prefix  | Description
+| _I.     | Inbox point to point
+| _M.     | Generic multicast message
+| _X.     | Heartbeat link presence message
+| _Z.     | Link state broadcast message
+| _S.     | Normal subscription broadcast message
+| _P.     | Pattern subscripion broadcast message
+| _N.     | Peer statistics multicast message
+|==========================================
+
+A broadcast style forwarding used by _Z, _S, _P subjects is different from
+multicast forwarding.  It will flood the authenticated peers in the network,
+adjusting the routing database as it is received.  It uses this type of
+forwarding because this kind of update may cause the multicast forwarding to be
+temporarily incomplete until the network converges again.
+
+Inbox Subjects
+~~~~~~~~~~~~~~
+
+The format of a subject with an _I. prefix also encodes the destination of the
+message by appending the 128 bridge id in base64.
+
+Example:
+
+----
+_I.duBVZZwXfwBVlYgGNUZQTw.auth
+----
+
+All of the peers along the path to the destination use this bridge id to
+forward the message using the rules for the point to point route of the
+destination peer.  This may be a TCP link or it may be a UDP Inbox link in the
+case of a multicast PGM transport.  The suffix if the inbox subject indicate
+the type of request or reply it is.  If the suffix is an integer then the
+endpoint is not a system function, but information requested by the console
+session or a web interface that is usually converted to text and displayed.
+
+These suffixes are currently recognized:
+
+[%autowidth,options="header",grid="cols",stripes="even"]
+|==========================================
+| Suffix    | Description
+| auth      | Request authentication, peer verifies with user or service pub key
+| subs      | Request and match active subscriptions strings with a pattern
+| ping      | Request a pong reply, also has seqnos for maintaining state
+| pong      | A reply to a ping, has latency inforation and update clock squew
+| rem       | Remote admin request, run a console command from another peer
+| add_rte   | After authenticated with peer, it will add other peers it knows
+| sync_req  | Peer sends when it finds an old peer db or subscription state
+| sync_rpy  | Response to a sync_req, includes current state if it is out of date
+| bloom_req | Peer requests bloom state, currently peers use adj_req instead
+| bloom_rpy | Response to a bloom_req, contains the bloom map of the subscriptions
+| adj_req   | Peer requests when it finds an old link state or subscription state
+| adj_rpy   | Response to adj_rpy, contains an up to date link state and bloom map for peer
+| mesh_req  | Peer reqeusts when it detects a missing mesh member
+| mesh_rpy  | Response to mesh_rpy, contains missing link urls
+| trace     | Response to messages which have the Trace option flag in header
+| ack       | Response to messages which have the Ack option flag in header
+| any       | Encapsulates a peer _INBOX message, for point to point routing
+|==========================================
+

@@ -293,7 +293,8 @@ enum MsgFid {
   FID_HB_SKEW        = 73 , /* hb system clock skew */
   FID_PK_SIG         = 74 , /* pk key signature */
   FID_CONN_URL       = 75 , /* connect url spec */
-  FID_CONN_PORT      = 76   /* connect port */
+  FID_CONN_PORT      = 76 , /* connect port */
+  FID_PUBKEY         = 77   /* ec pubkey */
 };
 static const int FID_TYPE_SHIFT = 8,
                  FID_MAX        = 1 << FID_TYPE_SHIFT; /* 256 */
@@ -497,6 +498,14 @@ struct MsgHdrDecoder : public MsgFldSet {
       return true;
     }
     nonce.zero();
+    return false;
+  }
+  bool get_pubkey( MsgFid fid,  ec25519_key &pubkey ) const {
+    if ( this->test( fid ) ) {
+      pubkey.copy_from( this->mref[ fid ].fptr );
+      return true;
+    }
+    pubkey.zero();
     return false;
   }
   bool get_hmac( MsgFid fid,  HmacDigest &hmac ) const {
@@ -788,7 +797,8 @@ static FidTypeName fid_type_name[] = {
 { FID_HB_SKEW     , U_SHORT | U_INT | U_LONG    , XCL , 0 ,"hb_skew"         },
 { FID_PK_SIG      , OPAQUE_64                   , XCL , 0 ,"pk_sig"          },
 { FID_CONN_URL    , SHORT_STRING                , XCL , 0 ,"conn_url"        },
-{ FID_CONN_PORT   , U_SHORT                     , XCL , 0 ,"conn_port"       }
+{ FID_CONN_PORT   , U_SHORT                     , XCL , 0 ,"conn_port"       },
+{ FID_PUBKEY      , OPAQUE_32                   , XCL , 0 ,"pubkey"          }
 };
 
 #endif
