@@ -494,6 +494,18 @@ $(bind)/parse_config: $(parse_config_objs) $(parse_config_libs) $(lnk_dep)
 all_exes    += $(bind)/parse_config
 all_depends += $(parse_config_deps)
 
+parse_pcap_files := parse_pcap
+parse_pcap_cfile := test/parse_pcap.cpp
+parse_pcap_objs  := $(addprefix $(objd)/, $(addsuffix .o, $(parse_pcap_files)))
+parse_pcap_deps  := $(addprefix $(dependd)/, $(addsuffix .d, $(parse_pcap_files)))
+parse_pcap_libs  :=
+parse_pcap_lnk   := $(lnk_lib) -lpcap
+
+$(bind)/parse_pcap: $(parse_pcap_objs) $(parse_pcap_libs) $(lnk_dep)
+
+#all_exes    += $(bind)/parse_pcap
+#all_depends += $(parse_pcap_deps)
+
 ms_server_files := server
 ms_server_cfile := src/server.cpp
 ms_server_objs  := $(addprefix $(objd)/, $(addsuffix .o, $(ms_server_files)))

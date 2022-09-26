@@ -208,7 +208,6 @@ UserDB::calc_secret_hmac( UserBridge &n,  PolyHmacDigest &secret_hmac ) noexcept
     secret_hmac.calc_2( ha, this->hello_key->dig, HASH_DIGEST_SIZE,
                             ec.secret.key, EC25519_KEY_LEN );
   }
-
 #if 0
   char buf[ EC25519_KEY_B64_LEN + 1 ];
   buf[ EC25519_KEY_B64_LEN ] = '\0';
@@ -1316,7 +1315,7 @@ UserDB::add_authenticated( UserBridge &n,
     }
     if ( n.sub_seqno == 0 ) {
       McastBuf mcb;
-      uint32_t seed = n.user_route->rte.sub_route.prefix_seed( mcb.len() ),
+      uint32_t seed = this->poll.sub_route.prefix_seed( mcb.len() ),
                hash = kv_crc_c( mcb.buf, mcb.len(), seed );
       n.bloom.add_route( (uint16_t) mcb.len(), hash );
     }
@@ -1324,8 +1323,10 @@ UserDB::add_authenticated( UserBridge &n,
       this->remove_pending_peer( &n.bridge_id.nonce, 0 );
     this->uid_authenticated.add( n.uid );
     this->uid_rtt.add( n.uid );
-    this->set_ucast_url( *n.user_route, dec );
-    this->set_mesh_url( *n.user_route, dec );
+    if ( n.user_route != NULL ) {
+      this->set_ucast_url( *n.user_route, dec );
+      this->set_mesh_url( *n.user_route, dec );
+    }
     this->push_source_route( n );
     this->add_inbox_route( n, NULL );
     this->uid_auth_count++;

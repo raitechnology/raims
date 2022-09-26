@@ -114,7 +114,7 @@ UserDB::on_inbox_auth( const MsgFramePublish &pub,  UserBridge &n,
   if ( stage == 1 )
     this->compare_version( n, dec );
   if ( stage != AUTH_TRUST ) {
-    if ( ! dec.test_3( FID_CNONCE, FID_AUTH_TIME, FID_AUTH_SEQNO ) )
+    if ( ! dec.test_4( FID_CNONCE, FID_AUTH_TIME, FID_AUTH_SEQNO, FID_PUBKEY ) )
       return true;
   }
 
@@ -335,6 +335,8 @@ UserDB::recv_challenge( const MsgFramePublish &pub,  UserBridge &n,
 
   this->events.recv_challenge( n.uid, pub.rte.tport_id, stage );
   recv_cnonce.copy_from( dec.mref[ FID_CNONCE ].fptr );
+  n.hb_pubkey.copy_from( dec.mref[ FID_PUBKEY ].fptr );
+
   if ( debug_auth )
     n.printf( "recv stage %u verify(%lu,%lu,0x%08lx)\n", stage,
               n.auth[ 0 ].seqno, n.auth[ 0 ].time,

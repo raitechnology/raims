@@ -1,8 +1,26 @@
-Protocol
---------
+Internal Protocol
+-----------------
 
-Type Length Value
-~~~~~~~~~~~~~~~~~
+The protocol is asynchronous with timers to timeout rpcs and to throttle the
+rate which peers back off retries.  As a result of this, the message flow for
+a network configuration is variable and can change with different conditions.
+
+The function of each message is encoded in the subjects with the arguments
+passed as field values with some common flags and options encoded in the
+message header.
+
+Each message is authenticated a session key using a message HMAC.  The initial
+key exchange is signed by either the service private key or a configured user
+private key.  The heartbeat messages are also authenticated with a hello key
+message HMAC derived from the service public key and the start time.  These are
+messages that set up the initial key exchange before a session key is
+established, but can be weakly authenticated since service public key is
+encrypted at rest in the configuration and not shared over the network.
+
+Any message that fails authentication is ignored.
+
+Field Values
+~~~~~~~~~~~~
 
 Each field in a message is encoded with a type and length.  This allows new
 fields to be added without disrupting the message parsing.  The first 16 bits
@@ -51,10 +69,10 @@ and a maximum of 256 (defined in the header file `msg.h`).
 Message Framing
 ~~~~~~~~~~~~~~~
 
-A message frame includes 5 header fields and 3 Type Length Value fields that
-are always present and use two bytes.
+A message frame has 5 fixed length sections and 3 fields that are always
+present and use two bytes.
 
-These fields are:
+These header fields are:
 
 [%autowidth,options="header",grid="cols",stripes="even"]
 |=============================
@@ -158,9 +176,109 @@ There are 7 classes subject prefixes used:
 
 A broadcast style forwarding used by _Z, _S, _P subjects is different from
 multicast forwarding.  It will flood the authenticated peers in the network,
-adjusting the routing database as it is received.  It uses this type of
+adjusting each peer's routing database as it is received.  It uses this type of
 forwarding because this kind of update may cause the multicast forwarding to be
 temporarily incomplete until the network converges again.
+
+The forwarding path for the Inbox, Heartbeat and broadcast subjects does not
+follow the multicast forwarding path, so they can't be subscribed.
+
+There is a separate sequence number domain defined for these because of the
+idempotent nature of maintaining the replicated state of the network.  If a
+peer misses messages for a delta changes in the subscriptions or links
+database, the state is reinitialized by replicating it from an up to date peer.
+
+The multicast subjects follow normal forwarding rules.  The _M prefix is used
+for a multicast ping.
+
+The _N prefix has unique subjects for link and peer statististics like messages
+sent or received, bytes sent or received, as well as adjacency notifications.
+These are used to monitor an individual node or a group of them with pattern
+subscriptions.  These stats are not sent unless there are subscriptions open.
+
+Heartbeat Subjects
+~~~~~~~~~~~~~~~~~~
+
+These are sent on a link between directly connected peers.
+
+[%autowidth,options="header",grid="cols",stripes="even"]
+|==========================================
+| Subject  | Description
+| _X.HELLO | First message sent
+| _X.HB    | Periodic message
+| _X.BYE   | Last message sent
+| _X.NAME  | Link discovery message
+|==========================================
+
+- _X.HELLO and _X.HB messages have two functions, the first is to initiate the
+  authentication key exchange.  The second is to keep a peer up to date with
+  the last sequence numbers used by the subscription and link state.  When
+  heartbeats are not received within 1.5 intervals.  The interval default is 10
+  seconds, this causes a link to be deactivated at :15 when hb expected at :10.
+  When all of the direct links to a peer are inactive, then the peer is
+  unauthenticated and marked as a zombie.  The heartbeat timeout does not
+  depend on a transport timeout, like a TCP reset.  The result of this behavior
+  is that overloaded or congested links that delay messages for longer than the
+  1.5 times the heartbeat interval will may incur message loss.  This puts an
+  upper bound on the link latency and aleviates back pressure to the publisher.
+
+- _X.BYE causes the peer to be unauthenticated and dropped from the peer db.
+
+- _X.NAME messages are multicast to a device for presence detection.  Links
+  between peers are only established when the type and name of a transport is
+  matched within a service.
+
+Link State Subjects
+~~~~~~~~~~~~~~~~~~~
+
+These are broadcast flooded to authenticated peers.
+
+[%autowidth,options="header",grid="cols",stripes="even"]
+|==========================================
+| Subject  | Description
+| _Z.ADD   | New peer added to peer db
+| _Z.DEL   | Dropped peer from peer db
+| _Z.BLM   | Subscription bloom filter resized
+| _Z.ADJ   | Adjacency changed, link added or removed
+|==========================================
+
+- _Z.ADD is broadcast when a new peer is added to the peer db, usually as a
+  result of authentication and also in the case that then network split and
+  peers were joined again.
+
+- _Z.DEL is broadcast when a peer sent a _X.BYE or if it is no longer reachable
+  because all routes to it are down.
+
+- _Z.BLM is broadcast when a peer resizes the bloom filter associated with the
+  subscriptions and patterns it has open, this occurs approximately when
+  crossing powers of two subscription counts (currently at 31, 62, 124, 248,
+  ...).
+
+- _Z.ADJ notifies when a peer adds are subtracts a link to another peer.  It
+  increments the link state sequence number so that peers apply this update
+  only when the link state reflects the current state, otherwise a rpc
+  synchronization request is used (_I.[bridge].sync_req) to resync.
+
+Subscription Subjects
+~~~~~~~~~~~~~~~~~~~~~
+
+These are broadcast flooded to authenticated peers.  They are updates to the
+bloom filter that can be missed and resynchronized with _Z.BLM or a resync
+rpc reqeust.
+
+[%autowidth,options="header",grid="cols",stripes="even"]
+|==========================================
+| Subject  | Description
+| _S.JOIN  | Start a subscription
+| _S.LEAV  | Stop a subscription
+| _P.PSUB  | Start a pattern subscription
+| _P.STOP  | Stop a pattern subscription
+|==========================================
+
+- _S.JOIN and _S.LEAV add and subtract subscriptions to a subject.
+
+- _P.PSUB and _P.STOP add and subtract pattern subscriptions.  These contain
+a pattern type as well as the pattern string.
 
 Inbox Subjects
 ~~~~~~~~~~~~~~
@@ -206,3 +324,123 @@ These suffixes are currently recognized:
 | any       | Encapsulates a peer _INBOX message, for point to point routing
 |==========================================
 
+- Auth does a key exchange between two peers.  After completing successfully,
+  each peer has a session key for the other.  This allows messages to be
+  sent by the other to be authenticated using Message Digest field.
+
+- Subs is a request for the open subscriptions.  It is used by the console and
+  the web interface for examining the network.  The rpc reply is always a
+  numeric string to forward to the terminal or web page that requested it.
+
+- Ping and pong are latency gathering functions for any two peers in the
+  network, not necessarily directly connected.  The current sequence numbers
+  for the link state and subscripion state are also exchanged for synchronizing
+  peers which are not directly connected.
+
+- Rem is a remote console command execution, used in the console and web
+  interfaces.
+
+- Add_rte is used after the auth key exchange to replicate the peer db to a new
+  peer.  This initial peer db only contains the names and bridge ids, so the
+  new peer must request session keys, link state and subscription state for
+  peers it does not already know about.
+
+- Sync_req and sync_rpy are used replicate the session keys.  If a new peer
+  does not have the session info from a _Z.ADD or a add_rte, it will request it
+  from the peer that notified of the unknown peer session.  This will often be
+  the case after authentication occurs and the new peer receives an add_rte
+  from an older peer that has a db with the current state of the network.  This
+  is the only other way that the unique session keys for each peer is
+  distributed besides directly authenticating with a key exchange.  The sync_rpy
+  also includes the link state and subscription bloom filter of requested peer.
+
+- Bloom_req and bloom_rpy are rpcs for the subscription bloom filter.  The
+  adj_req and adj_rpy are used instead for this info.
+
+- Adj_req and adj_rpy are the main method that peers recover the current link
+  state and subscription state.  They work in a rpc request/response style.
+  The request contains the sequence numbers that the source peer has in it's
+  db.  The destination peer compares these numbers with it's own db and replies
+  when a sequence needs updating.  Usually the destination peer is the one that
+  the source needs synchronized, but a closer peer can be queried as well.
+  This occurs when a lot of peers need to resynchronize as a result of a
+  network split and reconnect.
+
+- Mesh_req and mesh_rpy are rpcs for distributing urls for peers in the same
+  mesh network.  When a peer connects to a mesh, it uses the initial connection
+  to find the addresses of all the other peers in the mesh with this rpc.
+ 
+- Trace and ack are sent as a multicast message is forwarded with the Message
+  Options set in the header.  These can be requested from a console publish
+  using the "trace" or "ack" commands.
+
+- Any encapsulates an _INBOX point to point message and forwards it to the
+  correct peer.  An _INBOX publish does not have a destination other than a
+  unique subject that another peer has subscribed, for example
+  "_INBOX.7F000001.2202C25FE975070A48320.>".  The peer that encapsulates this
+  message finds the possible destinations by testing the bloom filters it has
+  and then forwards to the matching peers.  The usual case is that there is
+  only one matching destination.
+
+Example Message Flow
+~~~~~~~~~~~~~~~~~~~~
+
+Two peers key exchange, ruby connecting to dyna:
+
+[%autowidth,options="header",grid="cols",stripes="even"]
+|==========================================
+| Packet | Subject   | Source | Destination | Description
+| ruby.1 | _X.HELLO  | ruby   | dyna        | initial hello message after connection
+| dyna.1 | _I.xq6vl+2HcoDxtt+7lC7dGQ.auth | dyna | ruby | dyna authenticates with ruby
+| ruby.2 | _I.wwEnbQEY2FMuwZGSjpi3jQ.auth | ruby | dyna | ruby authenticates with dyna
+| ruby.2 | _Z.ADD    | ruby   | dyna        | ruby adds dyna to peer db
+| ruby.2 | _Z.ADJ    | ruby   | dyna        | ruby adds link to dyna
+| dyna.2 | _Z.ADJ    | dyna   | ruby        | dyna adds link to ruby
+| dyna.2 | _I.xq6vl+2HcoDxtt+7lC7dGQ.auth | dyna | ruby | dyna confirms authentication
+| dyna.2 | _Z.ADD    | dyna   | ruby        | dyna adds ruby to peer db
+|==========================================
+
+Ruby connecting dyna, a member of a network of 4 nodes: dyna, zero, one, and
+two.  This is the message flow between ruby and dyna, which completes the initial
+synchronization of ruby.
+
+[%autowidth,options="header",grid="cols",stripes="even"]
+|==========================================
+| Packet | Subject   | Source | Destination | Description
+| ruby.1 | _X.HELLO  | ruby   | dyna        | initial hello message after connection
+| dyna.1 | _I.q6pEpnzNyANEZKKp29532Q.auth | dyna | ruby | dyna authenticates with ruby
+| ruby.2 | _I.tXB702RHKF0M69dl7K7vrw.auth | ruby | dyna | ruby authenticates with dyna
+| ruby.2 | _Z.ADD    | ruby   | dyna        | ruby adds dyna to peer db
+| ruby.2 | _Z.ADJ    | ruby   | dyna        | ruby adds link to dyna
+| ruby.2 | _I.tXB702RHKF0M69dl7K7vrw.adj_req | ruby | dyna | ruby requests adjacency of dyna
+| dyna.2 | _Z.ADJ    | dyna   | ruby      | dyna adds link to ruby
+| dyna.2 | _I.q6pEpnzNyANEZKKp29532Q.auth | dyna | ruby | dyna confirms authentication
+| dyna.2 | _Z.ADD    | dyna   | ruby      | dyna adds ruby to peer db
+| dyna.2 | _I.q6pEpnzNyANEZKKp29532Q.add_rte | dyna | ruby | dyna populates ruby peer db of other peers
+| dyna.2 | _I.q6pEpnzNyANEZKKp29532Q.adj_rpy | dyna | ruby | dyna replies to adj_req, links to other peers
+| ruby.3 | _I.tXB702RHKF0M69dl7K7vrw.sync_req | ruby | dyna | ruby requests sync of peer zero from dyna
+| ruby.3 | _I.tXB702RHKF0M69dl7K7vrw.sync_req | ruby | dyna | ruby requests sync of peer one from dyna
+| ruby.3 | _I.tXB702RHKF0M69dl7K7vrw.sync_req | ruby | dyna | ruby requests sync of peer two from dyna
+| dyna.3 | _I.q6pEpnzNyANEZKKp29532Q.sync_rpy | dyna | ruby | dyna replies key, links, bloom for peer zero
+| dyna.3 | _I.q6pEpnzNyANEZKKp29532Q.sync_rpy | dyna | ruby | dyna replies key, links, bloom for peer one
+| dyna.3 | _I.q6pEpnzNyANEZKKp29532Q.sync_rpy | dyna | ruby | dyna replies key, links, bloom for peer two
+|==========================================
+
+There is also message flow between dyna and zero, one, two.  This is the flow between dyna and zero.  The
+message flow between dyna and one, dyna and two is the same as dyna and zero.
+
+[%autowidth,options="header",grid="cols",stripes="even"]
+|==========================================
+| Packet | Subject   | Source | Destination | Description
+| dyna.1 | _Z.ADJ    | dyna   | zero        | dyna notifies the new link from dyna to ruby
+| dyna.1 | _Z.ADD    | dyna   | zero        | dyna notifies the add ruby to peer db
+| dyna.1 | _Z.ADJ    | ruby   | zero        | forward from ruby for new link from ruby to dyna
+| zero.1 | _I.tXB702RHKF0M69dl7K7vrw.sync_req | zero | dyna | zero requests sync of peer ruby from dyna
+| dyna.2 | _I.ia988C6TtC6/L3JC6D3GqA.sync_rpy | dyna | zero | dyna replies key, links, bloom for peer ruby
+| zero.2 | _Z.ADD    | zero   | dyna        | zero notifies the add of ruby to peer db
+|==========================================
+
+Adding ruby to the network ripples through the directly connected peers, which
+discover the new peer from the broadcasting of the _Z.ADD messages and then
+synchronize with each other to merge the ruby session key, the link state, and
+the subscription bloom state into the network state.
