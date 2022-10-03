@@ -61,8 +61,21 @@
 #cy {
   z-index: 999;
 }
-table { border-collapse: collapse; width: 100%; table-layout: fixed; }
-th, td { padding: 0.25rem; text-align: left; border: 1px solid #ccc; }
+table {
+  border-collapse: collapse;
+  width: 100%;
+  table-layout: fixed;
+}
+th, td {
+  padding: 0.25rem;
+  text-align: left;
+  border: 1px solid #ccc;
+  overflow: hidden;
+  white-space: nowrap;
+}
+td:hover {
+  overflow: visible;
+}
 </style>
 </head>
 <body>

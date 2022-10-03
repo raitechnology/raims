@@ -7,62 +7,75 @@
 <link rel="stylesheet" href="menu.css" />
 <title>Monitor Nodes</title>
 <style>
-  .container {
-    display: flex;
-    flex-direction: row;
-  }
-  .row {
-    flex: 1 55%;
-  }
-  .row:nth-child(2) {
-    flex: 1 45%;
-  }
-  .node {
-    stroke: #fff;
-    stroke-width: 1.5px;
-    cursor: move;
-  }
-  .link {
-    stroke: #999;
-    stroke-width: 3px;
-    stroke-opacity: 1;
-  }
-  .node-label {
-    fill: white;
-    font-family: Verdana;
-    font-size: 18px;
-    text-anchor: middle;
-    cursor: move;
-  }
-  .graph-title {
-    fill: black;
-    font-family: Verdana;
-    font-size: 18px;
-    text-anchor: middle;
-  }
-  .line {
-    fill: none;
-    stroke-width: 1.5px;
-  }
-  .svg-container {
-    display: inline-block;
-    position: relative;
-    width: 100%;
-    padding-bottom: 100%;
-    vertical-align: top;
-    overflow: hidden;
-  }
-  .svg-content {
-    display: inline-block;
-    position: absolute;
-    top: 0;
-    left: 0;
-  }
-  #cy {
-    z-index: 999;
-  }
-  table { border-collapse: collapse; width: 100%; table-layout: fixed; }
-  th, td { padding: 0.25rem; text-align: left; border: 1px solid #ccc; }
+.container {
+  display: flex;
+  flex-direction: row;
+}
+.row {
+  flex: 1 55%;
+}
+.row:nth-child(2) {
+  flex: 1 45%;
+}
+.node {
+  stroke: #fff;
+  stroke-width: 1.5px;
+  cursor: move;
+}
+.link {
+  stroke: #999;
+  stroke-width: 3px;
+  stroke-opacity: 1;
+}
+.node-label {
+  fill: white;
+  font-family: Verdana;
+  font-size: 18px;
+  text-anchor: middle;
+  cursor: move;
+}
+.graph-title {
+  fill: black;
+  font-family: Verdana;
+  font-size: 18px;
+  text-anchor: middle;
+}
+.line {
+  fill: none;
+  stroke-width: 1.5px;
+}
+.svg-container {
+  display: inline-block;
+  position: relative;
+  width: 100%;
+  padding-bottom: 100%;
+  vertical-align: top;
+  overflow: hidden;
+}
+.svg-content {
+  display: inline-block;
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+#cy {
+  z-index: 999;
+}
+table {
+  border-collapse: collapse;
+  width: 100%;
+  table-layout: fixed;
+}
+th, td {
+  padding: 0.25rem;
+  text-align: left;
+  border: 1px solid #ccc;
+  overflow: hidden;
+  white-space: nowrap;
+}
+td:hover {
+  overflow: visible;
+}
 </style>
 </head>
 <body>

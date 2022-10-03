@@ -112,32 +112,20 @@ EvRvTransportListen::get_rv_transport( RvHost &host,  bool create ) noexcept
   return t;
 }
 
-enum {
-  NET_NONE         = 0,
-  NET_ANY          = 1,
-  NET_MESH         = 2,
-  NET_MESH_LISTEN  = 3,
-  NET_MESH_CONNECT = 4,
-  NET_TCP          = 5,
-  NET_TCP_LISTEN   = 6,
-  NET_TCP_CONNECT  = 7,
-  NET_MCAST        = 8
-};
-
-static const struct {
-  const char * name;
-  int          type;
-} protos[] = {
- { "any", NET_ANY },
- { "mesh", NET_MESH }, { "mesh.listen", NET_MESH_LISTEN },
- { "mesh.connect", NET_MESH_CONNECT },
- { "tcp", NET_TCP },   { "tcp.listen", NET_TCP_LISTEN },
- { "tcp.connect", NET_TCP_CONNECT } };
-static const size_t nprotos = sizeof( protos ) / sizeof( protos[ 0 ] );
-
-static int
-net_to_transport( const char *net,  size_t &net_len ) noexcept
+NetTransport
+RvMcast2::net_to_transport( const char *net,  size_t &net_len ) noexcept
 {
+  static const struct {
+    const char * name;
+    NetTransport type;
+  } protos[] = {
+   { T_ANY, NET_ANY },
+   { T_MESH, NET_MESH }, { T_MESH_LISTEN, NET_MESH_LISTEN },
+   { T_MESH_CONNECT, NET_MESH_CONNECT },
+   { T_TCP, NET_TCP },   { T_TCP_LISTEN, NET_TCP_LISTEN },
+   { T_TCP_CONNECT, NET_TCP_CONNECT } };
+  static const size_t nprotos = sizeof( protos ) / sizeof( protos[ 0 ] );
+
   const char * p;
   if ( net_len == 0 )
     return NET_NONE;
@@ -155,18 +143,11 @@ net_to_transport( const char *net,  size_t &net_len ) noexcept
   return NET_MCAST;
 }
 
-namespace {
-struct RvMcast2 : public RvMcast {
-  RvMcast2() {}
-  int parse_network2( const char *net,  size_t net_len ) noexcept;
-};
-
 int
 RvMcast2::parse_network2( const char *net,  size_t net_len ) noexcept
 {
-  net_to_transport( net, net_len );
+  this->type = net_to_transport( net, net_len );
   return this->RvMcast::parse_network( net, net_len );
-}
 }
 
 static bool
@@ -184,32 +165,39 @@ net_equals( RvHost &host,  ConfigTree::Transport &t ) noexcept
 {
   size_t net_len = host.network_len;
 
-  switch ( net_to_transport( host.network, net_len ) ) {
+  switch ( RvMcast2::net_to_transport( host.network, net_len ) ) {
     default:
     case NET_NONE:
       return false;
 
     case NET_ANY:
-      return t.type.equals( "any", 3 ) &&
-             match_route_str( t, "device", host.host_ip, host.host_ip_len );
+      return t.type.equals( T_ANY, T_ANY_SZ ) &&
+             match_route_str( t, R_DEVICE, host.host_ip, host.host_ip_len );
 
     case NET_MESH_CONNECT:
     case NET_MESH:
     case NET_MESH_LISTEN:
-      return t.type.equals( "mesh", 4 ) &&
-             match_route_str( t, "device", host.host_ip, host.host_ip_len );
+      return t.type.equals( T_MESH, T_MESH_SZ ) &&
+             match_route_str( t, R_DEVICE, host.host_ip, host.host_ip_len );
 
     case NET_TCP_CONNECT:
     case NET_TCP:
     case NET_TCP_LISTEN:
-      return t.type.equals( "tcp", 3 ) &&
-             match_route_str( t, "device", host.host_ip, host.host_ip_len );
+      return t.type.equals( T_TCP, T_TCP_SZ ) &&
+             match_route_str( t, R_DEVICE, host.host_ip, host.host_ip_len );
 
     case NET_MCAST:
-      return t.type.equals( "pgm", 3 ) &&
-             match_route_str( t, "listen", host.network, host.network_len ) &&
-             match_route_str( t, "port", host.service, host.service_len );
+      return t.type.equals( T_PGM, T_PGM_SZ ) &&
+             match_route_str( t, R_LISTEN, host.network, host.network_len ) &&
+             match_route_str( t, R_PORT, host.service, host.service_len );
   }
+}
+
+int
+RvMcast2::device_ip( char *buf,  size_t len ) const noexcept
+{
+  const uint8_t * p = (const uint8_t *) (const void *) &this->host_ip;
+  return ::snprintf( buf, len, "%u.%u.%u.%u", p[ 0 ], p[ 1 ], p[ 2 ], p[ 3 ] );
 }
 
 void
@@ -221,7 +209,7 @@ EvRvTransportListen::make_rv_transport( ConfigTree::Transport *&t, RvHost &host,
   size_t       net_len = host.network_len;
 
   is_listener = true;
-  int type = net_to_transport( host.network, net_len );
+  NetTransport type = RvMcast2::net_to_transport( host.network, net_len );
   if ( type == NET_NONE )
     t = NULL;
   else {
@@ -243,8 +231,8 @@ EvRvTransportListen::make_rv_transport( ConfigTree::Transport *&t, RvHost &host,
     switch ( type ) {
       default: break;
       case NET_ANY:
-        stab.reref_string( "any", 3, t->type );
-        tree.set_route_str( *t, stab, "device",
+        stab.reref_string( T_ANY, T_ANY_SZ, t->type );
+        tree.set_route_str( *t, stab, R_DEVICE,
                             host.host_ip, host.host_ip_len );
         break;
 
@@ -252,8 +240,8 @@ EvRvTransportListen::make_rv_transport( ConfigTree::Transport *&t, RvHost &host,
         is_listener = false; /* FALLTHRU */
       case NET_MESH:
       case NET_MESH_LISTEN:
-        stab.reref_string( "mesh", 4, t->type );
-        tree.set_route_str( *t, stab, "device",
+        stab.reref_string( T_MESH, T_MESH_SZ, t->type );
+        tree.set_route_str( *t, stab, R_DEVICE,
                             host.host_ip, host.host_ip_len );
         break;
 
@@ -261,19 +249,19 @@ EvRvTransportListen::make_rv_transport( ConfigTree::Transport *&t, RvHost &host,
         is_listener = false; /* FALLTHRU */
       case NET_TCP:
       case NET_TCP_LISTEN:
-        stab.reref_string( "tcp", 3, t->type );
-        tree.set_route_str( *t, stab, "device",
+        stab.reref_string( T_TCP, T_TCP_SZ, t->type );
+        tree.set_route_str( *t, stab, R_DEVICE,
                             host.host_ip, host.host_ip_len );
         break;
 
       case NET_MCAST:
         if ( ! this->no_mcast ) {
-          stab.reref_string( "pgm", 3, t->type );
-          tree.set_route_str( *t, stab, "listen",
+          stab.reref_string( T_PGM, T_PGM_SZ, t->type );
+          tree.set_route_str( *t, stab, R_LISTEN,
                               host.network, host.network_len );
-          tree.set_route_str( *t, stab, "port",
+          tree.set_route_str( *t, stab, R_PORT,
                               host.service, host.service_len );
-          tree.set_route_str( *t, stab, "mcast_loop", "2", 1 );
+          tree.set_route_str( *t, stab, R_MCAST_LOOP, "2", 1 );
         }
         break;
     }

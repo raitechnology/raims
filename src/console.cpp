@@ -7,17 +7,12 @@
 #include <inttypes.h>
 #include <raikv/os_file.h>
 #include <errno.h>
-#if 0
-#include <unistd.h>
-#include <fcntl.h>
-#include <time.h>
-#include <sys/time.h>
-#endif
 #include <raikv/logger.h>
 #include <raids/term.h>
 #define IMPORT_CONSOLE_CMDS
 #define IMPORT_EVENT_DATA
 #define IMPORT_DEBUG_STRINGS
+#define IMPORT_CONSOLE_CONST
 #include <raims/session.h>
 #include <raims/ev_tcp_transport.h>
 #include <raims/ev_telnet.h>
@@ -664,23 +659,23 @@ JsonOutArray::find( const char *path,  size_t pathlen ) noexcept
 }
 
 static void
-make_valid( ValidCmds &valid,
+make_valid( ValidTportCmds &valid,
             const ConsoleCmdString *cmd,  size_t ncmds,
             const ConsoleCmdString *help,  size_t nhelps ) noexcept
 {
   ConsoleCmdString * x = (ConsoleCmdString *)
-                         ::malloc( sizeof( cmd[ 0 ] ) * valid.nvalid * 2 ),
-                   * y = &x[ valid.nvalid ];
+                      ::malloc( sizeof( cmd[ 0 ] ) * ( valid.nvalid + 1 ) * 2 ),
+                   * y = &x[ valid.nvalid + 1 ];
   size_t             xcnt = 0,
                      ycnt = 0,
                      j, k;
   for ( j = 0; j < valid.nvalid; j++ ) {
-    for ( k = 0; k < ncmds; k++ ) {
+    for ( k = 0; k < ncmds && xcnt < valid.nvalid + 1; k++ ) {
       if ( cmd[ k ].cmd == valid.valid[ j ] ) {
         x[ xcnt++ ] = cmd[ k ]; /* quit/exit have two enties */
       }
     }
-    for ( k = 0; k < nhelps; k++ ) {
+    for ( k = 0; k < nhelps && ycnt < valid.nvalid + 1; k++ ) {
       if ( help[ k ].cmd == valid.valid[ j ] ) {
         y[ ycnt++ ] = help[ k ];
         break;
@@ -702,9 +697,9 @@ Console::get_valid_cmds( const ConsoleCmdString *&cmds,
     ncmds = num_console_cmds;
   }
   else {
-    for ( size_t i = 0; i < num_valid_cmds; i++ ) {
-      if ( this->cfg_tport->type.equals( valid_cmd[ i ].type ) ) {
-        ValidCmds &valid = valid_cmd[ i ];
+    for ( size_t i = 0; i < num_valid_tport_cmds; i++ ) {
+      if ( this->cfg_tport->type.equals( valid_tport_cmd[ i ].type ) ) {
+        ValidTportCmds &valid = valid_tport_cmd[ i ];
         if ( valid.ncmds == 0 )
           make_valid( valid, tport_cmd, num_tport_cmds, tport_help_cmd,
                       num_tport_help_cmds );
@@ -727,9 +722,9 @@ Console::get_valid_help_cmds( const ConsoleCmdString *&cmds,
     ncmds = num_help_cmds;
   }
   else {
-    for ( size_t i = 0; i < num_valid_cmds; i++ ) {
-      if ( this->cfg_tport->type.equals( valid_cmd[ i ].type ) ) {
-        ValidCmds &valid = valid_cmd[ i ];
+    for ( size_t i = 0; i < num_valid_tport_cmds; i++ ) {
+      if ( this->cfg_tport->type.equals( valid_tport_cmd[ i ].type ) ) {
+        ValidTportCmds &valid = valid_tport_cmd[ i ];
         if ( valid.nhelps == 0 )
           make_valid( valid, tport_cmd, num_tport_cmds, tport_help_cmd,
                       num_tport_help_cmds );
@@ -743,6 +738,60 @@ Console::get_valid_help_cmds( const ConsoleCmdString *&cmds,
   }
 }
 
+int
+Console::which_cmd( const ConsoleCmdString *cmds,  size_t ncmds,
+                    const char *buf, size_t buflen, CmdMask *cmd_mask ) noexcept
+{
+  CmdMask  match;
+  size_t   off, last = 0;
+  bool     matched = false;
+  match.mask( ncmds );
+  for ( off = 0; match.count() != 0; off++ ) {
+    if ( off == buflen || buf[ off ] == ' ' ) {
+      matched = true;
+      break;
+    }
+    if ( buf[ off ] >= '0' && buf[ off ] <= '9' &&
+         ( off + 1 == buflen || buf[ off + 1 ] == ' ' ) ) {
+      if ( match.count() == 1 ) {
+        switch ( cmds[ last ].cmd ) { /* allow digits */
+          case CMD_TPORT_LISTEN:
+          case CMD_TPORT_CONNECT:
+          case CMD_TPORT_DEVICE:
+          case CMD_TPORT_COST:
+            matched = true;
+            break;
+          default:
+            break;
+        }
+      }
+      if ( matched )
+        break;
+    }
+    for ( size_t i = 0; i < ncmds; i++ ) {
+      if ( match.is_member( i ) ) {
+        if ( cmds[ i ].str[ off ] == buf[ off ] ) {
+          last = i;
+          continue;
+        }
+        match.remove( i );
+      }
+    }
+  }
+  if ( cmd_mask != NULL ) {
+    cmd_mask->zero();
+    if ( match.count() != 0 ) {
+      for ( size_t i = 0; i < ncmds; i++ ) {
+        if ( match.is_member( i ) )
+          cmd_mask->add( cmds[ i ].cmd );
+      }
+    }
+  }
+  if ( match.count() == 1 && matched )
+    return cmds[ last ].cmd;
+  return CMD_BAD;
+}
+
 static size_t
 scan_args( const char *buf,  const char *end,  const char **args,
            size_t *arglen,  size_t maxargs ) noexcept
@@ -753,16 +802,31 @@ scan_args( const char *buf,  const char *end,  const char **args,
       buf++;
     if ( buf == end || argc == maxargs )
       break;
-    args[ argc ] = buf;
-    while ( buf < end && *buf > ' ' )
-      buf++;
-    arglen[ argc ] = buf - args[ argc ];
+
+    bool matched_quote = false;
+    if ( ( buf[ 0 ] == '\"' || buf[ 0 ] == '\'' ) && buf + 1 < end ) {
+      char quote = buf[ 0 ];
+      const char * ptr = buf + 1;
+      args[ argc ] = ptr;
+      while ( ptr < end && ptr[ 0 ] != quote )
+        ptr++;
+      if ( ptr < end ) {
+        buf = ptr + 1;
+        arglen[ argc ] = ptr - args[ argc ];
+        matched_quote = true;
+      }
+    }
+    if ( ! matched_quote ) {
+      args[ argc ] = buf;
+      while ( buf < end && *buf > ' ' )
+        buf++;
+      arglen[ argc ] = buf - args[ argc ];
+    }
     argc++;
   }
   return argc;
 }
 
-static const size_t MAXARGS = 8;
 int
 Console::parse_command( const char *buf,  const char *end,
                         const char *&arg,  size_t &len,
@@ -782,7 +846,7 @@ Console::parse_command( const char *buf,  const char *end,
 
   if ( argc == 0 )
     return CMD_EMPTY;
-  cmd = which_cmd( cmds, ncmds, args[ 0 ], arglen[ 0 ], NULL );
+  cmd = (ConsoleCmd) which_cmd( cmds, ncmds, args[ 0 ], arglen[ 0 ], NULL );
 
   if ( cmd == CMD_BAD && cmds == console_cmd ) {
     ConsoleCmd cmd2 = which_show( args[ 0 ], arglen[ 0 ] );
@@ -836,13 +900,30 @@ Console::parse_command( const char *buf,  const char *end,
 }
 
 int
+Console::shift_command( size_t shift,  const char **&args,  size_t *&arglen,
+                        size_t &argcount ) noexcept
+{
+  const ConsoleCmdString * cmds;
+  size_t ncmds;
+
+  if ( shift >= argcount )
+    return CMD_EMPTY;
+  argcount -= shift;
+  args      = &args[ shift ];
+  arglen    = &arglen[ shift ];
+
+  this->get_valid_cmds( cmds, ncmds );
+  return which_cmd( cmds, ncmds, args[ 0 ], arglen[ 0 ], NULL );
+}
+
+int
 console_complete( struct LineCook_s *state,  const char *buf,  size_t off,
                   size_t len,  void *me ) noexcept
 {
   const ConsoleCmdString * cmds;
   size_t         ncmds;
-  const char *   args[ MAXARGS ];
-  size_t         arglen[ MAXARGS ],
+  const char *   args[ Console::MAXARGS ];
+  size_t         arglen[ Console::MAXARGS ],
                  argc,
                  arg_complete;
   int            j = 0;
@@ -852,7 +933,7 @@ console_complete( struct LineCook_s *state,  const char *buf,  size_t off,
   ConsoleCmd     cmd  = CMD_EMPTY;
   Console      * cons = (Console *) me;
 
-  argc = scan_args( buf, &buf[ off + len ], args, arglen, MAXARGS );
+  argc = scan_args( buf, &buf[ off + len ], args, arglen, Console::MAXARGS );
   arg_complete = argc;
   cons->get_valid_cmds( cmds, ncmds );
 
@@ -862,7 +943,8 @@ console_complete( struct LineCook_s *state,  const char *buf,  size_t off,
       arg_complete++;
   }
   if ( argc > 0 ) {
-    cmd = which_cmd( cmds, ncmds, args[ 0 ], arglen[ 0 ], &mask );
+    cmd = (ConsoleCmd)
+      Console::which_cmd( cmds, ncmds, args[ 0 ], arglen[ 0 ], &mask );
 
     if ( cmd == CMD_BAD && mask.count() == 0 && cmds == console_cmd ) {
       ConsoleCmd cmd2 = which_show( args[ 0 ], arglen[ 0 ] );
@@ -978,8 +1060,9 @@ console_help( struct Term_s *t ) noexcept
   cons->get_valid_cmds( cmds, ncmds );
   if ( arg_count > 0 && arg_len[ 0 ] > 0 ) {
     ConsoleCmd cmd;
-    cmd = which_cmd( cmds, ncmds, &buf[ arg_off[ 0 ] ], arg_len[ 0 ],
-                     &cmd_mask );
+    cmd = (ConsoleCmd)
+      Console::which_cmd( cmds, ncmds, &buf[ arg_off[ 0 ] ],
+                          arg_len[ 0 ], &cmd_mask );
     if ( cmd == CMD_SHOW ) {
       if ( arg_count > 1 )
         cmd = which_show( &buf[ arg_off[ 1 ] ], arg_len[ 1 ], &cmd_mask );
@@ -1738,6 +1821,12 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
   }
   switch ( cmd ) {
     default:
+      if ( cmd >= (ConsoleCmd) CMD_TPORT_BASE && cmd < CMD_TPORT_SHOW ) {
+        if ( this->cfg_tport != NULL ) {
+          if ( this->config_transport_param( cmd, args, arglen, argc ) )
+            break;
+        }
+      }
       goto help;
 
     case CMD_QUIT: {
@@ -1750,54 +1839,11 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
     case CMD_SHUTDOWN: this->shutdown( arg, len ); break;
       break;
     case CMD_CONFIGURE_TPORT:
-      if ( len == 0 || argc < 3 )
+      if ( ! this->config_transport( args, arglen, argc ) )
         goto help;
-      this->config_tport( arg, len, &args[ 3 ], &arglen[ 3 ], argc - 3 );
       break;
     case CMD_SAVE:
       this->config_save();
-      break;
-    case CMD_TPORT_NAME:
-      if ( argc < 1 )
-        goto help;
-      this->string_tab.reref_string( args[ 1 ], arglen[ 1 ],
-                                     this->cfg_tport->tport );
-      break;
-    case CMD_TPORT_TYPE:
-      if ( argc < 1 )
-        goto help;
-      this->string_tab.reref_string( args[ 1 ], arglen[ 1 ],
-                                     this->cfg_tport->type );
-      break;
-    case CMD_TPORT_LISTEN:
-    case CMD_TPORT_CONNECT:
-    case CMD_TPORT_PORT:
-      if ( argc < 1 )
-        goto help;
-      if ( argc < 2 ) {
-        args[ 1 ] = NULL;
-        arglen[ 1 ] = 0;
-      }
-      else {
-        arglen[ 1 ] = &args[ argc - 1 ][ arglen[ argc - 1 ] ] - args[ 1 ];
-      }
-      this->config_tport_route( args[ 0 ], arglen[ 0 ],
-                                args[ 1 ], arglen[ 1 ] );
-      break;
-    case CMD_TPORT_TIMEOUT:
-    case CMD_TPORT_MTU:
-    case CMD_TPORT_TXW_SQNS:
-    case CMD_TPORT_RXW_SQNS:
-    case CMD_TPORT_MCAST_LOOP:
-    case CMD_TPORT_EDGE:
-      if ( argc < 1 )
-        goto help;
-      if ( argc < 2 ) {
-        args[ 1 ] = NULL;
-        arglen[ 1 ] = 0;
-      }
-      this->config_tport_route( args[ 0 ], arglen[ 0 ],
-                                args[ 1 ], arglen[ 1 ] );
       break;
     case CMD_TPORT_SHOW:
       this->cfg_tport->print_y( *this, 0 );
@@ -2054,6 +2100,11 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
       }
       while ( datalen > 0 && data[ datalen - 1 ] <= ' ' )
         datalen--;
+      if ( datalen >= 2 && data[ 0 ] == data[ datalen - 1 ] &&
+           ( data[ 0 ] == '\"' || data[ 0 ] == '\'' ) ) {
+        data++;
+        datalen -= 2;
+      }
       if ( datalen == 0 )
         goto help;
       if ( cmd == CMD_REMOTE ) {
@@ -2320,24 +2371,79 @@ Console::change_prompt( const char *param,  size_t plen ) noexcept
     o->on_prompt( this->prompt );
 }
 
-void
-Console::config_tport( const char *param,  size_t plen,
-                       const char **,  size_t *,
-                       size_t ) noexcept
+bool
+Console::config_transport( const char *args[],  size_t *arglen,
+                           size_t argc ) noexcept
 {
-  this->change_prompt( param, plen );
-  this->cfg_tport = this->tree.find_transport( param, plen );
+  if ( argc < 3 )
+    return false;
+  const char * tport     = args[ 2 ];
+  size_t       tport_len = arglen[ 2 ];
+  if ( tport_len == 0 )
+    return false;
+  this->cfg_tport = this->tree.find_transport( tport, tport_len );
   if ( this->cfg_tport == NULL ) {
     this->cfg_tport = this->string_tab.make<ConfigTree::Transport>();
-    this->string_tab.ref_string( param, plen, this->cfg_tport->tport );
+    this->string_tab.ref_string( tport, tport_len, this->cfg_tport->tport );
     this->cfg_tport->tport_id = this->tree.transport_cnt++;
     this->tree.transports.push_tl( this->cfg_tport );
   }
+  if ( argc > 3 ) {
+    size_t shift = 3;
+    for (;;) {
+      int cmd = this->shift_command( shift, args, arglen, argc );
+      if ( cmd == CMD_BAD || cmd == CMD_EMPTY ) {
+        if ( cmd == CMD_BAD )
+          this->printf( "bad cmd: %.*s\n", (int) arglen[ 0 ], args[ 0 ] );
+        break;
+      }
+      if ( ! this->config_transport_param( cmd, args, arglen, argc ) )
+        break;
+      shift = 2;
+    }
+    this->changes.add( this->cfg_tport );
+    this->cfg_tport = NULL;
+  }
+  else {
+    this->change_prompt( tport, tport_len );
+  }
+  return true;
+}
+
+bool
+Console::config_transport_param( int cmd,  const char *args[],
+                                 size_t *arglen,  size_t argc ) noexcept
+{
+  switch ( cmd ) {
+    case CMD_TPORT_TPORT:
+      if ( argc < 1 )
+        return false;
+      this->string_tab.reref_string( args[ 1 ], arglen[ 1 ],
+                                     this->cfg_tport->tport );
+      break;
+    case CMD_TPORT_TYPE:
+      if ( argc < 1 )
+        return false;
+      this->string_tab.reref_string( args[ 1 ], arglen[ 1 ],
+                                     this->cfg_tport->type );
+      break;
+    default:
+      if ( argc < 1 )
+        return false;
+      if ( argc < 2 ) {
+        args[ 1 ] = NULL;
+        arglen[ 1 ] = 0;
+      }
+      this->config_transport_route( args[ 0 ], arglen[ 0 ],
+                                    args[ 1 ], arglen[ 1 ] );
+      break;
+  }
+  return true;
 }
 
 void
-Console::config_tport_route( const char *param, size_t plen,
-                             const char *value, size_t vlen ) noexcept
+Console::config_transport_route( const char *param, size_t plen,
+                                 const char *value, size_t vlen ) noexcept
 {
   ConfigTree::PairList & route = this->cfg_tport->route;
   ConfigTree::StringPair *sp = route.get_pair( param, plen );
@@ -3366,9 +3472,9 @@ Console::show_tports( ConsoleOutput *p, const char *name,  size_t len ) noexcept
     const char * listen,
                * connect;
     int          port;
-    tport->get_route_int( "port", port );
-    tport->get_route_str( "listen", listen );
-    tport->get_route_str( "connect", connect );
+    tport->get_route_int( R_PORT, port );
+    tport->get_route_str( R_LISTEN, listen );
+    tport->get_route_str( R_CONNECT, connect );
 
     char   buf[ 80 ];
     size_t len = sizeof( buf );

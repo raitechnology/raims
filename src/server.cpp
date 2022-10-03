@@ -95,6 +95,7 @@ main( int argc, char *argv[] )
              * rv_file     = NULL,
              * user        = NULL,
              * tports      = NULL,
+             * nets        = NULL,
              * log_file    = NULL,
              * log_rotate  = NULL,
              * log_max_rot = NULL,
@@ -178,19 +179,21 @@ main( int argc, char *argv[] )
   else {
   #define MS_SERVER_HELP \
   "[-d dir] [-a file] -u user.svc -t tport.listen [...]\n" \
-  "   -d dir        : config dir/file (default: config)\n" \
-  "   -u user.svc   : user name (default: hostname)\n" \
-  "   -t tport.list : transport name + listen or connect\n" \
-  "   -l file       : log to file\n" \
-  "   -f flags      : debug flags to set\n" \
-  "   -i name       : connect with ipc name\n" \
-  "   -m map        : attach to kv shm map\n" \
-  "   -D dbnum      : default db num\n" \
-  "   -c            : run with console\n"
+  "   -d dir         : config dir/file (default: config)\n" \
+  "   -u user.svc    : user name (default: hostname)\n" \
+  "   -t tport.list  : transport name + listen or connect\n" \
+  "   -n svc.network : service name + network spec\n" \
+  "   -l file        : log to file\n" \
+  "   -f flags       : debug flags to set\n" \
+  "   -i name        : connect with ipc name\n" \
+  "   -m map         : attach to kv shm map\n" \
+  "   -D dbnum       : default db num\n" \
+  "   -c             : run with console\n"
 
     cfg         = get_arg( argc, argv, 1, "-d", cfg_dir );
     user        = get_arg( argc, argv, 1, "-u", NULL );
     tports      = get_arg( argc, argv, 1, "-t", NULL );
+    nets        = get_arg( argc, argv, 1, "-n", NULL );
     log_file    = get_arg( argc, argv, 1, "-l", NULL );
     debug       = get_arg( argc, argv, 1, "-f", NULL );
     ipc_name    = get_arg( argc, argv, 1, "-i", NULL );
@@ -242,13 +245,13 @@ main( int argc, char *argv[] )
     return 1;
 
   if ( map_file != NULL )
-    tree->set_parameter( st, "map_file", map_file );
+    tree->set_parameter( st, P_MAP_FILE, map_file );
   if ( db_num != NULL )
-    tree->set_parameter( st, "db_num", db_num );
+    tree->set_parameter( st, P_DB_NUM, db_num );
   if ( ipc_name != NULL )
-    tree->set_parameter( st, "ipc_name", ipc_name );
+    tree->set_parameter( st, P_IPC_NAME, ipc_name );
   if ( reliability != NULL )
-    tree->set_parameter( st, "reliability", reliability );
+    tree->set_parameter( st, P_RELIABILITY, reliability );
 
   ConfigTree::User      * usr   = NULL;
   ConfigTree::Service   * svc   = NULL;
@@ -348,6 +351,25 @@ main( int argc, char *argv[] )
   int status = 0;
   if ( ! sess.init_param() || ! sess.add_ipc_transport() )
     status = -1;
+  if ( status == 0 && nets != NULL ) {
+    const char * p = ::strchr( nets, '.' );
+    if ( p == NULL ) {
+      fprintf( stderr, "expecting svc.network (%s)\n", nets );
+      status = -1;
+    }
+    for ( int i = 2; status == 0; i++ ) {
+      if ( ! sess.add_network( p+1, ::strlen( p ) - 1, nets, p - nets ) )
+        status = -1;
+      nets = get_arg( argc, argv, i, "-n", NULL );
+      if ( nets == NULL || nets[ 0 ] == '-' )
+        break;
+      p = ::strchr( nets, '.' );
+      if ( p == NULL ) {
+        fprintf( stderr, "expecting svc.network (%s)\n", nets );
+        status = -1;
+      }
+    }
+  }
   if ( status == 0 && tports != NULL ) {
     tport = tree->find_transport( tports, ::strlen( tports ), &conn );
     if ( tport == NULL ) {

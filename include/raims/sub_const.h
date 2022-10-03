@@ -56,82 +56,42 @@ namespace ms {
 #define _ACK            "ack"
 #define _ANY            "any"
 
-extern const char     X_HELLO[],
-                      X_HB[]   ,
-                      X_BYE[]  ,
-                      X_NAME[] ,
-                      Z_ADD[]  ,
-                      Z_DEL[]  ,
-                      Z_BLM[]  ,
-                      Z_ADJ[]  ,
-                      S_JOIN[] ,
-                      S_LEAVE[],
-                      P_PSUB[] ,
-                      P_PSTOP[],
-                      N_PORT[] ,
-                      N_PEER[] ,
-                      N_ADJ[]  ,
-                      N_ALL[]  ;
-                    /* prefix string size */
-extern const uint16_t X_HELLO_SZ,
-                      X_HB_SZ   ,
-                      X_BYE_SZ  ,
-                      X_NAME_SZ ,
-                      Z_ADD_SZ  ,
-                      Z_DEL_SZ  ,
-                      Z_BLM_SZ  ,
-                      Z_ADJ_SZ  ,
-                      S_JOIN_SZ ,
-                      S_LEAVE_SZ,
-                      P_PSUB_SZ ,
-                      P_PSTOP_SZ,
-                      N_PORT_SZ ,
-                      N_PEER_SZ ,
-                      N_ADJ_SZ  ,
-                      N_ALL_SZ  ;
-/* hashes of above */
-extern uint32_t hello_h, hb_h, bye_h, name_h, add_h, del_h, blm_h, adj_h,
-                join_h, leave_h, psub_h, pstop_h;
-
 #ifdef DECLARE_SUB_CONST
-
-const char     X_HELLO[]  = _SESSION_HELLO    ,
-               X_HB[]     = _SESSION_HB       ,
-               X_BYE[]    = _SESSION_BYE      ,
-               X_NAME[]   = _SESSION_NAME     ,
-               Z_ADD[]    = _PEER_ADD         ,
-               Z_DEL[]    = _PEER_DEL         ,
-               Z_BLM[]    = _BLOOM_FILTER     ,
-               Z_ADJ[]    = _ADJACENCY        ,
-               S_JOIN[]   = _SUB_JOIN     "." ,
-               S_LEAVE[]  = _SUB_LEAVE    "." ,
-               P_PSUB[]   = _PSUB_START   "." ,
-               P_PSTOP[]  = _PSUB_STOP    "." ,
-               N_PORT[]   = _STAT_PORT    "." ,
-               N_PEER[]   = _STAT_PEER    "." ,
-               N_ADJ[]    = _STAT_ADJ     "." ,
-               N_ALL[]    = _STAT_ALL     "." ;
-                    /* prefix string size */
-const uint16_t X_HELLO_SZ = (uint16_t) sizeof( X_HELLO ) - 1,
-               X_HB_SZ    = (uint16_t) sizeof( X_HB    ) - 1,
-               X_BYE_SZ   = (uint16_t) sizeof( X_BYE   ) - 1,
-               X_NAME_SZ  = (uint16_t) sizeof( X_NAME  ) - 1,
-               Z_ADD_SZ   = (uint16_t) sizeof( Z_ADD   ) - 1,
-               Z_DEL_SZ   = (uint16_t) sizeof( Z_DEL   ) - 1,
-               Z_BLM_SZ   = (uint16_t) sizeof( Z_BLM   ) - 1,
-               Z_ADJ_SZ   = (uint16_t) sizeof( Z_ADJ   ) - 1,
-               S_JOIN_SZ  = (uint16_t) sizeof( S_JOIN  ) - 1,
-               S_LEAVE_SZ = (uint16_t) sizeof( S_LEAVE ) - 1,
-               P_PSUB_SZ  = (uint16_t) sizeof( P_PSUB  ) - 1,
-               P_PSTOP_SZ = (uint16_t) sizeof( P_PSTOP ) - 1,
-               N_PORT_SZ  = (uint16_t) sizeof( N_PORT  ) - 1,
-               N_PEER_SZ  = (uint16_t) sizeof( N_PEER  ) - 1,
-               N_ADJ_SZ   = (uint16_t) sizeof( N_ADJ   ) - 1,
-               N_ALL_SZ   = (uint16_t) sizeof( N_ALL   ) - 1;
-
-uint32_t       hello_h, hb_h, bye_h, name_h, add_h, del_h, blm_h, adj_h,
-               join_h, leave_h, psub_h, pstop_h;
+#define SUB_CONST( CON, VAL ) \
+extern const char CON[]; \
+extern const uint16_t CON ## _SZ; \
+const char CON[] = VAL; \
+const uint16_t CON ## _SZ = (uint16_t) ( sizeof( CON ) - 1 );
+#define EX
+#else
+#define SUB_CONST( CON, VAL ) \
+extern const char CON[]; \
+extern const uint16_t CON ## _SZ;
+#define EX extern
 #endif
+
+SUB_CONST( X_HELLO , ( _SESSION_HELLO    ) )
+SUB_CONST( X_HB    , ( _SESSION_HB       ) )
+SUB_CONST( X_BYE   , ( _SESSION_BYE      ) )
+SUB_CONST( X_NAME  , ( _SESSION_NAME     ) )
+SUB_CONST( Z_ADD   , ( _PEER_ADD         ) )
+SUB_CONST( Z_DEL   , ( _PEER_DEL         ) )
+SUB_CONST( Z_BLM   , ( _BLOOM_FILTER     ) )
+SUB_CONST( Z_ADJ   , ( _ADJACENCY        ) )
+SUB_CONST( S_JOIN  , ( _SUB_JOIN     "." ) )
+SUB_CONST( S_LEAVE , ( _SUB_LEAVE    "." ) )
+SUB_CONST( P_PSUB  , ( _PSUB_START   "." ) )
+SUB_CONST( P_PSTOP , ( _PSUB_STOP    "." ) )
+SUB_CONST( N_PORT  , ( _STAT_PORT    "." ) )
+SUB_CONST( N_PEER  , ( _STAT_PEER    "." ) )
+SUB_CONST( N_ADJ   , ( _STAT_ADJ     "." ) )
+SUB_CONST( N_ALL   , ( _STAT_ALL     "." ) )
+                    /* prefix string size */
+/* hashes of above */
+EX uint32_t hello_h, hb_h, bye_h, name_h, add_h, del_h, blm_h, adj_h,
+            join_h, leave_h, psub_h, pstop_h;
+#undef SUB_CONST
+#undef EX
 
 }
 }

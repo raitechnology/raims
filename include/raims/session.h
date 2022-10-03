@@ -265,6 +265,8 @@ struct SessionMgr : public kv::EvSocket {
   bool add_transport2( ConfigTree::Transport &t,  bool is_listener,
                        TransportRoute *&rte ) noexcept;
   bool add_ipc_transport( void ) noexcept;
+  bool add_network( const char *net,  size_t net_len, 
+                    const char *svc,  size_t svc_len ) noexcept;
   bool start_transport( TransportRoute &rte,  bool is_listener ) noexcept;
   bool add_startup_transports( void ) noexcept;
   bool add_rvd_transports( const char *listen,  const char *http,

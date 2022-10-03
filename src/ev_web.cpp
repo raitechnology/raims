@@ -485,8 +485,10 @@ WebService::process_get_file2( WebReqData &data ) noexcept
   int num = 0;
   if ( this->http_dir_len != 0 ) {
     char path2[ 1024 ];
-    ::snprintf( path2, sizeof( path2 ), "%.*s%.*s",
-                (int) this->http_dir_len, this->http_dir,
+    const char * slash =
+      ( this->http_dir[ this->http_dir_len - 1 ] == '/' ?  "" : "/" );
+    ::snprintf( path2, sizeof( path2 ), "%.*s%s%.*s",
+                (int) this->http_dir_len, this->http_dir, slash,
                 (int) data.path_len, data.path );
     MapFile map( path2 );
 

@@ -46,10 +46,10 @@ NameSvc::connect( void ) noexcept
     mcast_recv_opts &= ~OPT_VERBOSE;
   }
   this->is_closed = false;
-  if ( ! this->tport.get_route_str( "connect", ip ) &&
-       ! this->tport.get_route_str( "listen", ip ) )
+  if ( ! this->tport.get_route_str( R_CONNECT, ip ) &&
+       ! this->tport.get_route_str( R_LISTEN, ip ) )
     ip = default_name_mcast();
-  if ( ! this->tport.get_route_int( "port", port ) )
+  if ( ! this->tport.get_route_int( R_PORT, port ) )
     port = default_name_port();
 
   if ( ::strchr( ip, ';' ) == NULL ) {
@@ -283,6 +283,9 @@ UserDB::mcast_name( NameSvc &name ) noexcept
              ad.is_newer( this->start_time ) )
         this->send_name_advert( name, *ad.rte, NULL );
     }
+    else {
+      ad.ad_counter = 0;
+    }
     ad.rotate_start_recv();
   }
 }
@@ -435,13 +438,13 @@ UserDB::on_name_svc( NameSvc &name,  CabaMsg *msg ) noexcept
   type_name     = (const char *) dec.mref[ FID_TPORT_TYPE ].fptr;
   type_len      = (uint32_t)     dec.mref[ FID_TPORT_TYPE ].fsize;
 
-  if ( type_len == 3 && ::memcmp( type_name, "any", 3 ) == 0 ) {
+  if ( type_len == T_ANY_SZ && ::memcmp( type_name, T_ANY, T_ANY_SZ ) == 0 ) {
     for ( size_t i = 0; i < adverts.count; i++ ) {
       Advert &ad = adverts.ptr[ i ];
       if ( ad.rte->is_set( TPORT_IS_SHUTDOWN ) ||
            ! ad.rte->transport.tport.equals( tport_name, tport_len ) )
         continue;
-      if ( ad.rte->transport.type.equals( "any", 3 ) )
+      if ( ad.rte->transport.type.equals( T_ANY, T_ANY_SZ ) )
         continue;
       if ( inbox.val != 0 && ad.rte->is_set( TPORT_IS_LISTEN ) )
         this->send_name_advert( name, *ad.rte, &inbox );
@@ -457,8 +460,8 @@ UserDB::on_name_svc( NameSvc &name,  CabaMsg *msg ) noexcept
       if ( ad.rte->is_set( TPORT_IS_SHUTDOWN ) ||
            ! ad.rte->transport.tport.equals( tport_name, tport_len ) )
         continue;
-      if ( ad.rte->transport.type.equals( "any", 3 ) ) {
-        ad.rte->change_any( "mesh", name );
+      if ( ad.rte->transport.type.equals( T_ANY, T_ANY_SZ ) ) {
+        ad.rte->change_any( T_MESH, name );
         type_change = true;
       }
       if ( ! ad.rte->transport.type.equals( type_name, type_len ) )
@@ -497,8 +500,8 @@ UserDB::on_name_svc( NameSvc &name,  CabaMsg *msg ) noexcept
       if ( ad.rte->is_set( TPORT_IS_SHUTDOWN ) ||
            ! ad.rte->transport.tport.equals( tport_name, tport_len ) )
         continue;
-      if ( ad.rte->transport.type.equals( "any", 3 ) ) {
-        ad.rte->change_any( "tcp", name );
+      if ( ad.rte->transport.type.equals( T_ANY, T_ANY_SZ ) ) {
+        ad.rte->change_any( T_TCP, name );
         type_change = true;
       }
       if ( ! ad.rte->transport.type.equals( type_name, type_len ) )

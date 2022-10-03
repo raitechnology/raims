@@ -9,6 +9,7 @@
 #include <raims/sub.h>
 #include <raims/string_tab.h>
 #include <raims/config_tree.h>
+#include <raims/config_const.h>
 
 extern "C" {
   struct LineCook_s;
@@ -472,6 +473,7 @@ struct ConfigChangeList : public kv::DLinkList< ConfigChange > {
 
 typedef kv::ArrayCount< TabPrint, 64 > TableArray;
 struct ConsoleCmdString;
+struct CmdMask;
 struct ConsoleOutBuf : public kv::ArrayOutput {};
 
 struct TabOut {
@@ -565,9 +567,14 @@ struct Console : public md::MDOutput, public SubOnMsg, public ConfigPrinter {
   void get_valid_cmds( const ConsoleCmdString *&cmds, size_t &ncmds ) noexcept;
   void get_valid_help_cmds( const ConsoleCmdString *&cmds,
                             size_t &ncmds ) noexcept;
+  static int which_cmd( const ConsoleCmdString *cmds,  size_t ncmds,
+                   const char *buf, size_t buflen, CmdMask *cmd_mask ) noexcept;
+  static const size_t MAXARGS = 64;
   int parse_command( const char *buf,  const char *end,
                      const char *&arg,  size_t &len,
                      const char **args,  size_t *arglen,
+                     size_t &argcount ) noexcept;
+  int shift_command( size_t shift,  const char **&args,  size_t *&arglen,
                      size_t &argcount ) noexcept;
   void output_help( ConsoleOutput *p,  int c ) noexcept;
   void print_dashes( const uint32_t *width,  uint32_t ncols ) noexcept;
@@ -601,11 +608,12 @@ struct Console : public md::MDOutput, public SubOnMsg, public ConfigPrinter {
   void config_save( void ) noexcept;
   void config_param( const char *param,  size_t plen,
                      const char *value,  size_t vlen ) noexcept;
-  void config_tport( const char *param,  size_t plen,
-                     const char **value,  size_t *vlen,
-                     size_t nvals ) noexcept;
-  void config_tport_route( const char *param,  size_t plen,
-                           const char *value,  size_t vlen ) noexcept;
+  bool config_transport( const char *args[],  size_t *arglen,
+                         size_t argc ) noexcept;
+  bool config_transport_param( int cmd,  const char *args[],
+                               size_t *arglen,  size_t argc ) noexcept;
+  void config_transport_route( const char *param,  size_t plen,
+                               const char *value,  size_t vlen ) noexcept;
   void show_subs( ConsoleOutput *p,  const char *arg,  size_t arglen,
                   const char *arg2,  size_t arglen2 ) noexcept;
   void ping_peer( ConsoleOutput *p,  const char *arg,  size_t arglen ) noexcept;
@@ -690,78 +698,68 @@ struct Console : public md::MDOutput, public SubOnMsg, public ConfigPrinter {
 };
 
 enum ConsoleCmd {
-  CMD_EMPTY            = 0,
-  CMD_PING             = 1,  /* ping [U]                   */
-  CMD_MPING            = 2,  /* mping                      */
-  CMD_REMOTE           = 3,  /* remote [U] cmd             */
-  CMD_SHOW             = 4,  /* show ...                   */
-  CMD_SHOW_SUBS        = 5,  /* show subs [U]              */
-  CMD_SHOW_SEQNO       = 6,  /* show seqno                 */
-  CMD_SHOW_ADJACENCY   = 7,  /* show adjacency             */
-  CMD_SHOW_PEERS       = 8,  /* show peers                 */
-  CMD_SHOW_PORTS       = 9,  /* show ports [T]             */
-  CMD_SHOW_STATUS      = 10, /* show status [T]            */
-  CMD_SHOW_LINKS       = 11, /* show links                 */
-  CMD_SHOW_NODES       = 12, /* show nodes                 */
-  CMD_SHOW_ROUTES      = 13, /* show routes                */
-  CMD_SHOW_URLS        = 14, /* show urls                  */
-  CMD_SHOW_TPORTS      = 15, /* show tport [T]             */
-  CMD_SHOW_USERS       = 16, /* show user [U]              */
-  CMD_SHOW_EVENTS      = 17, /* show events                */
-  CMD_SHOW_UNKNOWN     = 18, /* show unknown               */
-  CMD_SHOW_LOGS        = 19, /* show logs                  */
-  CMD_SHOW_COUNTERS    = 20, /* show counters              */
-  CMD_SHOW_LOSS        = 21, /* show loss                  */
-  CMD_SHOW_SKEW        = 22, /* show skew                  */
-  CMD_SHOW_REACHABLE   = 23, /* show reachable             */
-  CMD_SHOW_TREE        = 24, /* show tree [U]              */
-  CMD_SHOW_PATH        = 25, /* show path [N]              */
-  CMD_SHOW_FDS         = 26, /* show fds                   */
-  CMD_SHOW_BLOOMS      = 27, /* show blooms [N]            */
-  CMD_SHOW_GRAPH       = 28, /* show graph                 */
-  CMD_SHOW_RUN         = 29, /* show running               */
-  CMD_SHOW_RUN_TPORTS  = 30, /* show running transport [T] */
-  CMD_SHOW_RUN_SVCS    = 31, /* show running service [S]   */
-  CMD_SHOW_RUN_USERS   = 32, /* show running user [U]      */
-  CMD_SHOW_RUN_GROUPS  = 33, /* show running group [G]     */
-  CMD_SHOW_RUN_PARAM   = 34, /* show running parameter [P] */
-  CMD_CONNECT          = 35, /* connect [T]                */
-  CMD_LISTEN           = 36, /* listen [T]                 */
-  CMD_SHUTDOWN         = 37, /* shutdown [T]               */
-  CMD_CONFIGURE        = 38, /* configure                  */
-  CMD_CONFIGURE_TPORT  = 39, /* configure transport T      */
-  CMD_CONFIGURE_PARAM  = 40, /* configure parameter P V    */
-  CMD_SAVE             = 41, /* save                       */
-  CMD_SUB_START        = 42, /* sub subject [file]         */
-  CMD_SUB_STOP         = 43, /* unsub subject [file]       */
-  CMD_PSUB_START       = 44, /* psub rv-wildcard [file]    */
-  CMD_PSUB_STOP        = 45, /* punsub rv-wildcard [file]  */
-  CMD_GSUB_START       = 46, /* gsub glob-wildcard [file]  */
-  CMD_GSUB_STOP        = 47, /* gunsub glob-wildcard [file]*/
-  CMD_PUBLISH          = 48, /* pub subject msg            */
-  CMD_TRACE            = 49, /* trace subject msg          */
-  CMD_PUB_ACK          = 50, /* ack subject msg            */
-  CMD_RPC              = 51, /* rpc subject msg            */
-  CMD_ANY              = 52, /* any subject msg            */
-  CMD_DEBUG            = 54, /* debug ival                 */
-  CMD_CANCEL           = 55, /* cancel                     */
-  CMD_MUTE_LOG         = 56, /* mute                       */
-  CMD_UNMUTE_LOG       = 57, /* unmute                     */
-  CMD_QUIT             = 58, /* quit/exit                  */
-  CMD_TPORT_NAME       = 59, /* tport N                    */
-  CMD_TPORT_TYPE       = 60, /* type T                     */
-  CMD_TPORT_LISTEN     = 61, /* listen A                   */
-  CMD_TPORT_CONNECT    = 62, /* connect A                  */
-  CMD_TPORT_PORT       = 63, /* port N                     */
-  CMD_TPORT_TIMEOUT    = 64, /* timeout N                  */
-  CMD_TPORT_MTU        = 65, /* mtu N                      */
-  CMD_TPORT_TXW_SQNS   = 66, /* txw_sqns N                 */
-  CMD_TPORT_RXW_SQNS   = 67, /* rxw_sqns N                 */
-  CMD_TPORT_MCAST_LOOP = 68, /* mcast_loop N               */
-  CMD_TPORT_EDGE       = 69, /* edge B                     */
-  CMD_TPORT_SHOW       = 70, /* show                       */
-  CMD_TPORT_QUIT       = 71, /* quit/exit                  */
-  CMD_BAD              = 72
+  CMD_BAD              = 0,
+  CMD_EMPTY            = 1,
+  CMD_PING             = 2,  /* ping [U]                   */
+  CMD_MPING            = 3,  /* mping                      */
+  CMD_REMOTE           = 4,  /* remote [U] cmd             */
+  CMD_SHOW             = 5,  /* show ...                   */
+  CMD_SHOW_SUBS        = 6,  /* show subs [U]              */
+  CMD_SHOW_SEQNO       = 7,  /* show seqno                 */
+  CMD_SHOW_ADJACENCY   = 8,  /* show adjacency             */
+  CMD_SHOW_PEERS       = 9,  /* show peers                 */
+  CMD_SHOW_PORTS       = 10,  /* show ports [T]             */
+  CMD_SHOW_STATUS      = 11, /* show status [T]            */
+  CMD_SHOW_LINKS       = 12, /* show links                 */
+  CMD_SHOW_NODES       = 13, /* show nodes                 */
+  CMD_SHOW_ROUTES      = 14, /* show routes                */
+  CMD_SHOW_URLS        = 15, /* show urls                  */
+  CMD_SHOW_TPORTS      = 16, /* show tport [T]             */
+  CMD_SHOW_USERS       = 17, /* show user [U]              */
+  CMD_SHOW_EVENTS      = 18, /* show events                */
+  CMD_SHOW_UNKNOWN     = 19, /* show unknown               */
+  CMD_SHOW_LOGS        = 20, /* show logs                  */
+  CMD_SHOW_COUNTERS    = 21, /* show counters              */
+  CMD_SHOW_LOSS        = 22, /* show loss                  */
+  CMD_SHOW_SKEW        = 23, /* show skew                  */
+  CMD_SHOW_REACHABLE   = 24, /* show reachable             */
+  CMD_SHOW_TREE        = 25, /* show tree [U]              */
+  CMD_SHOW_PATH        = 26, /* show path [N]              */
+  CMD_SHOW_FDS         = 27, /* show fds                   */
+  CMD_SHOW_BLOOMS      = 28, /* show blooms [N]            */
+  CMD_SHOW_GRAPH       = 29, /* show graph                 */
+  CMD_SHOW_RUN         = 30, /* show running               */
+  CMD_SHOW_RUN_TPORTS  = 31, /* show running transport [T] */
+  CMD_SHOW_RUN_SVCS    = 32, /* show running service [S]   */
+  CMD_SHOW_RUN_USERS   = 33, /* show running user [U]      */
+  CMD_SHOW_RUN_GROUPS  = 34, /* show running group [G]     */
+  CMD_SHOW_RUN_PARAM   = 35, /* show running parameter [P] */
+  CMD_CONNECT          = 36, /* connect [T]                */
+  CMD_LISTEN           = 37, /* listen [T]                 */
+  CMD_SHUTDOWN         = 38, /* shutdown [T]               */
+  CMD_CONFIGURE        = 39, /* configure                  */
+  CMD_CONFIGURE_TPORT  = 40, /* configure transport T      */
+  CMD_CONFIGURE_PARAM  = 41, /* configure parameter P V    */
+  CMD_SAVE             = 42, /* save                       */
+  CMD_SUB_START        = 43, /* sub subject [file]         */
+  CMD_SUB_STOP         = 44, /* unsub subject [file]       */
+  CMD_PSUB_START       = 45, /* psub rv-wildcard [file]    */
+  CMD_PSUB_STOP        = 46, /* punsub rv-wildcard [file]  */
+  CMD_GSUB_START       = 47, /* gsub glob-wildcard [file]  */
+  CMD_GSUB_STOP        = 48, /* gunsub glob-wildcard [file]*/
+  CMD_PUBLISH          = 49, /* pub subject msg            */
+  CMD_TRACE            = 50, /* trace subject msg          */
+  CMD_PUB_ACK          = 51, /* ack subject msg            */
+  CMD_RPC              = 52, /* rpc subject msg            */
+  CMD_ANY              = 53, /* any subject msg            */
+  CMD_DEBUG            = 55, /* debug ival                 */
+  CMD_CANCEL           = 56, /* cancel                     */
+  CMD_MUTE_LOG         = 57, /* mute                       */
+  CMD_UNMUTE_LOG       = 58, /* unmute                     */
+  CMD_QUIT             = 59, /* quit/exit                  */
+
+#define CMD_TPORT_BASE 60
+  CMD_TPORT_ENUM /* config_const.h */
 };
 
 enum ConsoleArgType {
@@ -921,18 +919,11 @@ static const ConsoleCmdString help_cmd[] = {
   { CMD_SHOW_PEERS       , "show peers", "",     "Show active peers"                                 },
   { CMD_SHOW_PORTS       , "show ports", "[T]",  "Show the active ports"                             },
   { CMD_SHOW_STATUS      , "show status", "[T]", "Show the port status with any errors"              },
-#if 0
-  { CMD_SHOW_LINKS       , "show links", "",     "Show links"                                        },
-  { CMD_SHOW_NODES       , "show nodes", "",     "Show nodes"                                        },
-#endif
   { CMD_SHOW_ROUTES      , "show routes", "",    "Show the primary port for each peer"               },
   { CMD_SHOW_URLS        , "show urls", "",      "Show urls of connected peers"                      },
   { CMD_SHOW_TPORTS      , "show tport", "[T]",  "Show the configured tports"                        },
   { CMD_SHOW_USERS       , "show user", "[U]",   "Show the configured users"                         },
   { CMD_SHOW_EVENTS      , "show events", "",    "Show event recorder"                               },
-#if 0
-  { CMD_SHOW_UNKNOWN     , "show unknown", "",   "Show the list of peers yet to be resolved"         },
-#endif
   { CMD_SHOW_LOGS        , "show logs", "",      "Show current log buffer"                           },
   { CMD_SHOW_COUNTERS    , "show counters", "",  "Show system seqno and time values"                 },
   { CMD_SHOW_LOSS        , "show loss", "",      "Show message loss counters and time"               },
@@ -974,66 +965,40 @@ static const ConsoleCmdString help_cmd[] = {
 static const size_t num_help_cmds = ASZ( help_cmd );
 
 static const ConsoleCmdString tport_cmd[] = {
-  { CMD_TPORT_NAME       , "tport"      ,0,0},
-  { CMD_TPORT_TYPE       , "type"       ,0,0},
-  { CMD_TPORT_LISTEN     , "listen"     ,0,0},
-  { CMD_TPORT_CONNECT    , "connect"    ,0,0},
-  { CMD_TPORT_PORT       , "port"       ,0,0},
-  { CMD_TPORT_TIMEOUT    , "timeout"    ,0,0},
-  { CMD_TPORT_MTU        , "mtu"        ,0,0},
-  { CMD_TPORT_TXW_SQNS   , "txw_sqns"   ,0,0},
-  { CMD_TPORT_RXW_SQNS   , "rxw_sqns"   ,0,0},
-  { CMD_TPORT_MCAST_LOOP , "mcast_loop" ,0,0},
-  { CMD_TPORT_EDGE       , "edge"       ,0,0},
-  { CMD_TPORT_SHOW       , "show"       ,0,0},
-  { CMD_TPORT_QUIT       , "quit"       ,0,0},
-  { CMD_TPORT_QUIT       , "exit"       ,0,0}
+  CMD_TPORT_CMD /* config_const.h */
 };
 static const size_t num_tport_cmds = ASZ( tport_cmd );
 
 static const ConsoleCmd valid_tcp[] =
-  { CMD_TPORT_NAME, CMD_TPORT_TYPE, CMD_TPORT_LISTEN, CMD_TPORT_CONNECT, CMD_TPORT_PORT,
-    CMD_TPORT_TIMEOUT, CMD_TPORT_EDGE, CMD_TPORT_SHOW, CMD_TPORT_QUIT };
+  { CMD_TPORT_TPORT, CMD_TPORT_TYPE, VALID_TCP, CMD_TPORT_SHOW, CMD_TPORT_QUIT };
 
 static const ConsoleCmd valid_mesh[] =
-  { CMD_TPORT_NAME, CMD_TPORT_TYPE, CMD_TPORT_LISTEN, CMD_TPORT_CONNECT, CMD_TPORT_PORT,
-    CMD_TPORT_TIMEOUT, CMD_TPORT_SHOW, CMD_TPORT_QUIT };
+  { CMD_TPORT_TPORT, CMD_TPORT_TYPE, VALID_MESH, CMD_TPORT_SHOW, CMD_TPORT_QUIT };
 
 static const ConsoleCmd valid_pgm[] =
-  { CMD_TPORT_NAME, CMD_TPORT_TYPE, CMD_TPORT_LISTEN, CMD_TPORT_CONNECT, CMD_TPORT_PORT,
-    CMD_TPORT_MTU, CMD_TPORT_TXW_SQNS, CMD_TPORT_RXW_SQNS, CMD_TPORT_MCAST_LOOP,
-    CMD_TPORT_SHOW, CMD_TPORT_QUIT };
+  { CMD_TPORT_TPORT, CMD_TPORT_TYPE, VALID_PGM, CMD_TPORT_SHOW, CMD_TPORT_QUIT };
 
 static const ConsoleCmd valid_rv[] =
-  { CMD_TPORT_NAME, CMD_TPORT_TYPE, CMD_TPORT_LISTEN, CMD_TPORT_PORT,
-    CMD_TPORT_SHOW, CMD_TPORT_QUIT };
+  { CMD_TPORT_TPORT, CMD_TPORT_TYPE, VALID_RV, CMD_TPORT_SHOW, CMD_TPORT_QUIT };
 
 static const ConsoleCmd valid_nats[] =
-  { CMD_TPORT_NAME, CMD_TPORT_TYPE, CMD_TPORT_LISTEN, CMD_TPORT_PORT,
-    CMD_TPORT_SHOW, CMD_TPORT_QUIT };
+  { CMD_TPORT_TPORT, CMD_TPORT_TYPE, VALID_NATS, CMD_TPORT_SHOW, CMD_TPORT_QUIT };
 
 static const ConsoleCmd valid_redis[] =
-  { CMD_TPORT_NAME, CMD_TPORT_TYPE, CMD_TPORT_LISTEN, CMD_TPORT_PORT,
-    CMD_TPORT_SHOW, CMD_TPORT_QUIT };
+  { CMD_TPORT_TPORT, CMD_TPORT_TYPE, VALID_REDIS, CMD_TPORT_SHOW, CMD_TPORT_QUIT };
+
+static const ConsoleCmd valid_name[] =
+  { CMD_TPORT_TPORT, CMD_TPORT_TYPE, VALID_NAME, CMD_TPORT_SHOW, CMD_TPORT_QUIT };
+
+static const ConsoleCmd valid_any[] =
+  { CMD_TPORT_TPORT, CMD_TPORT_TYPE, VALID_ANY, CMD_TPORT_SHOW, CMD_TPORT_QUIT };
 
 static const ConsoleCmdString tport_help_cmd[] = {
-  { CMD_TPORT_NAME       , "tport","N",    "Name of transport" },
-  { CMD_TPORT_TYPE       , "type","T",     "Type of transport (tcp,pgm,mesh,rv,nats,redis)" },
-  { CMD_TPORT_LISTEN     , "listen","A",   "Listen address for passive transport" },
-  { CMD_TPORT_CONNECT    , "connect","A",  "Connect address for active transport" },
-  { CMD_TPORT_PORT       , "port","N",     "Port for address" },
-  { CMD_TPORT_TIMEOUT    , "timeout","N",  "Timeout for connect or accept" },
-  { CMD_TPORT_MTU        , "mtu","N",      "MTU for pgm type transport, which is the UDP datagram size" },
-  { CMD_TPORT_TXW_SQNS   , "txw_sqns","N", "Transmit window for pgm type transport, in datagram sequences" },
-  { CMD_TPORT_RXW_SQNS   , "rxw_sqns","N", "Recieve window for pgm type transport, in datagram sequences" },
-  { CMD_TPORT_MCAST_LOOP , "mcast_loop","N", "Controls multicast loop: 0 - none, 2 - host loop and exclude sender" },
-  { CMD_TPORT_EDGE       , "edge","B",     "When true, don't create a adjaceny and use existing" },
-  { CMD_TPORT_SHOW       , "show","",      "Show tport config" },
-  { CMD_TPORT_QUIT       , "quit/exit","", "Exit config" }
+  CMD_TPORT_HELP /* config_const.h */
 };
 static const size_t num_tport_help_cmds = ASZ( tport_help_cmd );
 
-struct ValidCmds {
+struct ValidTportCmds {
   const char       * type;
   const ConsoleCmd * valid;
   size_t             nvalid;
@@ -1041,15 +1006,17 @@ struct ValidCmds {
   size_t             ncmds;
   ConsoleCmdString * help;
   size_t             nhelps;
-} valid_cmd[] = {
+} valid_tport_cmd[] = {
   { "tcp",  valid_tcp,  ASZ( valid_tcp ),  NULL, 0, NULL, 0 },
   { "mesh", valid_mesh, ASZ( valid_mesh ), NULL, 0, NULL, 0 },
   { "pgm",  valid_pgm,  ASZ( valid_pgm ),  NULL, 0, NULL, 0 },
   { "rv",   valid_rv,   ASZ( valid_rv ),   NULL, 0, NULL, 0 },
   { "nats", valid_nats, ASZ( valid_nats ), NULL, 0, NULL, 0 },
-  { "redis",valid_redis,ASZ( valid_redis ),NULL, 0, NULL, 0 }
+  { "redis",valid_redis,ASZ( valid_redis ),NULL, 0, NULL, 0 },
+  { "name", valid_name, ASZ( valid_name ), NULL, 0, NULL, 0 },
+  { "any",  valid_any,  ASZ( valid_any ),  NULL, 0, NULL, 0 }
 };
-static const size_t num_valid_cmds = ASZ( valid_cmd );
+static const size_t num_valid_tport_cmds = ASZ( valid_tport_cmd );
 #undef ASZ
 
 struct CmdMask {
@@ -1085,63 +1052,24 @@ struct CmdMask {
 };
 
 static ConsoleCmd
-which_cmd( const ConsoleCmdString *cmds,  size_t ncmds,
-           const char *buf,  size_t buflen,  CmdMask *cmd_mask )
-{
-  CmdMask  match;
-  size_t   off, last = 0;
-  bool     matched = false;
-  match.mask( ncmds );
-  for ( off = 0; match.count() != 0; off++ ) {
-    if ( off == buflen || buf[ off ] == ' ' ) {
-      matched = true;
-      break;
-    }
-    for ( size_t i = 0; i < ncmds; i++ ) {
-      if ( match.is_member( i ) ) {
-        if ( cmds[ i ].str[ off ] != buf[ off ] )
-          match.remove( i );
-        else
-          last = i;
-      }
-    }
-  }
-  if ( cmd_mask != NULL ) {
-    cmd_mask->zero();
-    if ( match.count() != 0 ) {
-      for ( size_t i = 0; i < ncmds; i++ ) {
-        if ( match.is_member( i ) )
-          cmd_mask->add( cmds[ i ].cmd );
-      }
-    }
-  }
-  if ( match.count() == 1 && matched )
-    return cmds[ last ].cmd;
-  return CMD_BAD;
-}
-#if 0
-static ConsoleCmd
-which_command( const char *buf,  size_t buflen,  uint64_t *cmd_mask = NULL )
-{
-  return which_cmd( console_cmd, num_console_cmds, buf, buflen, cmd_mask );
-}
-#endif
-static ConsoleCmd
 which_show( const char *buf,  size_t buflen,  CmdMask *cmd_mask = NULL )
 {
-  return which_cmd( show_cmd, num_show_cmds, buf, buflen, cmd_mask );
+  return (ConsoleCmd)
+    Console::which_cmd( show_cmd, num_show_cmds, buf, buflen, cmd_mask );
 }
 
 static ConsoleCmd
 which_run( const char *buf,  size_t buflen,  CmdMask *cmd_mask = NULL )
 {
-  return which_cmd( run_cmd, num_run_cmds, buf, buflen, cmd_mask );
+  return (ConsoleCmd)
+    Console::which_cmd( run_cmd, num_run_cmds, buf, buflen, cmd_mask );
 }
 
 static ConsoleCmd
 which_config( const char *buf,  size_t buflen,  CmdMask *cmd_mask = NULL )
 {
-  return which_cmd( config_cmd, num_config_cmds, buf, buflen, cmd_mask );
+  return (ConsoleCmd)
+    Console::which_cmd( config_cmd, num_config_cmds, buf, buflen, cmd_mask );
 }
 
 #endif

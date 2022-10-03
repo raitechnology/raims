@@ -4,6 +4,7 @@
 #include <raikv/ev_net.h>
 #include <raims/msg.h>
 #include <raims/pgm_sock.h>
+#include <raims/config_tree.h>
 
 namespace rai {
 namespace ms {
@@ -24,6 +25,9 @@ struct EvPgmTransportParameters {
     : network( n ), port( p ),
       mtu( 16384 ), txw_sqns( 4 * 1024 ), rxw_sqns( 4 * 1024 ),
       txw_secs( 60 ), mcast_loop( 0 ) {}
+
+  void parse_tport( const char *name,  ConfigTree::Transport &tport,
+                    char net_buf[ 1024 ],  uint32_t reliability ) noexcept;
 };
 
 struct EvPgmTransport : public kv::EvSocket {

@@ -12,6 +12,33 @@ using namespace ms;
 using namespace kv;
 using namespace md;
 
+void
+EvPgmTransportParameters::parse_tport( const char *name,  ConfigTree::Transport &tport,
+                                       char net_buf[ 1024 ],
+                                       uint32_t reliability ) noexcept
+{
+  size_t len = 1024;
+  int    ival;
+  tport.get_route_str( name, this->network );
+  if ( ! tport.get_route_int( R_PORT, this->port ) )
+    this->port = tport.get_host_port( this->network, net_buf, len );
+  if ( tport.is_wildcard( this->network ) )
+    this->network = NULL;
+
+  if ( tport.get_route_int( R_MTU, ival ) )
+    this->mtu = ival;
+  if ( tport.get_route_int( R_TXW_SQNS, ival ) )
+    this->txw_sqns = ival;
+  if ( tport.get_route_int( R_RXW_SQNS, ival ) )
+    this->rxw_sqns = ival;
+  if ( tport.get_route_int( R_MCAST_LOOP, ival ) )
+    this->mcast_loop = ival;
+  if ( tport.get_route_int( R_TXW_SECS, ival ) )
+    this->txw_secs = ival;
+  else
+    this->txw_secs = reliability;
+}
+
 EvPgmTransport::EvPgmTransport( EvPoll &p,  TransportRoute &r ) noexcept
     : EvSocket( p, p.register_type( "pgm" ) ), rte( r ),
       recv_highwater( 15 * 1024 ), send_highwater( 31 * 1024 ),

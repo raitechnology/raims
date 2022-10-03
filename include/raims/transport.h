@@ -9,6 +9,7 @@
 #include <raims/peer.h>
 #include <raims/state_test.h>
 #include <raims/debug.h>
+#include <raims/config_const.h>
 
 namespace rai {
 namespace ms {
@@ -133,7 +134,6 @@ struct IpcRteList : public kv::RouteNotify {
 
 struct TransportRoute : public kv::EvSocket, public kv::EvConnectionNotify,
                         public StateTest<TransportRoute> {
-  /*TransportRoute        * next;*/
   kv::EvPoll            & poll;           /* event poller */
   SessionMgr            & mgr;            /* session of transport */
   UserDB                & user_db;        /* session of transport */
@@ -191,6 +191,7 @@ struct TransportRoute : public kv::EvSocket, public kv::EvConnectionNotify,
   bool is_edge( void )  const { return this->is_set( TPORT_IS_EDGE ) != 0; }
 
   int init( void ) noexcept;
+  void init_state( void ) noexcept;
   void set_peer_name( kv::PeerData &pd,  const char *suff ) noexcept;
   void update_cost( UserBridge &n,  uint32_t cost[ COST_PATH_COUNT ] ) noexcept;
   const char * connected_names( char *buf,  size_t buflen ) noexcept;
@@ -208,7 +209,6 @@ struct TransportRoute : public kv::EvSocket, public kv::EvConnectionNotify,
   bool create_transport( ConfigTree::Transport &tport ) noexcept;
   void change_any( const char *type,  NameSvc &name ) noexcept;
 
-  void clear_mesh( void ) noexcept;
   bool add_mesh_connect( const char *mesh_url,  uint32_t mesh_hash ) noexcept;
   bool add_tcp_connect( const char *conn_url,  uint32_t conn_hash ) noexcept;
 

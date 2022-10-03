@@ -12,6 +12,27 @@ namespace ms {
 
 struct TransportRoute;
 
+enum NetTransport {
+  NET_NONE         = 0,
+  NET_ANY          = 1,
+  NET_MESH         = 2,
+  NET_MESH_LISTEN  = 3,
+  NET_MESH_CONNECT = 4,
+  NET_TCP          = 5,
+  NET_TCP_LISTEN   = 6,
+  NET_TCP_CONNECT  = 7,
+  NET_MCAST        = 8
+};
+
+struct RvMcast2 : public sassrv::RvMcast {
+  NetTransport type;
+  RvMcast2() : type( NET_NONE ) {}
+  int parse_network2( const char *net,  size_t net_len ) noexcept;
+  static NetTransport net_to_transport( const char *net,
+                                        size_t &net_len ) noexcept;
+  int device_ip( char *buf,  size_t len ) const noexcept;
+};
+
 struct RvHostRoute {
   RvHostRoute           * next,
                         * back;

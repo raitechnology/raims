@@ -16,6 +16,7 @@
 #include <raikv/key_hash.h>
 #include <raims/parse_config.h>
 #include <raims/gen_config.h>
+#include <raims/config_const.h>
 
 using namespace rai;
 using namespace md;
@@ -489,8 +490,8 @@ ConfigTree::print_parameters_y( ConfigPrinter &p, int which,
       p.printf( "parameters:\n" );
   }
   if ( listen.count > 0 ) {
-    if ( namelen == 0 ||
-         ( namelen == 6 && ::memcmp( name, "listen", 6 ) == 0 ) ) {
+    if ( namelen == 0 || ( namelen == R_LISTEN_SZ &&
+          ::memcmp( name, R_LISTEN, R_LISTEN_SZ ) == 0 ) ) {
       p.printf( "%*slisten:\n", i, "" );
       for ( n = 0; n < listen.count; n++ ) {
         p.printf( "  %*s- ", i, "" );
@@ -500,8 +501,8 @@ ConfigTree::print_parameters_y( ConfigPrinter &p, int which,
     }
   }
   if ( connect.count > 0 ) {
-    if ( namelen == 0 ||
-         ( namelen == 7 && ::memcmp( name, "connect", 7 ) == 0 ) ) {
+    if ( namelen == 0 || ( namelen == R_CONNECT_SZ &&
+          ::memcmp( name, R_CONNECT, R_CONNECT_SZ ) == 0 ) ) {
       p.printf( "%*sconnect:\n", i, "" );
       for ( n = 0; n < connect.count; n++ ) {
         p.printf( "  %*s- ", i, "" );
@@ -1524,8 +1525,8 @@ ConfigTree::print_parameters_js( ConfigPrinter &p, int which,
         for ( ; sp != NULL; ) {
           bool matched = false;
           if ( namelen == 0 || sp->name.equals( name, namelen ) ) {
-            bool is_startup = ( sp->name.equals( "listen" ) ||
-                                sp->name.equals( "connect" ) );
+            bool is_startup = ( sp->name.equals( R_LISTEN, R_LISTEN_SZ ) ||
+                                sp->name.equals( R_CONNECT, R_CONNECT_SZ ) );
             if ( is_startup && ( which & PRINT_STARTUP ) != 0 )
               matched = true;
           }
@@ -1653,8 +1654,8 @@ ConfigTree::print_y( ConfigPrinter &p,  int &did_which,  int which,
         for ( ; sp != NULL; ) {
           bool matched = false;
           if ( namelen == 0 || sp->name.equals( name, namelen ) ) {
-            bool is_startup = ( sp->name.equals( "listen" ) ||
-                                sp->name.equals( "connect" ) );
+            bool is_startup = ( sp->name.equals( R_LISTEN, R_LISTEN_SZ ) ||
+                                sp->name.equals( R_CONNECT, R_CONNECT_SZ ) );
             if ( which & PRINT_STARTUP )
               matched = is_startup;
             else
@@ -2147,6 +2148,30 @@ ConfigTree::Transport::is_wildcard( const char *host ) noexcept
          ( host[ 0 ] == '*' && host[ 1 ] == '\0' ) ||
          ( host[ 0 ] == '0' && host[ 1 ] == '\0' );
 }
+
+void
+ConfigTree::Transport::get_route_pairs( const char *name,
+                                        ConfigTree::StringPair **el,
+                                        size_t max_el ) noexcept
+{
+  size_t i, nlen = ::strlen( name );
+
+  el[ 0 ] = this->route.get_pair( name, nlen );
+  for ( i = 1; i < max_el; i++ ) {
+    char nbuf[ 16 ]; /* try connect2, connect3, ... */
+    ::snprintf( nbuf, sizeof( nbuf ), "%s%d", name, (int) i + 1 );
+    el[ i ] = this->route.get_pair( nbuf, nlen+1 );
+  }
+  /* parse config that uses array of cost */
+  if ( el[ 0 ] != NULL ) {
+    for ( i = 0; i < max_el - 1; i++ ) {
+      if ( el[ i ]->next == NULL ) break;
+      if ( ! el[ i ]->next->name.equals( name, nlen ) ) break;
+      el[ i + 1 ] = el[ i ]->next;
+    }
+  }
+}
+
 
 ConfigTree::StringPair *
 ConfigTree::get_free_pair( StringTab &st ) noexcept

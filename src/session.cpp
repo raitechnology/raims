@@ -7,6 +7,7 @@
 #include <raikv/os_file.h>
 #define DECLARE_SUB_CONST
 #define INCLUDE_FRAME_CONST
+#define DECLARE_CONFIG_CONST
 #include <raims/session.h>
 #include <raims/transport.h>
 #include <raims/ev_name_svc.h>
@@ -372,6 +373,8 @@ SessionMgr::start( void ) noexcept
 void
 SessionMgr::name_hb( uint64_t cur_mono ) noexcept
 {
+  if ( cur_mono == 0 )
+    cur_mono = this->poll.timer.current_monotonic_time_ns();
   this->name_svc_mono_time = cur_mono + this->user_db.hb_ival_ns;
   for ( size_t i = 0; i < this->unrouteable.count; i++ ) {
     NameSvc *name = this->unrouteable.ptr[ i ].name;

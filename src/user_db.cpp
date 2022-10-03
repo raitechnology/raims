@@ -278,6 +278,30 @@ UserDB::forward_to( UserBridge &n,  const char *sub,
   return u_src.rte.sub_route.forward_to( isrc, u_src.inbox_fd );
 }
 
+bool
+UserDB::forward_pub( const MsgFramePublish &pub,  const UserBridge &,
+                     const MsgHdrDecoder &dec ) noexcept
+{
+  bool b = true;
+  if ( dec.is_mcast_type() ) {
+    size_t count = this->transport_tab.count;
+    if ( count > 1 || pub.rte.connect_count > 1 ) {
+      kv::EvPublish tmp( pub );
+      for ( size_t i = 0; i < count; i++ ) {
+        TransportRoute * rte = this->transport_tab.ptr[ i ];
+        tmp.pub_type = 'p';
+        if ( rte->connect_count > 0 ) {
+          if ( rte != &pub.rte )
+            b &= rte->forward_to_connected_auth( tmp );
+          else if ( rte->connect_count > 1 )
+            b &= rte->forward_to_connected_auth_not_fd( tmp, pub.src_route );
+        }
+      }
+    }
+  }
+  return b;
+}
+
 PeerEntry *
 UserDB::make_peer( const StringVal &user,  const StringVal &svc,
                    const StringVal &create,  const StringVal &expires ) noexcept
@@ -1658,6 +1682,34 @@ PeerEntry::print( void ) noexcept
   printf( "svc: \"%s\"\n", this->svc.val );
   printf( "create: \"%s\"\n", this->create.val );
   printf( "expires: \"%s\"\n", this->expires.val );
+}
+
+const char *
+UserDB::uid_names( const BitSpace &uids,  char *buf,
+                   size_t buflen ) noexcept
+{
+  UIntBitSet bits( uids.ptr );
+  return this->uid_names( bits, uids.bit_size(), buf, buflen );
+}
+
+const char *
+UserDB::uid_names( const UIntBitSet &uids,  uint32_t max_uid,
+                   char *buf,  size_t buflen ) noexcept
+{
+  uint32_t uid;
+  size_t   off = 0;
+  buf[ 0 ] = '\0';
+  for ( bool ok = uids.first( uid, max_uid ); ok;
+        ok = uids.next( uid, max_uid ) ) {
+    if ( this->bridge_tab.ptr[ uid ] == NULL )
+      continue;
+    const UserBridge &n = *this->bridge_tab.ptr[ uid ];
+    off += ::snprintf( &buf[ off ], buflen - off, "%s.%u ",
+                       n.peer.user.val, uid );
+  }
+  if ( off > 0 )
+    buf[ off - 1 ] = '\0';
+  return buf;
 }
 
 static inline char *

@@ -3,6 +3,7 @@
 
 #include <raikv/ev_tcp.h>
 #include <raims/msg.h>
+#include <raims/config_tree.h>
 
 namespace rai {
 namespace ms {
@@ -42,6 +43,12 @@ struct EvTcpTransport : public kv::EvConnection {
 
 static const size_t MAX_TCP_HOST_LEN = 256,
                     MAX_TCP_HOSTS    = 8;
+enum {
+  PARAM_REUSEPORT  = 1,
+  PARAM_NB_CONNECT = 2,
+  PARAM_LISTEN     = 4
+};
+
 struct EvTcpTransportParameters {
   const char * host[ MAX_TCP_HOSTS ]; /* connect host */
   int          port[ MAX_TCP_HOSTS ], /* connect port */
@@ -118,6 +125,8 @@ struct EvTcpTransportParameters {
     EvTcpTransportParameters *p = new ( m ) EvTcpTransportParameters( *this );
     return p;
   }
+
+  void parse_tport( ConfigTree::Transport &tport,  int ptype ) noexcept;
 };
 
 struct EvTcpTransportClient : public EvTcpTransport {
