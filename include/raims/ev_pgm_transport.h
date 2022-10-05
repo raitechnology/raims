@@ -24,7 +24,7 @@ struct EvPgmTransportParameters {
   EvPgmTransportParameters( const char *n = NULL,  int p = 9000 )
     : network( n ), port( p ),
       mtu( 16384 ), txw_sqns( 4 * 1024 ), rxw_sqns( 4 * 1024 ),
-      txw_secs( 60 ), mcast_loop( 0 ) {}
+      txw_secs( 15 ), mcast_loop( 2 ) {}
 
   void parse_tport( const char *name,  ConfigTree::Transport &tport,
                     char net_buf[ 1024 ],  uint32_t reliability ) noexcept;

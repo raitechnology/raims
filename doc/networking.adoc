@@ -23,29 +23,153 @@ use PGM multicast as well as a TCP mesh.  The routing of messages between peers
 is agnostic to the type of protocol that the endpoint clients are using.  It is
 possible to use the Rai MS protocol directly as well.  The `ms_server` console
 contains the ability to publish, subscribe without using an external client.
-The `telnet` transport uses the console protocol.
+The Telnet transport uses the console protocol.  The Web transport serves
+builtin html pages that interface with the console protocol through websocket
+protocol.
 
 There are two sides to transport configuration, the listener and the connector.
-An external transport does not (yet) support the connector side, only the
-listener side.  The internal transports support both.
+Only the internal transports support the connecting side (PGM, mesh, tcp), the
+client side (RV, NATS, Redis, Telnet, Web) only uses listeners and do not have
+a cost.  The device option will auto-discover a connector or listener via
+multicast through a device.  This requires that the connector and listener are
+on the same broadcast domain or have multicast routing configured.
 
-The config file format is a JSON or YAML with a record that has these fields:
+The config file format is a JSON or YAML with a record that can have these
+fields:
 
 ----
   tport: <name>
-  type: <pgm | mesh | tcp | rv | nats | redis | telnet>
+  type: <pgm | mesh | tcp | rv | nats | redis | telnet | web | name>
   route:
     listen: <address>
     connect: <address>
+    device: <address>
     port: <number>
+    cost: <number>
     <parm>: <value>
 ----
 
 The `name` identifies the transport so that it can be referenced for starting
-and stopping in the console and the command line.  It is also sent to other
-peers so that it can be read in log files and diagnostic output.  It has no
-protocol implications, a misspelling won't cause it to stop working, it will
-just be confusing for the operator.
+and stopping in the console and the command line.  It is also used by auto
+discovery to match transports and it is sent to other peers so that it can be
+read in log files and diagnostic output.  It has no protocol implications
+beyond auto discovery, a misspelling won't cause it to stop working.
+
+[[service_and_networks]]
+Services and Networks
+~~~~~~~~~~~~~~~~~~~~~
+
+The endpoint protocols: RV, NATS, Redis; all have a service defined to separate
+the data flow from one another.  By using the same service name allows these
+endpoints to share the same namespace.  The underlay network that connects the
+namespaces can both be configured using the YAML files or the console and also
+be specified by the connecting clients.  The clients can specify a network with
+PGM multicast or with TCP endpoints and meshes.  All of networks specified by a
+client that use TCP will still use multicast to resolve the endpoints by
+service name by using the name protocol.
+
+Networks use a device name and a protocol or a multicast address.  When a
+network is not specified by a client or configuration, then the links between
+services have to be configured by the the YAML files and/or in the console.
+
+Example networks and how they are interpreted.  All of these have a service
+name associated with the network, which must match for namespace to
+communicate.
+
+- `eth0;239.1.2.3` -- Connect a PGM protocol to eth0 joining the multicast
+  address of 239.1.2.3 for communicating with other peers.
+
+- `eth0;tcp.listen` -- Connect a name protocol to the eth0 interface and
+  advertise a tcp listen endpoint.
+
+- `eth0;tcp.connect` -- Connect a name protocol to eth0, and advertise a tcp
+  connection endpoint.  These resolve to a connection when listen endpoints
+  appear with a clients that use the above.
+
+- `eth0;mesh` -- Connect a name protocol to eth0, and advertise a tcp mesh
+  endpoint.  This creates connections to all other mesh endpoints advertised.
+
+- `eth0;any` -- Connect a name protocol to the eth0, and connect to a listen or
+  a mesh advertised.
+
+The device name eth0 can be substituted with an IPv4 address, like
+`192.168.1.0;tcp.listen`, or a hostname that resolves to an IPv4 address.  If a
+network is specified without a name, like `;tcp.listen`, then the machine's
+hostname is used to find the device.
+
+The configuration for the PGM, name, TCP protocols are generated as needed by
+the client if they do not exist.  When a service already is configured, then
+it is used instead and the network parameters are ignored.
+
+Cost
+~~~~
+
+All of the internal transports have a cost assigned to the links.  The routing
+from peer to peer uses this cost to find a path that minimizes the cost.  Equal
+cost links are utilized by each peer by encoding a path into the message
+header.  This path is enumerated from 0 -> 3, so there is a maximum of 4 equal
+cost paths possible between any 2 peers in the network.  The per path cost can
+be configured by using different cost metrics for each link.  The default cost
+is 1000 so that a configured cost can be less or greater than 1000.  These
+configured metrics are replicated throughout the network so that every peer
+agrees the cost of every path that exists.  A case where lowering the cost is
+useful is when some of the links have higher performance than others as is the
+case when all peers exist within a host or within a datacenter.  A case when
+configuring different cost for each of the 4 paths is to load balance multiple
+links with equal performance.
+
+Example of configuring a lower cost mesh on a bridge:
+
+----
+  tport: rv_7500
+  type: mesh
+  route:
+    device: docker0
+    cost: 10
+----
+
+If every container within this host has a RV client that connects with a
+network and service of `-network eth0;mesh -service 7500` then the cost of 10
+discovered through the `docker0` bridge.  The name protocols used will use the
+name of the device as their tport name.
+
+Example of configuring a load balanced cost for links through a data center:
+
+----
+  transports:
+    - tport: a_mesh
+      type: mesh
+      route:
+        listen: *
+        connect: [ host, host2, host3, host4 ]
+        port: 5000
+        cost: [ 100, 1000, 1000, 1000 ]
+    - tport: b_mesh
+      type: mesh
+      route:
+        listen: *
+        connect: [ host, host2, host3, host4 ]
+        port: 5001
+        cost: [ 1000, 100, 1000, 1000 ]
+    - tport: c_mesh
+      type: mesh
+      route:
+        listen: *
+        connect: [ host, host2, host3, host4 ]
+        port: 5002
+        cost: [ 1000, 1000, 100, 1000 ]
+    - tport: d_mesh
+      type: mesh
+      route:
+        listen: *
+        connect: [ host, host2, host3, host4 ]
+        port: 5003
+        cost: [ 1000, 1000, 1000, 100 ]
+----
+
+This creates 4 equal mesh networks, each of which is preferred for part of the
+subject space.  The connect and cost can be enumerated as connect, connect2,
+connect3, connect4 and cost, cost2, cost3, cost4 as well as an array.
 
 Open PGM
 ~~~~~~~~
@@ -63,14 +187,40 @@ part is unspecified, then the hostname is used to find the interface.  If there
 is only one multicast address, then that is used for both sending and
 receiving.
 
-The transmit and receive window sizes are in number of packets.  Although many
-messages can fit into a single packet, often the rate isn't high enough to
-fill each packet, so this is a lower bound on the number of messages which
-stay in memory for recovery.  The receive window memory is not used until there
-is packet loss and a retransmission occurs.  Unrecoverable packet loss occurs
-when the transmission window no longer has the sequences that are lost.  The
-`mcast_loop`, when set to 1, allows two nodes to share the same network on
-the same host.  This is useful for testing locally.
+Example `tport_mypgm.yaml`:
+
+----
+  tport: mypgm
+  type: pgm
+  route:
+    listen: 192.168.1.0;224.4.4.4
+    port: 4444
+    cost: 100
+----
+
+[%autowidth,options="header",grid="cols",stripes="even"]
+|======================================================
+| Field      |   Default    | Description              
+| listen     | ;239.192.0.1 | Multicast address        
+| connect    | ;239.192.0.1 | Multicast address        
+| port       | 9000         | UDP port                 
+| cost       | 1000         | Cost of PGM network
+| mtu        | 16384        | Maximum UDP packet size  
+| txw_sqns   | 4096         | Send window size         
+| rxw_sqns   | 4096         | Receive window size      
+| txw_secs   | 15           | Send window in seconds
+| mcast_loop | 2            | Loop through the host    
+|======================================================
+
+The transmit and receive window sizes expand to the reliability time or the
+`txw_secs` parameter.  When the `txw_secs` is not set, then the reliability
+passed on the command line or as a configuration parameter is used.  The
+receive window memory is not used until there is packet loss and a
+retransmission occurs.  Unrecoverable packet loss occurs when the transmission
+window no longer has the sequences that are lost.  The `mcast_loop`, when set
+to 2, allows two peers to share the same network on the same host.  This causes
+packets to loop back through the interface and allows multiple PGM networks to
+coexist on the same multicast group.
 
 In addition to the multicast networking, an inbox protocol is used for point
 to point messages.  The network specified in the multicast address is used
@@ -80,29 +230,6 @@ The listen and connect addresses act similarily, two peers using different
 methods will communicate if the multicast send address matches one of the
 receive addresses and the inboxes are connected.
 
-[%autowidth,options="header",grid="cols",stripes="even"]
-|======================================================
-| Field      |   Default    | Description              
-| listen     | ;239.192.0.1 | Multicast address        
-| connect    | ;239.192.0.1 | Multicast address        
-| port       | 7239         | UDP port                 
-| mtu        | 16384        | Maximum UDP packet size  
-| txw_sqns   | 16384        | Send window size         
-| rxw_sqns   | 16384        | Receive window size      
-| mcast_loop | 0            | Loop through the host    
-|======================================================
-
-Example `tport_mypgm.yaml`:
-
-----
-  tport: mypgm
-  type: pgm
-  route:
-    listen: 192.168.1.0;224.4.4.4
-    port: 4444
-    mtu: 16384
-----
-
 TCP Mesh
 ~~~~~~~~
 
@@ -110,21 +237,16 @@ A TCP mesh is a group of peers which automatically maintain connections with
 every other peer.  When a new peer joins the mesh, it opens a connection with
 all the other peers which are currently members of the mesh.
 
-Only the initial peer listens passively, all the other peers discover the
-members by connecting to the passive peer.
-
 The timeout parameter causes the connecting peer to retry for this amount of
 time.  When the timeout expires, the transport will not try to connect until
 told to do so again.
 
-[%autowidth,options="header",grid="cols",stripes="even"]
-|======================================================
-| Field      |   Default    | Description              
-| listen     | *            | Passive listener         
-| connect    | localhost    | Active joiner            
-| port       | random       | Listener or connect port 
-| timeout    | 15           | Active connect timeout   
-|======================================================
+Multiple connect addresses are normally specified so that some connection
+likely succeeds if that network is running.  Allo peers can specify multiple
+connect addresses since they use both listen and connect methods to join a
+network.  After one connection succeeds, all the other connections in progress
+are stopped and the list of mesh members are downloaded from the peers and
+those are connected.
 
 Example `tport_mymesh.yaml`:
 
@@ -133,29 +255,39 @@ Example `tport_mymesh.yaml`:
   type: mesh
   route:
     listen: *
-    connect: passive.host
+    connect: [ host, host2, host3, host4 ]
     port: 9000
     timeout: 0
 ----
-
-TCP Point-to-point
-~~~~~~~~~~~~~~~~~~
-
-A simple TCP connection from one host to another.  This is useful to create
-ad-hoc topologies at the network boundaries.  The `edge` parameter causes
-the passive peer to pool the connections on a single transport, similar to
-a multicast transport.  This should only be done when the connectors do not
-route messages, they only have one connection to the network.
 
 [%autowidth,options="header",grid="cols",stripes="even"]
 |======================================================
 | Field      |   Default    | Description              
 | listen     | *            | Passive listener         
 | connect    | localhost    | Active joiner            
+| device     |              | Use peer discovery
 | port       | random       | Listener or connect port 
 | timeout    | 15           | Active connect timeout   
-| edge       | false        | A peer at the edge       
+| cost       | 1000         | Cost of mesh links
 |======================================================
+
+If the mesh is a stable network, then the timeout set to a larger value or zero
+can prevent a netork split where some parts of the network are isolated for a
+period of time.  When a host is restarted doesn't have as much of an effect by
+a timeout since it is rejoining an existing network.  If a timeout expires,
+then an admin request to rejoin the network is possible through the console.
+
+When a device is used, then multicast is used through the name protocol to
+discover peers that are joining the same mesh, matching using the tport name.
+After discovering the peer, a connection with TCP is used to join the mesh.
+The port can be random with a device, since the address is discovered rather
+than connected.  Both the device and connect can be methods can be used.
+
+TCP Point-to-point
+~~~~~~~~~~~~~~~~~~
+
+A TCP point to point connection to another peer.  This is useful to create
+ad-hoc topologies at the network boundaries.
 
 Example `tport_mytcp.yaml`:
 
@@ -164,10 +296,36 @@ Example `tport_mytcp.yaml`:
   type: tcp
   route:
     listen: *
-    connect: passive.host
+    connect: host
     port: 9001
     timeout: 0
 ----
+
+[%autowidth,options="header",grid="cols",stripes="even"]
+|======================================================
+| Field      |   Default    | Description              
+| listen     | *            | Passive listener         
+| connect    | localhost    | Active joiner            
+| device     |              | Use peer discovery
+| port       | random       | Listener or connect port 
+| timeout    | 15           | Active connect timeout   
+| cost       | 1000         | Cost of the tcp link
+| edge       | false        | A peer at the edge       
+|======================================================
+
+A TCP protocol is either a listener or a connector.  When device is used
+to discover the peers through the multicast name protocol, the listeners
+are matched with the connectors.  When more than one listener is discovered
+by a connector, then connections are made to each one.
+
+Whether a configuration is used to connect or listen is specified by a listen
+or connect command or configuration.  If multiple connections are specified by
+the connect parameter, then the first connection that is successful will cause
+the others to stop trying to connect.
+
+The `edge` parameter causes the passive peer to pool the connections on a
+single transport, similar to a multicast transport where the traffic is
+primarily through a gateway peer.
 
 Tib RV
 ~~~~~~
@@ -190,19 +348,6 @@ and the multicast network specified by the client is ignored.  When no
 multicast network is specified, then no Rai MS transport is created and
 the existing transports are used.
 
-Unlike a normal RV service, the Rai MS transports do not segregate by service
-number.  When RV clients use the different services, like service 7500 and
-service 7600, they will route publishes to each other.  The only way to
-segregate RV traffic by service number is to run multiple instances of the
-Rai MS `ms_server`.
-
-[%autowidth,options="header",grid="cols",stripes="even"]
-|======================================================
-| Field      |   Default    | Description              
-| listen     | *            | Passive listener  
-| port       | random       | Listener port     
-|======================================================
-
 Example `tport_myrv.yaml`:
 
 ----
@@ -212,6 +357,20 @@ Example `tport_myrv.yaml`:
     listen: *
     port: 7500
 ----
+
+[%autowidth,options="header",grid="cols",stripes="even"]
+|======================================================
+| Field              |   Default    | Description              
+| listen             | *            | Passive listener  
+| port               | random       | Listener port     
+| use_service_prefix | true         | Use a service namespace
+| no_permanent       | false        | Exit if no connections
+| no_mcast           | false        | Ignore multicast networking
+|======================================================
+
+Unless the use_service_prefix is false, the traffic is segregated to the
+`_rv_7500` where service is 7500.  If it is true, then all services that also
+have use_service_prefix set to true will share the same namespace.
 
 NATS
 ~~~~
@@ -223,13 +382,6 @@ only the pub/sub and queue groups.  NATS does not have an inbox point-to-point
 publish scheme, it relies on the client to create a unique subject for this
 functionality.
 
-[%autowidth,options="header",grid="cols",stripes="even"]
-|======================================================
-| Field      |   Default    | Description              
-| listen     | *            | Passive listener  
-| port       | random       | Listener port     
-|======================================================
-
 Example `tport_mynats.yaml`:
 
 ----
@@ -240,24 +392,25 @@ Example `tport_mynats.yaml`:
     port: 4222
 ----
 
+[%autowidth,options="header",grid="cols",stripes="even"]
+|======================================================
+| Field      |   Default    | Description              
+| listen     | *            | Passive listener  
+| port       | random       | Listener port     
+| service    | _nats        | Service namespace
+| network    | none         | Join a network
+|======================================================
+
+If the netork is specified, then starting the NATS service will also join
+the network.  A network format is as described in <<service_and_networks>>.
+
 Redis
 ~~~~~
 
 Redis has a pub/sub component that has slightly different semantics, without a
 reply subject for request/reply.  It also uses the term `channel` to refer to a
 subscription.  A pattern subscription is separated by a psub operator, allowing
-subscriptions and publishes to any series of bytes.  The data operators that
-operate on cached structures like lists and sets, etc.  These commands are
-available when a shared memory key value segment created and passed as an
-argment to the server (example: -m sysv:raikv.shm), or defined as a value in
-the parameters section of the config (example: map: "sysv:raikv.shm").
-
-[%autowidth,options="header",grid="cols",stripes="even"]
-|======================================================
-| Field      |   Default    | Description              
-| listen     | *            | Passive listener  
-| port       | random       | Listener port     
-|======================================================
+subscriptions and publishes to any series of bytes.
 
 Example `tport_myredis.yaml`:
 
@@ -269,6 +422,23 @@ Example `tport_myredis.yaml`:
     port: 6379
 ----
 
+[%autowidth,options="header",grid="cols",stripes="even"]
+|======================================================
+| Field      |   Default    | Description              
+| listen     | *            | Passive listener  
+| port       | random       | Listener port     
+| service    | _redis       | Service namespace
+| network    | none         | Join a network
+|======================================================
+
+The data operators that operate on cached structures like lists and sets, etc.
+These commands are available when a shared memory key value segment created and
+passed as a command line argment to the server (example: -m sysv:raikv.shm), or
+defined as a value in the the config files (example: map: "sysv:raikv.shm").
+
+If the netork is specified, then starting the Redis service will also join
+the network.  A network format is as described in <<service_and_networks>>.
+
 Telnet
 ~~~~~~
 
@@ -277,13 +447,6 @@ uses the same transport config as the pub/sub protocols.  It also can be used
 by network configuration tools to install a configuration remotely.  A telnet
 client signals the service that it has terminal capabilities which enables
 command line editing.  
-
-[%autowidth,options="header",grid="cols",stripes="even"]
-|======================================================
-| Field      |   Default    | Description              
-| listen     | *            | Passive listener  
-| port       | random       | Listener port     
-|======================================================
 
 Example `tport_mytelnet.yaml`:
 
@@ -295,6 +458,13 @@ Example `tport_mytelnet.yaml`:
     port: 22
 ----
 
+[%autowidth,options="header",grid="cols",stripes="even"]
+|======================================================
+| Field      |   Default    | Description              
+| listen     | *            | Passive listener  
+| port       | random       | Listener port     
+|======================================================
+
 Web
 ~~~
 
@@ -302,14 +472,6 @@ Web handles http requests and websocket endpoints and integrates an web
 application that can be used to graph activity and show internal tables.  The
 web application is compiled into the server, so no external file access is
 necessary.
-
-[%autowidth,options="header",grid="cols",stripes="even"]
-|======================================================
-| Field      |   Default    | Description              
-| listen     | *            | Passive listener  
-| port       | random       | Listener port     
-| http_dir   | none         | If set, serve files from directory
-|======================================================
 
 Example `tport_myweb.yaml`:
 
@@ -321,6 +483,14 @@ Example `tport_myweb.yaml`:
     port: 80
     http_dir: "./"
 ----
+
+[%autowidth,options="header",grid="cols",stripes="even"]
+|======================================================
+| Field      |   Default    | Description              
+| listen     | *            | Passive listener  
+| port       | random       | Listener port     
+| http_dir   | none         | If set, serve files from directory
+|======================================================
 
 Files located in the directory will override the internal files.  The html
 files and websock requests also have a templating system which substitute
