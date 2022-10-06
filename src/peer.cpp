@@ -201,14 +201,13 @@ UserDB::decode_peer_msg( UserBridge &from_n,  const MsgHdrDecoder &dec,
                          UserBridge *&user_n,  UserBuf *user,
                          uint64_t &start ) noexcept
 {
-  HashDigest     sess_key,
-                 tmp_ha1;
-  Nonce          cnonce;
-  PolyHmacDigest hmac;
-  uint64_t       time    = 0,
-                 seqno   = 0;
-  size_t         n_pos;
-  uint32_t       uid;
+  HashDigest sess_key,
+             tmp_ha1;
+  Nonce      cnonce;
+  uint64_t   time    = 0,
+             seqno   = 0;
+  size_t     n_pos;
+  uint32_t   uid;
 
   if ( ! dec.test_6( FID_SESSION, FID_SEQNO, FID_TIME, FID_SESS_KEY,
                      FID_CNONCE, FID_START ) )

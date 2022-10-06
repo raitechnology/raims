@@ -1,7 +1,7 @@
 Internal Protocol
 -----------------
 
-The protocol is asynchronous with timers to timeout rpcs and to throttle the
+The protocol is asynchronous with timers to timeout RPCs and to throttle the
 rate which peers back off retries.  As a result of this, the message flow for
 a network configuration is variable and can change with different conditions.
 
@@ -62,9 +62,9 @@ The types are enumerated as:
 | long opaque    | 8          | 32 bit length + up to 4G bytes
 |=============================================
 
-The TLV header is aligned on 2 byte boundaries, so the value is padded one byte
-when the value size is odd.  There are currently 76 different field ids (fid)
-and a maximum of 256 (defined in the header file `msg.h`).
+The field values are aligned on 2 byte boundaries, so the value is padded one
+byte when the value size is odd.  There are currently 76 different field ids
+(fid) and a maximum of 256 (defined in the header file `msg.h`).
 
 Message Framing
 ~~~~~~~~~~~~~~~
@@ -82,9 +82,9 @@ These header fields are:
 | Message Option | 5 bits     
 | Message Size   | 3 bytes    
 | Subject Hash   | 4 bytes    
-| Bridge         | 2 byte TLV + 16 bytes
-| Message Digest | 2 byte TLV + 16 bytes
-| Subject        | 2 byte TLV + 16 bit length + up to 64K
+| Bridge         | 2 byte type + 16 bytes
+| Message Digest | 2 byte type + 16 bytes
+| Subject        | 2 byte type + 16 bit length + up to 64K
 |=============================
 
 The first 4 bytes encoded as:
@@ -105,13 +105,13 @@ The Message Type encodes 4 classes of messages:
 [%autowidth,options="header",grid="cols",stripes="even"]
 |==========================================
 | Type         | Value | Description
-| Mcast        | 0     | Multicast message with routable payload
+| Mcast        | 0     | Multicast message with routeable payload
 | Inbox        | 1     | Point to point message
 | Router Alert | 2     | System link state or subscription update
 | Heartbeat    | 3     | Neighbor link keep alive
 |==========================================
 
-A message that has routable data always has the Multicast or Inbox type set.
+A message that has routeable data always has the Multicast or Inbox type set.
 The Inbox type message is also used for RPC style communication between peers.
 The Router Alert type message alters the routing database by modifying the link
 state or the subscription state.  A Heartbeat type is a periodic presence
@@ -145,12 +145,12 @@ authentication field.  The receiving peer will authenticate that the message is
 valid by using the Bridge to look up the 512 bit session key of the sender and
 calculate an HMAC using the message data with the session key and compare it
 to the value contained in the Message Digest.  In addition, there are sequence
-numbers and timestamps present that prevent the replay of each message frame.
+numbers and time stamps present that prevent the replay of each message frame.
 
 The 4 multicast path options will select the one of the equal cost paths
 calculated from the current link state.  Every peer can calculate these paths
 using the same replicated link state database, this results in 4 forwarding
-trees to the same destinations if there are enough redundent links.
+trees to the same destinations if there are enough redundant links.
 
 System Subjects
 ~~~~~~~~~~~~~~~
@@ -170,7 +170,7 @@ There are 7 classes subject prefixes used:
 | _X.     | Heartbeat link presence message
 | _Z.     | Link state broadcast message
 | _S.     | Normal subscription broadcast message
-| _P.     | Pattern subscripion broadcast message
+| _P.     | Pattern subscription broadcast message
 | _N.     | Peer statistics multicast message
 |==========================================
 
@@ -191,7 +191,7 @@ database, the state is reinitialized by replicating it from an up to date peer.
 The multicast subjects follow normal forwarding rules.  The _M prefix is used
 for a multicast ping.
 
-The _N prefix has unique subjects for link and peer statististics like messages
+The _N prefix has unique subjects for link and peer statistics like messages
 sent or received, bytes sent or received, as well as adjacency notifications.
 These are used to monitor an individual node or a group of them with pattern
 subscriptions.  These stats are not sent unless there are subscriptions open.
@@ -214,13 +214,13 @@ These are sent on a link between directly connected peers.
   authentication key exchange.  The second is to keep a peer up to date with
   the last sequence numbers used by the subscription and link state.  When
   heartbeats are not received within 1.5 intervals.  The interval default is 10
-  seconds, this causes a link to be deactivated at :15 when hb expected at :10.
+  seconds, this causes a link to be deactivated at :15 when HB expected at :10.
   When all of the direct links to a peer are inactive, then the peer is
   unauthenticated and marked as a zombie.  The heartbeat timeout does not
   depend on a transport timeout, like a TCP reset.  The result of this behavior
   is that overloaded or congested links that delay messages for longer than the
   1.5 times the heartbeat interval will may incur message loss.  This puts an
-  upper bound on the link latency and aleviates back pressure to the publisher.
+  upper bound on the link latency and alleviates back pressure to the publisher.
 
 - _X.BYE causes the peer to be unauthenticated and dropped from the peer db.
 
@@ -256,7 +256,7 @@ These are broadcast flooded to authenticated peers.
 
 - _Z.ADJ notifies when a peer adds are subtracts a link to another peer.  It
   increments the link state sequence number so that peers apply this update
-  only when the link state reflects the current state, otherwise a rpc
+  only when the link state reflects the current state, otherwise a RPC
   synchronization request is used (_I.[bridge].sync_req) to resync.
 
 Subscription Subjects
@@ -264,7 +264,7 @@ Subscription Subjects
 
 These are broadcast flooded to authenticated peers.  They are updates to the
 bloom filter that can be missed and resynchronized with _Z.BLM or a resync
-rpc reqeust.
+RPC request.
 
 [%autowidth,options="header",grid="cols",stripes="even"]
 |==========================================
@@ -308,7 +308,7 @@ These suffixes are currently recognized:
 | auth      | Request authentication, peer verifies with user or service pub key
 | subs      | Request and match active subscriptions strings with a pattern
 | ping      | Request a pong reply, also has seqnos for maintaining state
-| pong      | A reply to a ping, has latency inforation and update clock squew
+| pong      | A reply to a ping, has latency information and update clock skew
 | rem       | Remote admin request, run a console command from another peer
 | add_rte   | After authenticated with peer, it will add other peers it knows
 | sync_req  | Peer sends when it finds an old peer db or subscription state
@@ -317,8 +317,8 @@ These suffixes are currently recognized:
 | bloom_rpy | Response to a bloom_req, contains the bloom map of the subscriptions
 | adj_req   | Peer requests when it finds an old link state or subscription state
 | adj_rpy   | Response to adj_rpy, contains an up to date link state and bloom map for peer
-| mesh_req  | Peer reqeusts when it detects a missing mesh member
-| mesh_rpy  | Response to mesh_rpy, contains missing link urls
+| mesh_req  | Peer requests when it detects a missing mesh member
+| mesh_rpy  | Response to mesh_rpy, contains missing link URLs
 | trace     | Response to messages which have the Trace option flag in header
 | ack       | Response to messages which have the Ack option flag in header
 | any       | Encapsulates a peer _INBOX message, for point to point routing
@@ -329,12 +329,12 @@ These suffixes are currently recognized:
   sent by the other to be authenticated using Message Digest field.
 
 - Subs is a request for the open subscriptions.  It is used by the console and
-  the web interface for examining the network.  The rpc reply is always a
+  the web interface for examining the network.  The RPC reply is always a
   numeric string to forward to the terminal or web page that requested it.
 
 - Ping and pong are latency gathering functions for any two peers in the
   network, not necessarily directly connected.  The current sequence numbers
-  for the link state and subscripion state are also exchanged for synchronizing
+  for the link state and subscription state are also exchanged for synchronizing
   peers which are not directly connected.
 
 - Rem is a remote console command execution, used in the console and web
@@ -354,11 +354,11 @@ These suffixes are currently recognized:
   distributed besides directly authenticating with a key exchange.  The sync_rpy
   also includes the link state and subscription bloom filter of requested peer.
 
-- Bloom_req and bloom_rpy are rpcs for the subscription bloom filter.  The
+- Bloom_req and bloom_rpy are RPCs for the subscription bloom filter.  The
   adj_req and adj_rpy are used instead for this info.
 
 - Adj_req and adj_rpy are the main method that peers recover the current link
-  state and subscription state.  They work in a rpc request/response style.
+  state and subscription state.  They work in a RPC request/response style.
   The request contains the sequence numbers that the source peer has in it's
   db.  The destination peer compares these numbers with it's own db and replies
   when a sequence needs updating.  Usually the destination peer is the one that
@@ -366,9 +366,9 @@ These suffixes are currently recognized:
   This occurs when a lot of peers need to resynchronize as a result of a
   network split and reconnect.
 
-- Mesh_req and mesh_rpy are rpcs for distributing urls for peers in the same
+- Mesh_req and mesh_rpy are RPCs for distributing URLs for peers in the same
   mesh network.  When a peer connects to a mesh, it uses the initial connection
-  to find the addresses of all the other peers in the mesh with this rpc.
+  to find the addresses of all the other peers in the mesh with this RPC.
  
 - Trace and ack are sent as a multicast message is forwarded with the Message
   Options set in the header.  These can be requested from a console publish
@@ -382,6 +382,7 @@ These suffixes are currently recognized:
   and then forwards to the matching peers.  The usual case is that there is
   only one matching destination.
 
+[[example_message_flow]]
 Example Message Flow
 ~~~~~~~~~~~~~~~~~~~~
 

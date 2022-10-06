@@ -21,7 +21,7 @@ $ ms_server -help
    -log               : log file
    -log-rotate        : rotate file size limit
    -log-max-rotations : max log file rotations
-   -no-perminent      : exit when no clients
+   -no-permanent      : exit when no clients
    -foreground        : run in foreground
    -listen            : rv listen port
    -no-http           : no http service
@@ -79,7 +79,7 @@ Starting in rvd Compatibility Mode
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 If the `ms_server` is linked to `rvd` and run that way, it will run in
-compatability mode:
+compatibility mode:
 
 ----
 $ ln -s /usr/local/bin/ms_server /usr/local/bin/rvd
@@ -91,8 +91,8 @@ moving to background daemon
 
 Unless the -foreground or the -console options are used, it forks itself to
 release from the terminal that it is started.  `ms_server` will also run in
-compatibity mode when an argument above is used, for example, `ms_server
--listen 7501 -http 7581 -reliabilty 60` will run in compatible mode.
+compatibility mode when an argument above is used, for example, `ms_server
+-listen 7501 -http 7581 -reliability 60` will run in compatible mode.
 
 If there is already a `rvd` running on port 7500, it will fail to start and
 exit:
@@ -112,9 +112,9 @@ $ killall -HUP rvd
 Connecting to Networks
 ~~~~~~~~~~~~~~~~~~~~~~
 
-The network paramenter that the client specifies controls which network that
-the `ms_server` joins.  It can specify a multicast address, tcp connections, or
-a tcp mesh.  Only daemons which connect to the same network will communicate.
+The network parameter that the client specifies controls which network that
+the `ms_server` joins.  It can specify a multicast address, TCP connections, or
+a TCP mesh.  Only daemons which connect to the same network will communicate.
 
 The formats of these are:
 
@@ -169,7 +169,7 @@ rv_7600.4 | mesh | 1000 | 26 |     |    X |        host2_7500.1@mesh://10.88.0.3
 The ANY specifier can either connect to a mesh or a TCP listener, depending
 which is present.
 
-The empty network does not attept to connect to anything, but it will find
+The empty network does not attempt to connect to anything, but it will find
 other services through existing connections.
 
 If there exists a rv_7500 transport in the configuration (configured in rv.yaml

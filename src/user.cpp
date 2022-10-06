@@ -389,9 +389,8 @@ ServiceBuf::gen_key( const char *svc,  size_t slen,
 bool
 ServiceBuf::sign_users( DSA *dsa,  const CryptPass &pwd ) noexcept
 {
-  DSA            dsa_buf;
-  PolyHmacDigest hmac;
-  uint64_t       ctr;
+  DSA      dsa_buf;
+  uint64_t ctr;
   HmacEncrypt< DSA_CIPHER_SIGN_LEN, DSA_SIGN_LEN > sig( ctr, sig_tag );
 
   if ( dsa == NULL ) {
@@ -537,9 +536,8 @@ ServiceBuf::load_service( const ConfigTree &tree,
 bool
 ServiceBuf::check_signatures( const CryptPass &pwd ) noexcept
 {
-  DSA            dsa;
-  PolyHmacDigest hmac;
-  uint64_t       ctr;
+  DSA      dsa;
+  uint64_t ctr;
   HmacDecrypt< DSA_CIPHER_SIGN_LEN, DSA_SIGN_LEN > sig( ctr, sig_tag );
 
   if ( ! this->get_dsa( pwd, dsa, DO_PUB ) ) {

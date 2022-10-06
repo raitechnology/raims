@@ -1,3 +1,4 @@
+[[message_loss]]
 Message Loss
 ------------
 
@@ -6,10 +7,10 @@ last sequence received.  The sequence numbers are 64 bits so they will never be
 zero.  These conditions are possible when a sequence is not in incrementing
 order from the last message received, which is what normally occurs.
 
-- Publisher includes a timestamp
+- Publisher includes a time stamp
 
 This causes the subscriber to synchronize the sequence numbers.  The publisher
-will always include a timestamp when the first message of a subject is
+will always include a time stamp when the first message of a subject is
 published, or when the last sequence is old enough to be cycled from the
 publisher sequence window.
 
@@ -72,7 +73,7 @@ new time frames when the sequence number is zero.
 These are properties of the time frame encoded in the message sequence numbers:
 
 1.  A start of a new multicast stream sequence will use the current time, this
-is always after the last convergence timestamp.  The current time is also used
+is always after the last convergence time stamp.  The current time is also used
 as needed when memory limitations prevent caching of the last sequence
 published.  When the sequence is cached, the additional messages won't change
 the time frame but will increment the sequence number.
@@ -80,7 +81,7 @@ the time frame but will increment the sequence number.
 2.  A new subscription start or uncached sequence publish can verify that the
 first message received is greater than the network convergence time.  This is
 used to validate that the message stream is uninterrupted to the start of the
-time frame, since message loss has not occured since the before network
+time frame, since message loss has not occurred since the before network
 convergence.
 
 All of the transports are stream oriented, so a loss of unrecoverable network
@@ -91,7 +92,7 @@ constructed in any one peer greater than the convergence time in all peers.
 
 When routes are added to or subtracted from the network, the message routing is
 not stable until all peers have finished adjusting their view of the network.
-The peer that publishes a message may use a suboptimal forwarding path to the
+The peer that publishes a message may use a sub-optimal forwarding path to the
 recipients until they are notified that better paths are available with link
 state exchanges.
 
@@ -108,7 +109,7 @@ new time frame.
 Subscription sequence window
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-A map of subject to sequence numbers for the subscriptons that a peer has
+A map of subject to sequence numbers for the subscriptions that a peer has
 is also maintained.  This validates that the messages are processed in order
 and allows notification of message loss when the sequences skip and does not
 allow a message to be processed twice.  The memory limit for this is
@@ -135,7 +136,7 @@ The pong calculation subtracts the round trip time and is the most accurate,
 the others disregard the latency of the network.  The hb are from time
 differences of directly attached peers using heartbeats and are shared with
 those not directly attached.  The ref is the peer (0 = self, 1 = A.1) that
-orinated the hb difference.  The time is the estimated clock setting of the
+originated the hb difference.  The time is the estimated clock setting of the
 remote peer in the current timezone.
 
 Configuration for sequence windows

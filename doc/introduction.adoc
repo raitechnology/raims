@@ -23,7 +23,7 @@ routing through the network, so it can't be looped.
 It uses a best effort delivery system.  It serializes messages based on subject
 so that streams are delivered in order discarding duplicates, but messages
 which are lost in transit because of node or network failures, are not
-retransmitted.  Transaction semantics are left to the endpoints.
+retransmitted.
 
 Architecture
 ~~~~~~~~~~~~
@@ -31,21 +31,12 @@ Architecture
 Authentication
 ^^^^^^^^^^^^^^
 
-Each node has a ECDH (Elliptic Curve Diffie Hellman) key pair and the ECDH
-public key is signed by the ECDSA (Elliptic Curve Digital Signature Algo)
-private key of the service.  Before a ECDH key exchange is initiated by a node,
-the node's ECDH public key is verified by the service's ECDSA public key.  The
-ECDSA private key is not used by the network, it is only used by the
-administrator to authenticate new nodes.  The ECDH key exchange between nodes
-constructs a 512 bit ephemeral key identity that authenticates each message.  A
-message arriving at any node is authenticated by using the ephemeral key of the
-message source to compute a HMAC of the message and comparing it to the HMAC
-included in the message.  This mechanism means that fake messages cannot be
-introduced or replayed since each message is uniquely sequenced using the
-source and the destination.  The first message sequence, which has no history
-to provide replay prevention, can include a timestamp within the safety margin
-of the network latency and the system clock skew, or else the source of the
-message can be asked to verify sending it with a local timestamp sequence.
+A ECDSA key pair is generated for a service and for each user that is
+pre-configured.  A ECDH key is generated for by peer on startup for a key
+exchange that establishes a 32 byte session key.  This session key is used to
+authenticate messages sent and received.  Each peer in the system has a unique
+session key so that a message from any one of them can be authenticated.
+This is described further in <<authentication>>.
 
 Console Interface
 ^^^^^^^^^^^^^^^^^
@@ -70,9 +61,9 @@ communication without regard to the other nodes attached to other switches or
 transports through the router.
 
 The subscription mechanism has three layers:  the router, the switch, and the
-the connection.  The router uses bloom filters to route subjects, the switch
-uses 32 bit mac addresses based on the subject/wildcard hash, and the
-connection uses a btree of subjects:
+connection.  The router uses bloom filters to route subjects, the switch uses
+32 bit mac addresses based on the subject/wildcard hash, and the connection
+uses a btree of subjects:
 
 ----
   router <-> bloom filter 1 <-> switch 1 <-> mac 1 <-> connection 1 <-> btree entry 1
@@ -86,12 +77,12 @@ The first thing a node does after authentication, is download the peers LSDB
 (Link-State DB), which first consists of records for every other peer:
 
 ----
-  { bridge id, ephemeral key (encrypted), peer name, sub seqno, link seqno, bloom }
+  { bridge id, session key, peer name, sub seqno, link seqno, bloom }
 ----
 
 The seqno values allow for delta updates of the LSDB, which can add/remove a
 link or add/remove a subscription from the bloom filter.  The bloom filter
-contains everthing needed to filter the subscriptions that the peer has
+contains everything needed to filter the subscriptions that the peer has
 interest.  It generally uses about 2 bytes per subscription for a false
 positive error rate at about 0.05% (1 in 2000 subjects), so if a peer has a
 10,000 subjects or wildcards open, it will be about 20,000 bytes in size.
@@ -106,13 +97,10 @@ connected to it.
 The link records are for nodes which are directly attached to the peer via
 a transport.  There may be many nodes using the same link attached to the
 peer and a node may be reachable via multiple transports.  The unique
-feature identifying this link is the bridge id, tport id pair.  A peer may
-have the same name with a different bridge id, and a tport may have the
-same name with a different tport id (this makes human reading the database
-a little harder).
+feature identifying this link is the bridge id, tport id pair.
 
 ----
-  { bridge id, tport name, peer name, tport id }
+  { bridge id, tport name, peer name, tport id, cost }
 ----
 
 A delta update of the LSDB, whether link change or subscription change is
@@ -185,8 +173,8 @@ lengths are noted in the bloom filter and the hash set is calculated as
 If any of these are hash values present in the bloom filter, then a check for
 the suffix matches are done.  The hash set is computed in groups before any
 routing based on the entire set of hashes needed is done in order to take
-advantage of instruction parallism, computing several hashes for each
-interation of the subject length.
+advantage of instruction parallelism, computing several hashes for each
+iteration of the subject length.
 
 Anycast and Shardcast
 ^^^^^^^^^^^^^^^^^^^^^
@@ -205,7 +193,7 @@ the shards are split between them.  If A subscribes to X.* using shard 1/2 and
 B subscribes to X.* using shard 2/2, then the subjects X.Y and X.Z is split
 between A and B based on the hash of X.Y and the hash of X.Z.  This is a
 variation of suffix matching where the hash of the subject is used to
-descriminate the route of the message.
+discriminate the route of the message.
 
 Why use it?
 ~~~~~~~~~~~
@@ -245,7 +233,6 @@ maybe others).
   $ make install_rpm_deps
   $ make clone
   $ make
-
 ----
 
 If this completes, there will be a static binary at `raims/OS/bin/ms_server`

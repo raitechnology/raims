@@ -28,7 +28,7 @@ builtin html pages that interface with the console protocol through websocket
 protocol.
 
 There are two sides to transport configuration, the listener and the connector.
-Only the internal transports support the connecting side (PGM, mesh, tcp), the
+Only the internal transports support the connecting side (PGM, mesh, TCP), the
 client side (RV, NATS, Redis, Telnet, Web) only uses listeners and do not have
 a cost.  The device option will auto-discover a connector or listener via
 multicast through a device.  This requires that the connector and listener are
@@ -70,7 +70,7 @@ service name by using the name protocol.
 
 Networks use a device name and a protocol or a multicast address.  When a
 network is not specified by a client or configuration, then the links between
-services have to be configured by the the YAML files and/or in the console.
+services have to be configured by the YAML files and/or in the console.
 
 Example networks and how they are interpreted.  All of these have a service
 name associated with the network, which must match for namespace to
@@ -80,13 +80,13 @@ communicate.
   address of 239.1.2.3 for communicating with other peers.
 
 - `eth0;tcp.listen` -- Connect a name protocol to the eth0 interface and
-  advertise a tcp listen endpoint.
+  advertise a TCP listen endpoint.
 
-- `eth0;tcp.connect` -- Connect a name protocol to eth0, and advertise a tcp
+- `eth0;tcp.connect` -- Connect a name protocol to eth0, and advertise a TCP
   connection endpoint.  These resolve to a connection when listen endpoints
   appear with a clients that use the above.
 
-- `eth0;mesh` -- Connect a name protocol to eth0, and advertise a tcp mesh
+- `eth0;mesh` -- Connect a name protocol to eth0, and advertise a TCP mesh
   endpoint.  This creates connections to all other mesh endpoints advertised.
 
 - `eth0;any` -- Connect a name protocol to the eth0, and connect to a listen or
@@ -114,7 +114,7 @@ is 1000 so that a configured cost can be less or greater than 1000.  These
 configured metrics are replicated throughout the network so that every peer
 agrees the cost of every path that exists.  A case where lowering the cost is
 useful is when some of the links have higher performance than others as is the
-case when all peers exist within a host or within a datacenter.  A case when
+case when all peers exist within a host or within a data center.  A case when
 configuring different cost for each of the 4 paths is to load balance multiple
 links with equal performance.
 
@@ -226,7 +226,7 @@ In addition to the multicast networking, an inbox protocol is used for point
 to point messages.  The network specified in the multicast address is used
 as the inbox network, with a random port.
 
-The listen and connect addresses act similarily, two peers using different
+The listen and connect addresses act similarly, two peers using different
 methods will communicate if the multicast send address matches one of the
 receive addresses and the inboxes are connected.
 
@@ -242,7 +242,7 @@ time.  When the timeout expires, the transport will not try to connect until
 told to do so again.
 
 Multiple connect addresses are normally specified so that some connection
-likely succeeds if that network is running.  Allo peers can specify multiple
+likely succeeds if that network is running.  Allow peers can specify multiple
 connect addresses since they use both listen and connect methods to join a
 network.  After one connection succeeds, all the other connections in progress
 are stopped and the list of mesh members are downloaded from the peers and
@@ -272,7 +272,7 @@ Example `tport_mymesh.yaml`:
 |======================================================
 
 If the mesh is a stable network, then the timeout set to a larger value or zero
-can prevent a netork split where some parts of the network are isolated for a
+can prevent a network split where some parts of the network are isolated for a
 period of time.  When a host is restarted doesn't have as much of an effect by
 a timeout since it is rejoining an existing network.  If a timeout expires,
 then an admin request to rejoin the network is possible through the console.
@@ -309,7 +309,7 @@ Example `tport_mytcp.yaml`:
 | device     |              | Use peer discovery
 | port       | random       | Listener or connect port 
 | timeout    | 15           | Active connect timeout   
-| cost       | 1000         | Cost of the tcp link
+| cost       | 1000         | Cost of the TCP link
 | edge       | false        | A peer at the edge       
 |======================================================
 
@@ -334,7 +334,7 @@ The RV protocol supports both the RV5 and RV6+ styles of clients.  The RV6+
 clients use the daemon for the inbox endpoint and don't create sessions, the
 RV5 clients use a unique session for each connection and allow an inbox reply
 in the subscription start.  These differences cause decades old software
-incompatabilities and pressure to reengineer legacy messaging systems.
+incompatibilities and pressure to re-engineer legacy messaging systems.
 
 There clients usually specify the network and service they want to connect,
 which is different from the other clients.  When a client requests to connect
@@ -401,7 +401,7 @@ Example `tport_mynats.yaml`:
 | network    | none         | Join a network
 |======================================================
 
-If the netork is specified, then starting the NATS service will also join
+If the network is specified, then starting the NATS service will also join
 the network.  A network format is as described in <<service_and_networks>>.
 
 Redis
@@ -433,10 +433,10 @@ Example `tport_myredis.yaml`:
 
 The data operators that operate on cached structures like lists and sets, etc.
 These commands are available when a shared memory key value segment created and
-passed as a command line argment to the server (example: -m sysv:raikv.shm), or
-defined as a value in the the config files (example: map: "sysv:raikv.shm").
+passed as a command line argument to the server (example: -m sysv:raikv.shm), or
+defined as a value in the config files (example: map: "sysv:raikv.shm").
 
-If the netork is specified, then starting the Redis service will also join
+If the network is specified, then starting the Redis service will also join
 the network.  A network format is as described in <<service_and_networks>>.
 
 Telnet
@@ -493,7 +493,7 @@ Example `tport_myweb.yaml`:
 |======================================================
 
 Files located in the directory will override the internal files.  The html
-files and websock requests also have a templating system which substitute
+files and websocket requests also have a templating system which substitute
 values from the server.  If `@(show ports)` appears in a html page, it is
 replace with a html `<table>` of ports.  If `template "res" : @{show ports}` is
 sent using a websocket, it expands to a JSON array off ports and the reply is

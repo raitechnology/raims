@@ -1,5 +1,224 @@
+[[authentication]]
 Authentication
 --------------
 
-Authentication.
+Authentication has two parts, the initial key exchange that sets up unique
+session key for each pear and message authentication that verifies that a peer
+sent it.  The key exchange protocol uses a Elliptic Curve Diffie Hellman (ECDH)
+exchange that is signed by a Elliptic Curve Digital Signature (ECDSA).  The
+message authentication uses a HMAC digest computed by enveloping the message
+with a peer's session key and computing the hash along with sequencing by
+subject to prevent a replay of messages.
+
+Key Exchange
+~~~~~~~~~~~~
+
+Two peers authenticate with each other by signing a message with a configured
+ECDSA key.  This message includes a generated a ECDH public key.  The ECDH key
+is used by each side to compute the secret using the corresponding ECDH private
+key.  The secret along with a unique nonce, a time stamp, and a sequence number
+to create a temporary key that is used to encrypt a random session key.
+
+For peers A and B to complete the key exchange, there are 4 messages:
+
+- HELLO/HB from peer A sent to peer B -- Includes a seqno, a time, a nonce, and
+  a ECDH public key.  Since these are unique for each side, call these A_seqno,
+  A_time, A_nonce, A_ECDH_pub
+
+- AUTH from peer B sent to peer A -- Includes B_ECDSA_sig, B_seqno, B_time,
+  B_nonce, B_ECDH_pub, B_auth_key, A_seqno, and A_time.  The A_seqno and A_time
+  allow peer A to match the unique A_nonce which corresponds to the HELLO
+  message sent previously.  The last two HELLO messages are tracked so it must
+  match one of these.  The B_auth_key contains an AES encrypted session key
+  which must be decrypted by computing a temporary key using the data from B as
+  well as the ECDH secret computed from B_ECDH_pub and A_ECDH_pri.  Peer A
+  trusts peer B if the decrypted session key in B_auth_key authenticates the
+  message using the HMAC computation and the HMAC computation is also signed
+  by B_ECDSA_sig.
+
+- AUTH from peer A sent to peer B -- The reverse of above, includes
+  A_ECDSA_sig, A_seqno, A_time, A_nonce, A_ECDH_pub, A_auth_key, B_seqno, and
+  B_time.  The B_seqno and B_time are used to match the B_nonce included in the
+  previous AUTH and used by peer A to create the temporary key which encrypts
+  the A_auth_key session key for A.  B trusts peer A if the decrypted session
+  key in A_auth_key authenticates the message using the HMAC computation and
+  the HMAC computation is also signed by A_ECDSA_sig.
+
+- AUTH_OK from peer B sent to peer A -- This notifies peer B that
+  authentication was successful.
+
+If either AUTH fails the HMAC computation, then the authentication fails and
+one or both peers are ignored for a 20 seconds (or 2 times the heartbeat
+interval).  It is possible that the latency of the key exchange is greater than
+2 HELLO/HB messages so the nonce associated with the seqno/time pair is too old
+and the authentication must restart.
+
+The ECDSA private key used to sign the authentication messages is either the
+configured key pair from the service or the configured key pair from the user.
+A configuration may not include the service private key in the case that a user
+has less privileges that the service, which has admin privileges.  The
+service's private key is able to sign users which don't exist and are added to
+the system, but a user's private key can only authenticate itself.
+
+The ECDH algorithm used is
+https://github.com/floodyberry/curve25519-donna[EC25519].  The ECDSA algorithm
+used is https://github.com/floodyberry/ed25519-donna[ED25519].
+
+The following is from the <<example_message_flow>>.  This shows the HELLO/HB
+part of the key exchange, where peer A is ruby and peer B is dyna.
+
+----
+_X.HELLO ... ruby -> dyna
+   bridge_16 [1027]   : xq6vl+2HcoDxtt+7lC7dGQ
+   digest_16 [1029]   : mB1uDQ7fsGmYScIGU0kt6Q
+   sub_s2 [1792]      : "_X.HB"
+   user_hmac_16 [1028] : TQO1sorP9oD+smMOrnvzuQ
+   seqno_2 [273]      : 1
+   time_8 [787]       : 1663967268385616894
+   uptime_8 [788]     : 17982050574
+   start_8 [794]      : 1663967250404676993
+   interval_2 [277]   : 10
+   cnonce_16 [1034]   : IG45ISINnT0bX2Td6Ovivw
+   pubkey_32 [1357]   : +A2dlZCcDo8vS/XsWApNNfJwQH8ApmFIRTOcS+cPuAk
+   sub_seqno_2 [274]  : 0
+   user_s2 [1836]     : "ruby"
+   create_s2 [1838]   : "1663967250.404513467"
+   link_state_2 [281] : 0
+   converge_8 [839]   : 1663967250404676993
+   uid_cnt_2 [292]    : 0
+   uid_csum_16 [1036] : xq6vl+2HcoDxtt+7lC7dGQ
+   version_s2 [1840]  : "1.12.0-42"
+   pk_digest_16 [1091] : SMnBqzoh/w6IFi2c7zoxMw
+----
+
+The seqno_2, time_8, cnonce_16, pubkey_32 are the A_seqno, A_time, A_nonce, and
+A_ECDH_pub.  The user_hmac_16, start_8, and service ECDSA_pub are combined to
+create a hello_key which is used to authenticate the HELLO message stored in
+pk_digest_16, since the session key that is product of the key exchange is not
+yet known by dyna.  The service ECDSA_pub is never sent over the wire so it is
+used as a pre-shared key in this instance.  There is another pre-shared key
+used by the Key Derivation Function (KDF) to generate keys from secrets,
+nonces, seqnos, and time stamps.  The KDF is seeded by a 640 byte salt and
+shared along with the service ECDSA_pub key in all of the peers that need to
+communicate.
+
+The first AUTH message from peer B (dyna) to peer A (ruby):
+
+----
+_I.xq6vl+2HcoDxtt+7lC7dGQ.auth ... dyna -> ruby
+   bridge_16 [1027]   : wwEnbQEY2FMuwZGSjpi3jQ
+   digest_16 [1029]   : 3UY+SJQYy3wGN0dW3zc4fg
+   sub_s2 [1792]      : "_I.xq6vl+2HcoDxtt+7lC7dGQ.auth"
+   user_hmac_16 [1028] : PYv43FUBG3N8ok+jn4nBPQ
+   seqno_2 [273]      : 1
+   time_8 [787]       : 1663967268386849657
+   uptime_8 [788]     : 63309580030
+   interval_2 [277]   : 10
+   sub_seqno_2 [274]  : 0
+   link_state_2 [281] : 0
+   auth_seqno_2 [285] : 1
+   auth_time_8 [798]  : 1663967268385616894
+   auth_key_64 [1542] : AdM61M2DqR6hXdVnPnp716n5lQwcBAyx0N1jzGtzIM9OmAF4txsoZRd1YMOySIcxkyydHELJHfgVflEtnLg9Fg
+   cnonce_16 [1034]   : TEbM+MfLCp66ds36xh0JAA
+   pubkey_32 [1357]   : PyEHl7Y3IxAkK5OQMnJzggmlKlUo8+RiBif0P7h+8kg
+   auth_stage_2 [305] : 1
+   user_s2 [1836]     : "dyna"
+   create_s2 [1838]   : "1663967205.077153809"
+   expires_s2 [1839]  : null
+   start_8 [794]      : 1663967205077372910
+   version_s2 [1840]  : "1.12.0-42"
+   pk_sig_64 [1610]   : gR2ovdrI4yfxdc7ZAR+ID00hj2HDYEcEexU/ib4CDAU4t2E/nzC6c1dK0s14RiZIWzHHxRFR6D2uJ/ZaHHwaDw
+----
+
+The auth_seqno_8, auth_time_8 are the A_seqno, A_time values from ruby used to 
+find the A_nonce (cnonce_16) in the HELLO message.  These along with seqno_8,
+time_8, cnonce_16, and pubkey_32 are used to construct the temporary key
+to decrypt the auth_key_64, which is session key used by dyna in the HMAC
+computation that authenticates messages and compare the result to digest_16.
+The pk_sig_64 is the ECDSA signature of the message signed either by the
+service's private key or by the user dyna's private key.
+
+After this succeeds, then ruby trusts messages from dyna that have a HMAC
+computation digest_16 included with each message, along with an seqno and
+time stamp to prevent replays.
+
+The second AUTH message from peer A (ruby) to peer B (dyna):
+
+----
+_I.wwEnbQEY2FMuwZGSjpi3jQ.auth ... ruby -> dyna
+   bridge_16 [1027]   : xq6vl+2HcoDxtt+7lC7dGQ
+   digest_16 [1029]   : h81umkyeNoYJAbomEWE+ng
+   sub_s2 [1792]      : "_I.wwEnbQEY2FMuwZGSjpi3jQ.auth"
+   user_hmac_16 [1028] : TQO1sorP9oD+smMOrnvzuQ
+   seqno_2 [273]      : 1
+   time_8 [787]       : 1663967268387280755
+   uptime_8 [788]     : 17982688972
+   interval_2 [277]   : 10
+   sub_seqno_2 [274]  : 0
+   link_state_2 [281] : 0
+   auth_seqno_2 [285] : 1
+   auth_time_8 [798]  : 1663967268386849657
+   auth_key_64 [1542] : v4mYze2OruL2L02gODDt7Fd9FHTDPLO0UD/auhab+FJiGgbD473osbwlYKfYBVgwvZMFqbLpVnLiGPHD+MXPtw
+   cnonce_16 [1034]   : zUYBUCh9n0L4F0dltxxtyg
+   pubkey_32 [1357]   : +A2dlZCcDo8vS/XsWApNNfJwQH8ApmFIRTOcS+cPuAk
+   auth_stage_2 [305] : 2
+   user_s2 [1836]     : "ruby"
+   create_s2 [1838]   : "1663967250.404513467"
+   expires_s2 [1839]  : null
+   start_8 [794]      : 1663967250404676993
+   version_s2 [1840]  : "1.12.0-42"
+   pk_sig_64 [1610]   : 6lU9Yz3cvW178goVHwakHsFR55TYid9SHDwjIl/fPrxFVCkCujLxK2HQXNtw3zeVRgmi01pGEqemBUW59YuNDA
+----
+
+The same exchange from the first AUTH message is used in order for dyna to
+trust ruby.
+
+System Compromise
+~~~~~~~~~~~~~~~~~
+
+If a host is compromised and the KDF pre-shared key and service ECDSA_pub key
+are discovered along with a user ECDSA_pri key, then an unauthorized party
+could masquerade as that user.  One way to prevent this is to remove the
+pre-shared 640 salt file after starting a server and a unique password file
+used to encrypt the ECDSA keys in the configuration files.  The attacker would
+need to extract these from the process space of the server and design a system
+that uses this data.
+
+The user ECDSA_pri key is needed to authenticate new peers, so it remains in
+memory for the duration of the process.  A design that drops the private key
+material after this key exchange could prevent this type of attack.
+
+Message Authentication
+~~~~~~~~~~~~~~~~~~~~~~
+
+The function of the key exchange protocol is to initialize each peer with a
+random 32 byte session key.  The function of this key is to authenticate
+messages.  A HMAC calculation of the message is done by enveloping the message
+data with the key and hashing it using a AES based hash that results in a 8
+byte digest:
+
+----
+  AES( IV = 8 bytes key )( [ message ] [ 24 bytes key ] )
+----
+
+The header of every message contains these 5 fields which identify the source
+of the message, the HMAC digest of the message, the subject, a seqno and a
+time stamp:
+
+----
+   bridge_16 [1027]   : h783olFEb9ve8K07E7PoQg 
+   digest_16 [1029]   : FKZxGPHiC7e5GXVKh2PWLg 
+   sub_s2 [1792]      : "_I.xq6vl+2HcoDxtt+7lC7dGQ.ping" 
+   seqno_2 [273]      : 4 
+   stamp_8 [838]      : 1663967313973571299 
+----
+
+This header ensures that a message never contains the same bits and is always
+unique.  It also allows the receivers to check that a replay has not occurred
+by tracking the sequences and time stamps for the subjects that it has seen
+previously.  If the subject has never been seen before, then the time stamp is
+used to check that the message is at least as old as the last network
+convergence time stamp, described in more thoroughly in <<message_loss>>.  The
+bridge_16 identifies the source of the message and the digest_16 is computed
+with the source's session key.
 

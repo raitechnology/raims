@@ -5,12 +5,12 @@ Wildcarding Subscriptions
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The subject schema used by the external bridged transports may introduce some
-incompatabilities when routing from one to another.  The subscriptions and the
+incompatibilities when routing from one to another.  The subscriptions and the
 patterns are separate operators internally.  A subscription using wildcarding
-characters is allowed, but not interpretted differently that any other subject.
+characters is allowed, but not interpreted differently that any other subject.
 A pattern subscription includes a field which causes the pattern to be
 evaluated with different syntax rules, Redis GLOB or NATS/RV.  A publish is not
-interpretted as a wildcard, even when it contains wildcard syntax.  Any string
+interpreted as a wildcard, even when it contains wildcard syntax.  Any string
 of bytes can be subscribed or published, but the wildcarding follows the syntax
 of the pattern type and uses a different subscription operator internally, as
 Redis does (sub, unsub, psub, punsub).
@@ -19,7 +19,7 @@ The _INBOX subject
 ~~~~~~~~~~~~~~~~~~
 
 There is a special rule for subjects that begin with the prefix `_INBOX.`, it
-is interpretted as a point to point message.  This subject format finds the
+is interpreted as a point to point message.  This subject format finds the
 peers which are subscribers, typically just one, and sends the message point to
 point for each one.  The subject and message are put into an envelope addressed
 for each peer.  The peers that forward this message along the path to the
@@ -66,7 +66,7 @@ Redis subject rules
 1.  There are no limitations for the characters used in a subject.
 
 2.  A wildcard is subscribed using a `psub` operator, so the characters
-    are interpreted using wildcard rules.  A `*` charactor matches zero
+    are interpreted using wildcard rules.  A `*` character matches zero
     or more, a `?` matches 0 or 1 characters.  A `[` and `]` match any
     of the characters enclosed.  A `\` character escapes the wildcard
     characters.  It is similar to a shell glob wildcard.

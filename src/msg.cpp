@@ -479,7 +479,7 @@ MsgFrameDecoder::build_msg_dict( void ) noexcept
       out += ::snprintf( out, end - out, fmt, t->type_name, fid );
     }
     if ( ( t->type_mask & OPAQUE_32) != 0 ) {
-      fmt = "%s_16 { CLASS_ID %d; DATA_SIZE 32; DATA_TYPE opaque; }\n";
+      fmt = "%s_32 { CLASS_ID %d; DATA_SIZE 32; DATA_TYPE opaque; }\n";
       fid = t->fid | ( OPAQUE_32_CLASS << FID_TYPE_SHIFT );
       out += ::snprintf( out, end - out, fmt, t->type_name, fid );
     }
