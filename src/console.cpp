@@ -1781,8 +1781,8 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
     this->output_help( p, cmd );
     return this->flush_output( p );
   }
-  const char    * args[ MAXARGS ]; /* all args */
-  size_t          arglen[ MAXARGS ], argc;
+  const char    * args[ MAXARGS + 1 ]; /* all args */
+  size_t          arglen[ MAXARGS + 1 ], argc;
   const char    * arg;   /* arg after command */
   size_t          len;   /* len of arg */
   ConsoleOutput * sub_output = p;
@@ -1792,6 +1792,8 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
   /* empty line, skip it */
   if ( cmd == CMD_EMPTY )
     return this->flush_output( p );
+  args[ argc ] = NULL;
+  arglen[ argc ] = 0;
 
   if ( cmd >= CMD_SUB_START && argc == 3 ) {
     switch ( cmd ) {
@@ -1837,7 +1839,12 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
     case CMD_CONNECT:  this->connect( arg, len ); break;
     case CMD_LISTEN:   this->listen( arg, len ); break;
     case CMD_SHUTDOWN: this->shutdown( arg, len ); break;
+    case CMD_NETWORK:
+      if ( len == 0 || argc < 3 )
+        goto help;
+      this->mgr.add_network( args[ 2 ], arglen[ 2 ], arg, len );
       break;
+
     case CMD_CONFIGURE_TPORT:
       if ( ! this->config_transport( args, arglen, argc ) )
         goto help;
@@ -1857,10 +1864,6 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
     case CMD_CONFIGURE_PARAM:
       if ( len == 0 || argc < 3 )
         goto help;
-      if ( argc == 3 ) {
-        args[ 3 ] = NULL;
-        arglen[ 3 ] = 0;
-      }
       this->config_param( arg, len, args[ 3 ], arglen[ 3 ] );
       break;
     case CMD_MUTE_LOG:
@@ -1975,10 +1978,6 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
       this->show_seqno( p, arg, len );
       break;
     case CMD_SHOW_SUBS:
-      if ( argc <= 3 ) {
-        args[ 3 ] = NULL;
-        arglen[ 3 ] = 0;
-      }
       this->show_subs( p, arg, len, args[ 3 ], arglen[ 3 ] );
       break;
     case CMD_PING:      this->ping_peer( p, arg, len ); break;

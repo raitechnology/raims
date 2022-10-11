@@ -45,7 +45,7 @@ The model that a node implements in the base client is close to that of a
 router.  The command line resembles a cisco style interface with the ability to
 bring up and down transports at run time, examine the state of them, ping other
 nodes, traceroute, get help on commands with the '?' key, use command line
-completion, telnet into the node.
+completion, telnet into the node.  More in <<console>>.
 
 Networking
 ^^^^^^^^^^
@@ -69,6 +69,8 @@ uses a btree of subjects:
   router <-> bloom filter 1 <-> switch 1 <-> mac 1 <-> connection 1 <-> btree entry 1
              bloom filter 2     switch 2     mac 2     connection 2     btree entry 2
 ----
+
+More about this in the <<network>> section.
 
 Link-State Database
 ^^^^^^^^^^^^^^^^^^^
@@ -117,6 +119,8 @@ The behavior of a transport which becomes too congested is that the heartbeat
 misses and the link is dropped and rejoined at the next heartbeat.  The effect
 of this is that 10 seconds of traffic is rerouted or lost if there are no other
 routes to the peers on the other side.
+
+More in the <<linkstate>> section.
 
 Multicast routing
 ^^^^^^^^^^^^^^^^^
@@ -307,7 +311,7 @@ and saves it to the startup config.
   05:55:12.790  create file A/tport_mytran.yaml     -- transport
 ----
 
-The files are described in the <<config,configuration>> section and the
-transports are described in the <<network,networking>> section.  The
+The files are described in the <<configuration>> section and the
+transports are described in the <<network>> section.  The
 authentication keys need to be distributed to all the nodes, but the networking
 config will be somewhat unique to each node.

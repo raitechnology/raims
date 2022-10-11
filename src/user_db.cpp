@@ -1554,7 +1554,7 @@ UserDB::add_inbox_route( UserBridge &n,  UserRoute *primary ) noexcept
     }
   }
   if ( primary == NULL ) {
-    n.printe( "add inbox no valid route\n" );
+    n.printf( "add inbox no valid routes yet\n" );
     return;
   }
   /* reset hb timeout */

@@ -16,6 +16,34 @@ using namespace ms;
 using namespace kv;
 using namespace md;
 
+bool
+WebListen::init_htdigest( const char *http_username,  const char *http_password,
+                          const char *http_realm,
+                          const char *htdigest ) noexcept
+{
+  bool b = true;
+  this->db = new ( ::malloc( sizeof( HtDigestDB ) ) ) HtDigestDB();
+  if ( htdigest != NULL ) {
+    if ( ! this->db->load( htdigest, http_realm ) ) {
+      ::perror( htdigest );
+      b = false;
+    }
+  }
+  if ( http_username != NULL || http_password != NULL ) {
+    if ( http_realm == NULL )
+      http_realm = "realm@raims";
+    if ( http_username == NULL )
+      http_username = "raims";
+    if ( http_password == NULL )
+      http_password = http_username;
+    if ( ! this->db->add_user_pass( http_username, http_password, http_realm ) )
+      b = false;
+  }
+  this->svr = new ( ::malloc( sizeof( HttpServerNonce ) ) ) HttpServerNonce();
+  this->svr->regenerate();
+  return b;
+}
+
 TarEntry rai::ms::WebService::entry[ MAX_ENTRIES ];
 uint32_t rai::ms::WebService::entry_count;
 NullOutput * rai::ms::WebService::null_output;
@@ -188,7 +216,7 @@ WebListen::accept( void ) noexcept
     return NULL;
   if ( ! this->accept2( *c, "web" ) )
     return NULL;
-  c->initialize_state();
+  c->initialize_state( this->svr, this->db );
   c->console      = &this->console;
   c->http_dir     = this->http_dir;
   c->http_dir_len = this->http_dir_len;

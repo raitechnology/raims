@@ -243,8 +243,8 @@ These are broadcast flooded to authenticated peers.
 |==========================================
 
 - _Z.ADD is broadcast when a new peer is added to the peer db, usually as a
-  result of authentication and also in the case that then network split and
-  peers were joined again.
+  result of authentication and also in the case when network splits and peers
+  were joined again.
 
 - _Z.DEL is broadcast when a peer sent a _X.BYE or if it is no longer reachable
   because all routes to it are down.
@@ -295,7 +295,7 @@ _I.duBVZZwXfwBVlYgGNUZQTw.auth
 All of the peers along the path to the destination use this bridge id to
 forward the message using the rules for the point to point route of the
 destination peer.  This may be a TCP link or it may be a UDP Inbox link in the
-case of a multicast PGM transport.  The suffix if the inbox subject indicate
+case of a multicast PGM transport.  The suffix of the inbox subject indicate
 the type of request or reply it is.  If the suffix is an integer then the
 endpoint is not a system function, but information requested by the console
 session or a web interface that is usually converted to text and displayed.

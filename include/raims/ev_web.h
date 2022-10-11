@@ -2,6 +2,7 @@
 #define __rai_raims__ev_web_h__
 
 #include <raids/ev_http.h>
+#include <raids/http_auth.h>
 #include <raikv/stream_buf.h>
 #include <raikv/dlinklist.h>
 #include <raims/console.h>
@@ -83,12 +84,18 @@ struct WebListen : public kv::EvTcpListen {
   Console    & console;
   const char * http_dir;
   size_t       http_dir_len;
+
+  ds::HttpServerNonce * svr;
+  ds::HtDigestDB      * db;
+
   void * operator new( size_t, void *ptr ) { return ptr; }
   WebListen( kv::EvPoll &p,  Console &c )
     : kv::EvTcpListen( p, "web_listen", "web_sock" ), console( c ),
-      http_dir( 0 ), http_dir_len( 0 ) {}
+      http_dir( 0 ), http_dir_len( 0 ), svr( 0 ), db( 0 ) {}
 
   virtual EvSocket *accept( void ) noexcept;
+  bool init_htdigest( const char *http_username,  const char *http_password,
+                      const char *http_realm,  const char *htdigest ) noexcept;
 };
 
 struct tar_header;

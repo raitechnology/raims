@@ -572,7 +572,8 @@ SubDB::resize_bloom( void ) noexcept
   BloomBits * b;
 
   if ( bloom_resize ) {
-    b = this->bloom.bits->resize( this->bloom.bits, this->bloom.bits->seed );
+    b = this->bloom.bits->resize( this->bloom.bits, this->bloom.bits->seed,
+                                  this->bloom.bits->bwidth );
     this->bloom.bits = b;
     this->index_bloom( *b, CONSOLE_SUB | IPC_SUB );
     if ( debug_sub )
@@ -582,13 +583,15 @@ SubDB::resize_bloom( void ) noexcept
   }
   if ( console_resize ) {
     b = this->console.bits->resize( this->console.bits,
-                                    this->console.bits->seed );
+                                    this->console.bits->seed,
+                                    this->console.bits->bwidth );
     this->console.bits = b;
     this->index_bloom( *b, CONSOLE_SUB );
     this->notify_bloom_update( this->console );
   }
   if ( ipc_resize ) {
-    b = this->ipc.bits->resize( this->ipc.bits, this->ipc.bits->seed );
+    b = this->ipc.bits->resize( this->ipc.bits, this->ipc.bits->seed,
+                                this->ipc.bits->bwidth );
     this->ipc.bits = b;
     this->index_bloom( *b, IPC_SUB );
     this->notify_bloom_update( this->ipc );

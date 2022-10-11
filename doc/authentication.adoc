@@ -201,6 +201,12 @@ byte digest:
   AES( IV = 8 bytes key )( [ message ] [ 24 bytes key ] )
 ----
 
+Note that HMAC is traditionally performed as MD5( key.opad + MD5( key.ipad +
+message ) ) or SHA3( message + key ).  The above AES construction is chosen
+purely for speed, since AES instructions are widely available and an order of
+magnitude faster than the other hashes.  This may change in the near future
+with the addition SHA instructions.
+
 The header of every message contains these 5 fields which identify the source
 of the message, the HMAC digest of the message, the subject, a seqno and a
 time stamp:

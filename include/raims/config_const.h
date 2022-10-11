@@ -60,6 +60,10 @@ CONFIG_CONST( R_SERVICE            , "service" )
 CONFIG_CONST( R_NETWORK            , "network" )
 CONFIG_CONST( R_COST               , "cost" )         /* 2,3,4 */
 CONFIG_CONST( R_HTTP_DIR           , "http_dir" )
+CONFIG_CONST( R_HTTP_USERNAME      , "http_username" )
+CONFIG_CONST( R_HTTP_PASSWORD      , "http_password" )
+CONFIG_CONST( R_HTTP_REALM         , "http_realm" )
+CONFIG_CONST( R_HTDIGEST           , "htdigest" )
 CONFIG_CONST( R_IPV4ONLY           , "ipv4only" )
 CONFIG_CONST( R_IPV6ONLY           , "ipv6only" )
 
@@ -87,10 +91,14 @@ CONFIG_CONST( R_IPV6ONLY           , "ipv6only" )
   CMD_TPORT_NETWORK            = CMD_TPORT_BASE+17,\
   CMD_TPORT_COST               = CMD_TPORT_BASE+18,\
   CMD_TPORT_HTTP_DIR           = CMD_TPORT_BASE+19,\
-  CMD_TPORT_IPV4ONLY           = CMD_TPORT_BASE+20,\
-  CMD_TPORT_IPV6ONLY           = CMD_TPORT_BASE+21,\
-  CMD_TPORT_SHOW               = CMD_TPORT_BASE+22,\
-  CMD_TPORT_QUIT               = CMD_TPORT_BASE+23
+  CMD_TPORT_HTTP_USERNAME      = CMD_TPORT_BASE+20,\
+  CMD_TPORT_HTTP_PASSWORD      = CMD_TPORT_BASE+21,\
+  CMD_TPORT_HTTP_REALM         = CMD_TPORT_BASE+22,\
+  CMD_TPORT_HTDIGEST           = CMD_TPORT_BASE+23,\
+  CMD_TPORT_IPV4ONLY           = CMD_TPORT_BASE+24,\
+  CMD_TPORT_IPV6ONLY           = CMD_TPORT_BASE+25,\
+  CMD_TPORT_SHOW               = CMD_TPORT_BASE+26,\
+  CMD_TPORT_QUIT               = CMD_TPORT_BASE+27
 
 /* configure transport route parameters */
 #define CMD_TPORT_CMD \
@@ -114,6 +122,10 @@ CONFIG_CONST( R_IPV6ONLY           , "ipv6only" )
   { CMD_TPORT_NETWORK           , R_NETWORK    ,0,0},\
   { CMD_TPORT_COST              , R_COST       ,0,0},\
   { CMD_TPORT_HTTP_DIR          , R_HTTP_DIR   ,0,0},\
+  { CMD_TPORT_HTTP_USERNAME     , R_HTTP_USERNAME,0,0},\
+  { CMD_TPORT_HTTP_PASSWORD     , R_HTTP_PASSWORD,0,0},\
+  { CMD_TPORT_HTTP_REALM        , R_HTTP_REALM ,0,0},\
+  { CMD_TPORT_HTDIGEST          , R_HTDIGEST   ,0,0},\
   { CMD_TPORT_IPV4ONLY          , R_IPV4ONLY   ,0,0},\
   { CMD_TPORT_IPV6ONLY          , R_IPV6ONLY   ,0,0},\
   { CMD_TPORT_SHOW              , "show"       ,0,0},\
@@ -142,6 +154,10 @@ CONFIG_CONST( R_IPV6ONLY           , "ipv6only" )
   { CMD_TPORT_NETWORK    ,  R_NETWORK,"A", "Connect to network" },\
   { CMD_TPORT_COST       ,  R_COST,"N",    "Cost used for calculating routes" },\
   { CMD_TPORT_HTTP_DIR   ,  R_HTTP_DIR,"D","Use this directory for serving files" },\
+  { CMD_TPORT_HTTP_USERNAME , R_HTTP_USERNAME,"N","Username for http auth" },\
+  { CMD_TPORT_HTTP_PASSWORD , R_HTTP_PASSWORD,"N","Password for http auth" },\
+  { CMD_TPORT_HTTP_REALM    , R_HTTP_REALM   ,"N","Realm for http auth" },\
+  { CMD_TPORT_HTDIGEST      , R_HTDIGEST     ,"N","File to load for http auth" },\
   { CMD_TPORT_IPV4ONLY   ,  R_IPV4ONLY,"B","Only use IPv4 addresses" },\
   { CMD_TPORT_IPV6ONLY   ,  R_IPV6ONLY,"B","Only use IPv6 addresses" },\
   { CMD_TPORT_SHOW       , "show","",      "Show tport config" },\
@@ -174,6 +190,11 @@ CONFIG_CONST( R_IPV6ONLY           , "ipv6only" )
                      CMD_TPORT_IPV4ONLY, CMD_TPORT_IPV6ONLY
 
 #define VALID_NAME   CMD_TPORT_LISTEN, CMD_TPORT_CONNECT, CMD_TPORT_PORT
+
+#define VALID_WEB    CMD_TPORT_LISTEN, CMD_TPORT_DEVICE, CMD_TPORT_PORT, \
+                     CMD_TPORT_HTTP_DIR, CMD_TPORT_HTTP_USERNAME, CMD_TPORT_HTTP_PASSWORD, \
+                     CMD_TPORT_HTTP_REALM, CMD_TPORT_HTDIGEST, \
+                     CMD_TPORT_IPV4ONLY, CMD_TPORT_IPV6ONLY
 
 #define VALID_ANY    CMD_TPORT_DEVICE
 

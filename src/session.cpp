@@ -1296,7 +1296,7 @@ SessionMgr::publish( PubMcastData &mc ) noexcept
 
     mc.seqno = p->next_seqno( loc.is_new, time, this->timer_time,
                               this->converge_seqno, chain_seqno );
-    if ( chain_seqno != 0 ) {
+    if ( debug_sess && chain_seqno != 0 ) {
       printf( "seqno frame jump\n" );
     }
   }

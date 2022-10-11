@@ -1,3 +1,4 @@
+[[linkstate]]
 Link State
 ----------
 
@@ -7,30 +8,42 @@ The Forwarding Set
 Each node in a network must construct a forwarding set for any message sent by
 any peer.  A forwarding set instructs the node where to send a message so that
 all subscribers of it will see the message exactly one time, when the network
-is converged and stable.  When a Link State database is used to compute the
-forwarding set, it is sometimes called Proactive Routing.  This is different
-from flood and learn type systems, where messages flood the network and
-duplicate links are pruned by the receivers.  This sometimes called Reactive
-Routing.
+is converged and stable.
 
-The Proactive case and the Reactive case will converge to the same network
-coverage.   The difference between them is that the Proactive protocol can
-compute the forwarding set before routing the messages by using the Link State
-database, and the Reactive case forwards the message and then computes the
-forwarding set using the peers which will tell the sender to prune the route if
-it is unnecessary.
+A "converged network" is one where all peers agree that a link exists.  If
+peer A has in it's database a link to peer B, then peer B must also have a
+link to peer A.  If a link is missing, then the network tries to resolve the
+difference by asking the peers with the discrepancy which is correct.
 
-This system uses Proactive routing, which I believe is better because of the
-number of unique subjects published can be very large.  A Reactive system needs
-to resolve the routes for each new subject published or become a hybrid system
-where some aspects of the Proactive design are maintained to alleviate this
-need.
+Every peer has a bloom filter that contains all of the subscriptions currently
+active.  The links database tells each peer how the network can be traversed
+for full coverage and the bloom filter prunes the coverage by dropping the
+message when there are no subscriptions active that match the subject on the
+other side of the link.
 
-A node uses the source of the message as an index to arrive at a forwarding set
-for the message.  If a node A has peers B, C and D, then a message from B with
-have a different forwarding set than a message from C or D.  The set for
-B must have a path that includes C and D, and a message from D must have a path
-that includes B and C.  These paths can be calculated with the Link State
-database and are summarized as a set of send operations.
+A simple redundant network is a circle:
 
+----
+dyna  --  ruby
+            
+  |        |
+            
+bond  --  chex
+----
+
+If the cost of each of the links is set to the default 1000, then the
+forwarding set for dyna is the link to ruby and bond.  When ruby and bond
+receive a message from dyna, only one of them will forward the message to chex.
+The path cost from dyna -> ruby -> chex is equal to the path cost from dyna ->
+bond -> chex.  The forwarding algorithm tracks the equal cost paths and ranks
+them in order of peer age.  In the case that ruby is older than bond, then the
+ranking of these routes would by 1. dyna -> ruby -> chex and 2. dyna -> bond ->
+chex.  The top 4 ranked routes are saved as the forwarding sets, and selected
+by the hash of the message subject.  In this case, half of the subjects
+subscribed by chex and published from dyna would take the first path and the
+other half would take the second path.
+
+The method of ranking the paths by peer age is used because the stability
+of the network is less affected when more transient peers are added and
+subtracted from the link state database.
 

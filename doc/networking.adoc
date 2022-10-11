@@ -482,29 +482,39 @@ Example `tport_myweb.yaml`:
     listen: *
     port: 80
     http_dir: "./"
+    http_username: myuser
+    http_password: mypassword
 ----
 
 [%autowidth,options="header",grid="cols",stripes="even"]
 |======================================================
-| Field      |   Default    | Description              
-| listen     | *            | Passive listener  
-| port       | random       | Listener port     
-| http_dir   | none         | If set, serve files from directory
+| Field         |   Default    | Description              
+| listen        | *            | Passive listener  
+| port          | random       | Listener port     
+| http_dir      | none         | Serve files from this directory
+| http_username | none         | Adds username to digest auth
+| http_password | none         | Sets password for username
+| http_realm    | none         | Sets realm for username
+| htdigest      | none         | Load digest file for auth
 |======================================================
 
-Files located in the directory will override the internal files.  The html
-files and websocket requests also have a templating system which substitute
-values from the server.  If `@(show ports)` appears in a html page, it is
-replace with a html `<table>` of ports.  If `template "res" : @{show ports}` is
-sent using a websocket, it expands to a JSON array off ports and the reply is
-`"res" : [ports...]`.
+If http_dir is not set, then this service does not access the filesystem
+for processing http get requests.  It has a set of html pages compiled
+into the binary that it uses for viewing the server state.
+
+If http_dir is set, then the files located in the directory will override the
+internal files.  The html files and websocket requests also have a templating
+system which substitute values from the server.  If `@(show ports)` appears in
+a html page, it is replace with a html `<table>` of ports.  If `template "res"
+: @{show ports}` is sent using a websocket, it expands to a JSON array off
+ports and the reply is `"res" : [ports...]`.
 
 Any of the commands from the console interface are now exposed on the http
 endpoint.  Requesting "show ports" will respond with a JSON array of transports
 with the current totals of messages and bytes:
 
 ----
-$ wget -q -O - "http://localhost:80/?show ports"                                                                        
+$ wget --http-user=myuser --http-password=mypassword -q -O - "http://localhost:80/?show ports"                                                                        
 [{"tport":"rv.0", "type":"rv", "cost":1000, "fd":13, "bs":"", "br":"", "ms":"", "mr":"", "lat":"", "fl":"SLI", "address":"rv://127.0.0.1:7500"},
 {"tport":"mesh4.1", "type":"mesh", "cost":1000, "fd":16, "bs":"", "br":"", "ms":"", "mr":"", "lat":"", "fl":"SLX", "address":"mesh://10.4.4.18:19500"},
 {"tport":"primary.2", "type":"tcp", "cost":1000, "fd":18, "bs":29500, "br":47324, "ms":229, "mr":355, "lat":"26.5ms", "fl":"C", "address":"robotron.1@tcp://209.237.252.104:18500"},
@@ -518,5 +528,39 @@ is published to the websocket, the format used is:
 "subject" : { "field" : "value" }
 ----
 
-This requires that the message can be converted to JSON or is already in JSON
-format.
+This requires that the messages published  can be converted to JSON or is
+already in JSON format.
+
+The http_username / http_password or htdigest will cause http digest
+authentication to be used and require them for access.  The above wget is used
+with the example configuration.
+
+A htdigest file contains a list of users and can be created by the htdigest
+program distributed with the Apache packages.
+
+----
+$ htdigest -c .htdigest realm@raims myuser
+Adding password for myuser in realm realm@raims.
+New password: mypassword
+Re-type new password: mypassword
+
+$ cat .htdigest
+myuser:realm@raims:56f52efe43dcf419e991ea6452ae6f06
+----
+
+Then `tport_myweb.yaml` is configured like this:
+
+----
+  tport: myweb
+  type: web
+  route:
+    listen: *
+    port: 80
+    htdigest: ./.htdigest
+----
+
+Only one realm can be used by the service.  If http_realm is configured then
+that realm is used, otherwise the first realm in the htdigest file is used.  If
+no realm is specified but a user and password are specified, then "realm@raims"
+is used.
+

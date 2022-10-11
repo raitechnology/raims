@@ -221,6 +221,7 @@ SessionMgr::add_network( const char *net,  size_t net_len,
   StringTab  & stab = this->user_db.string_tab;
   RvMcast2     mc;
   char         svc_buf[ 1024 ];
+  int          svc_buf_len;
   bool is_listener = true;
 
   if ( mc.parse_network2( net, net_len ) != sassrv::HOST_OK )
@@ -228,26 +229,21 @@ SessionMgr::add_network( const char *net,  size_t net_len,
   if ( mc.type == NET_NONE )
     return false;
 
-  t = tree.find_transport( svc, svc_len );
-  if ( t != NULL ) {
-    for ( int i = 0; ; i++ ) {
-      int j;
-      if ( i == 0 )
-        j = ::snprintf( svc_buf, sizeof( svc_buf ), "net_%.*s",
-                        (int) svc_len, svc );
-      else
-        j = ::snprintf( svc_buf, sizeof( svc_buf ), "net%d_%.*s", i,
-                        (int) svc_len, svc );
-      t = tree.find_transport( svc_buf, j );
-      if ( t == NULL ) {
-        svc     = svc_buf;
-        svc_len = j;
-        break;
-      }
-    }
+  /*t = tree.find_transport( svc, svc_len );
+  if ( t != NULL ) {*/
+  for ( int i = 0; ; i++ ) {
+    if ( i == 0 )
+      svc_buf_len = ::snprintf( svc_buf, sizeof( svc_buf ), "net_%.*s",
+                                (int) svc_len, svc );
+    else
+      svc_buf_len = ::snprintf( svc_buf, sizeof( svc_buf ), "net%d_%.*s", i,
+                                (int) svc_len, svc );
+    t = tree.find_transport( svc_buf, svc_buf_len );
+    if ( t == NULL )
+      break;
   }
   t = stab.make<ConfigTree::Transport>();
-  stab.ref_string( svc, svc_len, t->tport );
+  stab.ref_string( svc_buf, svc_buf_len, t->tport );
   t->tport_id = tree.transport_cnt++;
   tree.transports.push_tl( t );
 
@@ -283,11 +279,18 @@ SessionMgr::add_network( const char *net,  size_t net_len,
     case NET_MCAST: {
       size_t i, port_len = 0;
       const char * port = NULL;
-      for ( i = svc_len; i > 0 && svc[ i - 1 ] >= '0' && svc[ i - 1 ] <= '9'; )
-        i--;
-      if ( i < svc_len ) {
-        port = &svc[ i ];
-        port_len = svc_len - i;
+      char port_hash[ 16 ];
+      for ( i = 0; i < svc_len && svc[ i ] >= '0' && svc[ i ] <= '9'; i++ )
+        ;
+      if ( i == svc_len ) {
+        port     = svc;
+        port_len = svc_len;
+      }
+      else {
+        port_len = uint32_to_string(
+          ( kv_crc_c( svc, svc_len, 0 ) & 0x7fff ) + 0x8000, port_hash );
+        port = port_hash;
+        port_hash[ port_len ] = '\0';
       }
       stab.reref_string( "pgm", 3, t->type );
       tree.set_route_str( *t, stab, R_LISTEN, net, net_len );
@@ -910,6 +913,18 @@ SessionMgr::create_web( ConfigTree::Transport &tport ) noexcept
     if ( tport.get_route_str( R_HTTP_DIR, un.web->http_dir ) &&
          un.web->http_dir != NULL ) {
       un.web->http_dir_len = ::strlen( un.web->http_dir );
+    }
+    const char * http_username = NULL,
+               * http_password = NULL,
+               * http_realm    = NULL,
+               * htdigest      = NULL;
+    tport.get_route_str( R_HTTP_USERNAME, http_username );
+    tport.get_route_str( R_HTTP_PASSWORD, http_password );
+    tport.get_route_str( R_HTTP_REALM, http_realm );
+    tport.get_route_str( R_HTDIGEST, htdigest );
+    if ( http_username != NULL || http_password != NULL || htdigest != NULL ) {
+      un.web->init_htdigest( http_username, http_password, http_realm,
+                             htdigest );
     }
   }
   if ( do_listen_start( tport, un.web, "web_listen" ) ) {

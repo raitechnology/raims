@@ -16,7 +16,7 @@ publisher sequence window.
 
 - The first message received
 
-When a subscription start occurs it will usually not contain a timestamp,
+When a subscription start occurs it will usually not contain a time stamp,
 unless it is the first message published.
 
 - The message sequence is repeated
@@ -31,7 +31,7 @@ message loss is propagated to the subscriptions.
 
 - The message subject is not subscribed
 
-The subscription may have dropped and the pubilisher has not yet seen the
+The subscription may have dropped and the publisher has not yet seen the
 unsubscribe.
 
 Multicast sequence numbers
@@ -41,7 +41,7 @@ The sequence numbers include a time frame when the publisher starts the
 message stream.  This is the computation that creates a new sequence stream.
 
 ----
-nanosecond timestamp = 1659131646 * 1000000000 = 0x17066b710b706c00
+nanosecond time stamp = 1659131646 * 1000000000 = 0x17066b710b706c00
 
  1               8               16              24              
 |-+-+-+-+-+-+-+-|-+-+-+-+-+-+-+-|-+-+-+-+-+-+-+-|-+-+-+-+-+-+-+-
@@ -64,9 +64,9 @@ message sequence number = ( nano time >> 33 << 35 ) + 1 = 0x5c19adc000000001
  -+-+-+-+-+-+-+-|-+-+-+-+-+-+-+-|-+-+-+-+-+-+-+-|-+-+-+-+-+-+-+-|
 ----
 
-This truncates nanosecond timestamp to approximately 10 second intervals, a new
-time frame can only occur after 10 seconds.  The time frame is stored in the
-upper 29 bits will be valid until the year 2115.  The sequence resolution
+This truncates nanosecond time stamp to approximately 10 second intervals, a
+new time frame can only occur after 10 seconds.  The time frame is stored in
+the upper 29 bits will be valid until the year 2115.  The sequence resolution
 within a time frame is 35 bits or 34 billion sequences.  These are rotated to
 new time frames when the sequence number is zero.
 
@@ -133,10 +133,10 @@ user |   lat  |   hb   | ref |  ping  |   pong  |     time
 ----
 
 The pong calculation subtracts the round trip time and is the most accurate,
-the others disregard the latency of the network.  The hb are from time
+the others disregard the latency of the network.  The HB are from time
 differences of directly attached peers using heartbeats and are shared with
 those not directly attached.  The ref is the peer (0 = self, 1 = A.1) that
-originated the hb difference.  The time is the estimated clock setting of the
+originated the HB difference.  The time is the estimated clock setting of the
 remote peer in the current timezone.
 
 Configuration for sequence windows

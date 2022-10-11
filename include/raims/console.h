@@ -737,28 +737,29 @@ enum ConsoleCmd {
   CMD_CONNECT          = 36, /* connect [T]                */
   CMD_LISTEN           = 37, /* listen [T]                 */
   CMD_SHUTDOWN         = 38, /* shutdown [T]               */
-  CMD_CONFIGURE        = 39, /* configure                  */
-  CMD_CONFIGURE_TPORT  = 40, /* configure transport T      */
-  CMD_CONFIGURE_PARAM  = 41, /* configure parameter P V    */
-  CMD_SAVE             = 42, /* save                       */
-  CMD_SUB_START        = 43, /* sub subject [file]         */
-  CMD_SUB_STOP         = 44, /* unsub subject [file]       */
-  CMD_PSUB_START       = 45, /* psub rv-wildcard [file]    */
-  CMD_PSUB_STOP        = 46, /* punsub rv-wildcard [file]  */
-  CMD_GSUB_START       = 47, /* gsub glob-wildcard [file]  */
-  CMD_GSUB_STOP        = 48, /* gunsub glob-wildcard [file]*/
-  CMD_PUBLISH          = 49, /* pub subject msg            */
-  CMD_TRACE            = 50, /* trace subject msg          */
-  CMD_PUB_ACK          = 51, /* ack subject msg            */
-  CMD_RPC              = 52, /* rpc subject msg            */
-  CMD_ANY              = 53, /* any subject msg            */
-  CMD_DEBUG            = 55, /* debug ival                 */
-  CMD_CANCEL           = 56, /* cancel                     */
-  CMD_MUTE_LOG         = 57, /* mute                       */
-  CMD_UNMUTE_LOG       = 58, /* unmute                     */
-  CMD_QUIT             = 59, /* quit/exit                  */
+  CMD_NETWORK          = 39, /* network svc network        */
+  CMD_CONFIGURE        = 40, /* configure                  */
+  CMD_CONFIGURE_TPORT  = 41, /* configure transport T      */
+  CMD_CONFIGURE_PARAM  = 42, /* configure parameter P V    */
+  CMD_SAVE             = 43, /* save                       */
+  CMD_SUB_START        = 44, /* sub subject [file]         */
+  CMD_SUB_STOP         = 45, /* unsub subject [file]       */
+  CMD_PSUB_START       = 46, /* psub rv-wildcard [file]    */
+  CMD_PSUB_STOP        = 47, /* punsub rv-wildcard [file]  */
+  CMD_GSUB_START       = 48, /* gsub glob-wildcard [file]  */
+  CMD_GSUB_STOP        = 49, /* gunsub glob-wildcard [file]*/
+  CMD_PUBLISH          = 50, /* pub subject msg            */
+  CMD_TRACE            = 51, /* trace subject msg          */
+  CMD_PUB_ACK          = 52, /* ack subject msg            */
+  CMD_RPC              = 53, /* rpc subject msg            */
+  CMD_ANY              = 54, /* any subject msg            */
+  CMD_DEBUG            = 56, /* debug ival                 */
+  CMD_CANCEL           = 57, /* cancel                     */
+  CMD_MUTE_LOG         = 58, /* mute                       */
+  CMD_UNMUTE_LOG       = 59, /* unmute                     */
+  CMD_QUIT             = 60, /* quit/exit                  */
 
-#define CMD_TPORT_BASE 60
+#define CMD_TPORT_BASE ( (int) CMD_QUIT + 1 )
   CMD_TPORT_ENUM /* config_const.h */
 };
 
@@ -836,6 +837,7 @@ static const ConsoleCmdString console_cmd[] = {
   { CMD_CONNECT    , "connect"      ,0,0}, /* connect <tport> */
   { CMD_LISTEN     , "listen"       ,0,0}, /* listen <tport> */
   { CMD_SHUTDOWN   , "shutdown"     ,0,0}, /* shutdown <tport> */
+  { CMD_NETWORK    , "network"      ,0,0}, /* network <svc> <network> */
   { CMD_CONFIGURE  , "configure"    ,0,0}, /* configure <subcmd> */
   { CMD_SAVE       , "save"         ,0,0}, /* save config */
   { CMD_SUB_START  , "subscribe"    ,0,0}, /* subscribe <subject> */
@@ -909,6 +911,7 @@ static const ConsoleCmdString help_cmd[] = {
   { CMD_CONNECT          , "connect", "[T]",     "Start tport connect"                               },
   { CMD_LISTEN           , "listen", "[T]",      "Start tport listener"                              },
   { CMD_SHUTDOWN         , "shutdown", "[T]",    "Shutdown tport"                                    },
+  { CMD_NETWORK          , "network", "[S] [N]", "Configure service and join network"                                    },
   { CMD_CONFIGURE        , "configure", "",      "Configure ..."                                     },
   { CMD_CONFIGURE_TPORT  , "configure transport", "T",  "Configure tport T"                          },
   { CMD_CONFIGURE_PARAM  , "configure parameter", "P V", "Configure parameter P = V"                 },
@@ -990,6 +993,9 @@ static const ConsoleCmd valid_redis[] =
 static const ConsoleCmd valid_name[] =
   { CMD_TPORT_TPORT, CMD_TPORT_TYPE, VALID_NAME, CMD_TPORT_SHOW, CMD_TPORT_QUIT };
 
+static const ConsoleCmd valid_web[] =
+  { CMD_TPORT_TPORT, CMD_TPORT_TYPE, VALID_WEB, CMD_TPORT_SHOW, CMD_TPORT_QUIT };
+
 static const ConsoleCmd valid_any[] =
   { CMD_TPORT_TPORT, CMD_TPORT_TYPE, VALID_ANY, CMD_TPORT_SHOW, CMD_TPORT_QUIT };
 
@@ -1014,6 +1020,7 @@ struct ValidTportCmds {
   { "nats", valid_nats, ASZ( valid_nats ), NULL, 0, NULL, 0 },
   { "redis",valid_redis,ASZ( valid_redis ),NULL, 0, NULL, 0 },
   { "name", valid_name, ASZ( valid_name ), NULL, 0, NULL, 0 },
+  { "web",  valid_web,  ASZ( valid_web ),  NULL, 0, NULL, 0 },
   { "any",  valid_any,  ASZ( valid_any ),  NULL, 0, NULL, 0 }
 };
 static const size_t num_valid_tport_cmds = ASZ( valid_tport_cmd );
