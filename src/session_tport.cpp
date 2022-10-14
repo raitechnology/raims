@@ -530,7 +530,7 @@ SessionMgr::add_mesh_accept( TransportRoute &listen_rte,
     this->user_db.transport_tab[ id ] = rte;
     this->user_db.add_transport( *rte );
   }
-  this->events.on_connect( rte->tport_id, TPORT_IS_MESH );
+  this->events.on_connect( rte->tport_id, TPORT_IS_MESH, conn.encrypt );
   if ( ! rte->connected.test_set( conn.fd ) )
     rte->connect_count++;
   d_tran( "%s connect_count %u\n", rte->name, rte->connect_count );
@@ -603,7 +603,7 @@ SessionMgr::add_tcp_accept( TransportRoute &listen_rte,
   conn.route_id = rte->sub_route.route_id;
 
   rte->printf( "add_tcp_accept\n" );
-  this->events.on_connect( rte->tport_id, TPORT_IS_TCP );
+  this->events.on_connect( rte->tport_id, TPORT_IS_TCP, conn.encrypt );
   if ( ! rte->connected.test_set( conn.fd ) )
     rte->connect_count++;
 
@@ -828,7 +828,6 @@ SessionMgr::add_mesh_connect( TransportRoute &mesh_rte,  const char **mesh_url,
   this->user_db.add_transport( *rte );
 
   EvTcpTransportParameters parm;
-
   j = 0;
   for ( i = 0; i < url_count; i++ ) {
     if ( mesh_url[ i ] != NULL ) {
@@ -843,6 +842,8 @@ SessionMgr::add_mesh_connect( TransportRoute &mesh_rte,  const char **mesh_url,
   }
   if ( ! mesh_rte.transport.get_route_int( R_TIMEOUT, parm.timeout ) )
     parm.timeout = 15;
+  if ( ! mesh_rte.transport.get_route_bool( R_NOENCRYPT, parm.noencrypt ) )
+    parm.noencrypt = false;
 
   EvTcpTransportClient *c = rte->connect_mgr.conn;
   if ( c == NULL ) {
@@ -850,8 +851,9 @@ SessionMgr::add_mesh_connect( TransportRoute &mesh_rte,  const char **mesh_url,
     c = rte->connect_mgr.alloc_conn<EvTcpTransportClient>( this->poll, type );
     rte->connect_mgr.conn = c;
   }
-  c->rte = rte;
+  c->rte      = rte;
   c->route_id = rte->sub_route.route_id;
+  c->encrypt  = ! parm.noencrypt;
   rte->connect_mgr.connect_timeout_secs = parm.timeout;
   rte->connect_mgr.set_parm( parm.copy() );
   if ( ! rte->connect_mgr.do_connect() ) {

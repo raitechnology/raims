@@ -66,6 +66,7 @@ CONFIG_CONST( R_HTTP_REALM         , "http_realm" )
 CONFIG_CONST( R_HTDIGEST           , "htdigest" )
 CONFIG_CONST( R_IPV4ONLY           , "ipv4only" )
 CONFIG_CONST( R_IPV6ONLY           , "ipv6only" )
+CONFIG_CONST( R_NOENCRYPT          , "noencrypt" )
 
 #undef CONFIG_CONST
 
@@ -97,8 +98,9 @@ CONFIG_CONST( R_IPV6ONLY           , "ipv6only" )
   CMD_TPORT_HTDIGEST           = CMD_TPORT_BASE+23,\
   CMD_TPORT_IPV4ONLY           = CMD_TPORT_BASE+24,\
   CMD_TPORT_IPV6ONLY           = CMD_TPORT_BASE+25,\
-  CMD_TPORT_SHOW               = CMD_TPORT_BASE+26,\
-  CMD_TPORT_QUIT               = CMD_TPORT_BASE+27
+  CMD_TPORT_NOENCRYPT          = CMD_TPORT_BASE+26,\
+  CMD_TPORT_SHOW               = CMD_TPORT_BASE+27,\
+  CMD_TPORT_QUIT               = CMD_TPORT_BASE+28
 
 /* configure transport route parameters */
 #define CMD_TPORT_CMD \
@@ -128,6 +130,7 @@ CONFIG_CONST( R_IPV6ONLY           , "ipv6only" )
   { CMD_TPORT_HTDIGEST          , R_HTDIGEST   ,0,0},\
   { CMD_TPORT_IPV4ONLY          , R_IPV4ONLY   ,0,0},\
   { CMD_TPORT_IPV6ONLY          , R_IPV6ONLY   ,0,0},\
+  { CMD_TPORT_NOENCRYPT         , R_NOENCRYPT  ,0,0},\
   { CMD_TPORT_SHOW              , "show"       ,0,0},\
   { CMD_TPORT_QUIT              , "quit"       ,0,0},\
   { CMD_TPORT_QUIT              , "exit"       ,0,0}
@@ -160,6 +163,7 @@ CONFIG_CONST( R_IPV6ONLY           , "ipv6only" )
   { CMD_TPORT_HTDIGEST      , R_HTDIGEST     ,"N","File to load for http auth" },\
   { CMD_TPORT_IPV4ONLY   ,  R_IPV4ONLY,"B","Only use IPv4 addresses" },\
   { CMD_TPORT_IPV6ONLY   ,  R_IPV6ONLY,"B","Only use IPv6 addresses" },\
+  { CMD_TPORT_NOENCRYPT  ,  R_NOENCRYPT,"B","Do not use encryption" },\
   { CMD_TPORT_SHOW       , "show","",      "Show tport config" },\
   { CMD_TPORT_QUIT       , "quit/exit","", "Exit config" }
 
@@ -172,9 +176,9 @@ CONFIG_CONST( R_IPV6ONLY           , "ipv6only" )
                      CMD_TPORT_DEVICE, CMD_TPORT_PORT, CMD_TPORT_COST, \
                      CMD_TPORT_IPV4ONLY, CMD_TPORT_IPV6ONLY
                      
-#define VALID_TCP    VALID_COMMON, CMD_TPORT_EDGE
+#define VALID_TCP    VALID_COMMON, CMD_TPORT_EDGE, CMD_TPORT_NOENCRYPT
 
-#define VALID_MESH   VALID_COMMON
+#define VALID_MESH   VALID_COMMON, CMD_TPORT_NOENCRYPT
 
 #define VALID_PGM    VALID_COMMON, CMD_TPORT_MTU, CMD_TPORT_TXW_SQNS, CMD_TPORT_RXW_SQNS, \
                      CMD_TPORT_TXW_SECS, CMD_TPORT_MCAST_LOOP

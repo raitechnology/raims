@@ -323,7 +323,7 @@ libraims_files := session user_db heartbeat auth peer link_state adjacency \
                   config user msg sub pat transport session_tport \
 		  conn_mgr console stats adj_test gen_config \
 		  crypt poly1305 ec25519 ed25519 sha512 aes \
-                  ev_tcp_transport ev_pgm_transport pgm_sock \
+		  ev_tcp_aes ev_tcp_transport ev_pgm_transport pgm_sock \
 		  ev_inbox_transport ev_telnet ev_web ev_rv_transport \
 		  ev_nats_transport ev_redis_transport ev_name_svc
 libraims_files := $(libraims_files)
@@ -494,6 +494,18 @@ $(bind)/parse_config: $(parse_config_objs) $(parse_config_libs) $(lnk_dep)
 
 all_exes    += $(bind)/parse_config
 all_depends += $(parse_config_deps)
+
+test_tcp_aes_files := test_tcp_aes
+test_tcp_aes_cfile := test/test_tcp_aes.cpp
+test_tcp_aes_objs  := $(addprefix $(objd)/, $(addsuffix .o, $(test_tcp_aes_files)))
+test_tcp_aes_deps  := $(addprefix $(dependd)/, $(addsuffix .d, $(test_tcp_aes_files)))
+test_tcp_aes_libs  :=
+test_tcp_aes_lnk   := $(lnk_lib)
+
+$(bind)/test_tcp_aes: $(test_tcp_aes_objs) $(test_tcp_aes_libs) $(lnk_dep)
+
+all_exes    += $(bind)/test_tcp_aes
+all_depends += $(test_tcp_aes_deps)
 
 parse_pcap_files := parse_pcap
 parse_pcap_cfile := test/parse_pcap.cpp

@@ -212,6 +212,7 @@ Console::parse_debug_flags( const char *arg,  size_t len,
   kv_pub_debug     = 0;
   kv_ps_debug      = 0;
   sassrv::rv_debug = 0;
+  no_tcp_aes       = 0;
 
   for ( size_t i = 0; i < debug_str_count; i++ ) {
     size_t dlen = ::strlen( debug_str[ i ] );
@@ -226,6 +227,8 @@ Console::parse_debug_flags( const char *arg,  size_t len,
     kv_ps_debug = 1;
   if ( len >= 2 && ::memmem( arg, len, "rv", 2 ) != NULL )
     sassrv::rv_debug = 1;
+  if ( len >= 5 && ::memmem( arg, len, "noaes", 5 ) != NULL )
+    no_tcp_aes = 1;
   if ( dbg_flags == 0 && len > 0 && arg[ 0 ] >= '0' && arg[ 0 ] <= '9' )
     dbg_flags = (int) string_to_uint64( arg, len );
 }
@@ -1948,6 +1951,8 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
         this->outf( p, "kv ps debug on" );
       if ( sassrv::rv_debug )
         this->outf( p, "rv debug on" );
+      if ( no_tcp_aes )
+        this->outf( p, "disable tcp aes" );
       break;
     }
     case CMD_CANCEL: {
@@ -3058,6 +3063,8 @@ Console::show_events( ConsoleOutput *p ) noexcept
       this->tab_user_id( uid, tab[ i++ ] ); /* peer */
     else if ( ev->is_ecdh() )
       tab[ i++ ].set( "(ecdh)", 6 );
+    else if ( ev->is_encrypt() )
+      tab[ i++ ].set( "(aes)", 5 );
     else 
       tab[ i++ ].set_null();
 

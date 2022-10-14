@@ -2,16 +2,19 @@
 #define __rai_raims__ev_tcp_transport_h__
 
 #include <raikv/ev_tcp.h>
+#include <raims/ev_tcp_aes.h>
 #include <raims/msg.h>
 #include <raims/config_tree.h>
 
 namespace rai {
 namespace ms {
 
+extern int no_tcp_aes; /* turn off tcp aes encryption */
 struct TransportRoute;
 /* tcp listener for accepting EvTcpTransportService connections */
 struct EvTcpTransportListen : public kv::EvTcpListen {
   TransportRoute & rte;
+  bool encrypt;
 
   void * operator new( size_t, void *ptr ) { return ptr; }
 
@@ -23,11 +26,12 @@ struct EvTcpTransportListen : public kv::EvTcpListen {
   virtual void process_close( void ) noexcept final;
 };
 
-struct EvTcpTransport : public kv::EvConnection {
+struct EvTcpTransport : public AES_Connection {
   MsgFrameDecoder    msg_in;
   TransportRoute   * rte;
   bool               fwd_all_msgs,   /* send publishes */
-                     is_connect;
+                     is_connect,
+                     encrypt;
 
   EvTcpTransport( kv::EvPoll &p,  uint8_t t ) noexcept;
   void start( void ) noexcept;
@@ -55,7 +59,8 @@ struct EvTcpTransportParameters {
                opts,      /* tcp opts */
                timeout;   /* connect timeout seconds */
   uint32_t     hash[ MAX_TCP_HOSTS ];
-  bool         edge;      /* if listen edge true, don't create transport*/
+  bool         edge,      /* if listen edge true, don't create transport*/
+               noencrypt; /* don't encrypt connection */
   char         buf[ MAX_TCP_HOSTS ][ MAX_TCP_HOST_LEN ];
   void * operator new( size_t, void *ptr ) { return ptr; }
 
@@ -66,11 +71,12 @@ struct EvTcpTransportParameters {
       this->hash[ i ] = 0;
       this->buf[ i ][ 0 ] = '\0';
     }
-    this->opts    = kv::DEFAULT_TCP_CONNECT_OPTS;
-    this->opts   &= ~( kv::OPT_REUSEPORT | kv::OPT_VERBOSE );
-    this->opts   |= kv::OPT_CONNECT_NB;
-    this->timeout = 10;
-    this->edge    = false;
+    this->opts      = kv::DEFAULT_TCP_CONNECT_OPTS;
+    this->opts     &= ~( kv::OPT_REUSEPORT | kv::OPT_VERBOSE );
+    this->opts     |= kv::OPT_CONNECT_NB;
+    this->timeout   = 10;
+    this->edge      = false;
+    this->noencrypt = false;
   }
 
   static size_t copy_host_buf( char buf[ MAX_TCP_HOST_LEN ],  size_t off,
@@ -84,9 +90,10 @@ struct EvTcpTransportParameters {
   }
 
   EvTcpTransportParameters( const EvTcpTransportParameters &p ) {
-    this->opts    = p.opts;
-    this->timeout = p.timeout;
-    this->edge    = p.edge;
+    this->opts      = p.opts;
+    this->timeout   = p.timeout;
+    this->edge      = p.edge;
+    this->noencrypt = p.noencrypt;
     ::memcpy( this->buf, p.buf, sizeof( this->buf ) );
 
     for ( size_t i = 0; i < MAX_TCP_HOSTS; i++ ) {

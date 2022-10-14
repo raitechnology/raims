@@ -171,6 +171,38 @@ This creates 4 equal mesh networks, each of which is preferred for part of the
 subject space.  The connect and cost can be enumerated as connect, connect2,
 connect3, connect4 and cost, cost2, cost3, cost4 as well as an array.
 
+TCP Encryption
+~~~~~~~~~~~~~~
+
+The TCP type and mesh type links are encrypted using AES 128 bit in counter
+mode.  The protocol above the link layer handles the authentication for
+trusting the peer and the messages that are received.  The encryption is
+set up by a ECDH exchange.  Each side generates a ECDH keypair and sends
+the public key with a checksum and a 128 bit nonce value.  Each side
+computes the secret key and uses the KDF to mix the secret with the
+nonce value to arrive at a 128 bit key and a 128 bit counter for sending
+and receiving.  Thse are used to encrypt and decrypt the other sides bytes.
+
+----
+alice -> bob [ 8 bytes checksum ] [ 32 bytes pub key ] [ 16 bytes nonce ]
+bob -> alice [ 8 bytes checksum ] [ 32 bytes pub key ] [ 16 bytes nonce ]
+alice.secret = ECDH( bob public key, alice private key )
+bob.secret = ECDH( alice public key, bob private key )
+alice.recv key+counter = KDF( secret[32] + bob.nonce[16] ) -> 64 bytes
+alice.send key+counter = KDF( secret[32] + alice.once[16] ) -> 64 bytes
+bob.recv key+counter = KDF( secret[32] + alice.nonce[16] ) -> 64 bytes
+bob.send key+counter = KDF( secret[32] + bob.once[16] ) -> 64 bytes
+----
+
+The 32 byte secret will be the same on both ends.  The nonce is a random 16
+byte value.  The KDF function mixes into the keys a preshared salt value.
+Without this salt value, the key exchange will compute incorrect keys even
+though the secret is computed correctly.
+
+The 8 bytes checksum is a CRC of the pub key and the nonce in big endian, so
+the first 4 bytes will be zero.  The zero bytes cause an encrypted connection
+to an unencrypted endpoint to fail.
+
 Open PGM
 ~~~~~~~~
 
@@ -258,6 +290,7 @@ Example `tport_mymesh.yaml`:
     connect: [ host, host2, host3, host4 ]
     port: 9000
     timeout: 0
+    noencrypt: true
 ----
 
 [%autowidth,options="header",grid="cols",stripes="even"]
@@ -269,6 +302,7 @@ Example `tport_mymesh.yaml`:
 | port       | random       | Listener or connect port 
 | timeout    | 15           | Active connect timeout   
 | cost       | 1000         | Cost of mesh links
+| noencrypt  | false        | Disable encryption
 |======================================================
 
 If the mesh is a stable network, then the timeout set to a larger value or zero
@@ -277,11 +311,16 @@ period of time.  When a host is restarted doesn't have as much of an effect by
 a timeout since it is rejoining an existing network.  If a timeout expires,
 then an admin request to rejoin the network is possible through the console.
 
-When a device is used, then multicast is used through the name protocol to
-discover peers that are joining the same mesh, matching using the tport name.
-After discovering the peer, a connection with TCP is used to join the mesh.
-The port can be random with a device, since the address is discovered rather
-than connected.  Both the device and connect can be methods can be used.
+When a `device` parameter is used, then multicast is used through the name
+protocol to discover peers that are joining the same mesh, matching using the
+tport name.  After discovering the peer, a connection with TCP is used to join
+the mesh.  The port can be random with a device, since the address is
+discovered rather than connected.  Both the device and connect can be methods
+can be used.
+
+The `noencrypt` parameter set to true disables tcp link encryption.  Both the
+listener and connector must match this setting, otherwise they will close the
+connection after receiving the first bytes sent.
 
 TCP Point-to-point
 ~~~~~~~~~~~~~~~~~~
@@ -295,7 +334,7 @@ Example `tport_mytcp.yaml`:
   tport: mytcp
   type: tcp
   route:
-    listen: *
+    listen: eth0
     connect: host
     port: 9001
     timeout: 0
@@ -311,21 +350,31 @@ Example `tport_mytcp.yaml`:
 | timeout    | 15           | Active connect timeout   
 | cost       | 1000         | Cost of the TCP link
 | edge       | false        | A peer at the edge       
+| noencrypt  | false        | Disable encryption
 |======================================================
 
-A TCP protocol is either a listener or a connector.  When device is used
-to discover the peers through the multicast name protocol, the listeners
-are matched with the connectors.  When more than one listener is discovered
-by a connector, then connections are made to each one.
+A TCP protocol is either a listener or a connector, the appropriate config is
+used at run time when a connect or listen is used to activate the port.  When
+device is used to discover the peers through the multicast name protocol, the
+listeners are matched with the connectors.  When more than one listener is
+discovered by a connector, then connections are made to each one.
 
 Whether a configuration is used to connect or listen is specified by a listen
 or connect command or configuration.  If multiple connections are specified by
 the connect parameter, then the first connection that is successful will cause
 the others to stop trying to connect.
 
-The `edge` parameter causes the passive peer to pool the connections on a
-single transport, similar to a multicast transport where the traffic is
-primarily through a gateway peer.
+The `edge` parameter set to true causes the passive peer to pool the
+connections on a single transport, similar to a multicast transport where the
+traffic is primarily through a gateway peer.  The `noencrypt` parameter set to
+true disables tcp link encryption.  Both the listener and connector must match
+this setting, otherwise they will close the connection after receiving the
+first bytes sent.
+
+If the `listen` or `connect` parameters specify a port, as in "localhost:8000",
+then that port overides the parameter `port` configured.  A device name is
+resolved before the hostname DNS resolver is tried, so "eth0:8000" will resolve
+the address configured on the eth0 device.
 
 Tib RV
 ~~~~~~

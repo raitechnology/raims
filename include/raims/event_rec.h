@@ -43,17 +43,19 @@ enum EventType {
   RESIZE_BLOOM      = 29,
   RECV_BLOOM        = 30,
   CONVERGE          = 31,
-  MAX_EVENT         = 32
+  BAD_EVENT         = 32,
+  MAX_EVENT         = 33
 };
 
-static const uint32_t MASK_EVENT = 63,
-                      HAS_TPORT  = 64,
-                      HAS_PEER   = 128,
-                      HAS_DATA   = 256,
-                      HAS_STRING = 512,
-                      HAS_REASON = 1024,
-                      IS_FLOOD   = 2048,
-                      IS_ECDH    = 4096;
+static const uint32_t MASK_EVENT =   0x3f, /* 63 */
+                      HAS_TPORT  =   0x40,
+                      HAS_PEER   =   0x80,
+                      HAS_DATA   =  0x100,
+                      HAS_STRING =  0x200,
+                      HAS_REASON =  0x400,
+                      IS_FLOOD   =  0x800,
+                      IS_ECDH    = 0x1000,
+                      IS_ENCRYPT = 0x2000;
 
 #ifdef IMPORT_EVENT_DATA
 #define EVSZ( s ) { s, sizeof( s ) - 1 }
@@ -92,7 +94,8 @@ static const struct {
   EVSZ( "recv_adj_result" ), /* 28 */
   EVSZ( "resize_bloom" ),    /* 29 */
   EVSZ( "recv_bloom" ),      /* 30 */
-  EVSZ( "converge" )         /* 31 */
+  EVSZ( "converge" ),        /* 31 */
+  EVSZ( "bad_event" )        /* 32 */
 };
 #if __cplusplus >= 201103L
 static_assert( MAX_EVENT == ( sizeof( event_strings ) / sizeof( event_strings[ 0 ] ) ), "max_events" );
@@ -109,7 +112,10 @@ struct EventRec {
   uint16_t    event_flags,
               reason;
   EventType event_type( void ) const {
-    return (EventType) ( this->event_flags & MASK_EVENT );
+    uint32_t e = this->event_flags & MASK_EVENT;
+    if ( e >= MAX_EVENT )
+      return BAD_EVENT;
+    return (EventType) e;
   }
   const char *data_tag( StringTab &tab,  char *buf ) const {
     if ( ( this->event_flags & HAS_DATA ) != 0 ) {
@@ -210,6 +216,9 @@ struct EventRec {
   bool is_ecdh( void ) const {
     return ( this->event_flags & IS_ECDH ) != 0;
   }
+  bool is_encrypt( void ) const {
+    return ( this->event_flags & IS_ENCRYPT ) != 0;
+  }
 };
 
 struct EventRecord {
@@ -263,8 +272,9 @@ struct EventRecord {
   EventRec &uid_event( uint32_t uid,  uint16_t fl ) {
     return this->tid_event( uid, 0, fl );
   }
-  void on_connect( uint32_t tid,  uint32_t state ) {
-    this->tid_event( 0, tid, ON_CONNECT | HAS_TPORT | HAS_DATA ).data = state;
+  void on_connect( uint32_t tid,  uint32_t state,  bool is_encrypt ) {
+    this->tid_event( 0, tid, ON_CONNECT | HAS_TPORT | HAS_DATA |
+                             ( is_encrypt ? IS_ENCRYPT : 0 ) ).data = state;
   }
   void on_shutdown( uint32_t tid,  bool was_active ) {
     this->tid_event( 0, tid,

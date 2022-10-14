@@ -11,6 +11,8 @@ using namespace ms;
 using namespace kv;
 using namespace md;
 
+int rai::ms::no_tcp_aes;
+
 void
 EvTcpTransportParameters::parse_tport( ConfigTree::Transport &tport,
                                        int ptype ) noexcept
@@ -54,6 +56,8 @@ EvTcpTransportParameters::parse_tport( ConfigTree::Transport &tport,
     ip4 = false;
   if ( ! tport.get_route_bool( R_IPV6ONLY, ip6 ) )
     ip6 = false;
+  if ( ! tport.get_route_bool( R_NOENCRYPT, this->noencrypt ) )
+    this->noencrypt = false;
   if ( is_device )
     this->opts |= OPT_NO_DNS;
   if ( ip4 )
@@ -74,15 +78,15 @@ EvTcpTransportParameters::parse_tport( ConfigTree::Transport &tport,
 
 
 EvTcpTransport::EvTcpTransport( EvPoll &p,  uint8_t t ) noexcept
-  : EvConnection( p, t ), rte( 0 ), /*tport_count( 0 ), not_fd2( 0 ),*/
-    fwd_all_msgs( false ), is_connect( false )
+  : AES_Connection( p, t ), rte( 0 ), /*tport_count( 0 ), not_fd2( 0 ),*/
+    fwd_all_msgs( false ), is_connect( false ), encrypt( true )
 {
 }
 
 EvTcpTransportListen::EvTcpTransportListen( EvPoll &p,
                                             TransportRoute &r ) noexcept
   : EvTcpListen( p, "ev_tcp_tport_listen", "ev_tcp_tport" ),
-    rte( r )
+    rte( r ), encrypt( true )
 {
   this->notify = &r;
 }
@@ -92,8 +96,9 @@ EvTcpTransportListen::listen( const char *ip,  int port,  int opts ) noexcept
 {
   int res = this->kv::EvTcpListen::listen2( ip, port, opts, "tcp_listen",
                                             this->rte.sub_route.route_id );
-  if ( res == 0 )
-    this->rte.set_peer_name( *this, "list" );
+  if ( res == 0 ) {
+    this->rte.set_peer_name( *this, "tcp_list" );
+  }
   return res;
 }
 
@@ -106,6 +111,7 @@ EvTcpTransportListen::accept( void ) noexcept
     return NULL;
   c->rte = &this->rte;
   c->notify = this->notify;
+  c->encrypt = this->encrypt;
   if ( ! this->accept2( *c, "tcp_accept" ) )
     return NULL;
   c->start();
@@ -135,8 +141,9 @@ EvTcpTransportClient::connect( EvTcpTransportParameters &p,
     return false;
   this->is_connect = true;
   this->EvConnection::release_buffers();
-  if ( EvTcpConnection::connect2( *this, p.host[ index ], p.port[ index ], p.opts,
-                          "ev_tcp_tport", this->rte->sub_route.route_id ) != 0 )
+  if ( EvTcpConnection::connect2( *this, p.host[ index ], p.port[ index ],
+                                  p.opts, "ev_tcp_tport",
+                                  this->rte->sub_route.route_id ) != 0 )
     return false;
   this->notify = n;
   this->start();
@@ -146,7 +153,21 @@ EvTcpTransportClient::connect( EvTcpTransportParameters &p,
 void
 EvTcpTransport::start( void ) noexcept
 {
-  this->rte->set_peer_name( *this, this->is_connect ? "conn" : "acc" );
+  const char * name;
+  if ( this->is_connect )
+    name = "tcp_conn";
+  else
+    name = "tcp_acc";
+  this->rte->set_peer_name( *this, name );
+
+  if ( this->encrypt && ! no_tcp_aes ) {
+    this->init_exchange( NULL, 0 );
+    this->send_key();
+  }
+  else {
+    this->encrypt = false;
+    this->init_noencrypt();
+  }
   if ( this->fwd_all_msgs ) {
     uint32_t h = this->rte->sub_route.prefix_seed( 0 );
     this->rte->sub_route.add_pattern_route( h, this->fd, 0 );

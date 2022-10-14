@@ -2,6 +2,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <raims/aes.h>
+#include <raikv/util.h>
 
 using namespace rai;
 using namespace ms;
@@ -35,7 +36,7 @@ main( void )
                        0x88, 0x1b, 0x00, 0xe3, 0xed, 0x03, 0x06, 0x88};
   uint8_t key3[]    = {0x2b, 0x7e, 0x15, 0x16, 0x28, 0xae, 0xd2, 0xa6,
                        0xab, 0xf7, 0x15, 0x88, 0x09, 0xcf, 0x4f, 0x3c};
-  uint8_t plain[ 16 ], cipher[ 16 ];
+  uint8_t plain[ AES128::BLOCK_SIZE ], cipher[ AES128::BLOCK_SIZE ];
   AES128 aes;
   
   aes.expand_key( key1 );
@@ -53,6 +54,40 @@ main( void )
   aes.decrypt( cipher, plain );
   printf( "test3 : %s\n", ::memcmp( cipher, cipher3, sizeof( cipher ) ) == 0 &&
            ::memcmp( plain, plain3, sizeof( plain ) ) == 0 ? "pass" : "fail" );
+
+
+  uint64_t ctr[ 2 ], ctr2[ 2 ];
+  uint8_t  buf[ AES128::BLOCK_SIZE * 8 ], buf2[ AES128::BLOCK_SIZE * 8 ];
+  size_t   i, k;
+
+  ctr[ 0 ] = ctr2[ 0 ] = kv_bswap64( 1 );
+  ctr[ 1 ] = ctr2[ 1 ] = kv_bswap64( (uint64_t) -8 );
+  ::memset( buf, 0, sizeof( buf ) );
+  ::memset( buf2, 0, sizeof( buf2 ) );
+
+  aes.encrypt_ctr( ctr, buf, sizeof( buf ) / AES128::BLOCK_SIZE );
+
+  for ( i = 0; i < sizeof( buf ); i += AES128::BLOCK_SIZE ) {
+    aes.encrypt_ctr( ctr2, &buf2[ i ], 1 );
+  }
+
+  printf( "test4 : %s\n",
+          ::memcmp( buf, buf2, sizeof( buf ) ) == 0 &&
+          ctr[ 0 ] == ctr2[ 0 ] && ctr[ 1 ] == ctr2[ 1 ] ? "pass" : "fail" );
+
+  uint8_t * ptr = (uint8_t *) ::malloc( 1024 * 1024 );
+  ::memset( ptr, 0, 1024 * 1024 );
+
+  double t1 = kv_current_monotonic_time_s();
+  for ( k = 0; k < 16 * 1024; k++ ) {
+    for ( i = 0; i < 1024 * 1024; i += sizeof( buf ) ) {
+      aes.encrypt_ctr( ctr, buf, sizeof( buf ) / AES128::BLOCK_SIZE );
+      aes.byte_xor( buf, &ptr[ i ], sizeof( buf ) );
+    }
+  }
+  double t2 = kv_current_monotonic_time_s();
+  printf( "16GB %f sec, %f MB/sec\n", t2 - t1, ( 16 * 1024.0 ) / ( t2 - t1 ) );
+
   return 0;
 }
 

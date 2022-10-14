@@ -10,7 +10,8 @@ using namespace ms;
 using namespace md;
 
 static const char *
-get_arg( int argc, char *argv[], int b, const char *f, const char *def )
+get_arg( int argc, char *argv[], int b, const char *f,
+         const char *def ) noexcept
 {
   for ( int i = 1; i < argc - b; i++ )
     if ( ::strcmp( f, argv[ i ] ) == 0 ) /* -p port */

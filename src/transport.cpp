@@ -530,9 +530,14 @@ TransportRoute::start_listener( EvTcpListen *l,
                                 ConfigTree::Transport &tport ) noexcept
 {
   EvTcpTransportParameters parm;
+  bool encrypt = false;
   parm.parse_tport( tport, PARAM_LISTEN );
-  /*parse_tcp_param( parm, tport, P_LISTEN );*/
 
+  if ( tport.type.equals( T_TCP, T_TCP_SZ ) ||
+       tport.type.equals( T_MESH, T_MESH_SZ ) ) {
+    ((EvTcpTransportListen *) l)->encrypt = ! parm.noencrypt;
+    encrypt = ! parm.noencrypt;
+  }
   int status = l->listen( parm.host[ 0 ], parm.port[ 0 ], parm.opts );
   if ( status != 0 ) {
     fprintf( stderr, "%s.%u listen %s:%u failed\n", tport.tport.val,
@@ -543,7 +548,7 @@ TransportRoute::start_listener( EvTcpListen *l,
     this->set( TPORT_IS_LISTEN | TPORT_IS_SHUTDOWN );
     return false;
   }
-  this->mgr.events.on_connect( this->tport_id, TPORT_IS_LISTEN );
+  this->mgr.events.on_connect( this->tport_id, TPORT_IS_LISTEN, encrypt );
   this->set( TPORT_IS_LISTEN );
   if ( parm.edge )
     this->set( TPORT_IS_EDGE );
@@ -664,6 +669,7 @@ TransportRoute::create_tcp_connect( ConfigTree::Transport &tport ) noexcept
     c = this->connect_mgr.alloc_conn<EvTcpTransportClient>( this->poll, type );
     this->connect_mgr.conn = c;
   }
+  c->encrypt = ! parm.noencrypt;
   c->rte = this;
   c->route_id = this->sub_route.route_id;
   this->connect_mgr.connect_timeout_secs = parm.timeout;
@@ -681,10 +687,15 @@ TransportRoute::add_tcp_connect( const char *conn_url,
 {
   d_tran( "add_tcp_connect( %s )\n", conn_url );
   TransportRoute * rte = this;
+  bool noencrypt;
+  if ( ! rte->transport.get_route_bool( R_NOENCRYPT, noencrypt ) )
+    noencrypt = false;
   if ( ! rte->connect_mgr.is_shutdown ) {
     if ( rte->conn_hash == conn_hash ) {
-      if ( ! rte->connect_mgr.is_reconnecting )
+      if ( ! rte->connect_mgr.is_reconnecting ) {
+        rte->connect_mgr.conn->encrypt = ! noencrypt;
         return rte->connect_mgr.do_connect();
+      }
       return true;
     }
     rte = NULL;
@@ -702,6 +713,7 @@ TransportRoute::add_tcp_connect( const char *conn_url,
     }
     c->rte = rte;
     c->route_id = rte->sub_route.route_id;
+    c->encrypt = ! noencrypt;
   }
   EvTcpTransportParameters parm;
   char tcp_buf[ MAX_TCP_HOST_LEN ];
@@ -709,6 +721,7 @@ TransportRoute::add_tcp_connect( const char *conn_url,
   int port;
   port = ConfigTree::Transport::get_host_port( conn_url, tcp_buf, len );
   parm.set_host_port( tcp_buf, port, 0, 0 );
+  parm.noencrypt = noencrypt;
   d_tran( "tcp_url = %s:%u\n", tcp_buf, port );
   rte->connect_mgr.connect_timeout_secs = 1;
   rte->connect_mgr.set_parm( parm.copy() );

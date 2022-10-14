@@ -13,13 +13,16 @@ using namespace kv;
 void
 TransportRoute::on_connect( kv::EvSocket &conn ) noexcept
 {
-  this->printf( "connected %s %s using %s fd %u\n",
-                conn.peer_address.buf, conn.type_string(),
-                this->sub_route.service_name, conn.fd );
   uint32_t connect_type = 0;
+  bool     is_encrypt   = false;
   this->clear( TPORT_IS_SHUTDOWN );
   if ( ! this->is_mcast() ) {
     EvTcpTransport &tcp = (EvTcpTransport &) conn;
+    is_encrypt = tcp.encrypt;
+    this->printf( "connect %s %s %s using %s fd %u\n",
+                  tcp.encrypt ? "encrypted" : "clear",
+                  conn.peer_address.buf, conn.type_string(),
+                  this->sub_route.service_name, conn.fd );
     if ( this->is_mesh() ) {
       if ( ! tcp.is_connect ) {
         this->mgr.add_mesh_accept( *this, tcp );
@@ -42,8 +45,11 @@ TransportRoute::on_connect( kv::EvSocket &conn ) noexcept
   }
   else {
     connect_type = TPORT_IS_MCAST;
+    this->printf( "connect %s %s using %s fd %u\n",
+                  conn.peer_address.buf, conn.type_string(),
+                  this->sub_route.service_name, conn.fd );
   }
-  this->mgr.events.on_connect( this->tport_id, connect_type );
+  this->mgr.events.on_connect( this->tport_id, connect_type, is_encrypt );
   if ( ! this->connected.test_set( conn.fd ) )
     this->connect_count++;
 }
