@@ -3475,9 +3475,9 @@ Console::show_tports( ConsoleOutput *p, const char *name,  size_t len ) noexcept
     if ( t == count )
       rte = NULL;
 
-    const char * listen,
-               * connect;
-    int          port;
+    const char * listen  = NULL,
+               * connect = NULL;
+    int          port    = 0;
     tport->get_route_int( R_PORT, port );
     tport->get_route_str( R_LISTEN, listen );
     tport->get_route_str( R_CONNECT, connect );
