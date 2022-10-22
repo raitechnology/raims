@@ -773,7 +773,11 @@ UserDB::adjacency_size( UserBridge *sync ) noexcept
           else {
             n2 = this->bridge_tab.ptr[ uid ];
             if ( n2 != NULL ) {
-              e.tportid();
+              e.tportid()
+               .cost()
+               .cost2()
+               .cost3()
+               .cost4();
               if ( tport_changed( last, i ) ) {
                 e.tport     ( set->tport.len )
                  .tport_type( set->tport_type.len );

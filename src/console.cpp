@@ -3451,7 +3451,7 @@ Unrouteable::is_active( void ) const
 void
 Console::show_tports( ConsoleOutput *p, const char *name,  size_t len ) noexcept
 {
-  static const uint32_t ncols = 5;
+  static const uint32_t ncols = 6;
   TabOut           out( this->table, this->tmp, ncols );
   size_t           t, count = this->user_db.transport_tab.count;
   TransportRoute * rte;
@@ -3476,11 +3476,13 @@ Console::show_tports( ConsoleOutput *p, const char *name,  size_t len ) noexcept
       rte = NULL;
 
     const char * listen  = NULL,
-               * connect = NULL;
+               * connect = NULL,
+               * device  = NULL;
     int          port    = 0;
     tport->get_route_int( R_PORT, port );
     tport->get_route_str( R_LISTEN, listen );
     tport->get_route_str( R_CONNECT, connect );
+    tport->get_route_str( R_DEVICE, device );
 
     char   buf[ 80 ];
     size_t len = sizeof( buf );
@@ -3535,9 +3537,15 @@ Console::show_tports( ConsoleOutput *p, const char *name,  size_t len ) noexcept
         ::snprintf( &buf[ off ], len - off, ":%u", port );
       this->tab_string( buf, connect_col ); /* connect */
     }
+    if ( device != NULL ) {
+      size_t off = ::snprintf( buf, len, "%s://%s", tport->type.val, connect );
+      if ( port != 0 )
+        ::snprintf( &buf[ off ], len - off, ":%u", port );
+      this->tab_string( buf, connect_col ); /* connect */
+    }
   }
   static const char *hdr[ ncols ] = { "tport", "type", "state", "listen",
-                                      "connect" };
+                                      "connect", "device" };
   this->print_table( p, hdr, ncols );
 }
 

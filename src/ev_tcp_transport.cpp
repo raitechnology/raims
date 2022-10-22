@@ -140,6 +140,8 @@ EvTcpTransportClient::connect( EvTcpTransportParameters &p,
   if ( this->fd != -1 )
     return false;
   this->is_connect = true;
+  if ( this->encrypt )
+    this->AES_Connection::release_aes();
   this->EvConnection::release_buffers();
   if ( EvTcpConnection::connect2( *this, p.host[ index ], p.port[ index ],
                                   p.opts, "ev_tcp_tport",
@@ -235,6 +237,8 @@ EvTcpTransport::release( void ) noexcept
     this->rte->sub_route.del_pattern_route( h, this->fd, 0 );
   }
   this->msg_in.release();
+  if ( this->encrypt )
+    this->AES_Connection::release_aes();
   this->EvConnection::release_buffers();
   if ( this->notify != NULL )
     this->notify->on_shutdown( *this, NULL, 0 );

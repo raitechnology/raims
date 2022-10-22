@@ -76,6 +76,7 @@ TcpConn::release( void ) noexcept
 {
   printf( "release %.*s\n", (int) this->get_peer_address_strlen(),
           this->peer_address.buf );
+  this->AES_Connection::release_aes();
   this->EvConnection::release_buffers();
 }
 
@@ -128,6 +129,7 @@ TcpPing::release( void ) noexcept
 {
   printf( "release %.*s\n", (int) this->get_peer_address_strlen(),
           this->peer_address.buf );
+  this->AES_Connection::release_aes();
   this->EvConnection::release_buffers();
 }
 
@@ -175,10 +177,9 @@ int
 main( int argc, char *argv[] )
 { 
   SignalHandler sighndl;
-  EvPoll poll;
+  EvPoll    poll;
   TcpListen test( poll );
   TcpPing   ping( poll );
-  const char * host;
   int idle_count = 0; 
   bool encrypt = true;
   poll.init( 5, false );
@@ -188,7 +189,7 @@ main( int argc, char *argv[] )
     printf( "disabling encryption\n" );
   }
   if ( get_arg( argc, argv, 0, "-c", NULL ) != NULL ) {
-    host = get_arg( argc, argv, 1, "-c", NULL );
+    const char * host = get_arg( argc, argv, 1, "-c", NULL );
     if ( EvTcpConnection::connect( ping, host, 9000,
                               DEFAULT_TCP_CONNECT_OPTS | OPT_CONNECT_NB ) != 0 )
       return 1;

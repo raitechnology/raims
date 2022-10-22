@@ -75,7 +75,7 @@ main( void )
           ::memcmp( buf, buf2, sizeof( buf ) ) == 0 &&
           ctr[ 0 ] == ctr2[ 0 ] && ctr[ 1 ] == ctr2[ 1 ] ? "pass" : "fail" );
 
-  uint8_t * ptr = (uint8_t *) ::malloc( 1024 * 1024 );
+  uint8_t * ptr = (uint8_t *) kv::aligned_malloc( 1024 * 1024 );
   ::memset( ptr, 0, 1024 * 1024 );
 
   double t1 = kv_current_monotonic_time_s();

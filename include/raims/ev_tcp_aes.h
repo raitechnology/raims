@@ -15,7 +15,16 @@ struct CounterMode_AES {
   size_t   avail,
            off;
 
-  CounterMode_AES() : avail( 0 ), off( 0 ) {}
+  void init( void ) {
+    this->avail = 0;
+    this->off   = 0;
+  }
+
+  void release( void ) volatile {
+    this->aes.zero();
+    this->ctr[ 0 ] = 0;
+    this->ctr[ 1 ] = 0;
+  }
 
   void init_secret( const Nonce &nonce,  const ec25519_key &secret,
                     size_t exchange_offset ) {
@@ -54,33 +63,29 @@ struct CounterMode_AES {
 struct ECDH_Exchange {
   EC25519   ecdh;
   Nonce     send_nonce, recv_nonce;
-  size_t    save_len;
   uint8_t * save;
+  size_t    save_len;
   void    * psk;
   size_t    psk_len;
-
-  void * operator new( size_t, void *ptr ) { return ptr; }
-  void operator delete( void *ptr ) { ::free( ptr ); }
-
-  ECDH_Exchange() : save_len( 0 ), save( 0 ) {}
 
   void init( void *k,  size_t k_len ) {
     this->ecdh.gen_key();
     this->send_nonce.seed_random();
+    this->save     = NULL;
     this->save_len = 0;
-    this->psk = k;
-    this->psk_len = k_len;
+    this->psk      = k;
+    this->psk_len  = k_len;
   }
-  ~ECDH_Exchange() {
+  void release( void ) volatile {
     this->ecdh.zero();
     this->send_nonce.zero();
     this->recv_nonce.zero();
     if ( this->save != NULL )
       ::free( this->save );
+    this->save     = NULL;
     this->save_len = 0;
-    this->save = NULL;
-    this->psk = NULL;
-    this->psk_len = 0;
+    this->psk      = NULL;
+    this->psk_len  = 0;
   }
 };
 
@@ -97,16 +102,25 @@ struct AES_Connection : public kv::EvConnection {
     : kv::EvConnection( p, st ), exch( 0 ), have_key( false ) {}
 
   void init_exchange( void *k, size_t k_len ) {
+    this->send_aes.init();
+    this->recv_aes.init();
     if ( this->exch == NULL )
-      this->exch = new ( ::malloc( sizeof( ECDH_Exchange ) ) ) ECDH_Exchange();
-    this->have_key = false;
+      this->exch = (ECDH_Exchange *)
+        kv::aligned_malloc( sizeof( ECDH_Exchange ) );
     this->exch->init( k, k_len );
+    this->have_key = false;
   }
   void init_noencrypt( void ) {
+    this->release_aes();
+  }
+  void release_aes( void ) {
     if ( this->exch != NULL ) {
-      delete this->exch;
+      this->exch->release();
+      kv::aligned_free( this->exch );
       this->exch = NULL;
     }
+    this->send_aes.release();
+    this->recv_aes.release();
     this->have_key = false;
   }
   virtual void read( void ) noexcept;
