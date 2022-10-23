@@ -210,8 +210,8 @@ lnk_lib     += -lnatsmd
 dlnk_lib    += -lnatsmd
 endif
 
-lnk_lib     += -lpcre2-32 -lpcre2-8 -llzf
-dlnk_lib    += -lpcre2-32 -lpcre2-8 -llzf
+lnk_lib     += -lpcre2-32 -lpcre2-8 -llzf -lssl -lcrypto
+dlnk_lib    += -lpcre2-32 -lpcre2-8 -llzf -lssl -lcrypto
 rpath       := -Wl,-rpath,$(pwd)/$(libd)$(rpath1)$(rpath2)$(rpath3)$(rpath4)$(rpath5)$(rpath6)$(rpath7)$(rpath8)$(rpath9)$(rpath10)
 
 .PHONY: everything
