@@ -619,7 +619,7 @@ SessionMgr::add_mesh_connect( TransportRoute &mesh_rte ) noexcept
   size_t   url_buf_sz[ MAX_TCP_HOSTS ], i, j;
   uint32_t url_hash[ MAX_TCP_HOSTS ];
 
-  parm.parse_tport( mesh_rte.transport, PARAM_NB_CONNECT );
+  parm.parse_tport( mesh_rte.transport, PARAM_NB_CONNECT, this->tcp_noencrypt );
   /*parse_tcp_param( parm, mesh_rte.transport, P_NB_CONNECT );*/
 
   for ( i = 0; i < MAX_TCP_HOSTS; i++ ) {
@@ -843,7 +843,7 @@ SessionMgr::add_mesh_connect( TransportRoute &mesh_rte,  const char **mesh_url,
   if ( ! mesh_rte.transport.get_route_int( R_TIMEOUT, parm.timeout ) )
     parm.timeout = 15;
   if ( ! mesh_rte.transport.get_route_bool( R_NOENCRYPT, parm.noencrypt ) )
-    parm.noencrypt = false;
+    parm.noencrypt = this->tcp_noencrypt;
 
   EvTcpTransportClient *c = rte->connect_mgr.conn;
   if ( c == NULL ) {
@@ -868,7 +868,7 @@ do_listen_start( ConfigTree::Transport &tport,  EvTcpListen *l,
                  const char *k ) noexcept
 {
   EvTcpTransportParameters parm;
-  parm.parse_tport( tport, PARAM_LISTEN );
+  parm.parse_tport( tport, PARAM_LISTEN, false );
   /*parse_tcp_param( parm, tport, P_LISTEN );*/
 
   if ( ! l->in_list( IN_ACTIVE_LIST ) ) {

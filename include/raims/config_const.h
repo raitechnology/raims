@@ -16,13 +16,20 @@ extern const char CON[]; \
 extern const uint16_t CON ## _SZ;
 #endif
 
-/* parameters */
-CONFIG_CONST( P_MAP_FILE     , "map_file" )
-CONFIG_CONST( P_IPC_NAME     , "ipc_name" )
-CONFIG_CONST( P_DB_NUM       , "db_num" )
-CONFIG_CONST( P_RELIABILITY  , "reliability" )
+/* P_: parameters */
+CONFIG_CONST( P_MAP_FILE        , "map_file" )
+CONFIG_CONST( P_IPC_NAME        , "ipc_name" )
+CONFIG_CONST( P_DB_NUM          , "db_num" )
+CONFIG_CONST( P_RELIABILITY     , "reliability" )
+CONFIG_CONST( P_PUB_WINDOW_SIZE , "pub_window_size" )
+CONFIG_CONST( P_SUB_WINDOW_SIZE , "sub_window_size" )
+CONFIG_CONST( P_PUB_WINDOW_TIME , "pub_window_time" )
+CONFIG_CONST( P_SUB_WINDOW_TIME , "sub_window_time" )
+CONFIG_CONST( P_HEARTBEAT       , "heartbeat" )
+CONFIG_CONST( P_TIMESTAMP       , "timestamp" )
+CONFIG_CONST( P_TCP_NOENCRYPT   , "tcp_noencrypt" )
 
-/* transport / networks */
+/* T_: transport / networks */
 CONFIG_CONST( T_ANY          , "any" )
 CONFIG_CONST( T_MESH         , "mesh" )
 CONFIG_CONST( T_MESH_LISTEN  , "mesh.listen" )
@@ -39,7 +46,7 @@ CONFIG_CONST( T_WEB          , "web" )
 CONFIG_CONST( T_NAME         , "name" )
 CONFIG_CONST( T_IPC          , "ipc" )
 
-/* route parameters */
+/* R_: route parameters */
 CONFIG_CONST( R_TPORT              , "tport" )
 CONFIG_CONST( R_TYPE               , "type" )
 CONFIG_CONST( R_LISTEN             , "listen" )       /* 2,3,4,5,6,7,8 */

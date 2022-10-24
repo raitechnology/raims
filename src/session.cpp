@@ -59,6 +59,7 @@ SessionMgr::SessionMgr( EvPoll &p,  Logger &l,  ConfigTree &c,
              sub_window_size( 4 * 1024 * 1024 ),
              pub_window_ival( sec_to_ns( 10 ) ),
              sub_window_ival( sec_to_ns( 10 ) ),
+             tcp_noencrypt( false ),
              session_started( false )
 {
   this->sock_opts = OPT_NO_POLL;
@@ -86,39 +87,35 @@ SessionMgr::SessionMgr( EvPoll &p,  Logger &l,  ConfigTree &c,
   CabaMsg::init_auto_unpack();
 }
 
-static const char pub_w[] = "pub-window-size",
-                  sub_w[] = "sub-window-size",
-                  pub_t[] = "pub-window-time",
-                  sub_t[] = "sub-window-time",
-                  hb_t[]  = "heartbeat",
-                  rel_t[] = "reliability",
-                  tz_s[]  = "timestamp";
 bool
 SessionMgr::init_param( void ) noexcept
 {
   const char *s = "", *val = NULL;
   uint64_t hb_ival, rel_ival;
 
-  if ( this->tree.find_parameter( s = pub_w, val, NULL ) &&
+  if ( this->tree.find_parameter( s = P_PUB_WINDOW_SIZE, val, NULL ) &&
        ! ConfigTree::string_to_bytes( val, this->pub_window_size ) ) goto fail;
-  if ( this->tree.find_parameter( s = sub_w, val, NULL ) &&
+  if ( this->tree.find_parameter( s = P_SUB_WINDOW_SIZE, val, NULL ) &&
        ! ConfigTree::string_to_bytes( val, this->sub_window_size ) ) goto fail;
-  if ( this->tree.find_parameter( s = pub_t, val, NULL ) &&
+  if ( this->tree.find_parameter( s = P_PUB_WINDOW_TIME, val, NULL ) &&
        ! ConfigTree::string_to_nanos( val, this->pub_window_ival ) ) goto fail;
-  if ( this->tree.find_parameter( s = sub_t, val, NULL ) &&
+  if ( this->tree.find_parameter( s = P_SUB_WINDOW_TIME, val, NULL ) &&
        ! ConfigTree::string_to_nanos( val, this->sub_window_ival ) ) goto fail;
-  if ( this->tree.find_parameter( s = hb_t, val, NULL ) ) {
+  if ( this->tree.find_parameter( s = P_HEARTBEAT, val, NULL ) ) {
     if ( ! ConfigTree::string_to_secs( val, hb_ival ) ) goto fail;
     this->user_db.hb_interval = (uint32_t) hb_ival;
   }
-  if ( this->tree.find_parameter( s = rel_t, val, NULL ) ) {
+  if ( this->tree.find_parameter( s = P_RELIABILITY, val, NULL ) ) {
     if ( ! ConfigTree::string_to_secs( val, rel_ival ) ) goto fail;
     this->user_db.reliability = (uint32_t) rel_ival;
   }
-  if ( this->tree.find_parameter( s = tz_s, val, NULL ) ) {
+  if ( this->tree.find_parameter( s = P_TIMESTAMP, val, NULL ) ) {
     if ( val != NULL &&
          ( ::strcmp( val, "gmt" ) == 0 || ::strcmp( val, "GMT" ) == 0 ) )
       tz_stamp_gmt = true;
+  }
+  if ( this->tree.find_parameter( s = P_TCP_NOENCRYPT, val, NULL ) ) {
+    if ( ! ConfigTree::string_to_bool( val, this->tcp_noencrypt ) ) goto fail;
   }
   update_tz_stamp();
   return true;
@@ -334,12 +331,12 @@ SessionMgr::fork_daemon( int err_fd ) noexcept
 void
 SessionMgr::start( void ) noexcept
 {
-  printf( "%s: %lu bytes\n", pub_w, this->pub_window_size );
-  printf( "%s: %lu bytes\n", sub_w, this->sub_window_size );
-  printf( "%s: %lu secs\n", pub_t, ns_to_sec( this->pub_window_ival ) );
-  printf( "%s: %lu secs\n", sub_t, ns_to_sec( this->sub_window_ival ) );
-  printf( "%s: %u secs\n", hb_t, this->user_db.hb_interval );
-  printf( "%s: %u secs\n", rel_t, this->user_db.reliability );
+  printf( "%s: %lu bytes\n", P_PUB_WINDOW_SIZE, this->pub_window_size );
+  printf( "%s: %lu bytes\n", P_SUB_WINDOW_SIZE, this->sub_window_size );
+  printf( "%s: %lu secs\n", P_PUB_WINDOW_TIME, ns_to_sec( this->pub_window_ival ) );
+  printf( "%s: %lu secs\n", P_SUB_WINDOW_TIME, ns_to_sec( this->sub_window_ival ) );
+  printf( "%s: %u secs\n", P_HEARTBEAT, this->user_db.hb_interval );
+  printf( "%s: %u secs\n", P_RELIABILITY, this->user_db.reliability );
 
   uint64_t cur_mono = this->poll.timer.current_monotonic_time_ns(),
            cur_time = this->poll.timer.current_time_ns();

@@ -11,7 +11,7 @@ namespace ms {
 struct CounterMode_AES {
   AES128   aes;
   uint64_t ctr[ 2 ];
-  uint8_t  mask[ AES128::BLOCK_SIZE * 8 ];
+  uint8_t  mask[ AES128::BLOCK_SIZE * 16 ];
   size_t   avail,
            off;
 
@@ -42,7 +42,7 @@ struct CounterMode_AES {
   }
 
   void crypt( void *buf,  size_t len ) {
-    size_t moff = AES128::BLOCK_SIZE * 8 - this->avail;
+    size_t moff = sizeof( this->mask ) - this->avail;
     for (;;) {
       size_t n = ( this->avail < len ? this->avail : len );
       if ( n > 0 ) {
@@ -53,8 +53,9 @@ struct CounterMode_AES {
           return;
         buf = &((char *) buf)[ n ];
       }
-      this->aes.encrypt_ctr( this->ctr, this->mask, 8 );
-      this->avail = AES128::BLOCK_SIZE * 8;
+      this->aes.encrypt_ctr( this->ctr, this->mask,
+                             sizeof( this->mask ) / AES128::BLOCK_SIZE );
+      this->avail = sizeof( this->mask );
       moff = 0;
     }
   }

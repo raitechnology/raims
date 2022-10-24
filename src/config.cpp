@@ -2353,3 +2353,20 @@ ConfigTree::string_to_nanos( const char *s,  uint64_t &nanos ) noexcept
   return false;
 }
 
+bool
+ConfigTree::string_to_bool( const char *s,  bool &b ) noexcept
+{
+  b = false;
+  switch ( s[ 0 ] ) {
+    case '1': case 't': case 'T': case 'y': case 'Y':
+      b = true;
+      return true;
+    case '0': case 'f': case 'F': case 'n': case 'N':
+      b = false;
+      return true;
+    default:
+      break;
+  }
+  return false;
+}
+

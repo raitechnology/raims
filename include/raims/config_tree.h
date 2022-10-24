@@ -270,6 +270,7 @@ struct ConfigTree {
   static bool string_to_bytes( const char *s,  uint64_t &bytes ) noexcept;
   static bool string_to_secs( const char *s,  uint64_t &secs ) noexcept;
   static bool string_to_nanos( const char *s,  uint64_t &nanos ) noexcept;
+  static bool string_to_bool( const char *s,  bool &b ) noexcept;
 };
 
 }

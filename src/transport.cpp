@@ -531,7 +531,7 @@ TransportRoute::start_listener( EvTcpListen *l,
 {
   EvTcpTransportParameters parm;
   bool encrypt = false;
-  parm.parse_tport( tport, PARAM_LISTEN );
+  parm.parse_tport( tport, PARAM_LISTEN, this->mgr.tcp_noencrypt );
 
   if ( tport.type.equals( T_TCP, T_TCP_SZ ) ||
        tport.type.equals( T_MESH, T_MESH_SZ ) ) {
@@ -660,7 +660,7 @@ TransportRoute::create_tcp_connect( ConfigTree::Transport &tport ) noexcept
 {
   EvTcpTransportParameters parm;
   const char * tmp, * tmp2;
-  parm.parse_tport( tport, PARAM_NB_CONNECT );
+  parm.parse_tport( tport, PARAM_NB_CONNECT, this->mgr.tcp_noencrypt );
   /*parse_tcp_param( parm, tport, P_NB_CONNECT );*/
 
   EvTcpTransportClient *c = this->connect_mgr.conn;
@@ -689,7 +689,7 @@ TransportRoute::add_tcp_connect( const char *conn_url,
   TransportRoute * rte = this;
   bool noencrypt;
   if ( ! rte->transport.get_route_bool( R_NOENCRYPT, noencrypt ) )
-    noencrypt = false;
+    noencrypt = this->mgr.tcp_noencrypt;
   if ( ! rte->connect_mgr.is_shutdown ) {
     if ( rte->conn_hash == conn_hash ) {
       if ( ! rte->connect_mgr.is_reconnecting ) {

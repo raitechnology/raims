@@ -96,13 +96,14 @@ The peer that publishes a message may use a sub-optimal forwarding path to the
 recipients until they are notified that better paths are available with link
 state exchanges.
 
+<<pub_window>>
 Publish sequence window
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 A map of subject to sequence numbers for published multicast messages is
 maintained by each peer.  This map rotates when a configured memory limit is
-reached, `pub-window-size`, and the window time interval is greater than a
-configured time, `pub-window-time`, which must be at least 10 seconds.  When a
+reached, `pub_window_size`, and the window time interval is greater than a
+configured time, `pub_window_time`, which must be at least 10 seconds.  When a
 subject is rotated out of the window, the sequence number is restarted with a
 new time frame.
 
@@ -113,7 +114,7 @@ A map of subject to sequence numbers for the subscriptions that a peer has
 is also maintained.  This validates that the messages are processed in order
 and allows notification of message loss when the sequences skip and does not
 allow a message to be processed twice.  The memory limit for this is
-`sub-window-size` and time limit is `sub-window-time`.  When a subject is
+`sub_window_size` and time limit is `sub_window_time`.  When a subject is
 rotated out of the window, then the publisher did not update for the window
 time and the next sequence is treated as if a new subscription was created.
 
@@ -153,10 +154,10 @@ within 10 seconds.
 ----
 $ cat config/param.yaml
 parameters:
-  pub-window-size: 10 mb
-  pub-window-time: 60 sec
-  sub-window-size: 10 mb
-  sub-window-time: 60 sec
+  pub_window_size: 10 mb
+  pub_window_time: 60 sec
+  sub_window_size: 10 mb
+  sub_window_time: 60 sec
 ----
 
 Show loss

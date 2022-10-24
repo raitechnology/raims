@@ -133,7 +133,8 @@ struct EvTcpTransportParameters {
     return p;
   }
 
-  void parse_tport( ConfigTree::Transport &tport,  int ptype ) noexcept;
+  void parse_tport( ConfigTree::Transport &tport,  int ptype,
+                    bool tcp_noencrypt ) noexcept;
 };
 
 struct EvTcpTransportClient : public EvTcpTransport {

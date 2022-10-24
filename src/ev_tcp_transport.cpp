@@ -15,7 +15,7 @@ int rai::ms::no_tcp_aes;
 
 void
 EvTcpTransportParameters::parse_tport( ConfigTree::Transport &tport,
-                                       int ptype ) noexcept
+                                       int ptype,  bool tcp_noencrypt ) noexcept
 {
   char         tmp[ MAX_TCP_HOSTS ][ MAX_TCP_HOST_LEN ];
   size_t       len[ MAX_TCP_HOSTS ];
@@ -57,7 +57,7 @@ EvTcpTransportParameters::parse_tport( ConfigTree::Transport &tport,
   if ( ! tport.get_route_bool( R_IPV6ONLY, ip6 ) )
     ip6 = false;
   if ( ! tport.get_route_bool( R_NOENCRYPT, this->noencrypt ) )
-    this->noencrypt = false;
+    this->noencrypt = tcp_noencrypt;
   if ( is_device )
     this->opts |= OPT_NO_DNS;
   if ( ip4 )

@@ -254,7 +254,8 @@ struct SessionMgr : public kv::EvSocket {
                         sub_window_ival; /* sub interval of rotate */
   uint8_t               tcp_accept_sock_type, /* free list sock types */
                         tcp_connect_sock_type;
-  bool                  session_started;
+  bool                  tcp_noencrypt,
+                        session_started;
 
   SessionMgr( kv::EvPoll &p,  kv::Logger &l,  ConfigTree &c,
               ConfigTree::User &u,  ConfigTree::Service &s,

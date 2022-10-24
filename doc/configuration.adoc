@@ -13,7 +13,7 @@ Generating a master config is done with the `ms_gen_key` program.  The default
 location for the config directory is `./config`, other locations are specified
 with the `-d` option.
 
-Initially, the config directory is empty.  Intialize with some users and a
+Initially, the config directory is empty.  Initialize with some users and a
 service name.
 
 ----
@@ -83,3 +83,89 @@ startup and network configuration.
 
 The master config will also work, so just copying it to the peers will allow
 them to run if this type of security is unnecessary.
+
+Parameters
+~~~~~~~~~~
+
+The parameters section of the configuration is used to lookup values that can
+alter the behavior of the server.  These fields can be set anywhere in the
+config files, but are usually in the "param.yaml" or "startup.yaml" files.
+Since the "config.yaml" includes "*.yaml", any yaml file in the config
+directory can contain parameters.  Any field value pair which is not in a
+service, user, service, transport, or group section is added to the parameters
+section.
+
+This configuration is a list of parameters:
+
+----
+parameters:
+  pass: .pass
+  salt: .salt
+heartbeat: 5 secs
+reliability: 10 secs
+tcp_noencrypt: true
+listen:
+  - mymesh
+  - myweb
+connect:
+  - mytcp
+----
+
+The "parameters:" structure is optional and not necessary to define them.
+
+[%autowidth,options="header",grid="cols",stripes="even"]
+|=============================================
+| Name            | Type     | Default | Description
+| salt            | filename | none    | File to find encryption salt
+| pass            | filename | none    | File to find encryption password
+| salt_data       | string   | none    | Base 64 encoded encryption salt
+| pass_data       | string   | none    | Base 64 encoded encryption password
+| listen          | array    | none    | Startup listen transports
+| connect         | array    | none    | Startup connect transports
+| pub_window_size | bytes    | 4 MB    | Size of publish window
+| sub_window_size | bytes    | 4 MB    | Size of subscribe window
+| pub_window_time | time     | 10 secs | Time of publish window
+| sub_window_time | time     | 10 secs | Time of subscribe window
+| heartbeat       | time     | 10 secs | Interval of heartbeat
+| reliability     | time     | 15 secs | Time of publish reliability
+| timestamp       | string   | LOCAL   | Log using local time or GMT
+| tcp_noencrypt   | boolean  | false   | Default for TCP/mesh encryption
+| map_file        | string   | none    | Use for key value storage
+| db_num          | string   | none    | Default db number for key value
+| ipc_name        | string   | none    | Connect to IPC sockets
+|=============================================
+
+- Salt, pass, salt_data, pass_data -- The salt, pass or salt_data, pass_data
+  are required for startup.  The keys defined in the configuration are
+  encrypted with these values.  Any key derived during execution is mixed with
+  the salt and must be the same in all peers.
+
+- Listen, connect -- The startup transports.  They are started before any other
+  events are processed.  If a listen fails, then the program exits.  A connect
+  failure will not cause an exit, since it retries.
+
+- Pub_window_size, sub_window_size, pub_window_time, sub_window_time -- These
+  track the sequence numbers of messages sent and received.  They are described
+  in <<pub_window>>.
+
+- Heartbeat -- The interval which heartbeats are published to directly
+  connected peers.  A link is not active when a heartbeat is missed for
+  1.5 times this interval.  The link is reactivated when a heartbeat is
+  received.
+
+- Timestamp -- When set to GMT, the time stamps are not offset by the local
+  timezone.
+
+- Tcp_noencrypt -- When true, the default for TCP and mesh connections is to
+  to not encrypt the traffic.
+
+- Map_file -- If a Redis transport is used, this is where the data is stored.
+  If no map is defined, then the data stored will fail and data retrieved will
+  be zero.  The `kv_server` command will initialize a map file.
+
+- Db_num -- The default database number for the Redis transport.
+
+- Ipc_name -- When set, allows IPC processes to connect through Unix sockets
+  and subscription maps using the same name.  If the processes are shutdown,
+  they will restart or stop the subscriptions using the maps.
+
