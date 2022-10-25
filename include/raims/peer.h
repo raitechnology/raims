@@ -296,11 +296,12 @@ struct MeshDBFilter {
   bool   * matched;
   bool     invert_match;
 
-  MeshDBFilter( uint32_t except,  MsgHdrDecoder &dec ) :
+  MeshDBFilter( uint32_t except,  MsgHdrDecoder *dec = NULL ) :
       except_uid( except ), match_count( 0 ), url_count( 0 ),
       return_count( 0 ), request_count( 0 ), hash( 0 ), matched( 0 ),
       invert_match( false ) {
-    this->setup_filter( dec );
+    if ( dec != NULL )
+      this->setup_filter( *dec );
   }
 
   void setup_filter( MsgHdrDecoder &dec ) noexcept;

@@ -695,7 +695,7 @@ CMakeLists.txt: .copr/Makefile
 	if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
 	  set (ex_lib ws2_32)
 	else ()
-	  set (ex_lib -lpthread -lrt)
+	  set (ex_lib -lssl -lcrypto -lpthread -lrt)
 	endif ()
 	add_library (raims STATIC $(libraims_cfile))
 	link_libraries (raims raids raikv raimd natsmd sassrv decnumber rdbparser linecook h3 lzf openpgm_st $${pcre2lib} $${ex_lib})

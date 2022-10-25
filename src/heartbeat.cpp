@@ -206,7 +206,7 @@ UserDB::on_heartbeat( const MsgFramePublish &pub,  UserBridge &n,
   uint64_t    time, seqno, uptime, start, old_hb_seqno, current_mono_time;
   uint32_t    cost[ COST_PATH_COUNT ] = { COST_DEFAULT, COST_DEFAULT,
                                           COST_DEFAULT, COST_DEFAULT },
-           ival;
+              ival;
   if ( ! dec.get_ival<uint64_t>( FID_UPTIME, uptime ) ||
        ! dec.get_ival<uint64_t>( FID_SEQNO, seqno ) ||
        ! dec.get_ival<uint64_t>( FID_TIME, time ) ||
@@ -264,7 +264,7 @@ UserDB::on_heartbeat( const MsgFramePublish &pub,  UserBridge &n,
   }
 
   if ( dec.test( FID_MESH_URL ) )
-    this->set_mesh_url( *n.user_route, dec );
+    this->set_mesh_url( *n.user_route, dec, "hb" );
 
   if ( dec.test( FID_UCAST_URL ) )
     this->set_ucast_url( *n.user_route, dec );

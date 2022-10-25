@@ -805,34 +805,7 @@ UserDB::recv_mesh_db( const MsgFramePublish &pub,  UserBridge &n,
 
   while ( rec_list != NULL ) {
     MeshDBRec  & rec = *rec_list;
-    UserBridge * user_n = NULL;
-    size_t       n_pos;
-    uint32_t     uid;
     rec_list = rec.next;
-    if ( this->node_ht->find( rec.nonce, n_pos, uid ) ||
-         this->zombie_ht->find( rec.nonce, n_pos, uid ) ) {
-      if ( uid == MY_UID )
-        continue;
-      user_n = this->bridge_tab[ uid ];
-    }
-    if ( user_n == NULL || ! user_n->is_set( AUTHENTICATED_STATE ) ) {
-      StringVal user_sv;
-      this->string_tab.ref_string( rec.user, rec.user_len, user_sv );
-      this->start_pending_peer( rec.nonce, n, false, user_sv, PEER_DB_SYNC );
-    }
-#if 0
-    else {
-      if ( rec.mesh_url_len != 0 ) {
-        this->mesh_pending.update( pub.rte, rec.mesh_url, rec.mesh_url_len );
-        UserRoute * u_ptr   = user_n->user_route_ptr( *this, pub.rte.tport_id );
-        if ( u_ptr->is_valid() ) {
-          u_ptr->set_mesh( *this, rec.mesh_url, rec.mesh_url_len );
-          this->mesh_pending.update( u_ptr );
-          updated_mesh = true;
-        }
-      }
-    }
-#endif
     if ( rec.mesh_url_len != 0 ) {
       this->mesh_pending.update( pub.rte, rec.mesh_url, rec.mesh_url_len, 0,
                                  rec.nonce );
@@ -966,7 +939,7 @@ UserDB::recv_mesh_request( const MsgFramePublish &pub,  UserBridge &n,
   InboxBuf     ibx( n.bridge_id, dec.get_return( ret_buf, _MESH_RPY ) );
   bool         in_mesh     = pub.rte.uid_in_mesh->is_member( n.uid );
   size_t       mesh_db_len = 0;
-  MeshDBFilter filter( n.uid, dec );
+  MeshDBFilter filter( n.uid, &dec );
   
   if ( in_mesh ) {
     mesh_db_len = this->mesh_db_size( pub.rte, filter );

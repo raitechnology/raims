@@ -125,7 +125,7 @@ struct UserRoute : public UserStateTest<UserRoute> {
   }
   void set_ucast( UserDB &user_db,  const void *p,  size_t len,
                   const UserRoute *src ) noexcept;
-  void set_mesh( UserDB &user_db,  const void *p,  size_t len ) noexcept;
+  bool set_mesh( UserDB &user_db,  const void *p,  size_t len ) noexcept;
 
   char * inbox_route_str( char *buf,  size_t buflen ) noexcept;
 };
@@ -592,7 +592,8 @@ struct UserDB {
                           PeerEntry &peer,  uint64_t start,
                           HashDigest &hello ) noexcept;
   void set_ucast_url( UserRoute &u_rte, const MsgHdrDecoder &dec ) noexcept;
-  void set_mesh_url( UserRoute &u_rte, const MsgHdrDecoder &dec ) noexcept;
+  void set_mesh_url( UserRoute &u_rte, const MsgHdrDecoder &dec,
+                     const char *src ) noexcept;
   void find_adjacent_routes( void ) noexcept;
   void process_mesh_pending( uint64_t curr_mono ) noexcept;
   UserBridge * closest_peer_route( TransportRoute &rte,  UserBridge &n,

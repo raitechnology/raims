@@ -377,17 +377,16 @@ UserDB::recv_challenge( const MsgFramePublish &pub,  UserBridge &n,
 /* notify peer that it is trusted */
 bool
 UserDB::send_trusted( const MsgFramePublish &pub,  UserBridge &n,
-                      MsgHdrDecoder &dec ) noexcept
+                      MsgHdrDecoder & ) noexcept
 {
   InboxBuf ibx( n.bridge_id, _AUTH );
-  TransportRoute & rte = n.user_route->rte;
+  TransportRoute & rte     = n.user_route->rte;
   bool         in_mesh     = pub.rte.uid_in_mesh->is_member( n.uid );
   size_t       mesh_db_len = 0;
-  MeshDBFilter filter( n.uid, dec );
+  MeshDBFilter filter( n.uid );
 
   if ( in_mesh )
     mesh_db_len = this->mesh_db_size( pub.rte, filter );
-
   this->events.send_trust( n.uid, n.user_route->rte.tport_id, in_mesh );
   uint64_t uptime = current_monotonic_time_ns() - this->start_mono_time;
 
@@ -431,7 +430,42 @@ UserDB::send_trusted( const MsgFramePublish &pub,  UserBridge &n,
 
   /*"  challenge : \"" HASH_DIGEST_NAME "-" HMAC_NAME "\",\n"*/
   m.sign( ibx.buf, ibx.len(), *this->session_key );
-  return this->forward_to_inbox( n, ibx, h, m.msg, m.len(), false );
+  bool b = this->forward_to_inbox( n, ibx, h, m.msg, m.len(), false );
+
+  uint32_t count = this->transport_tab.count;
+  for ( uint32_t tport_id = 0; tport_id < count; tport_id++ ) {
+    if ( tport_id == rte.tport_id )
+      continue;
+    UserRoute *u_ptr = n.user_route_ptr( *this, tport_id );
+    if ( ! u_ptr->is_valid() )
+      continue;
+    TransportRoute &rte = u_ptr->rte;
+    if ( rte.is_mesh() ) {
+      MeshDBFilter filter2( n.uid );
+
+      size_t mesh_db_len2 = this->mesh_db_size( rte, filter );
+      if ( mesh_db_len2 > mesh_db_len ) {
+        e.sz += mesh_db_len2 - mesh_db_len;
+        mesh_db_len = mesh_db_len2;
+      }
+      if ( mesh_db_len2 != 0 ) {
+        MsgCat m;
+        m.reserve( e.sz );
+
+        m.open( this->bridge_id.nonce, ibx.len() )
+         .seqno     ( n.auth[ 1 ].seqno  )
+         .time      ( n.auth[ 1 ].time   )
+         .auth_stage( AUTH_TRUST         )
+         .start     ( this->start_time   );
+        this->mesh_db_submsg( rte, filter, m );
+        m.close( e.sz, h, CABA_INBOX );
+        m.sign( ibx.buf, ibx.len(), *this->session_key );
+        b |= this->forward_to( n, ibx.buf, ibx.len(), h, m.msg, m.len(),
+                               *u_ptr );
+      }
+    }
+  }
+  return b;
 }
 
 bool
@@ -441,9 +475,17 @@ UserDB::recv_trusted( const MsgFramePublish &pub,  UserBridge &n,
   if ( ! n.is_set( AUTHENTICATED_STATE ) )
     return true;
   bool in_mesh = ( dec.test( FID_MESH_DB ) != 0 );
-  this->events.recv_trust( n.uid, pub.rte.tport_id, in_mesh );
-  if ( in_mesh )
-    this->recv_mesh_db( pub, n, dec );
+  uint64_t start_time = 0, time = 0;
+  dec.get_ival<uint64_t>( FID_START, start_time );
+  dec.get_ival<uint64_t>( FID_TIME, time );
+  if ( n.start_time == start_time && time >= n.hb_time ) {
+    this->events.recv_trust( n.uid, pub.rte.tport_id, in_mesh );
+    if ( in_mesh )
+      this->recv_mesh_db( pub, n, dec );
+  }
+  else {
+    n.printe( "ignore trusted, time not correct\n" );
+  }
   return true;
 }
 

@@ -2170,8 +2170,9 @@ Console::find_tport( const char *name,  size_t len,
 {
   if ( len > 0 ) {
     ConfigTree::Transport * tport = this->tree.find_transport( name, len );
+    TransportRoute * rte;
     if ( tport != NULL ) {
-      TransportRoute * rte = this->user_db.transport_tab.find_transport( tport );
+      rte = this->user_db.transport_tab.find_transport( tport );
       if ( rte != NULL ) {
         tree_idx = tport;
         tport_id = rte->tport_id;

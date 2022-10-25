@@ -29,38 +29,45 @@ using namespace md;
 bool
 SessionMgr::add_startup_transports( void ) noexcept
 {
+  if ( ! this->add_startup_transports( R_LISTEN, R_LISTEN_SZ, true ) )
+    return false;
+  if ( ! this->add_startup_transports( R_CONNECT, R_CONNECT_SZ, false ) )
+    return false;
+  return true;
+}
+
+bool
+SessionMgr::add_startup_transports( const char *name,  size_t name_sz,
+                                    bool is_listen ) noexcept
+{
   ConfigTree::Parameters * p;
   ConfigTree::StringPair * sp;
   ConfigTree::Transport  * tport;
+  TransportRoute * rte;
   size_t len;
   for ( p = this->tree.parameters.hd; p != NULL; p = p->next ) {
     for ( sp = p->parms.hd; sp != NULL; sp = sp->next ) {
-      if ( sp->name.equals( R_LISTEN, R_LISTEN_SZ ) ) {
+      if ( sp->name.equals( name, name_sz ) ) {
         for ( len = sp->value.len; len > 0 && sp->value.val[ len - 1 ] == ' ';
           len-- ) ;
         tport = this->tree.find_transport( sp->value.val, len );
+        rte   = this->user_db.transport_tab.find_transport( tport );
+        if ( rte != NULL ) {
+          if ( ! rte->is_set( TPORT_IS_SHUTDOWN ) ) {
+            fprintf( stderr,
+                     "startup %.*s transport \"%.*s\" already running\n",
+                     (int) name_sz, name,
+                     (int) len, sp->value.val );
+            return true;
+          }
+        }
         if ( tport == NULL ) {
-          fprintf( stderr, "startup listen transport \"%.*s\" not found\n",
-                   (int) sp->value.len, sp->value.val );
+          fprintf( stderr, "startup %.*s transport \"%.*s\" not found\n",
+                   (int) name_sz, name,
+                   (int) len, sp->value.val );
           return false;
         }
-        if ( ! this->add_transport( *tport, true ) )
-          return false;
-      }
-    }
-  }
-  for ( p = this->tree.parameters.hd; p != NULL; p = p->next ) {
-    for ( sp = p->parms.hd; sp != NULL; sp = sp->next ) {
-      if ( sp->name.equals( R_CONNECT, R_CONNECT_SZ ) ) {
-        for ( len = sp->value.len; len > 0 && sp->value.val[ len - 1 ] == ' ';
-          len-- ) ;
-        tport = this->tree.find_transport( sp->value.val, len );
-        if ( tport == NULL ) {
-          fprintf( stderr, "startup connect transport \"%.*s\" not found\n",
-                   (int) sp->value.len, sp->value.val );
-          return false;
-        }
-        if ( ! this->add_transport( *tport, false ) )
+        if ( ! this->add_transport( *tport, is_listen ) )
           return false;
       }
     }

@@ -766,16 +766,16 @@ UserRoute::set_ucast( UserDB &user_db,  const void *p,  size_t len,
   user_db.peer_dist.invalidate( ADD_UCAST_URL_INV );
 }
 
-void
+bool
 UserRoute::set_mesh( UserDB &user_db,  const void *p,  size_t len ) noexcept
 {
   if ( len == 0 && this->mesh_url.len == 0 )
-    return;
+    return false;
   if ( ! this->rte.is_mesh() )
-    return;
+    return false;
 
   if ( len == 0 ) {
-    /*if ( debug_usr )*/
+    if ( debug_usr )
       this->n.printf( "clear_mesh( t=%s )\n", this->rte.name );
     this->mesh_url.zero();
     this->url_hash = 0;
@@ -783,19 +783,19 @@ UserRoute::set_mesh( UserDB &user_db,  const void *p,  size_t len ) noexcept
   }
   else {
     if ( this->mesh_url.equals( (const char *) p, len ) )
-      return;
-
+      return false;
     user_db.string_tab.ref_string( (const char *) p, len, this->mesh_url );
     this->url_hash = kv_crc_c( this->mesh_url.val, len, 0 );
 
-    /*if ( debug_usr )*/
+    if ( debug_usr )
       this->n.printf( "set_mesh( %.*s, tport=%s, hash=%x )\n",
                       (int) len, (char *) p, this->rte.name, this->url_hash );
-   this->rte.mesh_conn_hash = this->url_hash;
+    this->rte.mesh_conn_hash = this->url_hash;
 
     this->set( MESH_URL_STATE );
   }
   user_db.peer_dist.invalidate( ADD_MESH_URL_INV );
+  return true;
 }
 
 char *
@@ -894,7 +894,7 @@ UserDB::add_user_route( UserBridge &n,  TransportRoute &rte,  uint32_t fd,
   u_ptr->inbox_fd = inbox_fd;
   u_ptr->hops     = hops;
   n.user_route    = u_ptr;
-  this->set_mesh_url( *u_ptr, dec );
+  this->set_mesh_url( *u_ptr, dec, "add" );
 
   /* if directly attached to a transport route, hops == 0 */
   if ( hops == 0 ) {
@@ -1349,7 +1349,7 @@ UserDB::add_authenticated( UserBridge &n,
     this->uid_rtt.add( n.uid );
     if ( n.user_route != NULL ) {
       this->set_ucast_url( *n.user_route, dec );
-      this->set_mesh_url( *n.user_route, dec );
+      this->set_mesh_url( *n.user_route, dec, "auth" );
     }
     this->push_source_route( n );
     this->add_inbox_route( n, NULL );
@@ -1469,17 +1469,18 @@ UserDB::set_ucast_url( UserRoute &u_rte,  const MsgHdrDecoder &dec ) noexcept
 }
 
 void
-UserDB::set_mesh_url( UserRoute &u_rte,  const MsgHdrDecoder &dec ) noexcept
+UserDB::set_mesh_url( UserRoute &u_rte,  const MsgHdrDecoder &dec,
+                      const char *src ) noexcept
 {
   /* check if url based point to point */
   if ( dec.test( FID_MESH_URL ) ) {
     uint32_t     url_len = (uint32_t) dec.mref[ FID_MESH_URL ].fsize;
     const char * url     = (const char *) dec.mref[ FID_MESH_URL ].fptr;
-    if ( debug_usr )
-      u_rte.n.printf( "(%s) set_mesh_url(%s) %.*s\n",
+    if ( u_rte.set_mesh( *this, url, url_len ) ) {
+      u_rte.n.printf( "(%s) set_mesh_url(%s) %.*s (%s)\n",
         publish_type_to_string( dec.type ),
-        u_rte.rte.transport.tport.val, url_len, url );
-    u_rte.set_mesh( *this, url, url_len );
+        u_rte.rte.transport.tport.val, url_len, url, src );
+    }
   }
 }
 

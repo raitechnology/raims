@@ -20,7 +20,7 @@ TransportRoute::on_connect( kv::EvSocket &conn ) noexcept
     EvTcpTransport &tcp = (EvTcpTransport &) conn;
     is_encrypt = tcp.encrypt;
     this->printf( "connect %s %s %s using %s fd %u\n",
-                  tcp.encrypt ? "encrypted" : "clear",
+                  tcp.encrypt ? "encrypted" : "plaintext",
                   conn.peer_address.buf, conn.type_string(),
                   this->sub_route.service_name, conn.fd );
     if ( this->is_mesh() ) {
