@@ -211,12 +211,12 @@ struct AdjDistance : public md::MDMsgMem {
                * visit,         /* minimum distance to uid */
                * inc_list;      /* list of uids to be checked for links */
   PathSeqno      x[ COST_PATH_COUNT ]; /* x[ path_select ].port[ uid ]*/
-  UidMissing   * missing;       /* list of missing links */
   kv::UIntBitSet inc_visit,     /* inconsistent check visit uid map */
                  adj,           /* uid map masked with path for coverage */
                  path,          /* path through the network */
                  fwd,           /* next uid map transitioning at cost */
                  reachable;     /* reachable uid map through tport */
+  kv::ArrayCount< UidMissing, 8 > missing;
   kv::ArrayCount< AdjacencySpace *, 4 > links; /* links for fwd */
   kv::BitSpace   graph_used,    /* graph description visit map */
                  graph_mesh;    /* mesh common peers */

@@ -85,7 +85,6 @@ AdjDistance::clear_cache( void ) noexcept
                 max * sizeof( uint32_t ) +   /* visit */
                 max * sizeof( uint32_t ) +   /* inc_list */
                 max * sizeof( UidSrcPath ) * COST_PATH_COUNT + /* x */
-                max * sizeof( UidMissing ) + /* missing */
                 isz * sizeof( uint64_t ) +   /* inc_visit */
                 isz * sizeof( uint64_t ) +   /* adj */
                 isz * sizeof( uint64_t ) +   /* path */
@@ -112,10 +111,8 @@ AdjDistance::clear_cache( void ) noexcept
   for ( uint8_t i = 0; i < COST_PATH_COUNT; i++ ) {
     this->x[ i ].path = x; x = &x[ max ];
   }
-  UidMissing *g = (UidMissing *) (void *) x;
-  this->missing       = g; g = &g[ max ];
 
-  if ( (char *) (void *) g != (char *) p + size ) {
+  if ( (char *) (void *) x != (char *) p + size ) {
     fprintf( stderr, "cache allocation is wrong\n" );
   }
   this->miss_tos            = 0;
@@ -223,15 +220,17 @@ AdjDistance::find_inconsistent( UserBridge *&from,
           }
         }
         if ( ! found ) {
-          this->missing[ this->miss_tos ].uid  = uid;
-          this->missing[ this->miss_tos++ ].uid2 = uid2;
+          UidMissing & m = this->missing[ this->miss_tos++ ];
+          m.uid = uid;
+          m.uid2 = uid;
         }
       }
     }
   }
   if ( this->miss_tos > 0 ) { /* missing links */
-    uid  = this->missing[ --this->miss_tos ].uid;
-    uid2 = this->missing[ this->miss_tos ].uid2;
+    UidMissing & m = this->missing[ --this->miss_tos ];
+    uid  = m.uid;
+    uid2 = m.uid2;
     from = this->user_db.bridge_tab.ptr[ uid ];
     to   = this->user_db.bridge_tab.ptr[ uid2 ];
     this->found_inconsistency = true;
