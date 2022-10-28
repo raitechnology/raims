@@ -195,8 +195,8 @@ ConnectionMgr::do_connect( void ) noexcept
   /* non-blocking connect should always succeed unless socket error */
   if ( ! client.connect( parm, this, index ) ) {
     this->connect_failed( client );
-    this->is_shutdown = true;
-    return false;
+/*    this->is_shutdown = true;
+    return false;*/
   }
   return true;
 }

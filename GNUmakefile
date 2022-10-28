@@ -210,8 +210,8 @@ lnk_lib     += -lnatsmd
 dlnk_lib    += -lnatsmd
 endif
 
-lnk_lib     += -lpcre2-32 -lpcre2-8 -llzf -lssl -lcrypto
-dlnk_lib    += -lpcre2-32 -lpcre2-8 -llzf -lssl -lcrypto
+lnk_lib     += -lpcre2-32 -lpcre2-8 -llzf -lssl -lcrypto -lcares
+dlnk_lib    += -lpcre2-32 -lpcre2-8 -llzf -lssl -lcrypto -lcares
 rpath       := -Wl,-rpath,$(pwd)/$(libd)$(rpath1)$(rpath2)$(rpath3)$(rpath4)$(rpath5)$(rpath6)$(rpath7)$(rpath8)$(rpath9)$(rpath10)
 
 .PHONY: everything
@@ -695,7 +695,7 @@ CMakeLists.txt: .copr/Makefile
 	if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
 	  set (ex_lib ws2_32)
 	else ()
-	  set (ex_lib -lssl -lcrypto -lpthread -lrt)
+	  set (ex_lib -lssl -lcrypto -lcares -lpthread -lrt)
 	endif ()
 	add_library (raims STATIC $(libraims_cfile))
 	link_libraries (raims raids raikv raimd natsmd sassrv decnumber rdbparser linecook h3 lzf openpgm_st $${pcre2lib} $${ex_lib})
@@ -715,15 +715,15 @@ CMakeLists.txt: .copr/Makefile
 
 .PHONY: dnf_depend
 dnf_depend:
-	sudo dnf -y install make gcc-c++ git redhat-lsb openssl-devel pcre2-devel chrpath
+	sudo dnf -y install make gcc-c++ git redhat-lsb openssl-devel pcre2-devel chrpath c-ares-devel
 
 .PHONY: yum_depend
 yum_depend:
-	sudo yum -y install make gcc-c++ git redhat-lsb openssl-devel pcre2-devel chrpath
+	sudo yum -y install make gcc-c++ git redhat-lsb openssl-devel pcre2-devel chrpath c-ares-devel
 
 .PHONY: deb_depend
 deb_depend:
-	sudo apt-get install -y install make g++ gcc devscripts libpcre2-dev chrpath git lsb-release libssl-dev
+	sudo apt-get install -y install make g++ gcc devscripts libpcre2-dev chrpath git lsb-release libssl-dev c-ares-dev
 
 # create directories
 $(dependd):
