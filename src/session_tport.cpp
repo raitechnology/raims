@@ -441,10 +441,8 @@ SessionMgr::start_transport( TransportRoute &rte,
     }
     else {
       rte.clear( TPORT_IS_SHUTDOWN );
-      if ( rte.connect_mgr.conn != NULL ) {
-        rte.connect_mgr.restart();
-        rte.connect_mgr.do_connect();
-      }
+      if ( rte.connect_ctx != NULL )
+        rte.connect_ctx->reconnect();
     }
     if ( rte.is_set( TPORT_IS_DEVICE ) )
       this->name_hb( 0 );
@@ -498,7 +496,7 @@ SessionMgr::add_mesh_accept( TransportRoute &listen_rte,
     if ( &t == &rte->transport &&
          rte->all_set( TPORT_IS_SHUTDOWN | TPORT_IS_MESH ) &&
          rte->mesh_id == conn.rte->mesh_id ) {
-      if ( rte->connect_mgr.is_shutdown ) {
+      if ( rte->connect_ctx == NULL ) {
         rte->init_state();
         break;
       }
@@ -511,9 +509,6 @@ SessionMgr::add_mesh_accept( TransportRoute &listen_rte,
     if ( rte->init() != 0 )
       return false;
   }
-  if ( rte->connect_mgr.conn != NULL )
-    rte->connect_mgr.release_conn();
-
   rte->mesh_url    = listen_rte.mesh_url;
   rte->mesh_id     = listen_rte.mesh_id;
   rte->uid_in_mesh = listen_rte.uid_in_mesh;
@@ -525,8 +520,8 @@ SessionMgr::add_mesh_accept( TransportRoute &listen_rte,
 
   /*char buf[ MAX_TCP_HOST_LEN ];
   make_mesh_url_from_sock( buf, conn );
-  rte->mesh_conn_hash = kv_crc_c( buf, ::strlen( buf ), 0 );*/
-  rte->mesh_conn_hash = 0;
+  rte->mesh_url_hash = kv_crc_c( buf, ::strlen( buf ), 0 );*/
+  rte->mesh_url_hash = 0; /* don't know this util after auth */
   conn.rte      = rte;
   conn.notify   = rte;
   conn.route_id = rte->sub_route.route_id;
@@ -567,7 +562,7 @@ SessionMgr::add_tcp_rte( TransportRoute &src_rte,  uint32_t conn_hash ) noexcept
     if ( &t == &rte->transport &&
          rte->all_set( TPORT_IS_SHUTDOWN | TPORT_IS_TCP ) &&
          rte->dev_id == src_rte.dev_id ) {
-      if ( rte->connect_mgr.is_shutdown ) {
+      if ( rte->connect_ctx == NULL ) {
         rte->init_state();
         break;
       }
@@ -581,8 +576,6 @@ SessionMgr::add_tcp_rte( TransportRoute &src_rte,  uint32_t conn_hash ) noexcept
       return NULL;
     is_new = true;
   }
-  if ( rte->connect_mgr.conn != NULL )
-    rte->connect_mgr.release_conn();
   rte->dev_id        = src_rte.dev_id;
   rte->uid_in_device = src_rte.uid_in_device;
 
@@ -669,43 +662,62 @@ SessionMgr::add_mesh_connect( TransportRoute &mesh_rte ) noexcept
   return this->add_mesh_connect( mesh_rte, mesh_url, url_hash, i );
 }
 
-static const uint32_t MAX_DNS_HOST_ADDR = 128;
-static bool
-match_mesh_host_port( const char *host, int port, uint32_t conn_hash,
-                      uint32_t *dns_cache,  uint32_t &addr_count ) noexcept
-{
-  if ( addr_count != 0 ) {
-    for ( uint32_t i = 0; i < addr_count; i++ )
-      if ( dns_cache[ i ] == conn_hash )
+struct MatchMesh {
+  static const uint32_t MAX_DNS_HOST_ADDR = 128;
+  uint32_t addr_count;
+  uint32_t dns_cache[ MAX_DNS_HOST_ADDR ];
+
+  MatchMesh() : addr_count( 0 ) {}
+
+  void add_dns_cache( uint32_t h ) {
+    if ( this->addr_count == MAX_DNS_HOST_ADDR )
+      return;
+    for ( uint32_t i = 0; i < this->addr_count; i++ ) {
+      if ( this->dns_cache[ i ] == h )
+        return;
+    }
+    this->dns_cache[ this->addr_count++ ] = h;
+  }
+  bool match_dns_cache( uint32_t conn_hash ) {
+    for ( uint32_t i = 0; i < this->addr_count; i++ )
+      if ( this->dns_cache[ i ] == conn_hash )
         return true;
     return false;
   }
-  AddrInfo info;
-  struct addrinfo * p = NULL;
-  bool   matched = false;
+  bool match_addr_list( uint32_t conn_hash,
+                        const struct addrinfo *addr_list ) noexcept;
+  bool match_host_port( uint32_t conn_hash,  const char *host,
+                        int port ) noexcept;
+  bool match_url( uint32_t conn_hash,  const char *url,
+                  uint32_t url_hash ) noexcept;
+};
 
-  int status = info.get_address( host, port, DEFAULT_TCP_CONNECT_OPTS );
-  if ( status != 0 )
-    return false;
-  for ( p = info.ai; p != NULL; p = p->ai_next ) {
+bool
+MatchMesh::match_addr_list( uint32_t conn_hash,
+                            const struct addrinfo *addr_list ) noexcept
+{
+  const struct addrinfo * p = NULL;
+  bool matched = false;
+  for ( p = addr_list; p != NULL; p = p->ai_next ) {
     char url_buf[ MAX_TCP_HOST_LEN ], buf[ MAX_TCP_HOST_LEN ];
-    int n = 0;
+    int n = 0, port;
     if ( p->ai_family == AF_INET ) {
       struct sockaddr_in * p4 = (struct sockaddr_in *) p->ai_addr;
       inet_ntop( AF_INET, &p4->sin_addr, buf, sizeof( buf ) );
+      port = ntohs( p4->sin_port );
       n = ::snprintf( url_buf, sizeof( url_buf ), "tcp://%s:%d", buf, port );
     }
     else if ( p->ai_family == AF_INET6 ) {
       struct sockaddr_in6 * p6 = (struct sockaddr_in6 *) p->ai_addr;
       inet_ntop( AF_INET6, &p6->sin6_addr, buf, sizeof( buf ) );
-      n = ::snprintf( url_buf, sizeof( url_buf ), "tcp://[%s]:%d", buf, port );
+      port = ntohs( p6->sin6_port );
+      n = ::snprintf( url_buf, sizeof( url_buf ), "tcp://[%s]:%d", buf, port);
     }
     if ( n > 0 ) {
       uint32_t h = kv_crc_c( url_buf, n, 0 );
       if ( h == conn_hash )
         matched = true;
-      if ( addr_count < MAX_DNS_HOST_ADDR )
-        dns_cache[ addr_count++ ] = h;
+      this->add_dns_cache( h );
       d_tran( "match( %s ) %x %s %x\n", url_buf, h,
               h == conn_hash ? "=" : "!=", conn_hash );
     }
@@ -713,43 +725,50 @@ match_mesh_host_port( const char *host, int port, uint32_t conn_hash,
   return matched;
 }
 
-static bool
-match_mesh_hash( const char *url,  uint32_t url_hash,
-                 uint32_t conn_hash,  uint32_t *dns_cache,
-                 uint32_t &addr_count ) noexcept
+bool
+MatchMesh::match_host_port( uint32_t conn_hash,  const char *host,
+                            int port ) noexcept
 {
+  AddrInfo info;
+  int status = info.get_address( host, port, DEFAULT_TCP_CONNECT_OPTS );
+  if ( status != 0 )
+    return false;
+  return this->match_addr_list( conn_hash, info.ai );
+}
+
+bool
+MatchMesh::match_url( uint32_t conn_hash,  const char *url,
+                      uint32_t url_hash ) noexcept
+{
+  char tcp_buf[ MAX_TCP_HOST_LEN ];
+  size_t len = sizeof( tcp_buf );
+  int port;
+
   if ( url_hash == conn_hash )
     return true;
   if ( url == NULL )
     return false;
   d_tran( "match( %s ) %x != %x\n", url, url_hash, conn_hash );
-  if ( addr_count != 0 ) {
-    for ( uint32_t i = 0; i < addr_count; i++ )
-      if ( dns_cache[ i ] == conn_hash )
-        return true;
-    return false;
-  }
-  char tcp_buf[ MAX_TCP_HOST_LEN ];
-  size_t len = sizeof( tcp_buf );
-  int port;
   port = ConfigTree::Transport::get_host_port( url, tcp_buf, len );
-  return match_mesh_host_port( tcp_buf, port, conn_hash, dns_cache, addr_count );
+  return this->match_host_port( conn_hash, tcp_buf, port );
 }
 
 bool
-SessionMgr::find_mesh( TransportRoute &mesh_rte,  const char *host,
-                       int port,  uint32_t mesh_hash ) noexcept
+SessionMgr::find_mesh( TransportRoute &mesh_rte,  struct addrinfo *addr_list,
+                       uint32_t mesh_hash ) noexcept
 {
   uint32_t count = (uint32_t) this->user_db.transport_tab.count;
-  uint32_t dns_cache[ MAX_DNS_HOST_ADDR ], addr_count = 0;
+  MatchMesh match;
+
   for ( uint32_t tport_id = 0; tport_id < count; tport_id++ ) {
     TransportRoute *rte = this->user_db.transport_tab.ptr[ tport_id ];
     if ( rte != &mesh_rte && rte->mesh_id == mesh_rte.mesh_id &&
-      ! rte->is_set( TPORT_IS_SHUTDOWN ) && ! rte->is_set( TPORT_IS_LISTEN ) ) {
-      if ( rte->mesh_conn_hash == mesh_hash )
-        return true;
-      if ( match_mesh_host_port( host, port, rte->mesh_conn_hash,
-                                 dns_cache, addr_count ) )
+         ! rte->is_set( TPORT_IS_SHUTDOWN ) &&
+         ! rte->is_set( TPORT_IS_LISTEN ) ) {
+
+      if ( rte->mesh_url_hash == mesh_hash ||
+           match.match_dns_cache( rte->mesh_url_hash ) ||
+           match.match_addr_list( rte->mesh_url_hash, addr_list ) )
         return true;
     }
   }
@@ -773,10 +792,10 @@ SessionMgr::add_mesh_connect( TransportRoute &mesh_rte,  const char **mesh_url,
 
   count = (uint32_t) this->user_db.transport_tab.count;
   for ( i = 0; i < url_count; i++ ) {
-    uint32_t dns_cache[ MAX_DNS_HOST_ADDR ], addr_count = 0;
+    MatchMesh match;
     if ( mesh_rte.is_set( TPORT_IS_LISTEN ) &&
-         match_mesh_hash( mesh_url[ i ], mesh_hash[ i ],
-                          mesh_rte.mesh_conn_hash, dns_cache, addr_count ) ) {
+         match.match_url( mesh_rte.mesh_url_hash, mesh_url[ i ],
+                          mesh_hash[ i ] ) ) {
       mesh_rte.printf( "not connecting to self (%s)\n", mesh_url[ i ] );
       mesh_url[ i ]  = NULL;
       mesh_hash[ i ] = 0;
@@ -786,8 +805,9 @@ SessionMgr::add_mesh_connect( TransportRoute &mesh_rte,  const char **mesh_url,
       rte = this->user_db.transport_tab.ptr[ tport_id ];
       if ( rte != &mesh_rte && rte->mesh_id == mesh_rte.mesh_id &&
            ! rte->is_set( TPORT_IS_SHUTDOWN ) ) {
-        if ( match_mesh_hash( mesh_url[ i ], mesh_hash[ i ],
-                              rte->mesh_conn_hash, dns_cache, addr_count ) ) {
+        if ( match.match_dns_cache( rte->mesh_url_hash ) ||
+             match.match_url( rte->mesh_url_hash, mesh_url[ i ],
+                              mesh_hash[ i ] ) ) {
           mesh_rte.printf( "already connected (%s)\n", mesh_url[ i ] );
           return true;
         }
@@ -800,11 +820,45 @@ SessionMgr::add_mesh_connect( TransportRoute &mesh_rte,  const char **mesh_url,
     mesh_rte.printf( "no mesh urls to connect\n" );
     return true;
   }
+
+  EvTcpTransportParameters parm;
+  j = 0;
+  for ( i = 0; i < url_count; i++ ) {
+    if ( mesh_url[ i ] != NULL ) {
+      char tcp_buf[ MAX_TCP_HOST_LEN ];
+      size_t len = sizeof( tcp_buf );
+      int port;
+      port = ConfigTree::Transport::get_host_port( mesh_url[ i ], tcp_buf, len);
+      parm.set_host_port( tcp_buf, port, mesh_hash[ i ], j );
+      d_tran( "mesh_url[ %u ] = %s:%u\n", i, tcp_buf, port );
+      j++;
+    }
+  }
+  if ( ! mesh_rte.transport.get_route_int( R_TIMEOUT, parm.timeout ) )
+    parm.timeout = this->tcp_timeout;
+  if ( ! mesh_rte.transport.get_route_bool( R_NOENCRYPT, parm.noencrypt ) )
+    parm.noencrypt = this->tcp_noencrypt;
+
+  for ( i = 0; i < j; i++ )
+    this->add_mesh_connect( mesh_rte, parm, i, mesh_hash[ i ] );
+  return true;
+}
+
+bool
+SessionMgr::add_mesh_connect( TransportRoute &mesh_rte,
+                              EvTcpTransportParameters &parm,
+                              uint32_t index,  uint32_t url_hash ) noexcept
+{
+  TransportRoute * rte;
+  uint32_t         count,
+                   tport_id;
+  count = (uint32_t) this->user_db.transport_tab.count;
   for ( tport_id = 0; tport_id < count; tport_id++ ) {
     rte = this->user_db.transport_tab.ptr[ tport_id ];
     if ( rte->all_set( TPORT_IS_SHUTDOWN | TPORT_IS_MESH ) &&
          rte->mesh_id == mesh_rte.mesh_id ) {
-      if ( rte->connect_mgr.is_shutdown ) {
+      if ( rte->connect_ctx != NULL &&
+           rte->connect_ctx->state == ConnectCtx::CONN_SHUTDOWN ) {
         rte->clear( TPORT_IS_SHUTDOWN );
         break;
       }
@@ -822,11 +876,11 @@ SessionMgr::add_mesh_connect( TransportRoute &mesh_rte,  const char **mesh_url,
       return false;
   }
 
-  rte->mesh_url       = mesh_rte.mesh_url;
-  rte->mesh_id        = mesh_rte.mesh_id;
-  rte->uid_in_mesh    = mesh_rte.uid_in_mesh;
-  rte->mesh_csum      = mesh_rte.mesh_csum;
-  rte->mesh_conn_hash = first_hash;
+  rte->mesh_url      = mesh_rte.mesh_url;
+  rte->mesh_id       = mesh_rte.mesh_id;
+  rte->uid_in_mesh   = mesh_rte.uid_in_mesh;
+  rte->mesh_csum     = mesh_rte.mesh_csum;
+  rte->mesh_url_hash = url_hash;
   for ( uint8_t i = 0; i < COST_PATH_COUNT; i++ )
     rte->uid_connected.cost[ i ] = mesh_rte.uid_connected.cost[ i ];
 
@@ -834,39 +888,12 @@ SessionMgr::add_mesh_connect( TransportRoute &mesh_rte,  const char **mesh_url,
   this->user_db.transport_tab[ tport_id ] = rte;
   this->user_db.add_transport( *rte );
 
-  EvTcpTransportParameters parm;
-  j = 0;
-  for ( i = 0; i < url_count; i++ ) {
-    if ( mesh_url[ i ] != NULL ) {
-      char tcp_buf[ MAX_TCP_HOST_LEN ];
-      size_t len = sizeof( tcp_buf );
-      int port;
-      port = ConfigTree::Transport::get_host_port( mesh_url[ i ], tcp_buf, len);
-      parm.set_host_port( tcp_buf, port, mesh_hash[ i ], j );
-      d_tran( "mesh_url[ %u ] = %s:%u\n", i, tcp_buf, port );
-      j++;
-    }
-  }
-  if ( ! mesh_rte.transport.get_route_int( R_TIMEOUT, parm.timeout ) )
-    parm.timeout = 15;
-  if ( ! mesh_rte.transport.get_route_bool( R_NOENCRYPT, parm.noencrypt ) )
-    parm.noencrypt = this->tcp_noencrypt;
+  if ( rte->connect_ctx == NULL )
+    rte->connect_ctx = this->connect_mgr.create( tport_id );
 
-  EvTcpTransportClient *c = rte->connect_mgr.conn;
-  if ( c == NULL ) {
-    uint8_t type = this->tcp_connect_sock_type;
-    c = rte->connect_mgr.alloc_conn<EvTcpTransportClient>( this->poll, type );
-    rte->connect_mgr.conn = c;
-  }
-  c->rte      = rte;
-  c->route_id = rte->sub_route.route_id;
-  c->encrypt  = ! parm.noencrypt;
-  rte->connect_mgr.connect_timeout_secs = parm.timeout;
-  rte->connect_mgr.set_parm( parm.copy() );
-  if ( ! rte->connect_mgr.do_connect() ) {
-    rte->set( TPORT_IS_SHUTDOWN );
-    return false;
-  }
+  int opts = parm.opts | ( parm.noencrypt ? 0 : TCP_OPT_ENCRYPT );
+  rte->connect_ctx->timeout = parm.timeout;
+  rte->connect_ctx->connect( parm.host[ index ], parm.port[ index ], opts );
   return true;
 }
 

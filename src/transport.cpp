@@ -37,8 +37,8 @@ TransportRoute::TransportRoute( kv::EvPoll &p,  SessionMgr &m,
       stats_seqno( 0 ), tport_id( id ), hb_count( 0 ),
       last_hb_count( 0 ), connect_count( 0 ), last_connect_count( 0 ),
       state( f ), mesh_id( 0 ), dev_id( 0 ), listener( 0 ),
-      connect_mgr( *this ), pgm_tport( 0 ), ibx_tport( 0 ), inbox_fd( -1 ),
-      mcast_fd( -1 ), mesh_conn_hash( 0 ), conn_hash( 0 ), oldest_uid( 0 ),
+      connect_ctx( 0 ), pgm_tport( 0 ), ibx_tport( 0 ), inbox_fd( -1 ),
+      mcast_fd( -1 ), mesh_url_hash( 0 ), conn_hash( 0 ), oldest_uid( 0 ),
       primary_count( 0 ), ext( 0 ), svc( s ), transport( t )
 {
   uint8_t i;
@@ -107,13 +107,13 @@ TransportRoute::init_state( void ) noexcept
   this->mesh_url.zero();
   this->conn_url.zero();
   this->ucast_url.zero();
-  this->mesh_id        = NULL;
-  this->dev_id         = NULL;
-  this->uid_in_mesh    = &this->mesh_connected;
-  this->uid_in_device  = &this->mesh_connected;
-  this->mesh_csum      = &this->mesh_csum2;
-  this->mesh_conn_hash = 0;
-  this->conn_hash      = 0;
+  this->mesh_id       = NULL;
+  this->dev_id        = NULL;
+  this->uid_in_mesh   = &this->mesh_connected;
+  this->uid_in_device = &this->mesh_connected;
+  this->mesh_csum     = &this->mesh_csum2;
+  this->mesh_url_hash = 0;
+  this->conn_hash     = 0;
 }
 
 void
@@ -337,8 +337,8 @@ TransportRoute::port_status( char *buf,  size_t buflen ) noexcept
   buf[ 0 ] = '\0';
   if ( this->listener != NULL )
     return this->listener->print_sock_error( buf, buflen );
-  if ( this->connect_mgr.conn != NULL )
-    return this->connect_mgr.conn->print_sock_error( buf, buflen );
+  if ( this->connect_ctx != NULL && this->connect_ctx->client != NULL )
+    return this->connect_ctx->client->print_sock_error( buf, buflen );
   if ( this->pgm_tport != NULL )
     return this->pgm_tport->print_sock_error( buf, buflen );
   return 0;
@@ -349,9 +349,9 @@ TransportRoute::create_listener_mesh_url( void ) noexcept
 {
   make_url_from_sock( this->user_db.string_tab, this->mesh_url,
                       *this->listener );
-  this->mesh_conn_hash = kv_crc_c( this->mesh_url.val, this->mesh_url.len, 0 );
+  this->mesh_url_hash = kv_crc_c( this->mesh_url.val, this->mesh_url.len, 0 );
   d_tran( "%s: %s (%x)\n", this->name, this->mesh_url.val,
-          this->mesh_conn_hash );
+          this->mesh_url_hash );
 }
 
 void
@@ -480,7 +480,8 @@ TransportRoute::shutdown( ConfigTree::Transport &tport ) noexcept
               ok = this->uid_in_mesh->next( uid ) ) {
           UserBridge &n = *this->user_db.bridge_tab.ptr[ uid ];
           for ( i = 0; i < tport_count; i++ ) {
-            UserRoute * u_ptr = n.user_route_ptr( this->user_db, i );
+            UserRoute  * u_ptr = n.user_route_ptr( this->user_db, i );
+            ConnectCtx * ctx   = u_ptr->rte.connect_ctx;
             if ( u_ptr->is_valid() && u_ptr->rte.mesh_id == this->mesh_id ) {
               fd = u_ptr->mcast_fd;
               if ( fd < this->poll.maxfd ) {
@@ -489,11 +490,13 @@ TransportRoute::shutdown( ConfigTree::Transport &tport ) noexcept
                   s->idle_push( EV_SHUTDOWN );
                   count++;
                 }
-                else if ( ! u_ptr->rte.connect_mgr.is_shutdown )
-                  count++;
+                else {
+                  if ( ctx != NULL && ctx->state != ConnectCtx::CONN_SHUTDOWN )
+                    count++;
+                }
               }
-              if ( ! u_ptr->rte.connect_mgr.is_shutdown ) {
-                u_ptr->rte.connect_mgr.is_shutdown = true;
+              if ( ctx != NULL && ctx->state != ConnectCtx::CONN_SHUTDOWN ) {
+                ctx->state = ConnectCtx::CONN_SHUTDOWN;
                 u_ptr->rte.set( TPORT_IS_SHUTDOWN );
               }
             }
@@ -501,16 +504,19 @@ TransportRoute::shutdown( ConfigTree::Transport &tport ) noexcept
         }
       }
     }
-    else if ( this->connect_mgr.conn != NULL ) {
-      if ( this->connect_mgr.conn->fd >= 0 &&
-           (uint32_t) this->connect_mgr.conn->fd < this->poll.maxfd ) {
-        this->connect_mgr.conn->idle_push( EV_SHUTDOWN );
-        count++;
+    else {
+      ConnectCtx * ctx = this->connect_ctx;
+      if ( ctx != NULL ) {
+        if ( ctx->client != NULL && ctx->client->fd >= 0 &&
+             (uint32_t) ctx->client->fd < this->poll.maxfd ) {
+          ctx->client->idle_push( EV_SHUTDOWN );
+          count++;
+        }
+        else if ( ctx->state != ConnectCtx::CONN_SHUTDOWN )
+          count++;
+        ctx->state = ConnectCtx::CONN_SHUTDOWN;
+        this->set( TPORT_IS_SHUTDOWN );
       }
-      else if ( ! this->connect_mgr.is_shutdown )
-        count++;
-      this->connect_mgr.is_shutdown = true;
-      this->set( TPORT_IS_SHUTDOWN );
     }
   }
   else if ( tport.type.equals( T_PGM, T_PGM_SZ ) ) {
@@ -659,25 +665,14 @@ bool
 TransportRoute::create_tcp_connect( ConfigTree::Transport &tport ) noexcept
 {
   EvTcpTransportParameters parm;
-  const char * tmp, * tmp2;
   parm.parse_tport( tport, PARAM_NB_CONNECT, this->mgr.tcp_noencrypt );
-  /*parse_tcp_param( parm, tport, P_NB_CONNECT );*/
 
-  EvTcpTransportClient *c = this->connect_mgr.conn;
-  if ( c == NULL ) {
-    uint8_t type = this->mgr.tcp_connect_sock_type;
-    c = this->connect_mgr.alloc_conn<EvTcpTransportClient>( this->poll, type );
-    this->connect_mgr.conn = c;
-  }
-  c->encrypt = ! parm.noencrypt;
-  c->rte = this;
-  c->route_id = this->sub_route.route_id;
-  this->connect_mgr.connect_timeout_secs = parm.timeout;
-  if ( ! tport.get_route_str( R_DEVICE, tmp ) ||
-       tport.get_route_str( R_CONNECT, tmp2 ) ) {
-    this->connect_mgr.set_parm( parm.copy() );
-    return this->connect_mgr.do_connect();
-  }
+  if ( this->connect_ctx == NULL )
+    this->connect_ctx = this->mgr.connect_mgr.create( this->tport_id );
+
+  int opts = parm.opts | ( parm.noencrypt ? 0 : TCP_OPT_ENCRYPT );
+  this->connect_ctx->timeout = parm.timeout;
+  this->connect_ctx->connect( parm.host[ 0 ], parm.port[ 0 ], opts );
   return true;
 }
 
@@ -687,14 +682,22 @@ TransportRoute::add_tcp_connect( const char *conn_url,
 {
   d_tran( "add_tcp_connect( %s )\n", conn_url );
   TransportRoute * rte = this;
+  int timeout;
   bool noencrypt;
   if ( ! rte->transport.get_route_bool( R_NOENCRYPT, noencrypt ) )
     noencrypt = this->mgr.tcp_noencrypt;
-  if ( ! rte->connect_mgr.is_shutdown ) {
+  if ( ! rte->transport.get_route_int( R_TIMEOUT, timeout ) )
+    timeout = this->mgr.tcp_timeout;
+  if ( rte->connect_ctx != NULL &&
+       rte->connect_ctx->state != ConnectCtx::CONN_SHUTDOWN ) {
     if ( rte->conn_hash == conn_hash ) {
-      if ( ! rte->connect_mgr.is_reconnecting ) {
-        rte->connect_mgr.conn->encrypt = ! noencrypt;
-        return rte->connect_mgr.do_connect();
+      if ( ! rte->connect_ctx->state == ConnectCtx::CONN_IDLE ) {
+        if ( noencrypt )
+          rte->connect_ctx->opts &= ~TCP_OPT_ENCRYPT;
+        else
+          rte->connect_ctx->opts |= TCP_OPT_ENCRYPT;
+        rte->connect_ctx->timeout = timeout;
+        rte->connect_ctx->reconnect();
       }
       return true;
     }
@@ -705,28 +708,19 @@ TransportRoute::add_tcp_connect( const char *conn_url,
 
     if ( rte == NULL )
       return false;
-    EvTcpTransportClient *c = rte->connect_mgr.conn;
-    if ( c == NULL ) {
-      uint8_t type = this->mgr.tcp_connect_sock_type;
-      c = rte->connect_mgr.alloc_conn<EvTcpTransportClient>( this->poll, type );
-      rte->connect_mgr.conn = c;
-    }
-    c->rte = rte;
-    c->route_id = rte->sub_route.route_id;
-    c->encrypt = ! noencrypt;
+    if ( rte->connect_ctx == NULL )
+      rte->connect_ctx = rte->mgr.connect_mgr.create( rte->tport_id );
   }
-  EvTcpTransportParameters parm;
   char tcp_buf[ MAX_TCP_HOST_LEN ];
   size_t len = sizeof( tcp_buf );
+  int opts = TCP_TRANSPORT_CONNECT_OPTS | ( noencrypt ? 0 : TCP_OPT_ENCRYPT );
   int port;
   port = ConfigTree::Transport::get_host_port( conn_url, tcp_buf, len );
-  parm.set_host_port( tcp_buf, port, 0, 0 );
-  parm.noencrypt = noencrypt;
-  d_tran( "tcp_url = %s:%u\n", tcp_buf, port );
-  rte->connect_mgr.connect_timeout_secs = 1;
-  rte->connect_mgr.set_parm( parm.copy() );
   rte->conn_hash = conn_hash;
-  return rte->connect_mgr.do_connect();
+  d_tran( "tcp_url = %s:%u (%x)\n", tcp_buf, port, conn_hash );
+  rte->connect_ctx->timeout = timeout;
+  rte->connect_ctx->connect( tcp_buf, port, opts );
+  return true;
 }
 
 bool

@@ -53,12 +53,14 @@ SessionMgr::SessionMgr( EvPoll &p,  Logger &l,  ConfigTree &c,
              sub_db( p, this->user_db, *this ),
              sys_bloom( 0, "(sys)", p.g_bloom_db ),
              console( *this ), log( l ),
+             connect_mgr( *this, this->user_db, p, p.register_type( "ev_tcp_tport_client" ) ),
              pub_window_mono_time( 0 ), sub_window_mono_time( 0 ),
              name_svc_mono_time( 0 ),
              pub_window_size( 4 * 1024 * 1024 ),
              sub_window_size( 4 * 1024 * 1024 ),
              pub_window_ival( sec_to_ns( 10 ) ),
              sub_window_ival( sec_to_ns( 10 ) ),
+             tcp_timeout( 10 ),
              tcp_noencrypt( false ),
              session_started( false )
 {
@@ -91,7 +93,7 @@ bool
 SessionMgr::init_param( void ) noexcept
 {
   const char *s = "", *val = NULL;
-  uint64_t hb_ival, rel_ival;
+  uint64_t hb_ival, rel_ival, time_val;
 
   if ( this->tree.find_parameter( s = P_PUB_WINDOW_SIZE, val, NULL ) &&
        ! ConfigTree::string_to_bytes( val, this->pub_window_size ) ) goto fail;
@@ -116,6 +118,10 @@ SessionMgr::init_param( void ) noexcept
   }
   if ( this->tree.find_parameter( s = P_TCP_NOENCRYPT, val, NULL ) ) {
     if ( ! ConfigTree::string_to_bool( val, this->tcp_noencrypt ) ) goto fail;
+  }
+  if ( this->tree.find_parameter( s = P_TCP_TIMEOUT, val, NULL ) ) {
+    if ( ! ConfigTree::string_to_secs( val, time_val ) ) goto fail;
+    this->tcp_timeout = (int) time_val;
   }
   update_tz_stamp();
   return true;

@@ -790,7 +790,7 @@ UserRoute::set_mesh( UserDB &user_db,  const void *p,  size_t len ) noexcept
     if ( debug_usr )
       this->n.printf( "set_mesh( %.*s, tport=%s, hash=%x )\n",
                       (int) len, (char *) p, this->rte.name, this->url_hash );
-    this->rte.mesh_conn_hash = this->url_hash;
+    this->rte.mesh_url_hash = this->url_hash;
 
     this->set( MESH_URL_STATE );
   }

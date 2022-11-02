@@ -28,6 +28,7 @@ CONFIG_CONST( P_SUB_WINDOW_TIME , "sub_window_time" )
 CONFIG_CONST( P_HEARTBEAT       , "heartbeat" )
 CONFIG_CONST( P_TIMESTAMP       , "timestamp" )
 CONFIG_CONST( P_TCP_NOENCRYPT   , "tcp_noencrypt" )
+CONFIG_CONST( P_TCP_TIMEOUT     , "tcp_timeout" )
 
 /* T_: transport / networks */
 CONFIG_CONST( T_ANY          , "any" )

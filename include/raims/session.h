@@ -245,6 +245,7 @@ struct SessionMgr : public kv::EvSocket {
   kv::Logger          & log;
   SessionStats          stats;
   UnrouteableList       unrouteable;
+  ConnectMgr            connect_mgr;
   uint64_t              pub_window_mono_time, /* when pub window expires */
                         sub_window_mono_time, /* when sub window expires */
                         name_svc_mono_time;
@@ -254,6 +255,7 @@ struct SessionMgr : public kv::EvSocket {
                         sub_window_ival; /* sub interval of rotate */
   uint8_t               tcp_accept_sock_type, /* free list sock types */
                         tcp_connect_sock_type;
+  int                   tcp_timeout;
   bool                  tcp_noencrypt,
                         session_started;
 
@@ -284,10 +286,13 @@ struct SessionMgr : public kv::EvSocket {
   bool add_mesh_connect( TransportRoute &mesh_rte ) noexcept;
   TransportRoute * find_mesh_conn( TransportRoute &mesh_rte, const char *url,
                                    uint32_t mesh_hash ) noexcept;
-  bool find_mesh( TransportRoute &mesh_rte, const char *host,
-                  int port,  uint32_t mesh_hash ) noexcept;
+  bool find_mesh( TransportRoute &mesh_rte, struct addrinfo *addr_list,
+                  uint32_t mesh_hash ) noexcept;
   bool add_mesh_connect( TransportRoute &mesh_rte,  const char **mesh_url,
                          uint32_t *mesh_hash,  uint32_t url_count ) noexcept;
+  bool add_mesh_connect( TransportRoute &mesh_rte,
+                         EvTcpTransportParameters &parm,
+                         uint32_t index,  uint32_t url_hash ) noexcept;
   int init_session( const CryptPass &pwd ) noexcept;
   void add_rte( const char *sub, size_t sub_len, uint32_t hash,
                 PublishType type ) noexcept;

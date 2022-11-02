@@ -52,6 +52,11 @@ enum {
   PARAM_NB_CONNECT = 2,
   PARAM_LISTEN     = 4
 };
+static const int TCP_OPT_ENCRYPT = 0x10000; /* u16 reserved */
+static const int TCP_TRANSPORT_CONNECT_OPTS =
+  ( kv::DEFAULT_TCP_CONNECT_OPTS &
+  ~( kv::OPT_REUSEPORT | kv::OPT_VERBOSE ) ) |
+  kv::OPT_CONNECT_NB;
 
 struct EvTcpTransportParameters {
   const char * host[ MAX_TCP_HOSTS ]; /* connect host */
@@ -71,9 +76,7 @@ struct EvTcpTransportParameters {
       this->hash[ i ] = 0;
       this->buf[ i ][ 0 ] = '\0';
     }
-    this->opts      = kv::DEFAULT_TCP_CONNECT_OPTS;
-    this->opts     &= ~( kv::OPT_REUSEPORT | kv::OPT_VERBOSE );
-    this->opts     |= kv::OPT_CONNECT_NB;
+    this->opts      = TCP_TRANSPORT_CONNECT_OPTS;
     this->timeout   = 10;
     this->edge      = false;
     this->noencrypt = false;
@@ -138,17 +141,14 @@ struct EvTcpTransportParameters {
 };
 
 struct EvTcpTransportClient : public EvTcpTransport {
-  /*EvTcpTransportParameters parm;
-  char host_buf[ 256 ];*/
   void * operator new( size_t, void *ptr ) { return ptr; }
-
   EvTcpTransportClient( kv::EvPoll &p,  uint8_t t )
     : EvTcpTransport( p, t )/*, parm( this->host_buf )*/ {
     /*this->host_buf[ 0 ] = '\0';*/
     this->fwd_all_msgs = false;
   }
-  bool connect( EvTcpTransportParameters &p,
-                kv::EvConnectionNotify *n,  int index ) noexcept;
+  bool connect( int opts, kv::EvConnectionNotify *n,
+                struct addrinfo *addr_list ) noexcept;
 };
 
 struct EvTcpTransportService : public EvTcpTransport {

@@ -504,8 +504,20 @@ test_tcp_aes_lnk   := $(lnk_lib)
 
 $(bind)/test_tcp_aes: $(test_tcp_aes_objs) $(test_tcp_aes_libs) $(lnk_dep)
 
-all_exes    += $(bind)/test_tcp_aes
-all_depends += $(test_tcp_aes_deps)
+all_exes    += $(bind)/test_conn
+all_depends += $(test_conn_deps)
+
+test_conn_files := test_conn
+test_conn_cfile := test/test_conn.cpp
+test_conn_objs  := $(addprefix $(objd)/, $(addsuffix .o, $(test_conn_files)))
+test_conn_deps  := $(addprefix $(dependd)/, $(addsuffix .d, $(test_conn_files)))
+test_conn_libs  :=
+test_conn_lnk   := $(lnk_lib)
+
+$(bind)/test_conn: $(test_conn_objs) $(test_conn_libs) $(lnk_dep)
+
+all_exes    += $(bind)/test_conn
+all_depends += $(test_conn_deps)
 
 parse_pcap_files := parse_pcap
 parse_pcap_cfile := test/parse_pcap.cpp

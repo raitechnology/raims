@@ -132,7 +132,7 @@ EvTcpTransportListen::process_close( void ) noexcept
   this->client_stats( this->rte.sub_route.peer_stats );
   this->EvSocket::process_close();
 }
-
+#if 0
 bool
 EvTcpTransportClient::connect( EvTcpTransportParameters &p,
                                EvConnectionNotify *n,  int index ) noexcept
@@ -145,6 +145,21 @@ EvTcpTransportClient::connect( EvTcpTransportParameters &p,
   this->EvConnection::release_buffers();
   if ( EvTcpConnection::connect2( *this, p.host[ index ], p.port[ index ],
                                   p.opts, "ev_tcp_tport",
+                                  this->rte->sub_route.route_id ) != 0 )
+    return false;
+  this->notify = n;
+  this->start();
+  return true;
+}
+#endif
+bool
+EvTcpTransportClient::connect( int opts,  EvConnectionNotify *n,
+                               struct addrinfo *addr_list ) noexcept
+{
+  if ( this->fd != -1 )
+    return false;
+  this->is_connect = true;
+  if ( EvTcpConnection::connect3( *this, addr_list, opts, "ev_tcp_tport",
                                   this->rte->sub_route.route_id ) != 0 )
     return false;
   this->notify = n;
