@@ -375,31 +375,25 @@ TransportRoute::change_any( const char *type,  NameSvc & ) noexcept
 bool
 TransportRoute::create_transport( ConfigTree::Transport &tport ) noexcept
 {
-  bool b = false;
+  bool is_listener = this->is_set( TPORT_IS_LISTEN ), b = false;
   if ( tport.type.equals( T_ANY, T_ANY_SZ ) ) {
     return true;
   }
   if ( tport.type.equals( T_RV, T_RV_SZ ) ) {
-    if ( this->is_svc() )
-      return this->create_rv_listener( tport );
-    return false;
+    return this->create_rv_listener( tport );
   }
   if ( tport.type.equals( T_NATS, T_NATS_SZ ) ) {
-    if ( this->is_svc() )
-      return this->create_nats_listener( tport );
-    return false;
+    return this->create_nats_listener( tport );
   }
   if ( tport.type.equals( T_REDIS, T_REDIS_SZ ) ) {
-    if ( this->is_svc() )
-      return this->create_redis_listener( tport );
-    return false;
+    return this->create_redis_listener( tport );
   }
   if ( tport.type.equals( T_TCP, T_TCP_SZ ) ) {
     if ( this->is_set( TPORT_IS_DEVICE ) )
       this->dev_id = this;
     else
       this->dev_id = NULL;
-    if ( this->is_svc() ) {
+    if ( this->is_listen() ) {
       this->listener = this->create_tcp_listener( tport );
       this->create_listener_conn_url();
       goto out_listen;
@@ -409,7 +403,7 @@ TransportRoute::create_transport( ConfigTree::Transport &tport ) noexcept
   }
   if ( tport.type.equals( T_PGM, T_PGM_SZ ) ) {
     this->set( TPORT_IS_MCAST );
-    if ( this->is_svc() ) {
+    if ( is_listener ) {
       if ( this->create_pgm( TPORT_IS_LISTEN, tport ) )
         return true;
       this->set( TPORT_IS_SHUTDOWN );
@@ -430,8 +424,10 @@ TransportRoute::create_transport( ConfigTree::Transport &tport ) noexcept
     this->listener = l;
     this->create_listener_mesh_url();
 
-    if ( ! this->is_svc() )
+    if ( ! is_listener || this->is_set( TPORT_IS_CONNECT ) ) {
+      this->set( TPORT_IS_CONNECT );
       this->add_mesh_connect( NULL, 0 );
+    }
     return true;
   }
 out_connect:;
@@ -448,78 +444,38 @@ out_listen:;
 }
 
 uint32_t
-TransportRoute::shutdown( ConfigTree::Transport &tport ) noexcept
+TransportRoute::shutdown( void ) noexcept
 {
   uint32_t count = 0;
-  if ( tport.type.equals( T_TCP, T_TCP_SZ ) ||
-       tport.type.equals( T_MESH, T_MESH_SZ ) ) {
-    if ( this->listener != NULL ) {
-      uint32_t fd, uid;
-      if ( ! this->test_set( TPORT_IS_SHUTDOWN ) ) {
-        count++;
-        this->listener->idle_push( EV_CLOSE );
-      }
-      if ( ! this->is_set( TPORT_IS_MESH ) ) {
-        if ( this->connect_count > 0 ) {
-          for ( bool ok = this->connected.first( fd ); ok;
-                ok = this->connected.next( fd ) ) {
-            if ( fd < this->poll.maxfd ) {
-              EvSocket *s = this->poll.sock[ fd ];
-              if ( s != NULL ) {
-                s->idle_push( EV_SHUTDOWN );
-                count++;
-              }
-            }
-          }
-        }
-      }
-      else {
-        uint32_t i,
-                 tport_count = (uint32_t) this->user_db.transport_tab.count;
-        for ( bool ok = this->uid_in_mesh->first( uid ); ok;
-              ok = this->uid_in_mesh->next( uid ) ) {
-          UserBridge &n = *this->user_db.bridge_tab.ptr[ uid ];
-          for ( i = 0; i < tport_count; i++ ) {
-            UserRoute  * u_ptr = n.user_route_ptr( this->user_db, i );
-            ConnectCtx * ctx   = u_ptr->rte.connect_ctx;
-            if ( u_ptr->is_valid() && u_ptr->rte.mesh_id == this->mesh_id ) {
-              fd = u_ptr->mcast_fd;
-              if ( fd < this->poll.maxfd ) {
-                EvSocket *s = this->poll.sock[ fd ];
-                if ( s != NULL ) {
-                  s->idle_push( EV_SHUTDOWN );
-                  count++;
-                }
-                else {
-                  if ( ctx != NULL && ctx->state != ConnectCtx::CONN_SHUTDOWN )
-                    count++;
-                }
-              }
-              if ( ctx != NULL && ctx->state != ConnectCtx::CONN_SHUTDOWN ) {
-                ctx->state = ConnectCtx::CONN_SHUTDOWN;
-                u_ptr->rte.set( TPORT_IS_SHUTDOWN );
-              }
-            }
+  if ( this->transport.type.equals( T_TCP, T_TCP_SZ ) ||
+       this->transport.type.equals( T_MESH, T_MESH_SZ ) ) {
+    if ( this->listener != NULL && this->listener->in_list( IN_ACTIVE_LIST ) ) {
+      this->listener->idle_push( EV_SHUTDOWN );
+      count++;
+    }
+    if ( this->connect_ctx != NULL ) {
+      this->connect_ctx->state = ConnectCtx::CONN_SHUTDOWN;
+      this->clear( TPORT_IS_INPROGRESS );
+      if ( this->connect_ctx->client != NULL )
+        this->connect_ctx->client->idle_push( EV_SHUTDOWN );
+      count++;
+    }
+    uint32_t fd;
+    for ( bool ok = this->connected.first( fd ); ok;
+          ok = this->connected.next( fd ) ) {
+      if ( fd <= this->poll.maxfd ) {
+        EvSocket *s = this->poll.sock[ fd ];
+        if ( s != NULL ) {
+          if ( ! s->test( EV_SHUTDOWN ) ) {
+            s->idle_push( EV_SHUTDOWN );
+            count++;
           }
         }
       }
     }
-    else {
-      ConnectCtx * ctx = this->connect_ctx;
-      if ( ctx != NULL ) {
-        if ( ctx->client != NULL && ctx->client->fd >= 0 &&
-             (uint32_t) ctx->client->fd < this->poll.maxfd ) {
-          ctx->client->idle_push( EV_SHUTDOWN );
-          count++;
-        }
-        else if ( ctx->state != ConnectCtx::CONN_SHUTDOWN )
-          count++;
-        ctx->state = ConnectCtx::CONN_SHUTDOWN;
-        this->set( TPORT_IS_SHUTDOWN );
-      }
-    }
+    this->set( TPORT_IS_SHUTDOWN );
   }
-  else if ( tport.type.equals( T_PGM, T_PGM_SZ ) ) {
+  else if ( this->transport.type.equals( T_PGM, T_PGM_SZ ) ) {
     if ( ! this->test_set( TPORT_IS_SHUTDOWN ) ) {
       if ( this->pgm_tport != NULL )
         this->pgm_tport->idle_push( EV_SHUTDOWN );
@@ -527,6 +483,7 @@ TransportRoute::shutdown( ConfigTree::Transport &tport ) noexcept
         this->ibx_tport->idle_push( EV_SHUTDOWN );
       count++;
     }
+    this->set( TPORT_IS_SHUTDOWN );
   }
   return count;
 }

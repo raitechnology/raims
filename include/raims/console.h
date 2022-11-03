@@ -95,6 +95,7 @@ struct PortOutput {
   TabOut         & out;
   uint32_t         tport_id,
                    state;
+  uint64_t         cur_time;
   UserBridge     * n;
   StringVal        local,
                    remote,

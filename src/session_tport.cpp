@@ -169,7 +169,7 @@ SessionMgr::add_ipc_transport( void ) noexcept
   }
   ConfigTree::Transport * tptr;
   TransportRoute * rte;
-  uint32_t f = TPORT_IS_SVC | TPORT_IS_IPC;
+  uint32_t f = TPORT_IS_IPC;
   StringTab & stab = this->user_db.string_tab;
 
   tptr = this->tree.find_transport( T_IPC, T_IPC_SZ );
@@ -323,7 +323,7 @@ SessionMgr::add_transport2( ConfigTree::Transport &t,
                             bool is_listener,
                             TransportRoute *&rte ) noexcept
 {
-  uint32_t f = ( is_listener ? TPORT_IS_SVC : 0 );
+  uint32_t f = ( is_listener ? TPORT_IS_LISTEN : 0 );
   NameSvc * name_svc[ MAX_TCP_HOSTS ];
   uint32_t  name_svc_count = 0;
 
@@ -421,7 +421,7 @@ SessionMgr::shutdown_transport( ConfigTree::Transport &t ) noexcept
   for ( id = 0; id < count; id++ ) {
     TransportRoute *rte = this->user_db.transport_tab.ptr[ id ];
     if ( &rte->transport == &t ) {
-      match += rte->shutdown( t );
+      match += rte->shutdown();
     }
   }
   return match;
@@ -488,7 +488,6 @@ SessionMgr::add_mesh_accept( TransportRoute &listen_rte,
   ConfigTree::Service   & s = listen_rte.svc;
   ConfigTree::Transport & t = listen_rte.transport;
 
-  //uint32_t id = this->user_db.transport_list.tport_count++;
   uint32_t id,
            count = (uint32_t) this->user_db.transport_tab.count;
   for ( id = 0; id < count; id++ ) {
@@ -517,10 +516,6 @@ SessionMgr::add_mesh_accept( TransportRoute &listen_rte,
     rte->uid_connected.cost[ i ] = listen_rte.uid_connected.cost[ i ];
 
   rte->set( TPORT_IS_MESH );
-
-  /*char buf[ MAX_TCP_HOST_LEN ];
-  make_mesh_url_from_sock( buf, conn );
-  rte->mesh_url_hash = kv_crc_c( buf, ::strlen( buf ), 0 );*/
   rte->mesh_url_hash = 0; /* don't know this util after auth */
   conn.rte      = rte;
   conn.notify   = rte;
@@ -547,7 +542,6 @@ SessionMgr::add_tcp_rte( TransportRoute &src_rte,  uint32_t conn_hash ) noexcept
   ConfigTree::Transport & t = src_rte.transport;
   bool is_new = false;
 
-  //uint32_t id = this->user_db.transport_list.tport_count++;
   uint32_t id,
            count = (uint32_t) this->user_db.transport_tab.count;
   if ( conn_hash != 0 ) {
@@ -620,7 +614,6 @@ SessionMgr::add_mesh_connect( TransportRoute &mesh_rte ) noexcept
   uint32_t url_hash[ MAX_TCP_HOSTS ];
 
   parm.parse_tport( mesh_rte.transport, PARAM_NB_CONNECT, this->tcp_noencrypt );
-  /*parse_tcp_param( parm, mesh_rte.transport, P_NB_CONNECT );*/
 
   for ( i = 0; i < MAX_TCP_HOSTS; i++ ) {
     char   * url    = url_buf[ i ];
@@ -792,10 +785,8 @@ SessionMgr::add_mesh_connect( TransportRoute &mesh_rte,  const char **mesh_url,
 
   count = (uint32_t) this->user_db.transport_tab.count;
   for ( i = 0; i < url_count; i++ ) {
-    MatchMesh match;
     if ( mesh_rte.is_set( TPORT_IS_LISTEN ) &&
-         match.match_url( mesh_rte.mesh_url_hash, mesh_url[ i ],
-                          mesh_hash[ i ] ) ) {
+         mesh_rte.mesh_url_hash == mesh_hash[ i ] ) {
       mesh_rte.printf( "not connecting to self (%s)\n", mesh_url[ i ] );
       mesh_url[ i ]  = NULL;
       mesh_hash[ i ] = 0;
@@ -805,9 +796,7 @@ SessionMgr::add_mesh_connect( TransportRoute &mesh_rte,  const char **mesh_url,
       rte = this->user_db.transport_tab.ptr[ tport_id ];
       if ( rte != &mesh_rte && rte->mesh_id == mesh_rte.mesh_id &&
            ! rte->is_set( TPORT_IS_SHUTDOWN ) ) {
-        if ( match.match_dns_cache( rte->mesh_url_hash ) ||
-             match.match_url( rte->mesh_url_hash, mesh_url[ i ],
-                              mesh_hash[ i ] ) ) {
+        if ( rte->mesh_url_hash == mesh_hash[ i ] ) {
           mesh_rte.printf( "already connected (%s)\n", mesh_url[ i ] );
           return true;
         }
@@ -903,7 +892,6 @@ do_listen_start( ConfigTree::Transport &tport,  EvTcpListen *l,
 {
   EvTcpTransportParameters parm;
   parm.parse_tport( tport, PARAM_LISTEN, false );
-  /*parse_tcp_param( parm, tport, P_LISTEN );*/
 
   if ( ! l->in_list( IN_ACTIVE_LIST ) ) {
     if ( l->listen2( parm.host[ 0 ], parm.port[ 0 ], parm.opts, k, -1 ) != 0 ) {

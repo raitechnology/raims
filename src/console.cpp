@@ -1237,6 +1237,34 @@ Console::tab_nonce( const Nonce &nonce,  TabPrint &pr ) noexcept
   pr.set( str, NONCE_B64_LEN );
 }
 
+static int
+latency_string( int64_t lat,  char *buf ) noexcept
+{
+  const char * units = "us";
+  while ( lat >= 1000000 || lat <= -1000000 ) {
+    lat /= 1000;
+    if ( units[ 0 ] == 'u' )
+      units = "ms";
+    else {
+      units = "se";
+      if ( lat >= 1000000 || lat <= -1000000 ) {
+        lat /= 60;
+        units = "mi";
+        if ( lat >= 1000000 || lat <= -1000000 ) {
+          lat /= 60;
+          units = "hr";
+          if ( lat >= 1000000 || lat <= -1000000 ) {
+            lat /= 24;
+            units = "da";
+          }
+        }
+      }
+      break;
+    }
+  }
+  return ::snprintf( buf, 80, "%.3g%s", (double) lat / 1000.0, units );
+}
+
 uint32_t
 TabPrint::width( Console &console,  char *buf ) noexcept
 {
@@ -1280,10 +1308,7 @@ TabPrint::width( Console &console,  char *buf ) noexcept
     case PRINT_LATENCY: {
       if ( this->ival == 0 )
         return 0;
-      int64_t lat = (int64_t) this->ival;
-      while ( lat >= 1000000 || lat <= -1000000 )
-        lat /= 1000;
-      return ::snprintf( buf, 80, "%.3gxs", (double) lat / 1000.0 );
+      return latency_string( (int64_t) this->ival, buf );
     }
     case PRINT_NONCE:
       if ( this->n == NULL )
@@ -1428,18 +1453,7 @@ TabPrint::string( Console &console,  char *buf ) noexcept
     case PRINT_LATENCY: {
       if ( this->ival == 0 )
         return "";
-      int64_t lat = (int64_t) this->ival;
-      const char * units = "us";
-      while ( lat >= 1000000 || lat <= -1000000 ) {
-        lat /= 1000;
-        if ( units[ 0 ] == 'u' )
-          units = "ms";
-        else {
-          units = "se";
-          break;
-        }
-      }
-      ::snprintf( buf, 80, "%.3g%s", (double) lat / 1000.0, units );
+      latency_string( (int64_t) this->ival, buf );
       return buf;
     }
     case PRINT_NONCE:
@@ -1513,16 +1527,16 @@ TabPrint::string( Console &console,  char *buf ) noexcept
     }
     case PRINT_TPORT_STATE: {
       uint32_t j = 0;
-      if ( this->len & TPORT_IS_SVC       ) buf[ j++ ] = 'S';
-      if ( this->len & TPORT_IS_LISTEN    ) buf[ j++ ] = 'L';
-      if ( this->len & TPORT_IS_MCAST     ) buf[ j++ ] = 'M';
-      if ( this->len & TPORT_IS_MESH      ) buf[ j++ ] = 'X';
-      if ( this->len & TPORT_IS_CONNECT   ) buf[ j++ ] = 'C';
-      if ( this->len & TPORT_IS_TCP       ) buf[ j++ ] = 'T';
-      if ( this->len & TPORT_IS_EDGE      ) buf[ j++ ] = 'E';
-      if ( this->len & TPORT_IS_IPC       ) buf[ j++ ] = 'I';
-      if ( this->len & TPORT_IS_SHUTDOWN  ) buf[ j++ ] = '-';
-      if ( this->len & TPORT_IS_DEVICE    ) buf[ j++ ] = 'D';
+      if ( this->len & TPORT_IS_LISTEN     ) buf[ j++ ] = 'L';
+      if ( this->len & TPORT_IS_MCAST      ) buf[ j++ ] = 'M';
+      if ( this->len & TPORT_IS_MESH       ) buf[ j++ ] = 'X';
+      if ( this->len & TPORT_IS_CONNECT    ) buf[ j++ ] = 'C';
+      if ( this->len & TPORT_IS_TCP        ) buf[ j++ ] = 'T';
+      if ( this->len & TPORT_IS_EDGE       ) buf[ j++ ] = 'E';
+      if ( this->len & TPORT_IS_IPC        ) buf[ j++ ] = 'I';
+      if ( this->len & TPORT_IS_SHUTDOWN   ) buf[ j++ ] = '-';
+      if ( this->len & TPORT_IS_DEVICE     ) buf[ j++ ] = 'D';
+      if ( this->len & TPORT_IS_INPROGRESS ) buf[ j++ ] = '*';
       buf[ j ] = '\0';
       return buf;
     }
@@ -1784,8 +1798,8 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
     this->output_help( p, cmd );
     return this->flush_output( p );
   }
-  const char    * args[ MAXARGS + 1 ]; /* all args */
-  size_t          arglen[ MAXARGS + 1 ], argc;
+  const char    * args[ MAXARGS + 3 ]; /* all args */
+  size_t          arglen[ MAXARGS + 3 ], argc;
   const char    * arg;   /* arg after command */
   size_t          len;   /* len of arg */
   ConsoleOutput * sub_output = p;
@@ -1795,8 +1809,8 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
   /* empty line, skip it */
   if ( cmd == CMD_EMPTY )
     return this->flush_output( p );
-  args[ argc ] = NULL;
-  arglen[ argc ] = 0;
+  args[ argc ]   = args[ argc + 1 ]   = args[ argc + 2 ]   = NULL;
+  arglen[ argc ] = arglen[ argc + 1 ] = arglen[ argc + 2 ] = 0;
 
   if ( cmd >= CMD_SUB_START && argc == 3 ) {
     switch ( cmd ) {
@@ -2280,12 +2294,10 @@ Console::get_active_tports( ConfigTree::TransportArray &listen,
           }
           else {
             if ( rte->is_set( TPORT_IS_MESH ) ) {
-              if ( rte->is_set( TPORT_IS_LISTEN ) ) {
-                if ( rte->is_set( TPORT_IS_SVC ) )
-                  listen.push_unique( tport );
-                else
-                  connect.push_unique( tport );
-              }
+              if ( rte->is_set( TPORT_IS_LISTEN ) )
+                listen.push_unique( tport );
+              else
+                connect.push_unique( tport );
             }
             else if ( rte->is_set( TPORT_IS_LISTEN ) )
               listen.push_unique( tport );
@@ -3119,11 +3131,12 @@ Console::show_unknown( ConsoleOutput *p ) noexcept
 
 PortOutput::PortOutput( Console &c,  TabOut &o,  uint32_t t ) noexcept :
     console( c ), mgr( c.mgr ), user_db( c.user_db ), out( o ), tport_id( t ),
-    unrouteable( 0 ) {}
+    cur_time( current_realtime_coarse_ns() ), unrouteable( 0 ) {}
 
 PortOutput::PortOutput( Console &c,  TabOut &o,  Unrouteable *u ) noexcept :
     console( c ), mgr( c.mgr ), user_db( c.user_db ), out( o ),
-    tport_id( 0xffffffffU ), unrouteable( u ) {}
+    tport_id( 0xffffffffU ), cur_time( current_realtime_coarse_ns() ),
+    unrouteable( u ) {}
 
 void
 PortOutput::init( TransportRoute *rte,  int fl,  int fd,
@@ -3148,7 +3161,7 @@ PortOutput::init( ConfigTree::Transport &tport,  int fl,  int fd ) noexcept
   this->rte   = NULL;
   this->type  = &tport.type;
   this->tport = &tport.tport;
-  this->state = TPORT_IS_SVC;
+  this->state = 0;
   this->n     = NULL;
   this->fd    = fd;
   this->flags = fl;
@@ -3181,6 +3194,13 @@ PortOutput::output( void ( PortOutput::*put )( void ) ) noexcept
     TransportRoute *rte = this->user_db.transport_tab.ptr[ this->tport_id ];
     if ( rte->is_set( TPORT_IS_SHUTDOWN ) ) {
       this->init( rte, P_IS_DOWN, -1 );
+      if ( rte->is_set( TPORT_IS_INPROGRESS ) ) {
+        if ( rte->connect_ctx != NULL ) {
+          uint64_t ns = rte->mgr.timer_mono_time -
+                        rte->connect_ctx->start_time;
+          this->stats.active_ns = rte->mgr.timer_time - ns;
+        }
+      }
       (this->*put)();
     }
     else if ( rte->is_set( TPORT_IS_IPC ) ) {
@@ -3218,7 +3238,6 @@ PortOutput::output( void ( PortOutput::*put )( void ) ) noexcept
       this->init( rte, P_IS_DOWN, -1 );
       (this->*put)();
     }
-
     uint32_t uid;
     for ( bool ok = rte->uid_connected.first( uid ); ok;
           ok = rte->uid_connected.next( uid ) ) {
@@ -3324,6 +3343,11 @@ PortOutput::put_show_ports( void ) noexcept
     tab[ i++ ].set_long( this->n->round_trip_time, PRINT_LATENCY ); /* lat */
   else
     tab[ i++ ].set_null();
+  if ( this->stats.active_ns > 0 )
+    tab[ i++ ].set_long( this->cur_time - this->stats.active_ns,
+                         PRINT_LATENCY ); /* idle */
+  else
+    tab[ i++ ].set_null();
 
   tab[ i++ ].set_int( this->state, PRINT_TPORT_STATE );
 
@@ -3347,7 +3371,7 @@ PortOutput::put_show_ports( void ) noexcept
 void
 Console::show_ports( ConsoleOutput *p, const char *name,  size_t len ) noexcept
 {
-  static const uint32_t ncols = 11;
+  static const uint32_t ncols = 12;
   size_t count = this->user_db.transport_tab.count;
 
   if ( len == 1 && name[ 0 ] == '*' )
@@ -3370,7 +3394,7 @@ Console::show_ports( ConsoleOutput *p, const char *name,  size_t len ) noexcept
     port.output( &PortOutput::put_show_ports );
   }
   static const char *hdr[ ncols ] = { "tport", "type", "cost", "fd", "bs", "br",
-                                      "ms", "mr", "lat", "fl", "address" };
+                                   "ms", "mr", "lat", "idle", "fl", "address" };
   this->print_table( p, hdr, ncols );
 }
 
@@ -3553,7 +3577,7 @@ Console::show_tports( ConsoleOutput *p, const char *name,  size_t len ) noexcept
 void
 Console::show_peers( ConsoleOutput *p ) noexcept
 {
-  static const uint32_t ncols = 8;
+  static const uint32_t ncols = 9;
   TabOut       out( this->table, this->tmp, ncols );
   const char * address;
   uint32_t     addr_len, ucast_fd;
@@ -3565,7 +3589,8 @@ Console::show_peers( ConsoleOutput *p ) noexcept
   out.add_row()
      .set( this->user_db.user.user, PRINT_SELF )  /* user */
      .set( nonce )  /* bridge */
-     .set_long( this->sub_db.sub_seqno )  /* sub */
+     .set_long( this->sub_db.bloom.bits->count )  /* sub */
+     .set_long( this->sub_db.sub_seqno )          /* seq */
      .set_long( this->user_db.link_state_seqno )  /* link */
      .set_null()  /* lat */
      .set_null()  /* tport */
@@ -3579,9 +3604,10 @@ Console::show_peers( ConsoleOutput *p ) noexcept
 
     TabPrint & row =
     out.add_row()
-       .set( n, PRINT_USER )  /* user */
-       .set( n, PRINT_NONCE )  /* bridge */
-       .set_long( n->sub_seqno )  /* sub */
+       .set( n, PRINT_USER )             /* user */
+       .set( n, PRINT_NONCE )            /* bridge */
+       .set_long( n->bloom.bits->count ) /* sub */
+       .set_long( n->sub_seqno )         /* seq */
        .set_long( n->link_state_seqno )  /* link */
        .set_long( n->round_trip_time, PRINT_LATENCY ); /* lat */
 
@@ -3638,8 +3664,8 @@ Console::show_peers( ConsoleOutput *p ) noexcept
       }
     }
   }
-  static const char *hdr[ ncols ] = { "user", "bridge", "sub", "link", "lat",
-                                      "tport", "cost", "address" };
+  static const char *hdr[ ncols ] = { "user", "bridge", "sub", "seq", "link",
+                                      "lat", "tport", "cost", "address" };
   this->print_table( p, hdr, ncols );
 }
 

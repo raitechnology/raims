@@ -34,6 +34,9 @@ struct ConnectPing : public ConnectDB {
   virtual void on_connect( ConnectCtx &ctx ) noexcept;
   virtual bool on_shutdown( ConnectCtx &ctx,  const char *msg,
                             size_t len ) noexcept;
+  virtual void on_timeout( ConnectCtx &ctx ) noexcept;
+  virtual void on_dns( ConnectCtx &ctx,  const char *host,  int port,
+                       int opts ) noexcept;
 };
 
 bool
@@ -63,6 +66,20 @@ ConnectPing::on_shutdown( ConnectCtx &ctx,  const char *msg,
 {
   printf( "on shutdown %lu %.*s\n", ctx.event_id, (int) len, msg );
   return true;
+}
+
+void
+ConnectPing::on_timeout( ConnectCtx &ctx ) noexcept
+{
+  printf( "on timeout, connect tries %u, time %.1f\n", ctx.connect_tries,
+    (double) ( current_monotonic_time_ns() - ctx.start_time ) / 1000000000.0 );
+}
+
+void
+ConnectPing::on_dns( ConnectCtx &,  const char *host,  int port,
+                     int opts ) noexcept
+{
+  printf( "resolving %s:%d opts(%x)\n", host, port, opts );
 }
 
 static uint64_t timer_id;

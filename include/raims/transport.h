@@ -83,6 +83,9 @@ struct ConnectDB {
   virtual void on_connect( ConnectCtx &ctx ) noexcept = 0;
   virtual bool on_shutdown( ConnectCtx &ctx,  const char *msg,
                             size_t len ) noexcept = 0;
+  virtual void on_timeout( ConnectCtx &ctx ) noexcept = 0;
+  virtual void on_dns( ConnectCtx &ctx,  const char *host,  int port,
+                       int opts ) noexcept = 0;
 };
 
 struct ConnectMgr : public ConnectDB {
@@ -95,79 +98,22 @@ struct ConnectMgr : public ConnectDB {
   virtual void on_connect( ConnectCtx &ctx ) noexcept;
   virtual bool on_shutdown( ConnectCtx &ctx,  const char *msg,
                             size_t len ) noexcept;
+  virtual void on_timeout( ConnectCtx &ctx ) noexcept;
+  virtual void on_dns( ConnectCtx &ctx,  const char *host,  int port,
+                       int opts ) noexcept;
 };
 
-#if 0
-struct ConnectionMgr : public kv::EvConnectionNotify,
-                       public kv::EvTimerCallback,
-                       public kv::EvCaresCallback {
-  TransportRoute           & rte;
-  kv::CaresAddrInfo          addr_info;
-  EvTcpTransportClient     * conn;
-  EvTcpTransportParameters * parameters;
-  double                     reconnect_time, /* when reconnect started */
-                             connect_time;
-  uint32_t                   connect_timeout_secs, /* how long to try */
-                             connect_count,
-                             is_connected,
-                             connect_mask;
-  uint16_t                   reconnect_timeout_secs; /* next connect try */
-  bool                       is_reconnecting, /* if connect in progress */
-                             is_shutdown; /* if should stop reconnecting */
-
-  void * operator new( size_t, void *ptr ) { return ptr; }
-  void operator delete( void *ptr ) { ::free( ptr ); }
-
-  ConnectionMgr( TransportRoute &r,  kv::EvPoll &poll )
-    : rte( r ), addr_info( poll, this ), conn( 0 ), parameters( 0 ),
-      reconnect_time( 0 ), connect_time( 0 ), connect_timeout_secs( 0 ),
-      connect_count( 0 ), is_connected( 0 ), connect_mask( 0 ),
-      reconnect_timeout_secs( 1 ), is_reconnecting( false ),
-      is_shutdown( true ) {}
-
-  template<class T>
-  T *alloc_conn( kv::EvPoll &poll,  const uint8_t sock_type ) {
-    void * p = kv::aligned_malloc( sizeof( T ) );
-    T *c = new ( p ) T( poll, sock_type );
-    this->conn = c;
-    return c;
-  }
-  void release_conn( void ) {
-    kv::aligned_free( this->conn );
-    this->conn = NULL;
-  }
-  void set_parm( EvTcpTransportParameters *parm ) noexcept;
-
-  void restart( void ) {
-    this->is_shutdown = false;
-    this->reconnect_time = 0;
-    this->reconnect_timeout_secs = 1;
-    this->is_connected = 0;
-  }
-  void connect_failed( kv::EvSocket &conn,  const char *reason ) noexcept;
-  uint32_t setup_reconnect( void ) noexcept;
-  /* protocol */
-  void do_connect( void ) noexcept;
-  /* EvConnectNotify */
-  virtual void on_connect( kv::EvSocket &conn ) noexcept;
-  virtual void on_shutdown( kv::EvSocket &conn,  const char *,
-                            size_t ) noexcept;
-  /* EvTimerCallback */
-  virtual bool timer_cb( uint64_t, uint64_t ) noexcept;
-  virtual void addr_resolve_cb( kv::CaresAddrInfo &info ) noexcept;
-};
-#endif
 enum TransportRouteState {
-  TPORT_IS_SVC       = 1,
-  TPORT_IS_LISTEN    = 2,
-  TPORT_IS_MCAST     = 4,
-  TPORT_IS_MESH      = 8,
-  TPORT_IS_CONNECT   = 16,
-  TPORT_IS_TCP       = 32,
-  TPORT_IS_EDGE      = 64,
-  TPORT_IS_IPC       = 128,
-  TPORT_IS_SHUTDOWN  = 256,
-  TPORT_IS_DEVICE    = 512
+  TPORT_IS_LISTEN     = 1,   /* is a listener */
+  TPORT_IS_MCAST      = 2,   /* is pgm / inbox */
+  TPORT_IS_MESH       = 4,   /* in a mesh connection */
+  TPORT_IS_CONNECT    = 8,   /* active connecting */
+  TPORT_IS_TCP        = 16,  /* uses a tcp connection */
+  TPORT_IS_EDGE       = 32,  /* is edge route */
+  TPORT_IS_IPC        = 64,  /* is ipc route */
+  TPORT_IS_SHUTDOWN   = 128, /* not running, disconnect or shutdown */
+  TPORT_IS_DEVICE     = 256, /* uses name + dev multicast */
+  TPORT_IS_INPROGRESS = 512  /* connect in progress */
 };
 
 enum RvOptions {
@@ -259,10 +205,10 @@ struct TransportRoute : public kv::EvSocket, public kv::EvConnectionNotify,
                   ConfigTree::Transport &t,  const char *svc_name,
                   uint32_t svc_id,  uint32_t id,  uint32_t f ) noexcept;
 
-  bool is_svc( void )   const { return this->is_set( TPORT_IS_SVC ) != 0; }
-  bool is_mcast( void ) const { return this->is_set( TPORT_IS_MCAST ) != 0; }
-  bool is_mesh( void )  const { return this->is_set( TPORT_IS_MESH ) != 0; }
-  bool is_edge( void )  const { return this->is_set( TPORT_IS_EDGE ) != 0; }
+  bool is_listen( void ) const { return this->is_set( TPORT_IS_LISTEN ) != 0; }
+  bool is_mcast( void )  const { return this->is_set( TPORT_IS_MCAST ) != 0; }
+  bool is_mesh( void )   const { return this->is_set( TPORT_IS_MESH ) != 0; }
+  bool is_edge( void )   const { return this->is_set( TPORT_IS_EDGE ) != 0; }
 
   int init( void ) noexcept;
   void init_state( void ) noexcept;
@@ -314,14 +260,16 @@ struct TransportRoute : public kv::EvSocket, public kv::EvConnectionNotify,
   bool forward_to_connected_auth_not_fd( kv::EvPublish &pub,  uint32_t fd ) {
     return this->sub_route.forward_set_not_fd( pub, this->connected_auth, fd );
   }
-  uint32_t shutdown( ConfigTree::Transport &tport ) noexcept;
+  uint32_t shutdown( void ) noexcept;
   bool start_listener( kv::EvTcpListen *l,
                        ConfigTree::Transport &tport ) noexcept;
+  bool is_self_connect( kv::EvSocket &conn ) noexcept;
   /* a new connection */
   virtual void on_connect( kv::EvSocket &conn ) noexcept;
   /* a disconnect */
   virtual void on_shutdown( kv::EvSocket &conn,  const char *,
                             size_t ) noexcept;
+  void on_timeout( uint32_t connect_tries,  uint64_t nsecs ) noexcept;
   int printf( const char *fmt, ... ) const noexcept __attribute__((format(printf,2,3)));
 };
 

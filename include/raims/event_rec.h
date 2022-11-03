@@ -15,36 +15,37 @@ enum EventType {
   STARTUP           = 1,
   ON_CONNECT        = 2,
   ON_SHUTDOWN       = 3,
-  AUTH_ADD          = 4,
-  AUTH_REMOVE       = 5,
-  SEND_CHALLENGE    = 6,
-  RECV_CHALLENGE    = 7,
-  SEND_TRUST        = 8,
-  RECV_TRUST        = 9,
-  ADD_USER_ROUTE    = 10,
-  HB_QUEUE          = 11,
-  HB_TIMEOUT        = 12,
-  SEND_HELLO        = 13,
-  RECV_BYE          = 14,
-  RECV_ADD_ROUTE    = 15,
-  RECV_PEER_DB      = 16,
-  SEND_ADD_ROUTE    = 17,
-  SEND_OTHER_PEER   = 18,
-  SEND_PEER_DELETE  = 19,
-  RECV_SYNC_RESULT  = 20,
-  SEND_SYNC_REQUEST = 21,
-  RECV_SYNC_REQUEST = 22,
-  RECV_SYNC_FAIL    = 23,
-  SEND_ADJ_CHANGE   = 24,
-  RECV_ADJ_CHANGE   = 25,
-  SEND_ADJ_REQUEST  = 26,
-  RECV_ADJ_REQUEST  = 27,
-  RECV_ADJ_RESULT   = 28,
-  RESIZE_BLOOM      = 29,
-  RECV_BLOOM        = 30,
-  CONVERGE          = 31,
-  BAD_EVENT         = 32,
-  MAX_EVENT         = 33
+  ON_TIMEOUT        = 4,
+  AUTH_ADD          = 5,
+  AUTH_REMOVE       = 6,
+  SEND_CHALLENGE    = 7,
+  RECV_CHALLENGE    = 8,
+  SEND_TRUST        = 9,
+  RECV_TRUST        = 10,
+  ADD_USER_ROUTE    = 11,
+  HB_QUEUE          = 12,
+  HB_TIMEOUT        = 13,
+  SEND_HELLO        = 14,
+  RECV_BYE          = 15,
+  RECV_ADD_ROUTE    = 16,
+  RECV_PEER_DB      = 17,
+  SEND_ADD_ROUTE    = 18,
+  SEND_OTHER_PEER   = 19,
+  SEND_PEER_DELETE  = 20,
+  RECV_SYNC_RESULT  = 21,
+  SEND_SYNC_REQUEST = 22,
+  RECV_SYNC_REQUEST = 23,
+  RECV_SYNC_FAIL    = 24,
+  SEND_ADJ_CHANGE   = 25,
+  RECV_ADJ_CHANGE   = 26,
+  SEND_ADJ_REQUEST  = 27,
+  RECV_ADJ_REQUEST  = 28,
+  RECV_ADJ_RESULT   = 29,
+  RESIZE_BLOOM      = 30,
+  RECV_BLOOM        = 31,
+  CONVERGE          = 32,
+  BAD_EVENT         = 33,
+  MAX_EVENT         = 34
 };
 
 static const uint32_t MASK_EVENT =   0x3f, /* 63 */
@@ -67,35 +68,36 @@ static const struct {
   EVSZ( "startup" ),         /* 1  */
   EVSZ( "on_connect" ),      /* 2  */
   EVSZ( "on_shutdown" ),     /* 3  */
-  EVSZ( "auth_add" ),        /* 4  */
-  EVSZ( "auth_remove" ),     /* 5  */
-  EVSZ( "send_challenge" ),  /* 6  */
-  EVSZ( "recv_challenge" ),  /* 7  */
-  EVSZ( "send_trust" ),      /* 8  */
-  EVSZ( "recv_trust" ),      /* 9  */
-  EVSZ( "add_user_route" ),  /* 10 */
-  EVSZ( "hb_queue" ),        /* 11 */
-  EVSZ( "hb_timeout" ),      /* 12 */
-  EVSZ( "send_hello" ),      /* 13 */
-  EVSZ( "recv_bye" ),        /* 14 */
-  EVSZ( "recv_add_route" ),  /* 15 */
-  EVSZ( "recv_peer_db" ),    /* 16 */
-  EVSZ( "send_add_route" ),  /* 17 */
-  EVSZ( "send_other_peer" ), /* 18 */
-  EVSZ( "send_peer_del" ),   /* 19 */
-  EVSZ( "sync_result" ),     /* 20 */
-  EVSZ( "send_sync_req" ),   /* 21 */
-  EVSZ( "recv_sync_req" ),   /* 22 */
-  EVSZ( "recv_sync_fail" ),  /* 23 */
-  EVSZ( "send_adj_change" ), /* 24 */
-  EVSZ( "recv_adj_change" ), /* 25 */
-  EVSZ( "send_adj_req" ),    /* 26 */
-  EVSZ( "recv_adj_req" ),    /* 27 */
-  EVSZ( "recv_adj_result" ), /* 28 */
-  EVSZ( "resize_bloom" ),    /* 29 */
-  EVSZ( "recv_bloom" ),      /* 30 */
-  EVSZ( "converge" ),        /* 31 */
-  EVSZ( "bad_event" )        /* 32 */
+  EVSZ( "on_timeout" ),      /* 4  */
+  EVSZ( "auth_add" ),        /* 5  */
+  EVSZ( "auth_remove" ),     /* 6  */
+  EVSZ( "send_challenge" ),  /* 7  */
+  EVSZ( "recv_challenge" ),  /* 8  */
+  EVSZ( "send_trust" ),      /* 9  */
+  EVSZ( "recv_trust" ),      /* 10  */
+  EVSZ( "add_user_route" ),  /* 11 */
+  EVSZ( "hb_queue" ),        /* 12 */
+  EVSZ( "hb_timeout" ),      /* 13 */
+  EVSZ( "send_hello" ),      /* 14 */
+  EVSZ( "recv_bye" ),        /* 15 */
+  EVSZ( "recv_add_route" ),  /* 16 */
+  EVSZ( "recv_peer_db" ),    /* 17 */
+  EVSZ( "send_add_route" ),  /* 18 */
+  EVSZ( "send_other_peer" ), /* 19 */
+  EVSZ( "send_peer_del" ),   /* 20 */
+  EVSZ( "sync_result" ),     /* 21 */
+  EVSZ( "send_sync_req" ),   /* 22 */
+  EVSZ( "recv_sync_req" ),   /* 23 */
+  EVSZ( "recv_sync_fail" ),  /* 24 */
+  EVSZ( "send_adj_change" ), /* 25 */
+  EVSZ( "recv_adj_change" ), /* 26 */
+  EVSZ( "send_adj_req" ),    /* 27 */
+  EVSZ( "recv_adj_req" ),    /* 28 */
+  EVSZ( "recv_adj_result" ), /* 29 */
+  EVSZ( "resize_bloom" ),    /* 30 */
+  EVSZ( "recv_bloom" ),      /* 31 */
+  EVSZ( "converge" ),        /* 32 */
+  EVSZ( "bad_event" )        /* 33 */
 };
 #if __cplusplus >= 201103L
 static_assert( MAX_EVENT == ( sizeof( event_strings ) / sizeof( event_strings[ 0 ] ) ), "max_events" );
@@ -279,6 +281,9 @@ struct EventRecord {
   void on_shutdown( uint32_t tid,  bool was_active ) {
     this->tid_event( 0, tid,
                      ON_SHUTDOWN | HAS_TPORT | HAS_DATA ).data = was_active;
+  }
+  void on_timeout( uint32_t tid,  uint32_t tries ) {
+    this->tid_event( 0, tid, ON_TIMEOUT | HAS_TPORT | HAS_DATA ).data = tries;
   }
   void send_hello( void ) {
     this->uid_event( 0, SEND_HELLO | IS_FLOOD );
