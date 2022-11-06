@@ -295,8 +295,11 @@ UserDB::send_name_advert( NameSvc &name,  TransportRoute &rte,
                           NameInbox *inbox ) noexcept
 {
   uint64_t stamp = current_realtime_ns();
-  this->name_send_time = stamp;
+  StringVal mesh_url;
+  if ( rte.mesh_id != NULL )
+    mesh_url = rte.mesh_id->mesh_url;
 
+  this->name_send_time = stamp;
   MsgEst e( X_NAME_SZ );
   e.user_hmac ()
    .seqno     ()
@@ -308,7 +311,7 @@ UserDB::send_name_advert( NameSvc &name,  TransportRoute &rte,
    .expires   ( this->user.expires.len )
    .tport     ( rte.transport.tport.len )
    .tport_type( rte.transport.type.len )
-   .mesh_url  ( rte.mesh_url.len )
+   .mesh_url  ( mesh_url.len )
    .conn_url  ( rte.conn_url.len )
    .pk_digest ();
 
@@ -334,8 +337,8 @@ UserDB::send_name_advert( NameSvc &name,  TransportRoute &rte,
    .tport_type( rte.transport.type.val,
                 rte.transport.type.len   );
   if ( rte.is_set( TPORT_IS_MESH ) )
-    m.mesh_url( rte.mesh_url.val, 
-                rte.mesh_url.len         );
+    m.mesh_url( mesh_url.val,
+                mesh_url.len             );
   else if ( rte.is_set( TPORT_IS_LISTEN ) )
     m.conn_url( rte.conn_url.val, 
                 rte.conn_url.len         );

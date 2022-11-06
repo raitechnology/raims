@@ -60,9 +60,8 @@ SessionMgr::SessionMgr( EvPoll &p,  Logger &l,  ConfigTree &c,
              sub_window_size( 4 * 1024 * 1024 ),
              pub_window_ival( sec_to_ns( 10 ) ),
              sub_window_ival( sec_to_ns( 10 ) ),
-             tcp_timeout( 10 ),
-             tcp_noencrypt( false ),
-             session_started( false )
+             tcp_timeout( 10 ), tcp_noencrypt( false ), tcp_ip4( true ),
+             tcp_ip6( true ), session_started( false )
 {
   this->sock_opts = OPT_NO_POLL;
   this->tcp_accept_sock_type = p.register_type( "ev_tcp_tport" );

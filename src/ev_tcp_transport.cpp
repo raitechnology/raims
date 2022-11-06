@@ -13,15 +13,67 @@ using namespace md;
 
 int rai::ms::no_tcp_aes;
 
+size_t
+EvTcpTransportParameters::copy_string( char buf[ MAX_TCP_HOST_LEN ], size_t off,
+                                       const char * str,  size_t len ) noexcept
+{
+  if ( off + len >= MAX_TCP_HOST_LEN )
+    len = MAX_TCP_HOST_LEN - ( off + 1 );
+  ::memcpy( &buf[ off ], str, len );
+  buf[ off + len ] = '\0';
+  return off + len;
+}
+
+size_t
+EvTcpTransportParameters::copy_host_buf( char buf[ MAX_TCP_HOST_LEN ],
+                                        size_t off, const char * host ) noexcept
+{
+  return copy_string( buf, off, host, ::strlen( host ) );
+}
+
+
+void
+EvTcpTransportOpts::parse( ConfigTree::Transport &tport,
+                           int ptype,  SessionMgr &mgr ) noexcept
+{
+  bool ip4, ip6;
+  if ( ! tport.get_route_int( R_TIMEOUT, this->timeout ) )
+    this->timeout = mgr.tcp_timeout;
+  if ( ! tport.get_route_bool( R_EDGE, this->edge ) )
+    this->edge = false;
+  if ( ! tport.get_route_bool( R_IPV4ONLY, ip4 ) )
+    ip4 = mgr.tcp_ip4;
+  if ( ! tport.get_route_bool( R_IPV6ONLY, ip6 ) )
+    ip6 = mgr.tcp_ip6;
+  if ( ! tport.get_route_bool( R_NOENCRYPT, this->noencrypt ) )
+    this->noencrypt = mgr.tcp_noencrypt;
+  if ( ! this->noencrypt )
+    this->opts |= TCP_OPT_ENCRYPT;
+  if ( ip4 )
+    this->opts = ( this->opts & ~OPT_AF_INET6 ) | OPT_AF_INET;
+  else if ( ip4 )
+    this->opts = ( this->opts & ~OPT_AF_INET ) | OPT_AF_INET6;
+  if ( ( ptype & PARAM_LISTEN ) != 0 )
+    this->opts |= kv::OPT_REUSEADDR;
+  if ( ( ptype & PARAM_REUSEPORT ) != 0 )
+    this->opts |= kv::OPT_REUSEPORT;
+  else
+    this->opts &= ~kv::OPT_REUSEPORT;
+  if ( ( ptype & PARAM_NB_CONNECT ) != 0 )
+    this->opts |= kv::OPT_CONNECT_NB;
+  else
+    this->opts &= ~kv::OPT_CONNECT_NB;
+}
+
 void
 EvTcpTransportParameters::parse_tport( ConfigTree::Transport &tport,
-                                       int ptype,  bool tcp_noencrypt ) noexcept
+                                       int ptype,  SessionMgr &mgr ) noexcept
 {
   char         tmp[ MAX_TCP_HOSTS ][ MAX_TCP_HOST_LEN ];
   size_t       len[ MAX_TCP_HOSTS ];
   const char * host[ MAX_TCP_HOSTS ];
   int          port[ MAX_TCP_HOSTS ], port2 = 0;
-  bool         ip4, ip6, is_device = false;
+  bool         is_device = false;
 
   ConfigTree::StringPair * el[ MAX_TCP_HOSTS ];
   if ( ( ptype & PARAM_LISTEN ) == 0 )
@@ -47,33 +99,9 @@ EvTcpTransportParameters::parse_tport( ConfigTree::Transport &tport,
     }
   }
   this->set_host_port( host, port );
-
-  if ( ! tport.get_route_int( R_TIMEOUT, this->timeout ) )
-    this->timeout = 15;
-  if ( ! tport.get_route_bool( R_EDGE, this->edge ) )
-    this->edge = false;
-  if ( ! tport.get_route_bool( R_IPV4ONLY, ip4 ) )
-    ip4 = false;
-  if ( ! tport.get_route_bool( R_IPV6ONLY, ip6 ) )
-    ip6 = false;
-  if ( ! tport.get_route_bool( R_NOENCRYPT, this->noencrypt ) )
-    this->noencrypt = tcp_noencrypt;
+  this->EvTcpTransportOpts::parse( tport, ptype, mgr );
   if ( is_device )
     this->opts |= OPT_NO_DNS;
-  if ( ip4 )
-    this->opts = ( this->opts & ~OPT_AF_INET6 ) | OPT_AF_INET;
-  else if ( ip4 )
-    this->opts = ( this->opts & ~OPT_AF_INET ) | OPT_AF_INET6;
-  if ( ( ptype & PARAM_LISTEN ) != 0 )
-    this->opts |= kv::OPT_REUSEADDR;
-  if ( ( ptype & PARAM_REUSEPORT ) != 0 )
-    this->opts |= kv::OPT_REUSEPORT;
-  else
-    this->opts &= ~kv::OPT_REUSEPORT;
-  if ( ( ptype & PARAM_NB_CONNECT ) != 0 )
-    this->opts |= kv::OPT_CONNECT_NB;
-  else
-    this->opts &= ~kv::OPT_CONNECT_NB;
 }
 
 

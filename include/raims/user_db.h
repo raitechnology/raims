@@ -499,6 +499,9 @@ struct UserDB {
   /* release secure mem */
   void release_alloc( void ) noexcept;
 
+  uint32_t next_tport_id( void ) const { return this->transport_tab.count; }
+  uint32_t next_svc_id( uint32_t f ) const { return ( f & TPORT_IS_IPC ) ? 0 :
+                                                    this->next_tport_id(); }
   bool init( const CryptPass &pwd,  uint32_t my_fd, ConfigTree &tree ) noexcept;
 
   void calc_hello_key( uint64_t start_time, const HmacDigest &user_hmac,

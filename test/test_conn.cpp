@@ -181,7 +181,7 @@ main( int argc, char** argv )
 
     const char * h = ( ::strcmp( host, "null" ) == 0 ? NULL : host );
     mgr.create( i )->connect( h, port, DEFAULT_TCP_CONNECT_OPTS |
-                                       OPT_CONNECT_NB );
+                                       OPT_CONNECT_NB, 15 );
   }
   sighndl.install();
   for (;;) {

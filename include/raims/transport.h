@@ -59,7 +59,7 @@ struct ConnectCtx : public kv::EvConnectionNotify,
       return ( 100 << this->connect_tries );
     return 10000;
   }
-  void connect( const char *host,  int port,  int opts ) noexcept;
+  void connect( const char *host,  int port,  int opts,  int timeout ) noexcept;
   void reconnect( void ) noexcept;
   bool expired( uint64_t cur_time = 0 ) noexcept;
   /* EvConnectNotify */
@@ -182,7 +182,8 @@ struct TransportRoute : public kv::EvSocket, public kv::EvConnectionNotify,
   TransportRoute        * mesh_id,        /* mesh listener */
                         * dev_id;         /* device listener */
   kv::EvTcpListen       * listener;       /* the listener if svc */
-  ConnectCtx            * connect_ctx;    /* if connnect manager */
+  ConnectCtx            * connect_ctx,    /* if connnect manager */
+                        * notify_ctx;     /* if accept drop, notify reconnect */
   EvPgmTransport        * pgm_tport;      /* if pgm mcast */
   EvInboxTransport      * ibx_tport;      /* if pgm, point-to-point ucast */
   StringVal               ucast_url,      /* url address of ucast ptp */
@@ -203,7 +204,7 @@ struct TransportRoute : public kv::EvSocket, public kv::EvConnectionNotify,
 
   TransportRoute( kv::EvPoll &p,  SessionMgr &m,  ConfigTree::Service &s,
                   ConfigTree::Transport &t,  const char *svc_name,
-                  uint32_t svc_id,  uint32_t id,  uint32_t f ) noexcept;
+                  uint32_t f ) noexcept;
 
   bool is_listen( void ) const { return this->is_set( TPORT_IS_LISTEN ) != 0; }
   bool is_mcast( void )  const { return this->is_set( TPORT_IS_MCAST ) != 0; }

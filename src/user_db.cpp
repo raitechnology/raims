@@ -779,6 +779,8 @@ UserRoute::set_mesh( UserDB &user_db,  const void *p,  size_t len ) noexcept
       this->n.printf( "clear_mesh( t=%s )\n", this->rte.name );
     this->mesh_url.zero();
     this->url_hash = 0;
+    this->rte.mesh_url_hash = 0;
+    this->rte.mesh_url.zero();
     this->clear( MESH_URL_STATE );
   }
   else {
@@ -791,6 +793,7 @@ UserRoute::set_mesh( UserDB &user_db,  const void *p,  size_t len ) noexcept
       this->n.printf( "set_mesh( %.*s, tport=%s, hash=%x )\n",
                       (int) len, (char *) p, this->rte.name, this->url_hash );
     this->rte.mesh_url_hash = this->url_hash;
+    this->rte.mesh_url      = this->mesh_url;
 
     this->set( MESH_URL_STATE );
   }
@@ -1112,13 +1115,15 @@ UserDB::process_mesh_pending( uint64_t curr_mono ) noexcept
           if ( m->is_mesh ) {
             if ( this->start_time > n->start_time ) {
               if ( m->rte.add_mesh_connect( m->mesh_url, m->url_hash ) ) {
-                n->printf( "add_mesh ok %s\n", m->mesh_url );
+                if ( debug_usr )
+                  n->printf( "add_mesh ok %s\n", m->mesh_url );
               }
             }
           }
           else {
             if ( m->rte.add_tcp_connect( m->mesh_url, m->url_hash ) ) {
-              n->printf( "add_tcp ok %s\n", m->mesh_url );
+              if ( debug_usr )
+                n->printf( "add_tcp ok %s\n", m->mesh_url );
             }
           }
         }
@@ -1477,9 +1482,10 @@ UserDB::set_mesh_url( UserRoute &u_rte,  const MsgHdrDecoder &dec,
     uint32_t     url_len = (uint32_t) dec.mref[ FID_MESH_URL ].fsize;
     const char * url     = (const char *) dec.mref[ FID_MESH_URL ].fptr;
     if ( u_rte.set_mesh( *this, url, url_len ) ) {
-      u_rte.n.printf( "(%s) set_mesh_url(%s) %.*s (%s)\n",
-        publish_type_to_string( dec.type ),
-        u_rte.rte.transport.tport.val, url_len, url, src );
+      if ( debug_usr )
+        u_rte.n.printf( "(%s) set_mesh_url(%s) %.*s (%s)\n",
+          publish_type_to_string( dec.type ),
+          u_rte.rte.name, url_len, url, src );
     }
   }
 }

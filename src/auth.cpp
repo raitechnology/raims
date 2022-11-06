@@ -233,6 +233,9 @@ UserDB::send_challenge( UserBridge &n,  AuthStage stage ) noexcept
              encrypted_ha1;
   TransportRoute & rte = n.user_route->rte;
   PolyHmacDigest secret_hmac;
+  StringVal mesh_url;
+  if ( rte.mesh_id != NULL )
+    mesh_url = rte.mesh_id->mesh_url;
   
   this->events.send_challenge( n.uid, n.user_route->rte.tport_id, stage );
   if ( debug_auth )
@@ -262,7 +265,7 @@ UserDB::send_challenge( UserBridge &n,  AuthStage stage ) noexcept
    .expires    ( this->user.expires.len )
    .start      ()
    .ucast_url  ( rte.ucast_url.len )
-   .mesh_url   ( rte.mesh_url.len )
+   .mesh_url   ( mesh_url.len )
    .cost       ()
    .cost2      ()
    .cost3      ()
@@ -303,8 +306,8 @@ UserDB::send_challenge( UserBridge &n,  AuthStage stage ) noexcept
 
   if ( rte.ucast_url.len != 0 )
     m.ucast_url( rte.ucast_url.val, rte.ucast_url.len );
-  if ( rte.mesh_url.len != 0 )
-    m.mesh_url( rte.mesh_url.val, rte.mesh_url.len );
+  if ( mesh_url.len != 0 )
+    m.mesh_url( mesh_url.val, mesh_url.len );
   if ( rte.uid_connected.is_advertised ) {
     m.cost( rte.uid_connected.cost[ 0 ] );
     m.cost2( rte.uid_connected.cost[ 1 ] );
@@ -437,18 +440,23 @@ UserDB::send_trusted( const MsgFramePublish &pub,  UserBridge &n,
     if ( tport_id == rte.tport_id )
       continue;
     UserRoute *u_ptr = n.user_route_ptr( *this, tport_id );
-    if ( ! u_ptr->is_valid() )
+    if ( ! u_ptr->is_valid() || ! u_ptr->is_set( MESH_URL_STATE ) )
       continue;
     TransportRoute &rte = u_ptr->rte;
     if ( rte.is_mesh() ) {
       MeshDBFilter filter2( n.uid );
 
-      size_t mesh_db_len2 = this->mesh_db_size( rte, filter );
-      if ( mesh_db_len2 > mesh_db_len ) {
-        e.sz += mesh_db_len2 - mesh_db_len;
-        mesh_db_len = mesh_db_len2;
-      }
-      if ( mesh_db_len2 != 0 ) {
+      mesh_db_len = this->mesh_db_size( rte, filter );
+      if ( mesh_db_len != 0 ) {
+        MsgEst e( ibx.len() );
+
+        e.seqno     ()
+         .time      ()
+         .auth_stage()
+         .start     ()
+         .mesh_url  ( u_ptr->mesh_url.len )
+         .mesh_db   ( mesh_db_len );
+
         MsgCat m;
         m.reserve( e.sz );
 
@@ -456,8 +464,10 @@ UserDB::send_trusted( const MsgFramePublish &pub,  UserBridge &n,
          .seqno     ( n.auth[ 1 ].seqno  )
          .time      ( n.auth[ 1 ].time   )
          .auth_stage( AUTH_TRUST         )
-         .start     ( this->start_time   );
+         .start     ( this->start_time   )
+         .mesh_url  ( u_ptr->mesh_url.val, u_ptr->mesh_url.len );
         this->mesh_db_submsg( rte, filter, m );
+
         m.close( e.sz, h, CABA_INBOX );
         m.sign( ibx.buf, ibx.len(), *this->session_key );
         b |= this->forward_to( n, ibx.buf, ibx.len(), h, m.msg, m.len(),

@@ -11,6 +11,7 @@ namespace ms {
 
 extern int no_tcp_aes; /* turn off tcp aes encryption */
 struct TransportRoute;
+struct SessionMgr;
 /* tcp listener for accepting EvTcpTransportService connections */
 struct EvTcpTransportListen : public kv::EvTcpListen {
   TransportRoute & rte;
@@ -58,16 +59,27 @@ static const int TCP_TRANSPORT_CONNECT_OPTS =
   ~( kv::OPT_REUSEPORT | kv::OPT_VERBOSE ) ) |
   kv::OPT_CONNECT_NB;
 
-struct EvTcpTransportParameters {
+struct EvTcpTransportOpts {
+  int  opts,      /* tcp opts */
+       timeout;   /* connect timeout seconds */
+  bool edge,      /* if listen edge true, don't create transport*/
+       noencrypt; /* don't encrypt connection */
+
+  EvTcpTransportOpts() {
+    this->opts      = TCP_TRANSPORT_CONNECT_OPTS;
+    this->timeout   = 10;
+    this->edge      = false;
+    this->noencrypt = false;
+  }
+  void parse( ConfigTree::Transport &tport,  int ptype,
+              SessionMgr &mgr ) noexcept;
+};
+
+struct EvTcpTransportParameters : public EvTcpTransportOpts {
   const char * host[ MAX_TCP_HOSTS ]; /* connect host */
-  int          port[ MAX_TCP_HOSTS ], /* connect port */
-               opts,      /* tcp opts */
-               timeout;   /* connect timeout seconds */
+  int          port[ MAX_TCP_HOSTS ]; /* connect port */
   uint32_t     hash[ MAX_TCP_HOSTS ];
-  bool         edge,      /* if listen edge true, don't create transport*/
-               noencrypt; /* don't encrypt connection */
   char         buf[ MAX_TCP_HOSTS ][ MAX_TCP_HOST_LEN ];
-  void * operator new( size_t, void *ptr ) { return ptr; }
 
   EvTcpTransportParameters() {
     for ( size_t i = 0; i < MAX_TCP_HOSTS; i++ ) {
@@ -76,41 +88,11 @@ struct EvTcpTransportParameters {
       this->hash[ i ] = 0;
       this->buf[ i ][ 0 ] = '\0';
     }
-    this->opts      = TCP_TRANSPORT_CONNECT_OPTS;
-    this->timeout   = 10;
-    this->edge      = false;
-    this->noencrypt = false;
   }
-
+  static size_t copy_string( char buf[ MAX_TCP_HOST_LEN ],  size_t off,
+                             const char * str,  size_t len ) noexcept;
   static size_t copy_host_buf( char buf[ MAX_TCP_HOST_LEN ],  size_t off,
-                               const char * host ) {
-    size_t len = ::strlen( host );
-    if ( off + len >= MAX_TCP_HOST_LEN )
-      len = MAX_TCP_HOST_LEN - ( off + 1 );
-    ::memcpy( &buf[ off ], host, len );
-    buf[ off + len ] = '\0';
-    return off + len;
-  }
-
-  EvTcpTransportParameters( const EvTcpTransportParameters &p ) {
-    this->opts      = p.opts;
-    this->timeout   = p.timeout;
-    this->edge      = p.edge;
-    this->noencrypt = p.noencrypt;
-    ::memcpy( this->buf, p.buf, sizeof( this->buf ) );
-
-    for ( size_t i = 0; i < MAX_TCP_HOSTS; i++ ) {
-      this->port[ i ] = p.port[ i ];
-      this->hash[ i ] = p.hash[ i ];
-      if ( p.host[ i ] == NULL )
-        this->host[ i ] = NULL;
-      else {
-        this->host[ i ] = this->buf[ i ];
-        copy_host_buf( this->buf[ i ], 0, p.host[ i ] );
-      }
-    }
-  }
-
+                               const char * host ) noexcept;
   void set_host_port( const char *ho,  int po,  uint32_t h,  int k ) {
     this->port[ k ] = po;
     this->host[ k ] = this->buf[ k ];
@@ -129,15 +111,8 @@ struct EvTcpTransportParameters {
       }
     }
   }
-
-  EvTcpTransportParameters *copy( void ) const {
-    void *m = ::malloc( sizeof( EvTcpTransportParameters ) );
-    EvTcpTransportParameters *p = new ( m ) EvTcpTransportParameters( *this );
-    return p;
-  }
-
   void parse_tport( ConfigTree::Transport &tport,  int ptype,
-                    bool tcp_noencrypt ) noexcept;
+                    SessionMgr &mgr ) noexcept;
 };
 
 struct EvTcpTransportClient : public EvTcpTransport {

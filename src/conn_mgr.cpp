@@ -44,15 +44,16 @@ TransportRoute::on_connect( kv::EvSocket &conn ) noexcept
            first_connect = true;
   this->clear( TPORT_IS_SHUTDOWN );
   if ( ! this->is_mcast() ) {
-    if ( this->is_self_connect( conn ) )
-      return;
     EvTcpTransport &tcp = (EvTcpTransport &) conn;
     is_encrypt = tcp.encrypt;
 
-    if ( this->connect_ctx != NULL &&
-         (EvConnection *) &tcp == this->connect_ctx->client &&
-         this->connect_ctx->connect_tries > 1 )
-      first_connect = false;
+    if ( this->connect_ctx != NULL ) { /* connected sock */
+      if ( (EvConnection *) &tcp == this->connect_ctx->client &&
+           this->connect_ctx->connect_tries > 1 )
+        first_connect = false;
+    }
+    else if ( this->is_self_connect( conn ) ) /* accepted sock */
+      return;
 
     if ( first_connect ) {
       this->printf( "connect %s %s %s using %s fd %u\n",
@@ -119,9 +120,16 @@ TransportRoute::on_shutdown( EvSocket &conn,  const char *err,
   if ( conn.fd >= 0 ) {
     this->user_db.retire_source( *this, conn.fd );
     if ( this->connected.test_clear( conn.fd ) ) {
-      if ( --this->connect_count == 0 )
-        if ( ! this->is_set( TPORT_IS_LISTEN ) )
+      if ( --this->connect_count == 0 ) {
+        if ( ! this->is_set( TPORT_IS_LISTEN ) ) {
           this->set( TPORT_IS_SHUTDOWN );
+          if ( this->notify_ctx != NULL ) {
+            if ( this->notify_ctx->state == ConnectCtx::CONN_SHUTDOWN )
+              this->notify_ctx->reconnect();
+            this->notify_ctx = NULL;
+          }
+        }
+      }
     }
     else if ( &conn == (EvSocket *) this->listener )
       this->set( TPORT_IS_SHUTDOWN );
@@ -140,15 +148,98 @@ TransportRoute::on_timeout( uint32_t connect_tries,  uint64_t nsecs ) noexcept
   this->mgr.events.on_timeout( this->tport_id, connect_tries );
 }
 
+TransportRoute *
+SessionMgr::find_mesh( const StringVal &mesh_url ) noexcept
+{
+  uint32_t count = (uint32_t) this->user_db.transport_tab.count;
+
+  for ( uint32_t tport_id = 0; tport_id < count; tport_id++ ) {
+    TransportRoute *rte = this->user_db.transport_tab.ptr[ tport_id ];
+    if ( ! rte->is_set( TPORT_IS_SHUTDOWN ) && rte->is_set( TPORT_IS_LISTEN ) &&
+           rte->is_set( TPORT_IS_MESH ) ) {
+      if ( rte->mesh_url.equals( mesh_url ) )
+        return rte;
+    }
+  }
+  return NULL;
+}
+
+TransportRoute *
+SessionMgr::find_mesh( TransportRoute &mesh_rte,
+                       struct addrinfo *addr_list ) noexcept
+{
+  uint32_t count = (uint32_t) this->user_db.transport_tab.count;
+  uint32_t addr_count = 0;
+  uint32_t dns_cache[ 128 ];
+  char     url_buf[ 128 ];
+  const struct addrinfo * p;
+
+  for ( uint32_t tport_id = 0; tport_id < count; tport_id++ ) {
+    TransportRoute *rte = this->user_db.transport_tab.ptr[ tport_id ];
+    if ( rte != &mesh_rte && rte->mesh_id == mesh_rte.mesh_id &&
+         ! rte->is_set( TPORT_IS_SHUTDOWN ) &&
+         ! rte->is_set( TPORT_IS_LISTEN ) ) {
+      if ( rte->mesh_url_hash == mesh_rte.mesh_url_hash ) {
+        d_tran( "mesh matched %u(%x)(%.*s) %u(%x)(%.*s)\n",
+         rte->tport_id, rte->mesh_url_hash, rte->mesh_url.len, rte->mesh_url.val,
+         mesh_rte.tport_id, mesh_rte.mesh_url_hash, mesh_rte.mesh_url.len, mesh_rte.mesh_url.val );
+        return rte;
+      }
+    }
+  }
+  for ( p = addr_list; p != NULL; ) {
+    addr_count = 0;
+    while ( p != NULL ) {
+      uint32_t n = 0;
+      PeerAddrStr paddr;
+      if ( p->ai_family == AF_INET || p->ai_family == AF_INET6 ) {
+        paddr.set_addr( (struct sockaddr *) p->ai_addr );
+        ::memcpy( url_buf, "tcp://", 6 );
+        ::memcpy( &url_buf[ 6 ], paddr.buf, paddr.len() );
+        n = 6 + paddr.len();
+        url_buf[ n ] = '\0';
+      }
+      p = p->ai_next;
+      if ( n > 0 ) {
+        dns_cache[ addr_count++ ] = kv_crc_c( url_buf, n, 0 );
+        if ( addr_count == sizeof( dns_cache ) / sizeof( dns_cache[ 0 ] ) )
+          break;
+      }
+    }
+    for ( uint32_t tport_id = 0; tport_id < count; tport_id++ ) {
+      TransportRoute *rte = this->user_db.transport_tab.ptr[ tport_id ];
+      if ( rte != &mesh_rte && rte->mesh_id == mesh_rte.mesh_id &&
+           ! rte->is_set( TPORT_IS_SHUTDOWN ) &&
+           ! rte->is_set( TPORT_IS_LISTEN ) ) {
+        for ( uint32_t i = 0; i < addr_count; i++ ) {
+          if ( rte->mesh_url_hash == dns_cache[ i ] )
+            return rte;
+        }
+      }
+    }
+  }
+  return NULL;
+}
+
 bool
 ConnectMgr::connect( ConnectCtx &ctx ) noexcept
 {
-  TransportRoute  * rte = this->user_db.transport_tab.ptr[ ctx.event_id ];
+  TransportRoute  * rte = this->user_db.transport_tab.ptr[ ctx.event_id ],
+                  * active_rte;
   struct addrinfo * ai  = ctx.addr_info.addr_list;
 
   if ( rte->is_set( TPORT_IS_MESH ) &&
-       this->mgr.find_mesh( *rte, ai, rte->mesh_url_hash ) ) {
+       (active_rte = this->mgr.find_mesh( *rte, ai )) != NULL ) {
+    const char * host = "";
+    if ( ctx.addr_info.host != NULL )
+      host = ctx.addr_info.host;
+    rte->clear( TPORT_IS_INPROGRESS );
+    rte->set( TPORT_IS_SHUTDOWN );
+    if ( debug_tran )
+      rte->printf( "connect %s:%d stopped, accepted connection active\n",
+                   host, ctx.addr_info.port );
     ctx.state = ConnectCtx::CONN_SHUTDOWN;
+    active_rte->notify_ctx = &ctx;
     return true;
   }
 
@@ -193,6 +284,7 @@ ConnectMgr::on_shutdown( ConnectCtx &ctx,  const char *msg,
   if ( ctx.client->sock_err == EV_ERR_CONN_SELF )
     return false;
   rte->set( TPORT_IS_INPROGRESS );
+  rte->clear( TPORT_IS_SHUTDOWN );
   return true;
 }
 
@@ -216,8 +308,10 @@ ConnectDB::create( uint64_t id ) noexcept
 }
 
 void
-ConnectCtx::connect( const char *host,  int port,  int opts ) noexcept
+ConnectCtx::connect( const char *host,  int port,  int opts,
+                     int timeout ) noexcept
 {
+  this->timeout       = timeout;
   this->opts          = opts;
   this->connect_tries = 0;
   this->state         = CONN_GET_ADDRESS;
@@ -230,7 +324,8 @@ ConnectCtx::connect( const char *host,  int port,  int opts ) noexcept
 void
 ConnectCtx::reconnect( void ) noexcept
 {
-  this->connect( this->addr_info.host, this->addr_info.port, this->opts );
+  this->connect( this->addr_info.host, this->addr_info.port, this->opts,
+                 this->timeout );
 }
 
 void

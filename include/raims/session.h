@@ -257,6 +257,8 @@ struct SessionMgr : public kv::EvSocket {
                         tcp_connect_sock_type;
   int                   tcp_timeout;
   bool                  tcp_noencrypt,
+                        tcp_ip4,
+                        tcp_ip6,
                         session_started;
 
   SessionMgr( kv::EvPoll &p,  kv::Logger &l,  ConfigTree &c,
@@ -284,15 +286,13 @@ struct SessionMgr : public kv::EvSocket {
   bool add_tcp_accept( TransportRoute &listen_rte,
                        EvTcpTransport &conn ) noexcept;
   bool add_mesh_connect( TransportRoute &mesh_rte ) noexcept;
-  TransportRoute * find_mesh_conn( TransportRoute &mesh_rte, const char *url,
-                                   uint32_t mesh_hash ) noexcept;
-  bool find_mesh( TransportRoute &mesh_rte, struct addrinfo *addr_list,
-                  uint32_t mesh_hash ) noexcept;
+  TransportRoute * find_mesh( const StringVal &mesh_url ) noexcept;
+  TransportRoute * find_mesh( TransportRoute &mesh_rte,
+                              struct addrinfo *addr_list ) noexcept;
   bool add_mesh_connect( TransportRoute &mesh_rte,  const char **mesh_url,
                          uint32_t *mesh_hash,  uint32_t url_count ) noexcept;
   bool add_mesh_connect( TransportRoute &mesh_rte,
-                         EvTcpTransportParameters &parm,
-                         uint32_t index,  uint32_t url_hash ) noexcept;
+                         const char *url,  uint32_t url_hash ) noexcept;
   int init_session( const CryptPass &pwd ) noexcept;
   void add_rte( const char *sub, size_t sub_len, uint32_t hash,
                 PublishType type ) noexcept;
@@ -332,6 +332,8 @@ struct SessionMgr : public kv::EvSocket {
                  const MsgHdrDecoder &dec,  const char *suf ) noexcept;
   bool forward_inbox( kv::EvPublish &pub ) noexcept;
   bool forward_ipc( TransportRoute &src_rte, kv::EvPublish &mc ) noexcept;
+  bool listen_start_noencrypt( ConfigTree::Transport &tport,
+                               kv::EvTcpListen *l, const char *k ) noexcept;
   bool create_telnet( ConfigTree::Transport &tport ) noexcept;
   bool create_web( ConfigTree::Transport &tport ) noexcept;
   bool create_name( ConfigTree::Transport &tport ) noexcept;

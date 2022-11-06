@@ -19,6 +19,9 @@ UserDB::make_hb( TransportRoute &rte,  const char *sub,  size_t sublen,
 {
   static const char * ver_str;
   static size_t       ver_len;
+  StringVal mesh_url;
+  if ( rte.mesh_id != NULL )
+    mesh_url = rte.mesh_id->mesh_url;
 
   if ( ver_len == 0 ) {
     ver_str = ms_get_version();
@@ -48,7 +51,7 @@ UserDB::make_hb( TransportRoute &rte,  const char *sub,  size_t sublen,
    .create    ( this->user.create.len )
    .expires   ( this->user.expires.len )
    .ucast_url ( rte.ucast_url.len )
-   .mesh_url  ( rte.mesh_url.len )
+   .mesh_url  ( mesh_url.len )
    .cost      ()
    .cost2     ()
    .cost3     ()
@@ -89,8 +92,8 @@ UserDB::make_hb( TransportRoute &rte,  const char *sub,  size_t sublen,
     }
     if ( rte.ucast_url.len != 0 )
       m.ucast_url( rte.ucast_url.val, rte.ucast_url.len );
-    if ( rte.mesh_url.len != 0 )
-      m.mesh_url( rte.mesh_url.val, rte.mesh_url.len );
+    if ( mesh_url.len != 0 )
+      m.mesh_url( mesh_url.val, mesh_url.len );
     if ( rte.uid_connected.is_advertised ) {
       m.cost( rte.uid_connected.cost[ 0 ] );
       m.cost2( rte.uid_connected.cost[ 1 ] );

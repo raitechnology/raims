@@ -25,26 +25,26 @@ using namespace md;
 TransportRoute::TransportRoute( kv::EvPoll &p,  SessionMgr &m,
                                 ConfigTree::Service &s,
                                 ConfigTree::Transport &t,
-                                const char *svc_name,  uint32_t svc_id,
-                                uint32_t id,  uint32_t f ) noexcept
+                                const char *svc_name, uint32_t f ) noexcept
     : EvSocket( p, p.register_type( "transport_route" ) ),
       poll( p ), mgr( m ), user_db( m.user_db ),
-      sub_route( p.sub_route.get_service( svc_name, svc_id, id ) ),
+      sub_route( p.sub_route.get_service( svc_name, m.user_db.next_svc_id( f ),
+                                          m.user_db.next_tport_id() ) ),
       uid_in_mesh( &this->mesh_connected ),
       uid_in_device( &this->mesh_connected ),
       mesh_csum( &this->mesh_csum2 ),
       hb_time( 0 ), hb_mono_time( 0 ), hb_seqno( 0 ),
-      stats_seqno( 0 ), tport_id( id ), hb_count( 0 ),
+      stats_seqno( 0 ), tport_id( m.user_db.next_tport_id() ), hb_count( 0 ),
       last_hb_count( 0 ), connect_count( 0 ), last_connect_count( 0 ),
       state( f ), mesh_id( 0 ), dev_id( 0 ), listener( 0 ),
-      connect_ctx( 0 ), pgm_tport( 0 ), ibx_tport( 0 ), inbox_fd( -1 ),
-      mcast_fd( -1 ), mesh_url_hash( 0 ), conn_hash( 0 ), oldest_uid( 0 ),
-      primary_count( 0 ), ext( 0 ), svc( s ), transport( t )
+      connect_ctx( 0 ), notify_ctx( 0 ), pgm_tport( 0 ), ibx_tport( 0 ),
+      inbox_fd( -1 ), mcast_fd( -1 ), mesh_url_hash( 0 ), conn_hash( 0 ),
+      oldest_uid( 0 ), primary_count( 0 ), ext( 0 ), svc( s ), transport( t )
 {
   uint8_t i;
   this->uid_connected.tport      = t.tport;
   this->uid_connected.tport_type = t.type;
-  this->uid_connected.tport_id   = id;
+  this->uid_connected.tport_id   = this->tport_id;
   for ( i = 0; i < COST_PATH_COUNT; i++ )
     this->router_rt[ i ] = NULL;
   /* parse config that has cost, cost2 ... */
@@ -60,9 +60,10 @@ TransportRoute::TransportRoute( kv::EvPoll &p,  SessionMgr &m,
       cost = ( i == 0 ? COST_DEFAULT : this->uid_connected.cost[ j++ ] );
     this->uid_connected.cost[ i ] = cost;
   }
-  d_tran( "transport.%u(%s, %x, %u,%u,%u,%u) created\n", id, t.tport.val, f,
-           this->uid_connected.cost[ 0 ], this->uid_connected.cost[ 1 ],
-           this->uid_connected.cost[ 2 ], this->uid_connected.cost[ 3 ] );
+  if ( debug_tran )
+    printf( "transport.%u(%s) [%u,%u,%u,%u] created\n", this->tport_id, t.tport.val,
+             this->uid_connected.cost[ 0 ], this->uid_connected.cost[ 1 ],
+             this->uid_connected.cost[ 2 ], this->uid_connected.cost[ 3 ] );
   this->sock_opts = OPT_NO_POLL;
   /* external tports do not have protocol for link state routing:
    *   _I.inbox, _X.HB, _Z.ADD, _Z.BLM, _Z.ADJ, _S.JOIN, _P.PSUB, etc */
@@ -81,6 +82,7 @@ TransportRoute::TransportRoute( kv::EvPoll &p,  SessionMgr &m,
   this->hb_cnonce.zero();
   for ( int i = 0; i < 3; i++ )
     this->auth[ i ].zero();
+  this->user_db.transport_tab.push( this );
 }
 
 int
@@ -145,24 +147,28 @@ TransportRoute::update_cost( UserBridge &n,
                              uint32_t cost[ COST_PATH_COUNT ] ) noexcept
 {
   uint8_t i;
+  uint32_t *cost2 = this->uid_connected.cost;
   for ( i = 0; i < COST_PATH_COUNT; i++ ) {
-    if ( cost[ i ] != this->uid_connected.cost[ i ] ) {
+    if ( cost[ i ] != cost2[ i ] ) {
       if ( this->uid_connected.is_advertised ) {
-        n.printe( "conflicting cost[%u] advertised %u != %u on %s\n",
-                   i, cost[ i ], this->uid_connected.cost[ i ], this->name );
+        n.printe( "conflicting cost[%u] "
+                   "[%u,%u,%u,%u] (advert) != [%u,%u,%u,%u] (config) on %s\n", i,
+                   cost[ 0 ], cost[ 1 ], cost[ 2 ], cost[ 3 ],
+                   cost2[ 0 ], cost2[ 1 ], cost2[ 2 ], cost2[ 3 ], this->name );
+        return;
       }
-      break;
     }
   }
   if ( i == COST_PATH_COUNT )
     return;
-
+#if 0
   if ( this->uid_connected.is_advertised ) {
     for ( i = 0; i < COST_PATH_COUNT; i++ ) {
       if ( this->uid_connected.cost[ i ] > cost[ i ] )
         cost[ i ] = this->uid_connected.cost[ i ];
     }
   }
+#endif
   for ( i = 0; i < COST_PATH_COUNT; i++ )
     this->uid_connected.cost[ i ] = cost[ i ];
 
@@ -449,6 +455,7 @@ TransportRoute::shutdown( void ) noexcept
   uint32_t count = 0;
   if ( this->transport.type.equals( T_TCP, T_TCP_SZ ) ||
        this->transport.type.equals( T_MESH, T_MESH_SZ ) ) {
+    this->notify_ctx = NULL;
     if ( this->listener != NULL && this->listener->in_list( IN_ACTIVE_LIST ) ) {
       this->listener->idle_push( EV_SHUTDOWN );
       count++;
@@ -494,7 +501,7 @@ TransportRoute::start_listener( EvTcpListen *l,
 {
   EvTcpTransportParameters parm;
   bool encrypt = false;
-  parm.parse_tport( tport, PARAM_LISTEN, this->mgr.tcp_noencrypt );
+  parm.parse_tport( tport, PARAM_LISTEN, this->mgr );
 
   if ( tport.type.equals( T_TCP, T_TCP_SZ ) ||
        tport.type.equals( T_MESH, T_MESH_SZ ) ) {
@@ -622,14 +629,16 @@ bool
 TransportRoute::create_tcp_connect( ConfigTree::Transport &tport ) noexcept
 {
   EvTcpTransportParameters parm;
-  parm.parse_tport( tport, PARAM_NB_CONNECT, this->mgr.tcp_noencrypt );
+  parm.parse_tport( tport, PARAM_NB_CONNECT, this->mgr );
 
   if ( this->connect_ctx == NULL )
     this->connect_ctx = this->mgr.connect_mgr.create( this->tport_id );
 
-  int opts = parm.opts | ( parm.noencrypt ? 0 : TCP_OPT_ENCRYPT );
-  this->connect_ctx->timeout = parm.timeout;
-  this->connect_ctx->connect( parm.host[ 0 ], parm.port[ 0 ], opts );
+  this->printf( "create_tcp_connect timeout=%u encrypt=%s host=%s port=%d\n",
+                parm.timeout, parm.noencrypt ? "false" : "true",
+                parm.host[ 0 ] ? parm.host[ 0 ] : "*", parm.port[ 0 ] );
+  this->connect_ctx->connect( parm.host[ 0 ], parm.port[ 0 ], parm.opts,
+                              parm.timeout );
   return true;
 }
 
@@ -637,23 +646,23 @@ bool
 TransportRoute::add_tcp_connect( const char *conn_url,
                                  uint32_t conn_hash ) noexcept
 {
-  d_tran( "add_tcp_connect( %s )\n", conn_url );
-  TransportRoute * rte = this;
-  int timeout;
-  bool noencrypt;
-  if ( ! rte->transport.get_route_bool( R_NOENCRYPT, noencrypt ) )
-    noencrypt = this->mgr.tcp_noencrypt;
-  if ( ! rte->transport.get_route_int( R_TIMEOUT, timeout ) )
-    timeout = this->mgr.tcp_timeout;
+  TransportRoute   * rte = this;
+  EvTcpTransportOpts opts;
+  char   host_buf[ MAX_TCP_HOST_LEN ];
+  size_t len = sizeof( host_buf );
+  int    port;
+
+  opts.parse( rte->transport, PARAM_NB_CONNECT, this->mgr );
+
+  rte->printf( "add_tcp_connect timeout=%u encrypt=%s %s (%x)\n",
+                opts.timeout, opts.noencrypt ? "false" : "true", conn_url,
+                conn_hash );
   if ( rte->connect_ctx != NULL &&
        rte->connect_ctx->state != ConnectCtx::CONN_SHUTDOWN ) {
     if ( rte->conn_hash == conn_hash ) {
       if ( ! rte->connect_ctx->state == ConnectCtx::CONN_IDLE ) {
-        if ( noencrypt )
-          rte->connect_ctx->opts &= ~TCP_OPT_ENCRYPT;
-        else
-          rte->connect_ctx->opts |= TCP_OPT_ENCRYPT;
-        rte->connect_ctx->timeout = timeout;
+        rte->connect_ctx->opts    = opts.opts;
+        rte->connect_ctx->timeout = opts.timeout;
         rte->connect_ctx->reconnect();
       }
       return true;
@@ -668,15 +677,10 @@ TransportRoute::add_tcp_connect( const char *conn_url,
     if ( rte->connect_ctx == NULL )
       rte->connect_ctx = rte->mgr.connect_mgr.create( rte->tport_id );
   }
-  char tcp_buf[ MAX_TCP_HOST_LEN ];
-  size_t len = sizeof( tcp_buf );
-  int opts = TCP_TRANSPORT_CONNECT_OPTS | ( noencrypt ? 0 : TCP_OPT_ENCRYPT );
-  int port;
-  port = ConfigTree::Transport::get_host_port( conn_url, tcp_buf, len );
+  const char * host = conn_url;
+  port = ConfigTree::Transport::get_host_port( host, host_buf, len );
   rte->conn_hash = conn_hash;
-  d_tran( "tcp_url = %s:%u (%x)\n", tcp_buf, port, conn_hash );
-  rte->connect_ctx->timeout = timeout;
-  rte->connect_ctx->connect( tcp_buf, port, opts );
+  rte->connect_ctx->connect( host, port, opts.opts, opts.timeout );
   return true;
 }
 
