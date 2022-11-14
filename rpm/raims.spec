@@ -15,6 +15,8 @@ BuildRequires:  raikv
 BuildRequires:  raimd
 BuildRequires:  openpgm
 BuildRequires:  raids
+BuildRequires:  natsmd
+BuildRequires:  sassrv
 BuildRequires:  h3
 BuildRequires:  rdbparser
 BuildRequires:  linecook
@@ -22,16 +24,22 @@ BuildRequires:  libdecnumber
 BuildRequires:  pcre2-devel
 BuildRequires:  liblzf-devel
 BuildRequires:  git-core
+BuildRequires:  c-ares-devel
+BuildRequires:  openssl-devel
 Requires:       raikv
 Requires:       raimd
 Requires:       openpgm
 Requires:       raids
+Requires:       natsmd
+Requires:       sassrv
 Requires:       libdecnumber
 Requires:       pcre2
 Requires:       liblzf
 Requires:       h3
 Requires:       rdbparser
 Requires:       linecook
+Requires:       c-ares
+Requires:       openssl
 Requires(post): /sbin/ldconfig
 Requires(postun): /sbin/ldconfig
 

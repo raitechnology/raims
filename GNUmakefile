@@ -762,8 +762,21 @@ $(dependd)/depend.make: $(dependd) $(all_depends)
 	@echo "# depend file" > $(dependd)/depend.make
 	@cat $(all_depends) >> $(dependd)/depend.make
 
+ifeq (SunOS,$(lsb_dist))
+remove_rpath = rpath -r
+else
+ifeq (Darwin,$(lsb_dist))
+remove_rpath = true
+else
+remove_rpath = chrpath -d
+endif
+endif
+
 .PHONY: dist_bins
-dist_bins: $(all_libs)
+dist_bins: $(all_libs) $(bind)/ms_server $(bind)/ms_gen_key
+	$(remove_rpath) $(libd)/libraims.so
+	$(remove_rpath) $(bind)/ms_server
+	$(remove_rpath) $(bind)/ms_gen_key
 
 .PHONY: dist_rpm
 dist_rpm: srpm
