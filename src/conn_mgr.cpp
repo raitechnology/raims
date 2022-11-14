@@ -165,6 +165,21 @@ SessionMgr::find_mesh( const StringVal &mesh_url ) noexcept
 }
 
 TransportRoute *
+SessionMgr::find_ucast( const StringVal &ucast_url ) noexcept
+{
+  uint32_t count = (uint32_t) this->user_db.transport_tab.count;
+
+  for ( uint32_t tport_id = 0; tport_id < count; tport_id++ ) {
+    TransportRoute *rte = this->user_db.transport_tab.ptr[ tport_id ];
+    if ( ! rte->is_set( TPORT_IS_SHUTDOWN ) && rte->is_set( TPORT_IS_MCAST ) ) {
+      if ( rte->ucast_url.equals( ucast_url ) )
+        return rte;
+    }
+  }
+  return NULL;
+}
+
+TransportRoute *
 SessionMgr::find_mesh( TransportRoute &mesh_rte,
                        struct addrinfo *addr_list ) noexcept
 {

@@ -40,12 +40,13 @@ enum EventType {
   RECV_ADJ_CHANGE   = 26,
   SEND_ADJ_REQUEST  = 27,
   RECV_ADJ_REQUEST  = 28,
-  RECV_ADJ_RESULT   = 29,
-  RESIZE_BLOOM      = 30,
-  RECV_BLOOM        = 31,
-  CONVERGE          = 32,
-  BAD_EVENT         = 33,
-  MAX_EVENT         = 34
+  SEND_ADJ          = 29,
+  RECV_ADJ_RESULT   = 30,
+  RESIZE_BLOOM      = 31,
+  RECV_BLOOM        = 32,
+  CONVERGE          = 33,
+  BAD_EVENT         = 34,
+  MAX_EVENT         = 35
 };
 
 static const uint32_t MASK_EVENT =   0x3f, /* 63 */
@@ -93,11 +94,12 @@ static const struct {
   EVSZ( "recv_adj_change" ), /* 26 */
   EVSZ( "send_adj_req" ),    /* 27 */
   EVSZ( "recv_adj_req" ),    /* 28 */
-  EVSZ( "recv_adj_result" ), /* 29 */
-  EVSZ( "resize_bloom" ),    /* 30 */
-  EVSZ( "recv_bloom" ),      /* 31 */
-  EVSZ( "converge" ),        /* 32 */
-  EVSZ( "bad_event" )        /* 33 */
+  EVSZ( "send_adj" ),        /* 29 */
+  EVSZ( "recv_adj_result" ), /* 30 */
+  EVSZ( "resize_bloom" ),    /* 31 */
+  EVSZ( "recv_bloom" ),      /* 32 */
+  EVSZ( "converge" ),        /* 33 */
+  EVSZ( "bad_event" )        /* 34 */
 };
 #if __cplusplus >= 201103L
 static_assert( MAX_EVENT == ( sizeof( event_strings ) / sizeof( event_strings[ 0 ] ) ), "max_events" );
@@ -106,13 +108,13 @@ static_assert( MAX_EVENT == ( sizeof( event_strings ) / sizeof( event_strings[ 0
 #endif
 
 struct EventRec {
-  uint64_t    stamp;
-  uint32_t    source_uid,
-              tport_id,
-              peer_uid,
-              data;
-  uint16_t    event_flags,
-              reason;
+  uint64_t stamp;
+  uint32_t source_uid,
+           tport_id,
+           peer_uid,
+           data;
+  uint16_t event_flags,
+           reason;
   EventType event_type( void ) const {
     uint32_t e = this->event_flags & MASK_EVENT;
     if ( e >= MAX_EVENT )
@@ -174,6 +176,7 @@ struct EventRec {
           case SEND_ADJ_REQUEST:
           case RECV_ADJ_REQUEST:
           case RECV_ADJ_RESULT:
+          case SEND_ADJ:
             return adjacency_request_string( (AdjacencyRequest) this->data );
             /*return sync_kind_string( (SyncKind) this->data );*/
           case RESIZE_BLOOM:
@@ -402,25 +405,23 @@ struct EventRecord {
   }
   void send_adjacency_request( uint32_t uid, uint32_t tid, uint32_t sync,
                                uint32_t chg /* AdjacencyRequest */ ) {
-    uint32_t event_type = SEND_ADJ_REQUEST | HAS_TPORT | HAS_DATA;
-    if ( sync != 0 )
-      event_type |= HAS_PEER;
-    EventRec & ev = this->tid_event( uid, tid, event_type );
-    ev.peer_uid = sync;
-    ev.data     = chg;
+    this->adjacency_op( SEND_ADJ_REQUEST, uid, tid, sync, chg );
   }
   void recv_adjacency_request( uint32_t uid,  uint32_t tid,  uint32_t sync,
                                uint32_t chg /* AdjacencyRequest */ ) {
-    uint32_t event_type = RECV_ADJ_REQUEST | HAS_TPORT | HAS_DATA;
-    if ( sync != 0 )
-      event_type |= HAS_PEER;
-    EventRec & ev = this->tid_event( uid, tid, event_type );
-    ev.peer_uid = sync;
-    ev.data     = chg;
+    this->adjacency_op( RECV_ADJ_REQUEST, uid, tid, sync, chg );
   }
   void recv_adjacency_result( uint32_t uid,  uint32_t tid,  uint32_t sync,
                               uint32_t chg/* AdjacencyRequest */ ) {
-    uint32_t event_type = RECV_ADJ_RESULT | HAS_TPORT | HAS_DATA;
+    this->adjacency_op( RECV_ADJ_RESULT, uid, tid, sync, chg );
+  }
+  void send_adjacency( uint32_t uid,  uint32_t tid,  uint32_t sync,
+                       uint32_t chg/* AdjacencyRequest */ ) {
+    this->adjacency_op( SEND_ADJ, uid, tid, sync, chg );
+  }
+  void adjacency_op( uint32_t event_type,  uint32_t uid,  uint32_t tid,
+                     uint32_t sync,  uint32_t chg/* AdjacencyRequest */ ) {
+    event_type |= HAS_TPORT | HAS_DATA;
     if ( sync != 0 )
       event_type |= HAS_PEER;
     EventRec & ev = this->tid_event( uid, tid, event_type );
@@ -442,4 +443,3 @@ struct EventRecord {
 }
 
 #endif
-

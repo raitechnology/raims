@@ -159,7 +159,7 @@ UserDB::load_users( const char *p,  size_t size,  ms::StringTab &st,
         this->make_link( one, two, cost, type, name, st );
       }
     }
-    else if ( ::strcmp( type, "mesh" ) == 0 || ::strcmp( type, "pgm" ) == 0 ) {
+    else if ( ::strcmp( type, "mesh" ) == 0 ) {
       for ( int i = 1; i < argc; i++ ) {
         UserBridge *one = this->find( args[ i ], "test", st );
         for ( int j = i + 1; j < argc; j++ ) {
@@ -167,6 +167,19 @@ UserDB::load_users( const char *p,  size_t size,  ms::StringTab &st,
           this->make_link( one, two, cost, type, name, st );
         }
       }
+    }
+    else if ( ::strcmp( type, "pgm" ) == 0 ) {
+      for ( int i = 1; i < argc; i++ ) {
+        UserBridge     * one  = this->find( args[ i ], "test", st );
+        AdjacencySpace * link = one->add_link( cost, type, name, st );
+        for ( int j = 1; j < argc; j++ ) {
+          if ( i == j )
+            continue;
+          UserBridge * two = this->find( args[ j ], "test", st );
+          link->add( two->uid );
+        }
+      }
+      this->peer_dist.update_seqno++;
     }
   }
   if ( start_len > 0 ) {

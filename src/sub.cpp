@@ -197,9 +197,9 @@ SubDB::send_subs_request( UserBridge &n,  uint64_t seqno ) noexcept
     m.reserve( e.sz );
 
     m.open( this->user_db.bridge_id.nonce, ibx.len() )
-     .seqno ( ++n.send_inbox_seqno )
-     .start ( n.sub_seqno          )
-     .end   ( seqno                );
+     .seqno ( n.inbox.next_send( U_INBOX_SUBS ) )
+     .start ( n.sub_seqno )
+     .end   ( seqno       );
     uint32_t h = ibx.hash();
     m.close( e.sz, h, CABA_INBOX );
     m.sign( ibx.buf, ibx.len(), *this->user_db.session_key );
@@ -229,7 +229,7 @@ SubDB::fwd_resub( UserBridge &n,  const char *sub,  size_t sublen,
   MsgCat   m;
   m.reserve( e.sz );
   m.open( this->user_db.bridge_id.nonce, ibx.len() )
-   .seqno( ++n.send_inbox_seqno );
+   .seqno( n.inbox.next_send( U_INBOX_RESUB ) );
   if ( ! is_psub )
     m.subject( sub, sublen );
   else
@@ -334,9 +334,9 @@ SubDB::recv_subs_request( const MsgFramePublish &,  UserBridge &n,
     m.reserve( e.sz );
 
     m.open( this->user_db.bridge_id.nonce, ibx.len() )
-     .seqno  ( ++n.send_inbox_seqno )
-     .start  ( from_seqno           )
-     .end    ( end                  );
+     .seqno  ( n.inbox.next_send( U_INBOX_RESUB ) )
+     .start  ( from_seqno )
+     .end    ( end        );
     if ( token != 0 )
       m.token( token );
     uint32_t h = ibx.hash();
@@ -392,7 +392,7 @@ SubDB::send_bloom_request( UserBridge &n ) noexcept
     m.reserve( e.sz );
 
     m.open( this->user_db.bridge_id.nonce, ibx.len() )
-     .seqno( ++n.send_inbox_seqno );
+     .seqno( n.inbox.next_send( U_INBOX_BLOOM_REQ ) );
     uint32_t h = ibx.hash();
     m.close( e.sz, h, CABA_INBOX );
     m.sign( ibx.buf, ibx.len(), *this->user_db.session_key );
@@ -424,8 +424,8 @@ SubDB::recv_bloom_request( const MsgFramePublish &,  UserBridge &n,
   MsgCat m;
   m.reserve( e.sz );
   m.open( this->user_db.bridge_id.nonce, ibx.len() )
-   .seqno    ( ++n.send_inbox_seqno )
-   .sub_seqno( this->sub_seqno      )
+   .seqno    ( n.inbox.next_send( U_INBOX_BLOOM_RPY ) )
+   .sub_seqno( this->sub_seqno            )
    .bloom    ( code.ptr, code.code_sz * 4 );
   uint32_t h = ibx.hash();
   m.close( e.sz, h, CABA_INBOX );

@@ -248,6 +248,8 @@ struct MsgBufDigestT : public BMsgBufT<T> {
 
   T  & mesh_filter( const void *in, size_t in_len ) {
     return this->o( FID_MESH_FILTER, in, (uint32_t) in_len ); }
+  T  & ucast_filter( const void *in, size_t in_len ) {
+    return this->o( FID_UCAST_FILTER, in, (uint32_t) in_len ); }
   T  & bloom      ( const void *in, size_t in_len ) {
     return this->o( FID_BLOOM, in, (uint32_t) in_len ); }
   T  & data       ( const void *in, size_t in_len ) {
@@ -377,10 +379,12 @@ static inline size_t fid_est( uint32_t fid, size_t len ) {
   switch ( fid ) {
     case FID_DATA:
     case FID_MESH_FILTER:
+    case FID_UCAST_FILTER:
     case FID_BLOOM:
       return 2 + 4 + len + 1; /* long opaque, aligned */
     case FID_PEER_DB:
     case FID_MESH_DB:
+    case FID_UCAST_DB:
     case FID_ADJACENCY:
       return 2 + 4 + 8 + len + 1; /* long opaque, msg, aligned */
     default:
@@ -438,10 +442,12 @@ struct MsgEst {
   MsgEst & mesh_csum  ( void ) { sz += fid_est( FID_MESH_CSUM ); return *this; }
 
   MsgEst & mesh_filter( size_t l ) { sz += fid_est( FID_MESH_FILTER, l ); return *this; }
+  MsgEst & ucast_filter( size_t l ){ sz += fid_est( FID_UCAST_FILTER, l ); return *this; }
   MsgEst & bloom      ( size_t l ) { sz += fid_est( FID_BLOOM, l ); return *this; }
   MsgEst & data       ( size_t l ) { sz += fid_est( FID_DATA, l ); return *this; }
   MsgEst & peer_db    ( size_t l ) { sz += fid_est( FID_PEER_DB, l ); return *this; }
   MsgEst & mesh_db    ( size_t l ) { sz += fid_est( FID_MESH_DB, l ); return *this; }
+  MsgEst & ucast_db   ( size_t l ) { sz += fid_est( FID_UCAST_DB, l ); return *this; }
   MsgEst & adjacency  ( size_t l ) { sz += fid_est( FID_ADJACENCY, l ); return *this; }
   MsgEst & cnonce     ( void ) { sz += fid_est( FID_CNONCE ); return *this; }
 

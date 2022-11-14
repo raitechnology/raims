@@ -123,12 +123,29 @@ struct UserRoute : public UserStateTest<UserRoute> {
     this->msgs_sent     = 0;
     this->ucast_src     = NULL;
   }
-  void set_ucast( UserDB &user_db,  const void *p,  size_t len,
+  bool set_ucast( UserDB &user_db,  const void *p,  size_t len,
                   const UserRoute *src ) noexcept;
   bool set_mesh( UserDB &user_db,  const void *p,  size_t len ) noexcept;
 
   char * inbox_route_str( char *buf,  size_t buflen ) noexcept;
 };
+
+struct InboxSeqno {
+  uint64_t recv_seqno, /* recv side inbox seqno */
+           send_seqno; /* inbox seqnos for ptp links */
+  uint8_t  recv_type[ 32 ],
+           send_type[ 32 ];
+  void set_recv( uint64_t seqno,  uint8_t pub_type ) {
+    this->recv_type[ seqno % 32 ] = pub_type;
+    this->recv_seqno = seqno;
+  }
+  uint64_t next_send( uint8_t pub_type ) {
+    uint64_t seqno = ++this->send_seqno;
+    this->send_type[ seqno % 32 ] = pub_type;
+    return seqno;
+  }
+};
+
 /* peer sessions */
 struct UserBridge : public UserStateTest<UserBridge> {
   HashDigest         peer_key,            /* peer session key */
@@ -162,18 +179,22 @@ struct UserBridge : public UserStateTest<UserBridge> {
                      link_state_seqno;    /* seqno used for link state db */
   UserRoute        * u_buf[ 24 ];         /* indexes user_route */
   StageAuth          auth[ 2 ];           /* auth handshake state */
-  uint32_t           ping_send_count,
+  InboxSeqno         inbox;
+  uint32_t           ping_send_seqno,
+                     ping_recv_seqno,
+                     pong_send_seqno,
+                     pong_recv_seqno,
+                     ping_send_count,
                      ping_recv_count,
                      pong_recv_count,
                      ping_fail_count,     /* ping counters */
                      challenge_count,     /* count of challenges */
                      unknown_refs,        /* link refs are yet to be resolved */
-                     auth_count;          /* number of times authenticated */
+                     auth_count,          /* number of times authenticated */
+                     adj_req_count;       /* throttle the number of requests */
   uint64_t           unknown_link_seqno,  /* edge of link_state_seqno */
-                     recv_peer_seqno,     /* seqno used for add/del/blm peer */
-                     send_inbox_seqno,    /* inbox seqnos for ptp links */
-                     recv_inbox_seqno,    /* recv side inbox seqno */
-                     recv_mcast_seqno,    /* recv side mcast seqno */
+                     peer_recv_seqno,     /* seqno used for add/del/blm peer */
+                     mcast_recv_seqno,    /* recv side mcast seqno */
                      start_mono_time,     /* uptime from hb */
                      auth_mono_time,      /* when auth happens */
                      challenge_mono_time, /* time challenge sent */
@@ -279,6 +300,7 @@ struct UserBridge : public UserStateTest<UserBridge> {
   static bool is_adj_older( UserBridge *r1,  UserBridge *r2 ) {
     return r1->adj_timeout() > r2->adj_timeout();
   }
+  bool throttle_adjacency( uint32_t inc,  uint64_t cur_mono = 0 ) noexcept;
   uint64_t ping_timeout( void ) const {
     return this->ping_mono_time + sec_to_ns( 5 );
   }
@@ -452,8 +474,8 @@ struct UserDB {
                         uid_ping_count,
                         next_ping_uid;
   uint64_t              send_peer_seqno, /* a unique seqno for peer multicast */
-                        link_state_seqno, /* seqno of adjacency updates */
-                        mcast_seqno,      /* seqno of mcast subjects */
+                        link_state_seqno,/* seqno of adjacency updates */
+                        mcast_send_seqno,/* seqno of mcast subjects */
                         hb_ival_ns,      /* heartbeat interval */
                         hb_ival_mask,    /* ping ival = pow2 hb_ival * 1.5 */
                         next_ping_mono,  /* when next ping is sent */
@@ -549,9 +571,10 @@ struct UserDB {
                      MsgHdrDecoder &dec ) noexcept;
   void interval_ping( uint64_t curr_mono,  uint64_t curr_time ) noexcept;
   void send_ping_request( UserBridge &n ) noexcept;
-  bool recv_ping_request( const MsgFramePublish &pub,  UserBridge &n,
-                          const MsgHdrDecoder &dec ) noexcept;
-  bool recv_pong_result( const MsgFramePublish &pub,  UserBridge &n,
+  bool recv_ping_request( MsgFramePublish &pub,  UserBridge &n,
+                          const MsgHdrDecoder &dec,
+                          bool is_mcast_ping = false ) noexcept;
+  bool recv_pong_result( MsgFramePublish &pub,  UserBridge &n,
                          const MsgHdrDecoder &dec ) noexcept;
   int64_t min_skew( UserBridge &n ) {
     if ( n.skew_upd == 0 )
@@ -594,7 +617,12 @@ struct UserDB {
   UserBridge * add_user2( const UserNonce &user_bridge_id,  
                           PeerEntry &peer,  uint64_t start,
                           HashDigest &hello ) noexcept;
-  void set_ucast_url( UserRoute &u_rte, const MsgHdrDecoder &dec ) noexcept;
+  void set_ucast_url( UserRoute &u_rte, const MsgHdrDecoder &dec,
+                      const char *src ) noexcept;
+  void set_ucast_url( UserRoute &u_rte, const UserRoute *ucast_src,
+                      const char *src ) noexcept;
+  void set_ucast_url( UserRoute &u_rte, const char *url,  size_t url_len,
+                      const char *src ) noexcept;
   void set_mesh_url( UserRoute &u_rte, const MsgHdrDecoder &dec,
                      const char *src ) noexcept;
   void find_adjacent_routes( void ) noexcept;
@@ -628,18 +656,19 @@ struct UserDB {
   void adjacency_submsg( UserBridge *sync,  MsgCat &m ) noexcept;
   bool recv_adjacency_change( const MsgFramePublish &pub,  UserBridge &n,
                               MsgHdrDecoder &dec ) noexcept;
+  bool send_adjacency( UserBridge &n,  UserBridge *sync,  InboxBuf &ibx,
+                       uint64_t time_val,  uint32_t reas,  int which ) noexcept;
   bool send_adjacency_request( UserBridge &n,  AdjacencyRequest reas ) noexcept;
-  bool send_adjacency_request2( UserBridge &n,  UserBridge &sync,
-                                AdjacencyRequest reas ) noexcept;
+  /*bool send_adjacency_request2( UserBridge &n, AdjacencyRequest reas ) noexcept;*/
   bool recv_adjacency_request( const MsgFramePublish &pub,  UserBridge &n,
-                               const MsgHdrDecoder &dec ) noexcept;
+                               MsgHdrDecoder &dec ) noexcept;
   bool recv_adjacency_result( const MsgFramePublish &pub,  UserBridge &n,
                               MsgHdrDecoder &dec ) noexcept;
   /* peer.cpp */
   /* sync info about peer n to send to inbox of dest */
   void make_peer_sync_msg( UserBridge &dest,  UserBridge &n,
                            const char *sub,  size_t sublen,  uint32_t h,
-                           MsgCat &m,  uint32_t hops,  bool in_mesh ) noexcept;
+                           MsgCat &m,  uint32_t hops ) noexcept;
   bool recv_sync_request( const MsgFramePublish &pub,  UserBridge &n,
                           const MsgHdrDecoder &dec ) noexcept;
 
@@ -664,6 +693,9 @@ struct UserDB {
                      MsgHdrDecoder &dec,  AuthStage stage ) noexcept;
   bool make_peer_db_msg( UserBridge &n,  const char *sub,  size_t sublen,
                          uint32_t h,  MsgCat &m ) noexcept;
+  size_t peer_db_size( UserBridge &n,  bool is_adj_req = false ) noexcept;
+  void peer_db_submsg( UserBridge &n,  MsgCat &m,
+                       bool is_adj_req = false ) noexcept;
   /* send peer db to inbox of peer */
   void send_peer_db( UserBridge &n ) noexcept;
 
@@ -685,8 +717,10 @@ struct UserDB {
   /* recv and construct mesh db */
   bool recv_mesh_db( const MsgFramePublish &pub,  UserBridge &n,
                      MsgHdrDecoder &dec ) noexcept;
-  size_t mesh_db_size( TransportRoute &rte,  MeshDBFilter &filter ) noexcept;
-  void mesh_db_submsg( TransportRoute &rte,  MeshDBFilter &filter,
+  bool recv_ucast_db( const MsgFramePublish &pub,  UserBridge &n,
+                      MsgHdrDecoder &dec ) noexcept;
+  size_t url_db_size( TransportRoute &rte,  UrlDBFilter &filter ) noexcept;
+  void url_db_submsg( TransportRoute &rte,  UrlDBFilter &filter,
                        MsgCat &m ) noexcept;
   bool recv_mesh_request( const MsgFramePublish &pub,  UserBridge &n,
                           MsgHdrDecoder &dec ) noexcept;

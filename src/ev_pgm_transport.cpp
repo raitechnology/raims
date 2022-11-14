@@ -74,7 +74,7 @@ EvPgmTransport::connect( EvPgmTransportParameters &p,
   this->PeerData::init_peer( this->fd, this->rte.sub_route.route_id,
                              NULL, "pgm" );
   char peer[ 256 ];
-  ::snprintf( peer, sizeof( peer ), "%s:%u", p.network, p.port );
+  ::snprintf( peer, sizeof( peer ), "%s:%u", net, port );
   this->PeerData::set_peer_address( peer, ::strlen( peer ) );
   if ( this->poll.add_sock( this ) < 0 ) {
     fprintf( stderr, "failed to add sock %d\n", this->fd );

@@ -294,7 +294,10 @@ enum MsgFid {
   FID_PK_SIG         = 74 , /* pk key signature */
   FID_CONN_URL       = 75 , /* connect url spec */
   FID_CONN_PORT      = 76 , /* connect port */
-  FID_PUBKEY         = 77   /* ec pubkey */
+  FID_PUBKEY         = 77 , /* ec pubkey */
+
+  FID_UCAST_DB       = 78 , /* ucast urls */
+  FID_UCAST_FILTER   = 79   /* filter ucast db requests */
 };
 static const int FID_TYPE_SHIFT = 8,
                  FID_MAX        = 1 << FID_TYPE_SHIFT; /* 256 */
@@ -378,19 +381,21 @@ enum PublishType {
   U_INBOX_BLOOM_RPY = 27, /* _I.Nonce.bloom_rpy */
   U_INBOX_ADJ_REQ   = 28, /* _I.Nonce.adj_req */
   U_INBOX_ADJ_RPY   = 29, /* _I.Nonce.adj_rpy */
-  U_INBOX_MESH_REQ  = 30, /* _I.Nonce.adj_req */
-  U_INBOX_MESH_RPY  = 31, /* _I.Nonce.adj_rpy */
-  U_INBOX_TRACE     = 32, /* _I.Nonce.trace */
-  U_INBOX_ACK       = 33, /* _I.Nonce.ack */
-  U_INBOX_ANY       = 34, /* _I.Nonce.any */
-  U_INBOX           = 35, /* _I.Nonce.X reply subject, X is integer */
+  U_INBOX_MESH_REQ  = 30, /* _I.Nonce.mesh_req */
+  U_INBOX_MESH_RPY  = 31, /* _I.Nonce.mesh_rpy */
+  U_INBOX_UCAST_REQ = 32, /* _I.Nonce.ucast_req */
+  U_INBOX_UCAST_RPY = 33, /* _I.Nonce.ucast_rpy */
+  U_INBOX_TRACE     = 34, /* _I.Nonce.trace */
+  U_INBOX_ACK       = 35, /* _I.Nonce.ack */
+  U_INBOX_ANY       = 36, /* _I.Nonce.any */
+  U_INBOX           = 37, /* _I.Nonce.X reply subject, X is integer */
 
-  U_MCAST_PING      = 36, /* _M.ping */
-  U_MCAST           = 37, /* _M.> */
+  U_MCAST_PING      = 38, /* _M.ping */
+  U_MCAST           = 39, /* _M.> */
   /* other subject */
-  U_INBOX_ANY_RTE   = 38, /* _I.Nonce.any, ipc inbox */
-  MCAST_SUBJECT     = 39, /* not _XX subject */
-  UNKNOWN_SUBJECT   = 40  /* init, not resolved */
+  U_INBOX_ANY_RTE   = 40, /* _I.Nonce.any, ipc inbox */
+  MCAST_SUBJECT     = 41, /* not _XX subject */
+  UNKNOWN_SUBJECT   = 42  /* init, not resolved */
 };
 #ifdef INCLUDE_MSG_CONST
 static const char *publish_type_str[] = {
@@ -423,6 +428,8 @@ static const char *publish_type_str[] = {
   "u_inbox_adj_rpy",
   "u_inbox_mesh_req",
   "u_inbox_mesh_rpy",
+  "u_inbox_ucast_req",
+  "u_inbox_ucast_rpy",
   "u_inbox_trace",
   "u_inbox_ack",
   "u_inbox_any",
@@ -798,7 +805,10 @@ static FidTypeName fid_type_name[] = {
 { FID_PK_SIG      , OPAQUE_64                   , XCL , 0 ,"pk_sig"          },
 { FID_CONN_URL    , SHORT_STRING                , XCL , 0 ,"conn_url"        },
 { FID_CONN_PORT   , U_SHORT                     , XCL , 0 ,"conn_port"       },
-{ FID_PUBKEY      , OPAQUE_32                   , XCL , 0 ,"pubkey"          }
+{ FID_PUBKEY      , OPAQUE_32                   , XCL , 0 ,"pubkey"          },
+
+{ FID_UCAST_DB    , LONG_OPAQUE                 , XCL , 0 ,"ucast_db"        },
+{ FID_UCAST_FILTER, LONG_OPAQUE                 , XCL , 0 ,"ucast_filter"    }
 };
 
 #endif

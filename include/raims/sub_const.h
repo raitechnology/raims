@@ -52,6 +52,8 @@ namespace ms {
 #define _ADJ_RPY        "adj_rpy"
 #define _MESH_REQ       "mesh_req"
 #define _MESH_RPY       "mesh_rpy"
+#define _UCAST_REQ      "ucast_req"
+#define _UCAST_RPY      "ucast_rpy"
 #define _TRACE          "trace"
 #define _ACK            "ack"
 #define _ANY            "any"

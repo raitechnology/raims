@@ -30,16 +30,12 @@ get_bridge_nonce( Nonce &b_nonce,  const MsgHdrDecoder &dec ) noexcept
 void
 UserDB::make_peer_sync_msg( UserBridge &dest,  UserBridge &n,
                             const char *sub,  size_t sublen,  uint32_t h,
-                            MsgCat &m,  uint32_t hops,  bool in_mesh/*,
-                            TransportRoute &rte*/ ) noexcept
+                            MsgCat &m,  uint32_t hops ) noexcept
 {
-  size_t user_len      = n.peer.user.len,
-         svc_len       = n.peer.svc.len,
-         create_len    = n.peer.create.len,
-         expires_len   = n.peer.expires.len,
-         ucast_url_len = n.user_route->ucast_url.len,
-         mesh_url_len  = n.user_route->mesh_url.len/*,
-         mesh_db_len   = ( in_mesh ? this->mesh_db_size( rte ) : 0 )*/;
+  size_t user_len    = n.peer.user.len,
+         svc_len     = n.peer.svc.len,
+         create_len  = n.peer.create.len,
+         expires_len = n.peer.expires.len;
   BloomCodec code;
   n.bloom.encode( code );
 
@@ -66,14 +62,11 @@ UserDB::make_peer_sync_msg( UserBridge &dest,  UserBridge &n,
    .link_state ()
    .hb_skew    ()
    .bloom      ( code.code_sz * 4 )
-   .ucast_url  ( ucast_url_len )
-   .mesh_url   ( mesh_url_len )
    .adjacency  ( this->adjacency_size( &n ) );
-   /*.mesh_db   ( mesh_db_len );*/
 
   m.reserve( e.sz );
   m.open( this->bridge_id.nonce, sublen )
-   .seqno      ( ++dest.send_inbox_seqno )
+   .seqno      ( dest.inbox.next_send( U_INBOX_SYNC_RPY ) )
    .time       ( n.hb_time  )
    .session    ( n.bridge_id.hmac, n.bridge_id.nonce )
    .sess_key   ( encrypted_ha1 )
@@ -90,13 +83,8 @@ UserDB::make_peer_sync_msg( UserBridge &dest,  UserBridge &n,
    .link_state ( n.link_state_seqno )
    .hb_skew    ( n.hb_skew )
    .bloom      ( code.ptr       , code.code_sz * 4 );
-  if ( ucast_url_len != 0 && hops == 0 )
-    m.ucast_url( n.user_route->ucast_url.val, ucast_url_len );
-  if ( mesh_url_len != 0 && in_mesh )
-    m.mesh_url( n.user_route->mesh_url.val, mesh_url_len );
+
   this->adjacency_submsg( &n, m );
-  /*if ( mesh_db_len != 0 && in_mesh )
-    this->mesh_db_submsg( rte, m );*/
   m.close( e.sz, h, CABA_INBOX );
   m.sign( sub, sublen, *this->session_key );
 }
@@ -129,8 +117,7 @@ UserDB::recv_sync_request( const MsgFramePublish &pub,  UserBridge &n,
         in_mesh = false;
       this->events.recv_sync_req( n.uid, pub.rte.tport_id, uid, hops );
       uint32_t h = ibx.hash();
-      this->make_peer_sync_msg( n, *user_n, ibx.buf, ibx.len(), h, m,
-                                hops, in_mesh );
+      this->make_peer_sync_msg( n, *user_n, ibx.buf, ibx.len(), h, m, hops );
       if ( debug_peer )
         printf(
             "forward b_nonce: %.*s to %s.%u for %s.%u hops=%u, in_mesh=%u\n",
@@ -299,81 +286,31 @@ UserDB::make_peer_session( const MsgFramePublish &pub,  UserBridge &from_n,
   return user_n;
 }
 
-struct PeerDBRec : public MsgFldSet {
-  Nonce        nonce;
-  const char * ucast_url,
-             * mesh_url,
-             * user;
-  uint32_t     ucast_url_len,
-               mesh_url_len,
-               user_len,
-               hops;
-  uint64_t     sub_seqno,
-               link_state;
-  int64_t      hb_skew;
-  PeerDBRec  * next;
-  void * operator new( size_t, void *ptr ) { return ptr; }
-  PeerDBRec() : ucast_url( 0 ), mesh_url( 0 ), user( 0 ), ucast_url_len( 0 ),
-                mesh_url_len( 0 ), user_len( 0 ), hops( 0 ), sub_seqno( 0 ),
-                link_state( 0 ), hb_skew( 0 ), next( 0 ) {
-    this->nonce.zero();
+void
+PeerDBRec::print( void ) const noexcept
+{
+  char buf[ NONCE_B64_LEN + 1 ];
+  printf( "  nonce[%s] user[%.*s] hops[%u] sub[%" PRIu64 "] link[%" PRIu64 "]\n",
+          this->nonce.to_base64_str( buf ),
+          this->user_len, this->user,
+          this->hops, this->sub_seqno, this->link_state );
+}
+
+void
+PeerDBRec::print_rec_list( const PeerDBRec *rec_list, UserBridge &n ) noexcept
+{
+  n.printf( "peer_db (%s):\n", n.user_route->rte.transport.tport.val );
+  for ( const PeerDBRec *r = rec_list; r != NULL; r = r->next ) {
+    r->print();
   }
-  void set_field( uint32_t fid,  MDReference &mref ) {
-    switch ( fid ) {
-      case FID_BRIDGE:
-        this->nonce.copy_from( mref.fptr );
-        break;
-      case FID_USER:
-        this->user     = (const char *) mref.fptr;
-        this->user_len = (uint32_t) mref.fsize;
-        break;
-      case FID_HOPS:
-        cvt_number<uint32_t>( mref, this->hops );
-        break;
-      case FID_SUB_SEQNO:
-        cvt_number<uint64_t>( mref, this->sub_seqno );
-        break;
-      case FID_LINK_STATE:
-        cvt_number<uint64_t>( mref, this->link_state );
-        break;
-      case FID_HB_SKEW:
-        cvt_number<int64_t>( mref, this->hb_skew );
-        break;
-      case FID_UCAST_URL:
-        this->ucast_url     = (const char *) mref.fptr;
-        this->ucast_url_len = (uint32_t) mref.fsize;
-        break;
-      case FID_MESH_URL:
-        this->mesh_url     = (const char *) mref.fptr;
-        this->mesh_url_len = (uint32_t) mref.fsize;
-        break;
-      default:
-        break;
-    }
-  }
-  void print( void ) const {
-    char buf[ NONCE_B64_LEN + 1 ];
-    printf( "  nonce[%s] user[%.*s] hops[%u] sub[%" PRIu64 "] link[%" PRIu64 "] ucast[%.*s] mesh[%.*s]\n",
-            this->nonce.to_base64_str( buf ),
-            this->user_len, this->user,
-            this->hops, this->sub_seqno, this->link_state,
-            this->ucast_url_len, this->ucast_url,
-            this->mesh_url_len, this->mesh_url );
-  }
-  static void print_rec_list( const PeerDBRec *rec_list,
-                              UserBridge &n ) noexcept {
-    n.printf( "peer_db (%s):\n", n.user_route->rte.transport.tport.val );
-    for ( const PeerDBRec *r = rec_list; r != NULL; r = r->next ) {
-      r->print();
-    }
-  }
-};
+}
 
 bool
 UserDB::recv_peer_db( const MsgFramePublish &pub,  UserBridge &n,
                       MsgHdrDecoder &dec,  AuthStage stage ) noexcept
 {
   PeerDBRec * rec_list = dec.decode_rec_list<PeerDBRec>( FID_PEER_DB );
+  bool need_adjacency = false;
 
   this->events.recv_peer_db( n.uid, pub.rte.tport_id, stage );
   if ( debug_peer )
@@ -398,11 +335,7 @@ UserDB::recv_peer_db( const MsgFramePublish &pub,  UserBridge &n,
     }
     else if ( user_n->link_state_seqno < rec.link_state ||
               user_n->sub_seqno < rec.sub_seqno ) {
-      this->send_adjacency_request2( n, *user_n, PEERDB_SYNC_REQ );
-    }
-    if ( rec.mesh_url_len != 0 ) {
-      this->mesh_pending.update( pub.rte, rec.mesh_url, rec.mesh_url_len,
-                                 0, rec.nonce );
+      need_adjacency = true;
     }
     if ( user_n != NULL && rec.hb_skew != 0 ) {
       if ( user_n->hb_skew == 0 ||
@@ -413,50 +346,43 @@ UserDB::recv_peer_db( const MsgFramePublish &pub,  UserBridge &n,
       }
     }
   }
+  if ( need_adjacency )
+    this->send_adjacency_request( n, PEERDB_SYNC_REQ );
   return true;
 }
 
-bool
-UserDB::make_peer_db_msg( UserBridge &n,  const char *sub,  size_t sublen,
-                          uint32_t h,  MsgCat &m ) noexcept
+size_t
+UserDB::peer_db_size( UserBridge &n,  bool is_adj_req ) noexcept
 {
-  UserRoute  * u_ptr = n.user_route,
-             * u_ptr2;
+  MsgEst       pdb;
   UserBridge * n2;
-  uint32_t     uid,
-               tport_id = u_ptr->rte.tport_id,
-               count = 0;
-  MsgEst pdb;
+  uint32_t     uid;
+
   if ( this->uid_authenticated.first( uid ) ) {
     do {
       if ( uid != n.uid ) {
         if ( (n2 = this->bridge_tab[ uid ]) != NULL ) {
-          u_ptr2 = n2->user_route_ptr( *this, tport_id );
           pdb.bridge2    ()
              .user       ( n2->peer.user.len )
-             .hops       ()
              .sub_seqno  ()
-             .link_state ()
-             .hb_skew    ();
-
-          if ( u_ptr2->is_valid() )
-            pdb.ucast_url( u_ptr2->ucast_url.len )
-               .mesh_url ( u_ptr2->mesh_url.len  );
-          count++;
+             .link_state ();
+          if ( ! is_adj_req ) {
+            pdb.hops     ()
+               .hb_skew  ();
+          }
         }
       }
     } while ( this->uid_authenticated.next( uid ) );
   }
-  if ( count == 0 )
-    return false;
+  return pdb.sz;
+}
 
-  MsgEst e( sublen );
-  e.seqno()
-   .peer_db( pdb.sz );
-
-  m.reserve( e.sz );
-  m.open( this->bridge_id.nonce, sublen )
-   .seqno( ++n.send_inbox_seqno   );
+void
+UserDB::peer_db_submsg( UserBridge &n,  MsgCat &m,  bool is_adj_req ) noexcept
+{
+  UserRoute  * u_ptr = n.user_route;
+  UserBridge * n2;
+  uint32_t     uid;
 
   SubMsgBuf submsg( m );
   submsg.open_submsg();
@@ -465,31 +391,42 @@ UserDB::make_peer_db_msg( UserBridge &n,  const char *sub,  size_t sublen,
     do {
       if ( uid != n.uid ) {
         if ( (n2 = this->bridge_tab[ uid ]) != NULL ) {
-          bool     in_mesh = u_ptr->rte.uid_in_mesh->is_member( uid );
-          uint32_t hops    = u_ptr->rte.uid_connected.is_member( uid ) ? 0:1;
-
           submsg.bridge2    ( n2->bridge_id.nonce )
                 .user       ( n2->peer.user.val, n2->peer.user.len )
-                .hops       ( hops                 )
                 .sub_seqno  ( n2->sub_seqno        )
-                .link_state ( n2->link_state_seqno )
-                .hb_skew    ( n2->hb_skew          );
-
-          u_ptr2 = n2->user_route_ptr( *this, tport_id );
-          if ( u_ptr2->is_valid() ) {
-            if ( u_ptr2->ucast_url.len != 0 && hops == 0 )
-              submsg.ucast_url( u_ptr2->ucast_url.val, u_ptr2->ucast_url.len );
-            if ( u_ptr2->mesh_url.len != 0 && in_mesh )
-              submsg.mesh_url( u_ptr2->mesh_url.val, u_ptr2->mesh_url.len );
+                .link_state ( n2->link_state_seqno );
+          if ( ! is_adj_req ) {
+            uint32_t hops = u_ptr->rte.uid_connected.is_member( uid ) ? 0:1;
+            submsg.hops     ( hops                 )
+                  .hb_skew  ( n2->hb_skew          );
           }
         }
       }
     } while ( this->uid_authenticated.next( uid ) );
   }
-
   submsg.close( m, FID_PEER_DB );
+}
+
+bool
+UserDB::make_peer_db_msg( UserBridge &n,  const char *sub,  size_t sublen,
+                          uint32_t h,  MsgCat &m ) noexcept
+{
+  size_t peer_db_len = this->peer_db_size( n );
+  if ( peer_db_len == 0 )
+    return false;
+
+  MsgEst e( sublen );
+  e.seqno()
+   .peer_db( peer_db_len );
+
+  m.reserve( e.sz );
+  m.open( this->bridge_id.nonce, sublen )
+   .seqno( n.inbox.next_send( U_INBOX_ADD_RTE ) );
+
+  this->peer_db_submsg( n, m );
   m.close( e.sz, h, CABA_INBOX );
   m.sign( sub, sublen, *this->session_key );
+
   return true;
 }
 
@@ -609,16 +546,11 @@ UserDB::send_peer_add( UserBridge &n,
               n.peer.user.val, rte->transport.tport.val, rte->connect_count );
       if ( rte->connect_count > 0 ) {
         uint32_t hops = 0;
-        bool     in_mesh = rte->uid_in_mesh->is_member( n.uid );
-        if ( ! rte->uid_connected.is_member( n.uid ) ) {
+        if ( ! rte->uid_connected.is_member( n.uid ) )
           hops = 1;
-          in_mesh = false;
-        }
         this->events.send_add_route( n.uid, (uint32_t) i, hops );
 
-        size_t ucast_url_len = n.user_route->ucast_url.len,
-               mesh_url_len  = n.user_route->mesh_url.len,
-               user_len      = n.peer.user.len;
+        size_t user_len = n.peer.user.len;
 
         MsgEst e( Z_ADD_SZ );
         e.seqno      ()
@@ -627,9 +559,7 @@ UserDB::send_peer_add( UserBridge &n,
          .user       ( user_len )
          .hops       ()
          .sub_seqno  ()
-         .link_state ()
-         .ucast_url  ( ucast_url_len )
-         .mesh_url   ( mesh_url_len );
+         .link_state ();
 
         MsgCat m;
         m.reserve( e.sz );
@@ -641,11 +571,6 @@ UserDB::send_peer_add( UserBridge &n,
          .hops       ( hops               )
          .sub_seqno  ( n.sub_seqno        )
          .link_state ( n.link_state_seqno );
-
-        if ( ucast_url_len != 0 && hops == 0 )
-          m.ucast_url( n.user_route->ucast_url.val, ucast_url_len );
-        if ( mesh_url_len != 0 && in_mesh )
-          m.mesh_url( n.user_route->mesh_url.val, mesh_url_len );
 
         m.close( e.sz, add_h, CABA_RTR_ALERT );
         m.sign( Z_ADD, Z_ADD_SZ, *this->session_key );
@@ -788,15 +713,17 @@ UserDB::recv_mesh_db( const MsgFramePublish &pub,  UserBridge &n,
   if ( debug_peer )
     MeshDBRec::print_rec_list( rec_list, n );
 
-  if ( dec.test( FID_MESH_URL ) ) {
-    StringVal mesh_url( (const char *) dec.mref[ FID_MESH_URL ].fptr,
-                        dec.mref[ FID_MESH_URL ].fsize );
-    if ( ! rte->mesh_url.equals( mesh_url ) ) {
-      rte = rte->mgr.find_mesh( mesh_url );
-      if ( rte == NULL ) {
-        n.printf( "no mesh url found (%.*s)\n", mesh_url.len, mesh_url.val );
-        return true;
-      }
+  if ( ! dec.test( FID_MESH_URL ) ) {
+    n.printf( "ignoring mesh db without mesh url\n" );
+    return true;
+  }
+  StringVal mesh_url( (const char *) dec.mref[ FID_MESH_URL ].fptr,
+                      dec.mref[ FID_MESH_URL ].fsize );
+  if ( ! rte->mesh_url.equals( mesh_url ) ) {
+    rte = rte->mgr.find_mesh( mesh_url );
+    if ( rte == NULL ) {
+      n.printf( "no mesh url found (%.*s)\n", mesh_url.len, mesh_url.val );
+      return true;
     }
   }
   while ( rec_list != NULL ) {
@@ -810,8 +737,100 @@ UserDB::recv_mesh_db( const MsgFramePublish &pub,  UserBridge &n,
   return true;
 }
 
+struct UcastDBRec : public MsgFldSet {
+  Nonce        nonce;
+  const char * ucast_url,
+             * user;
+  uint32_t     ucast_url_len,
+               user_len;
+  UcastDBRec * next;
+  void * operator new( size_t, void *ptr ) { return ptr; }
+  UcastDBRec() : ucast_url( 0 ), user( 0 ), ucast_url_len( 0 ), user_len( 0 ),
+                next( 0 ) {
+    this->nonce.zero();
+  }
+  void set_field( uint32_t fid,  MDReference &mref ) {
+    switch ( fid ) {
+      case FID_BRIDGE:
+        this->nonce.copy_from( mref.fptr );
+        break;
+      case FID_USER:
+        this->user     = (const char *) mref.fptr;
+        this->user_len = (uint32_t) mref.fsize;
+        break;
+      case FID_UCAST_URL:
+        this->ucast_url     = (const char *) mref.fptr;
+        this->ucast_url_len = (uint32_t) mref.fsize;
+        break;
+      default:
+        break;
+    }
+  }
+  void print( void ) const {
+    char buf[ NONCE_B64_LEN + 1 ];
+    printf( "  nonce[%s] user[%.*s] ucast[%.*s]\n",
+            this->nonce.to_base64_str( buf ),
+            this->user_len, this->user,
+            this->ucast_url_len, this->ucast_url );
+  }
+  static void print_rec_list( const UcastDBRec *rec_list,
+                              UserBridge &n ) noexcept {
+    n.printf( "ucast_db (%s):\n", n.user_route->rte.transport.tport.val );
+    for ( const UcastDBRec *r = rec_list; r != NULL; r = r->next ) {
+      r->print();
+    }
+  }
+};
+
+bool
+UserDB::recv_ucast_db( const MsgFramePublish &pub,  UserBridge &n,
+                       MsgHdrDecoder &dec ) noexcept
+{
+  TransportRoute * rte = &pub.rte;
+  UcastDBRec     * rec_list = dec.decode_rec_list<UcastDBRec>( FID_UCAST_DB );
+
+  /*this->events.recv_peer_db( n.uid, pub.rte.tport_id, stage );*/
+  if ( debug_peer )
+    UcastDBRec::print_rec_list( rec_list, n );
+
+  if ( ! dec.test( FID_UCAST_URL ) ) {
+    n.printf( "ignoring ucast db without ucast url\n" );
+    return true;
+  }
+  StringVal ucast_url( (const char *) dec.mref[ FID_UCAST_URL ].fptr,
+                       dec.mref[ FID_UCAST_URL ].fsize );
+  if ( ! rte->ucast_url.equals( ucast_url ) ) {
+    rte = rte->mgr.find_ucast( ucast_url );
+    if ( rte == NULL ) {
+      n.printf( "no ucast url found (%.*s)\n", ucast_url.len, ucast_url.val );
+      return true;
+    }
+  }
+  while ( rec_list != NULL ) {
+    UcastDBRec & rec = *rec_list;
+    size_t   n_pos;
+    uint32_t uid;
+    rec_list = rec.next;
+    if ( rec.ucast_url_len != 0 ) {
+      if ( this->node_ht->find( rec.nonce, n_pos, uid ) ) {
+        UserBridge * n = this->bridge_tab[ uid ];
+        if ( n != NULL ) {
+          UserRoute * u_ptr = n->user_route_ptr( *this, rte->tport_id );
+          this->set_ucast_url( *u_ptr, rec.ucast_url, rec.ucast_url_len,
+                               "recv" );
+        }
+      }
+      else {
+        this->mesh_pending.update( *rte, rec.ucast_url, rec.ucast_url_len, 0,
+                                   rec.nonce, false );
+      }
+    }
+  }
+  return true;
+}
+
 size_t
-UserDB::mesh_db_size( TransportRoute &rte,  MeshDBFilter &filter ) noexcept
+UserDB::url_db_size( TransportRoute &rte,  UrlDBFilter &filter ) noexcept
 {
   TransportRoute * rte2;
   uint32_t         tport_id, uid,
@@ -819,26 +838,53 @@ UserDB::mesh_db_size( TransportRoute &rte,  MeshDBFilter &filter ) noexcept
   bool             ok;
 
   MsgEst e;
-  for ( tport_id = 0; tport_id < tport_count; tport_id++ ) {
-    rte2 = this->transport_tab.ptr[ tport_id ];
-    if ( rte2->mesh_id == rte.mesh_id ) {
-      for ( ok = rte2->uid_connected.first( uid ); ok;
-            ok = rte2->uid_connected.next( uid ) ) {
-        UserBridge * n     = this->bridge_tab.ptr[ uid ];
-        UserRoute  * u_ptr = n->user_route_ptr( *this, rte2->tport_id );
 
-        if ( u_ptr->is_set( MESH_URL_STATE ) ) {
-          bool is_matched = filter.filter_hash( u_ptr->url_hash );
+  if ( filter.is_mesh_filter ) {
+    for ( tport_id = 0; tport_id < tport_count; tport_id++ ) {
+      rte2 = this->transport_tab.ptr[ tport_id ];
+      if ( rte2->mesh_id == rte.mesh_id ) {
+        for ( ok = rte2->uid_connected.first( uid ); ok;
+              ok = rte2->uid_connected.next( uid ) ) {
+          UserBridge * n     = this->bridge_tab.ptr[ uid ];
+          UserRoute  * u_ptr = n->user_route_ptr( *this, rte2->tport_id );
 
-          if ( uid == filter.except_uid )
-            continue;
+          if ( u_ptr->is_set( MESH_URL_STATE ) ) {
+            bool is_matched = filter.filter_hash( u_ptr->url_hash );
+            if ( uid == filter.except_uid )
+              continue;
 
-          if ( ! is_matched ) {
-            e.user    ( n->peer.user.len )
-             .bridge2 ()
-             .mesh_url( u_ptr->mesh_url.len );
-            filter.return_count++;
+            if ( ! is_matched ) {
+              e.user    ( n->peer.user.len )
+               .bridge2 ()
+               .mesh_url( u_ptr->mesh_url.len );
+              filter.return_count++;
+            }
           }
+        }
+      }
+    }
+  }
+  else {
+    if ( ! filter.filter_hash( rte.ucast_url_hash ) ) {
+      e.user      ( this->user.user.len )
+       .bridge2   ()
+       .ucast_url ( rte.ucast_url.len );
+    }
+    for ( ok = rte.uid_connected.first( uid ); ok;
+          ok = rte.uid_connected.next( uid ) ) {
+      UserBridge * n     = this->bridge_tab.ptr[ uid ];
+      UserRoute  * u_ptr = n->user_route_ptr( *this, rte.tport_id );
+
+      if ( u_ptr->is_set( UCAST_URL_STATE ) ) {
+        bool is_matched = filter.filter_hash( u_ptr->url_hash );
+        if ( uid == filter.except_uid )
+          continue;
+
+        if ( ! is_matched ) {
+          e.user     ( n->peer.user.len )
+           .bridge2  ()
+           .ucast_url( u_ptr->ucast_url.len );
+          filter.return_count++;
         }
       }
     }
@@ -872,8 +918,8 @@ UserDB::mesh_db_size( TransportRoute &rte,  MeshDBFilter &filter ) noexcept
 }
 
 void
-UserDB::mesh_db_submsg( TransportRoute &rte,  MeshDBFilter &filter,
-                        MsgCat &m ) noexcept
+UserDB::url_db_submsg( TransportRoute &rte,  UrlDBFilter &filter,
+                       MsgCat &m ) noexcept
 {
   TransportRoute * rte2;
   uint32_t         tport_id, uid,
@@ -883,37 +929,78 @@ UserDB::mesh_db_submsg( TransportRoute &rte,  MeshDBFilter &filter,
   SubMsgBuf s( m );
   s.open_submsg();
 
-  for ( tport_id = 0; tport_id < tport_count; tport_id++ ) {
-    rte2 = this->transport_tab.ptr[ tport_id ];
-    if ( rte2->mesh_id == rte.mesh_id ) {
-      for ( ok = rte2->uid_connected.first( uid ); ok;
-            ok = rte2->uid_connected.next( uid ) ) {
+  if ( filter.is_mesh_filter ) {
+    for ( tport_id = 0; tport_id < tport_count; tport_id++ ) {
+      rte2 = this->transport_tab.ptr[ tport_id ];
+      if ( rte2->mesh_id == rte.mesh_id ) {
+        for ( ok = rte2->uid_connected.first( uid ); ok;
+              ok = rte2->uid_connected.next( uid ) ) {
+          if ( uid == filter.except_uid )
+            continue;
 
-        if ( uid == filter.except_uid )
-          continue;
+          UserBridge * n     = this->bridge_tab.ptr[ uid ];
+          UserRoute  * u_ptr = n->user_route_ptr( *this, rte2->tport_id );
 
-        UserBridge * n     = this->bridge_tab.ptr[ uid ];
-        UserRoute  * u_ptr = n->user_route_ptr( *this, rte2->tport_id );
-
-        if ( u_ptr->is_set( MESH_URL_STATE ) ) {
-          if ( ! filter.filter_hash( u_ptr->url_hash ) ) {
-            s.user    ( n->peer.user.val, n->peer.user.len )
-             .bridge2 ( n->bridge_id.nonce )
-             .mesh_url( u_ptr->mesh_url.val, u_ptr->mesh_url.len );
+          if ( u_ptr->is_set( MESH_URL_STATE ) ) {
+            if ( ! filter.filter_hash( u_ptr->url_hash ) ) {
+              s.user    ( n->peer.user.val, n->peer.user.len )
+               .bridge2 ( n->bridge_id.nonce )
+               .mesh_url( u_ptr->mesh_url.val, u_ptr->mesh_url.len );
+            }
           }
         }
       }
     }
+    s.close( m, FID_MESH_DB );
   }
-  s.close( m, FID_MESH_DB );
+  else {
+    if ( ! filter.filter_hash( rte.ucast_url_hash ) ) {
+      s.user      ( this->user.user.val, this->user.user.len )
+       .bridge2   ( this->bridge_id.nonce )
+       .ucast_url ( rte.ucast_url.val, rte.ucast_url.len );
+    }
+    for ( ok = rte.uid_connected.first( uid ); ok;
+          ok = rte.uid_connected.next( uid ) ) {
+      if ( uid == filter.except_uid )
+        continue;
+
+      UserBridge * n     = this->bridge_tab.ptr[ uid ];
+      UserRoute  * u_ptr = n->user_route_ptr( *this, rte.tport_id );
+
+      if ( u_ptr->is_set( UCAST_URL_STATE ) ) {
+        if ( ! filter.filter_hash( u_ptr->url_hash ) ) {
+          s.user     ( n->peer.user.val, n->peer.user.len )
+           .bridge2  ( n->bridge_id.nonce )
+           .ucast_url( u_ptr->ucast_url.val, u_ptr->ucast_url.len );
+        }
+      }
+    }
+    s.close( m, FID_UCAST_DB );
+  }
 }
 
 void
-MeshDBFilter::setup_filter( MsgHdrDecoder &dec ) noexcept
+UrlDBFilter::setup_filter( MsgHdrDecoder &dec ) noexcept
 {
-  if ( dec.test( FID_MESH_FILTER ) ) {
-    void * ptr        = dec.mref[ FID_MESH_FILTER ].fptr;
-    this->url_count   = dec.mref[ FID_MESH_FILTER ].fsize / 4;
+  void * ptr = NULL;
+  this->url_count = 0;
+
+  if ( this->is_mesh_filter && dec.test( FID_MESH_FILTER ) ) {
+    ptr             = dec.mref[ FID_MESH_FILTER ].fptr;
+    this->url_count = dec.mref[ FID_MESH_FILTER ].fsize / 4;
+
+    if ( dec.type == U_INBOX_MESH_RPY )
+      this->invert_match = true;
+  }
+  else if ( ! this->is_mesh_filter && dec.test( FID_UCAST_FILTER ) ) {
+    ptr             = dec.mref[ FID_UCAST_FILTER ].fptr;
+    this->url_count = dec.mref[ FID_UCAST_FILTER ].fsize / 4;
+
+    if ( dec.type == U_INBOX_UCAST_RPY )
+      this->invert_match = true;
+  }
+
+  if ( ptr != NULL && this->url_count > 0 ) {
     this->match_count = 0;
 
     this->hash = (uint32_t *) dec.mem.make( this->url_count * 4 );
@@ -921,9 +1008,6 @@ MeshDBFilter::setup_filter( MsgHdrDecoder &dec ) noexcept
 
     this->matched = (bool *) dec.mem.make( this->url_count * sizeof( bool ) );
     ::memset( this->matched, 0, this->url_count * sizeof( bool ) );
-
-    if ( dec.type == U_INBOX_MESH_RPY )
-      this->invert_match = true;
   }
 }
 
@@ -931,14 +1015,14 @@ bool
 UserDB::recv_mesh_request( const MsgFramePublish &pub,  UserBridge &n,
                            MsgHdrDecoder &dec ) noexcept
 {
-  char         ret_buf[ 16 ];
-  InboxBuf     ibx( n.bridge_id, dec.get_return( ret_buf, _MESH_RPY ) );
-  bool         in_mesh     = pub.rte.uid_in_mesh->is_member( n.uid );
-  size_t       mesh_db_len = 0;
-  MeshDBFilter filter( n.uid, &dec );
+  char        ret_buf[ 16 ];
+  InboxBuf    ibx( n.bridge_id, dec.get_return( ret_buf, _MESH_RPY ) );
+  bool        in_mesh     = pub.rte.uid_in_mesh->is_member( n.uid );
+  size_t      mesh_db_len = 0;
+  UrlDBFilter filter( n.uid, true, &dec );
   
   if ( in_mesh ) {
-    mesh_db_len = this->mesh_db_size( pub.rte, filter );
+    mesh_db_len = this->url_db_size( pub.rte, filter );
     if ( debug_peer )
       n.printf(
         "%s filter match_count %u url_count %u return_count %u db_len %u\n",
@@ -969,12 +1053,12 @@ UserDB::recv_mesh_request( const MsgFramePublish &pub,  UserBridge &n,
   m.reserve( e.sz );
 
   m.open( this->bridge_id.nonce, ibx.len() )
-   .seqno( ++n.send_inbox_seqno )
+   .seqno( n.inbox.next_send( U_INBOX_MESH_RPY ) )
    .mesh_url( u_ptr->mesh_url.val, u_ptr->mesh_url.len );
   if ( filter.request_count > 0 )
     m.mesh_filter( filter.hash, filter.request_count * 4 );
   if ( filter.return_count > 0 )
-    this->mesh_db_submsg( pub.rte, filter, m );
+    this->url_db_submsg( pub.rte, filter, m );
   uint32_t h = ibx.hash();
   m.close( e.sz, h, CABA_INBOX );
   m.sign( ibx.buf, ibx.len(), *this->session_key );
@@ -1027,7 +1111,7 @@ UserDB::send_mesh_request( UserBridge &n,  MsgHdrDecoder &dec ) noexcept
   m.reserve( e.sz );
 
   m.open( this->bridge_id.nonce, ibx.len() )
-   .seqno( ++n.send_inbox_seqno  );
+   .seqno( n.inbox.next_send( U_INBOX_MESH_REQ ) );
   if ( url_count > 0 )
     m.mesh_filter( filter, url_count * 4 );
   uint32_t h = ibx.hash();
@@ -1229,7 +1313,7 @@ UserDB::request_pending_peer( UserPendingRoute &p,
   MsgCat m;
   m.reserve( e.sz );
   m.open( this->bridge_id.nonce, ibx.len() )
-   .seqno      ( ++n->send_inbox_seqno )
+   .seqno      ( n->inbox.next_send( U_INBOX_SYNC_REQ ) )
    .sync_bridge( p.bridge_nonce );
   if ( p.user_sv.len > 0 )
     m.user( p.user_sv.val, p.user_sv.len );

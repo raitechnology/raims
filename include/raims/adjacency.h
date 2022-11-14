@@ -335,6 +335,9 @@ struct AdjDistance : public md::MDMsgMem {
                               size_t buflen ) noexcept;
   bool find_peer_conn( const char *type,  uint32_t uid,
                        uint32_t peer_uid,  uint32_t &peer_conn_id ) noexcept;
+  bool find_peer_set( const char *type,  uint32_t uid,
+                      const AdjacencySpace &set,  uint32_t peer_uid,
+                      uint32_t &peer_conn_id ) noexcept;
   void message_graph_description( kv::ArrayOutput &out ) noexcept;
 };
 
@@ -375,21 +378,29 @@ struct UserBridge {
   UserBridge( uint32_t id ) : start_time( 0 ), uid( id ), step( 0 ), cost( 0 ){}
   ~UserBridge();
 
-  void add_link( uint32_t target_uid,  uint32_t cost[ COST_PATH_COUNT ],
-                 const char *type,  const char *name,
-                 ms::StringTab &st ) {
+  AdjacencySpace *add_link( uint32_t cost[ COST_PATH_COUNT ],
+                            const char *type,  const char *name,
+                            ms::StringTab &st ) {
     AdjacencySpace *adj = this->adjacency.get( this->adjacency.count,
                                                this->uid, cost );
-    adj->add( target_uid );
     if ( type != NULL )
       st.ref_string( type, ::strlen( type ), adj->tport_type );
     if ( name != NULL )
       st.ref_string( name, ::strlen( name ), adj->tport );
+    return adj;
   }
-  void add_link( UserBridge *n,  uint32_t cost[ COST_PATH_COUNT ],
-                 const char *type,  const char *name,
-                 ms::StringTab &st ) {
-    this->add_link( n->uid, cost, type, name, st );
+  AdjacencySpace *add_link( uint32_t target_uid,
+                            uint32_t cost[ COST_PATH_COUNT ],
+                            const char *type,  const char *name,
+                            ms::StringTab &st ) {
+    AdjacencySpace *adj = this->add_link( cost, type, name, st );
+    adj->add( target_uid );
+    return adj;
+  }
+  AdjacencySpace *add_link( UserBridge *n,  uint32_t cost[ COST_PATH_COUNT ],
+                            const char *type,  const char *name,
+                            ms::StringTab &st ) {
+    return this->add_link( n->uid, cost, type, name, st );
   }
 };
 
@@ -431,14 +442,13 @@ struct UserDB {
     }
     return this->add( u, s, st );
   }
-  TransportRoute *add_link( UserBridge *n,  uint32_t cost[ COST_PATH_COUNT ],
-                            const char *type,  const char *name,
-                            ms::StringTab &st ) {
+  TransportRoute *add_tport( uint32_t cost[ COST_PATH_COUNT ],
+                             const char *type,  const char *name,
+                             ms::StringTab &st ) {
     uint32_t tport_id = this->transport_tab.count;
     void * p = ::malloc( sizeof( TransportRoute ) );
     TransportRoute *t = new ( p ) TransportRoute( *this, tport_id );
     this->transport_tab[ tport_id ] = t;
-    t->uid_connected.add( n->uid );
     for ( uint8_t i = 0; i < COST_PATH_COUNT; i++ )
       t->uid_connected.cost[ i ] = cost[ i ];
     t->uid_connected.tport_id = tport_id;
@@ -446,6 +456,14 @@ struct UserDB {
       st.ref_string( type, ::strlen( type ), t->uid_connected.tport_type );
     if ( name != NULL )
       st.ref_string( name, ::strlen( name ), t->uid_connected.tport );
+    this->peer_dist.update_seqno++;
+    return t;
+  }
+  TransportRoute *add_link( UserBridge *n,  uint32_t cost[ COST_PATH_COUNT ],
+                            const char *type,  const char *name,
+                            ms::StringTab &st ) {
+    TransportRoute * t = this->add_tport( cost, type, name, st );
+    t->uid_connected.add( n->uid );
     n->add_link( (uint32_t) 0, cost, type, name, st );
     this->peer_dist.update_seqno++;
     return t;

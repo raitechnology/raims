@@ -671,75 +671,67 @@ UserDB::recv_adjacency_change( const MsgFramePublish &pub,  UserBridge &n,
   return b;
 }
 
-
 bool
-UserDB::send_adjacency_request( UserBridge &n,  AdjacencyRequest reas ) noexcept
+UserBridge::throttle_adjacency( uint32_t inc,  uint64_t cur_mono ) noexcept
 {
-  if ( ! n.test_set( ADJACENCY_REQUEST_STATE ) ) {
-    n.adj_mono_time = current_monotonic_time_ns();
-    this->adj_queue.push( &n );
-    this->events.send_adjacency_request( n.uid, n.user_route->rte.tport_id,
-                                         0, reas );
-
-    InboxBuf ibx( n.bridge_id, _ADJ_REQ );
-
-    MsgEst e( ibx.len() );
-    e.seqno       ()
-     .link_state  ()
-     .sub_seqno   ()
-     .adj_info    ();
-
-    MsgCat m;
-    m.reserve( e.sz );
-
-    m.open( this->bridge_id.nonce, ibx.len() )
-     .seqno     ( ++n.send_inbox_seqno  )
-     .link_state( n.link_state_seqno    )
-     .sub_seqno ( n.sub_seqno           )
-     .adj_info  ( reas                  );
-    uint32_t h = ibx.hash();
-    m.close( e.sz, h, CABA_INBOX );
-    m.sign( ibx.buf, ibx.len(), *this->session_key );
-
-    return this->forward_to_inbox( n, ibx, h, m.msg, m.len(), false );
+  if ( this->is_set( ADJACENCY_REQUEST_STATE ) )
+    return true;
+  if ( cur_mono == 0 )
+    cur_mono = current_monotonic_time_ns();
+  if ( this->adj_mono_time +
+       ( (uint64_t) 10000000 << this->adj_req_count ) >= cur_mono )
+    return true;
+  if ( inc > 0 ) {
+    this->adj_mono_time = cur_mono;
+    if ( this->adj_req_count < 7 )
+      this->adj_req_count += inc;
   }
-  return true;
+  return false;
 }
 
 bool
-UserDB::send_adjacency_request2( UserBridge &n,  UserBridge &sync,
-                                 AdjacencyRequest reas ) noexcept
+UserDB::send_adjacency_request( UserBridge &n, AdjacencyRequest reas ) noexcept
 {
-  if ( ! n.test_set( ADJACENCY_REQUEST_STATE ) ) {
-    n.adj_mono_time = current_monotonic_time_ns();
-    this->adj_queue.push( &n );
-    this->events.send_adjacency_request( n.uid, n.user_route->rte.tport_id,
-                                         sync.uid, reas );
-    InboxBuf ibx( n.bridge_id, _ADJ_REQ );
+  if ( n.throttle_adjacency( 1 ) )
+    return true;
 
-    MsgEst e( ibx.len() );
-    e.seqno       ()
-     .sync_bridge ()
-     .link_state  ()
-     .sub_seqno   ()
-     .adj_info    ();
+  n.set( ADJACENCY_REQUEST_STATE );
+  this->adj_queue.push( &n );
 
-    MsgCat m;
-    m.reserve( e.sz );
+  bool use_primary   = ( reas == DIJKSTRA_SYNC_REQ || n.user_route == NULL );
+  uint32_t tport_id  = ( use_primary ? n.primary_route :
+                         n.user_route->rte.tport_id );
+  size_t peer_db_len = this->peer_db_size( n, true );
+  this->events.send_adjacency_request( n.uid, tport_id, 0, reas );
 
-    m.open( this->bridge_id.nonce, ibx.len() )
-     .seqno       ( ++n.send_inbox_seqno  )
-     .sync_bridge ( sync.bridge_id.nonce  )
-     .link_state  ( sync.link_state_seqno )
-     .sub_seqno   ( sync.sub_seqno        )
-     .adj_info    ( reas                  );
-    uint32_t h = ibx.hash();
-    m.close( e.sz, h, CABA_INBOX );
-    m.sign( ibx.buf, ibx.len(), *this->session_key );
+  InboxBuf ibx( n.bridge_id, _ADJ_REQ );
 
-    return this->forward_to_inbox( n, ibx, h, m.msg, m.len(), false );
-  }
-  return true;
+  MsgEst e( ibx.len() );
+  e.seqno       ()
+   .link_state  ()
+   .sub_seqno   ()
+   .adj_info    ()
+   .peer_db     ( peer_db_len );
+
+  MsgCat m;
+  m.reserve( e.sz );
+
+  m.open( this->bridge_id.nonce, ibx.len() )
+   .seqno       ( n.inbox.next_send( U_INBOX_ADJ_REQ ) )
+   .link_state  ( n.link_state_seqno    )
+   .sub_seqno   ( n.sub_seqno           )
+   .adj_info    ( reas                  );
+  if ( peer_db_len > 0 )
+    this->peer_db_submsg( n, m, true );
+
+  uint32_t h = ibx.hash();
+  m.close( e.sz, h, CABA_INBOX );
+  m.sign( ibx.buf, ibx.len(), *this->session_key );
+
+  if ( debug_lnk )
+    n.printf( "*** send_adj_request ls=%lu %s for %s\n", n.link_state_seqno,
+              adjacency_request_string( reas ), n.peer.user.val );
+  return this->forward_to_inbox( n, ibx, h, m.msg, m.len(), use_primary );
 }
 
 size_t
@@ -898,22 +890,27 @@ UserDB::adjacency_submsg( UserBridge *sync,  MsgCat &m ) noexcept
   s.close( m, FID_ADJACENCY );
 }
 
+enum {
+  SYNC_NONE = 0,
+  SYNC_LINK = 1,
+  SYNC_SUB  = 2,
+  SYNC_ALL  = 3
+};
 bool
 UserDB::recv_adjacency_request( const MsgFramePublish &,  UserBridge &n,
-                                const MsgHdrDecoder &dec ) noexcept
+                                MsgHdrDecoder &dec ) noexcept
 {
-  BloomCodec   code;
-  UserBridge * sync  = NULL;
-  Nonce        nonce;
   char         ret_buf[ 16 ];
   InboxBuf     ibx( n.bridge_id, dec.get_return( ret_buf, _ADJ_RPY ) );
+  UserBridge * sync  = NULL;
+  Nonce        nonce;
   uint64_t     link_seqno = 0,
                sub_seqno  = 0,
                time_val,
                rq_link_seqno,
                rq_sub_seqno;
+  size_t       pos;
   uint32_t     uid        = 0,
-               hops       = 1,
                reas;
 
   dec.get_ival<uint64_t>( FID_LINK_STATE, rq_link_seqno );
@@ -922,11 +919,84 @@ UserDB::recv_adjacency_request( const MsgFramePublish &,  UserBridge &n,
   dec.get_ival<uint64_t>( FID_TIME, time_val );
 
   if ( dec.get_nonce( FID_SYNC_BRIDGE, nonce ) ) {
-    size_t pos;
-    if ( ! this->node_ht->find( nonce, pos, uid ) )
+    if ( ! this->node_ht->find( nonce, pos, uid ) ) {
+      n.printf( "*** adj_request nonce not found\n" );
       return true;
+    }
   }
 
+  if ( uid != 0 ) {
+    sync       = this->bridge_tab.ptr[ uid ];
+    link_seqno = sync->link_state_seqno;
+    sub_seqno  = sync->sub_seqno;
+  }
+  else {
+    sync       = NULL;
+    link_seqno = this->link_state_seqno;
+    sub_seqno  = this->sub_db.sub_seqno;
+  }
+  int which = SYNC_NONE;
+  if ( link_seqno > rq_link_seqno )
+    which |= SYNC_LINK;
+  if ( sub_seqno > rq_sub_seqno )
+    which |= SYNC_SUB;
+
+  this->events.recv_adjacency_request( n.uid, n.user_route->rte.tport_id,
+                                       ( sync == NULL ? 0 : sync->uid ), reas );
+  bool b = true, sent_one = false;
+  if ( which != SYNC_NONE ) {
+    b &= this->send_adjacency( n, sync, ibx, time_val, reas, which );
+    sent_one = true;
+  }
+  if ( dec.test( FID_PEER_DB ) ) {
+    PeerDBRec * rec_list = dec.decode_rec_list<PeerDBRec>( FID_PEER_DB );
+    while ( rec_list != NULL ) {
+      PeerDBRec  & rec = *rec_list;
+      rec_list = rec.next;
+      if ( this->node_ht->find( rec.nonce, pos, uid ) ) {
+        UserBridge *sync = this->bridge_tab.ptr[ uid ];
+        if ( sync != NULL ) {
+          int which = SYNC_NONE;
+          if ( sync->link_state_seqno > rec.link_state )
+            which |= SYNC_LINK;
+          if ( sync->sub_seqno > rec.sub_seqno )
+            which |= SYNC_SUB;
+          if ( which != SYNC_NONE ) {
+            b &= this->send_adjacency( n, sync, ibx, time_val, reas, which );
+            sent_one = true;
+          }
+        }
+      }
+    }
+  }
+  if ( ! sent_one )
+    b &= this->send_adjacency( n, sync, ibx, time_val, reas, which );
+  return b;
+}
+
+bool
+UserDB::send_adjacency( UserBridge &n,  UserBridge *sync,  InboxBuf &ibx,
+                        uint64_t time_val,  uint32_t reas,  int which ) noexcept
+{
+  BloomCodec code;
+  uint64_t   link_seqno, sub_seqno;
+  uint32_t   hops = 1;
+
+  if ( sync != NULL ) {
+    if ( n.user_route->rte.uid_connected.is_member( sync->uid ) &&
+         n.user_route->rte.uid_connected.is_member( n.uid ) )
+      hops = 0;
+    link_seqno = sync->link_state_seqno;
+    sub_seqno  = sync->sub_seqno;
+  }
+  else {
+    if ( n.user_route->rte.uid_connected.is_member( n.uid ) )
+      hops = 0;
+    link_seqno = this->link_state_seqno;
+    sub_seqno  = this->sub_db.sub_seqno;
+  }
+  this->events.send_adjacency( n.uid, n.user_route->rte.tport_id,
+                               ( sync == NULL ? 0 : sync->uid ), reas );
   MsgEst e( ibx.len() );
   e.seqno      ()
    .link_state ()
@@ -936,25 +1006,9 @@ UserDB::recv_adjacency_request( const MsgFramePublish &,  UserBridge &n,
    .time       ()
    .sync_bridge();
 
-  if ( uid != 0 ) {
-    sync       = this->bridge_tab.ptr[ uid ];
-    link_seqno = sync->link_state_seqno;
-    sub_seqno  = sync->sub_seqno;
-    if ( n.user_route->rte.uid_connected.is_member( sync->uid ) &&
-         n.user_route->rte.uid_connected.is_member( n.uid ) )
-      hops = 0;
-  }
-  else {
-    sync       = NULL;
-    link_seqno = this->link_state_seqno;
-    sub_seqno  = this->sub_db.sub_seqno;
-    if ( n.user_route->rte.uid_connected.is_member( n.uid ) )
-      hops = 0;
-  }
-  if ( rq_link_seqno != link_seqno ) {
+  if ( ( which & SYNC_LINK ) != 0 )
     e.adjacency( this->adjacency_size( sync ) );
-  }
-  if ( rq_sub_seqno != sub_seqno ) {
+  if ( ( which & SYNC_SUB ) != 0 ) {
     if ( sync != NULL )
       sync->bloom.encode( code );
     else
@@ -965,32 +1019,32 @@ UserDB::recv_adjacency_request( const MsgFramePublish &,  UserBridge &n,
   MsgCat m;
   m.reserve( e.sz );
 
+  if ( debug_lnk )
+    n.printf( "++++ send_adjacency( %s, %lu, %lu, %d )\n",
+            sync ? sync->peer.user.val : "self", link_seqno, sub_seqno, which );
   m.open( this->bridge_id.nonce, ibx.len() )
-   .seqno     ( ++n.send_inbox_seqno )
-   .link_state( link_seqno           )
-   .sub_seqno ( sub_seqno            )
-   .hops      ( hops                 )
-   .adj_info  ( reas                 );
+   .seqno   ( n.inbox.next_send( U_INBOX_ADJ_RPY ) )
+   .hops    ( hops )
+   .adj_info( reas );
+
   if ( time_val != 0 )
     m.time( time_val );
-  if ( dec.test( FID_SYNC_BRIDGE ) )
-    m.sync_bridge( nonce );
+  if ( sync != NULL )
+    m.sync_bridge( sync->bridge_id.nonce );
 
-  d_lnk( "recv_adj_request(%s,%" PRIu64 ",%" PRIu64 ")\n",
-       sync == NULL ? "me" : sync->peer.user.val, rq_sub_seqno, rq_link_seqno );
-
-  if ( rq_sub_seqno != sub_seqno ) {
+  if ( ( which & SYNC_SUB ) != 0 ) {
+    m.sub_seqno ( sub_seqno );
     m.bloom( code.ptr, code.code_sz * 4 );
   }
-  if ( rq_link_seqno != link_seqno ) {
+  if ( ( which & SYNC_LINK ) != 0 ) {
+    m.link_state( link_seqno );
     this->adjacency_submsg( sync, m );
   }
+
   uint32_t h = ibx.hash();
   m.close( e.sz, h, CABA_INBOX );
   m.sign( ibx.buf, ibx.len(), *this->session_key );
 
-  this->events.recv_adjacency_request( n.uid, n.user_route->rte.tport_id,
-                                       ( sync == NULL ? 0 : sync->uid ), reas );
   return this->forward_to_inbox( n, ibx, h, m.msg, m.len(), false );
 }
 
@@ -1000,13 +1054,12 @@ UserDB::recv_adjacency_result( const MsgFramePublish &pub,  UserBridge &n,
 {
   if ( n.test_clear( ADJACENCY_REQUEST_STATE ) )
     this->adj_queue.remove( &n );
-  if ( ! dec.test_2( FID_LINK_STATE, FID_SUB_SEQNO ) )
-    return true;
   Nonce        nonce;
-  uint64_t     link_state,
-               sub_seqno;
+  uint64_t     link_state = 0,
+               sub_seqno  = 0;
   uint32_t     reas;
-  UserBridge * sync = NULL;
+  int          which = SYNC_NONE;
+  UserBridge * sync  = NULL;
 
   if ( dec.get_nonce( FID_SYNC_BRIDGE, nonce ) ) {
     size_t   pos;
@@ -1034,8 +1087,12 @@ UserDB::recv_adjacency_result( const MsgFramePublish &pub,  UserBridge &n,
     sync = &n;
   }
 
-  dec.get_ival<uint64_t>( FID_LINK_STATE, link_state );
-  dec.get_ival<uint64_t>( FID_SUB_SEQNO, sub_seqno );
+  if ( dec.get_ival<uint64_t>( FID_LINK_STATE, link_state ) &&
+       dec.test( FID_ADJACENCY ) )
+    which |= SYNC_LINK;
+  if ( dec.get_ival<uint64_t>( FID_SUB_SEQNO, sub_seqno ) &&
+       dec.test( FID_BLOOM ) )
+    which |= SYNC_SUB;
   dec.get_ival<uint32_t>( FID_ADJ_INFO, reas );
 
   if ( debug_lnk )
@@ -1047,7 +1104,15 @@ UserDB::recv_adjacency_result( const MsgFramePublish &pub,  UserBridge &n,
   this->events.recv_adjacency_result( n.uid, pub.rte.tport_id,
                                       sync == &n ? 0 : sync->uid, reas );
 
-  if ( dec.test( FID_ADJACENCY ) && link_state > sync->link_state_seqno ) {
+  if ( ( which & SYNC_LINK ) != 0 ) {
+    if ( link_state > sync->link_state_seqno )
+      n.adj_req_count = 0;
+  }
+  if ( ( which & SYNC_SUB ) != 0 ) {
+    if ( sub_seqno > sync->sub_seqno )
+      n.adj_req_count = 0;
+  }
+  if ( ( which & SYNC_LINK ) != 0 && link_state > sync->link_state_seqno ) {
     AdjacencyRec * rec_list =
       dec.decode_rec_list<AdjacencyRec>( FID_ADJACENCY );
     if ( debug_lnk )
@@ -1139,7 +1204,7 @@ UserDB::recv_adjacency_result( const MsgFramePublish &pub,  UserBridge &n,
       sync->link_state_seqno = link_state;
     this->peer_dist.invalidate( ADJACENCY_UPDATE_INV );
   }
-  if ( dec.test( FID_BLOOM ) && sub_seqno > sync->sub_seqno )
+  if ( ( which & SYNC_SUB ) != 0 && sub_seqno > sync->sub_seqno )
     this->sub_db.recv_bloom( pub, *sync, dec );
 
   return true;

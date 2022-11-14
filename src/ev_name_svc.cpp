@@ -129,15 +129,19 @@ NameSvc::start_transports( void ) noexcept
 void
 EvNameConnect::send_msg( const void *data,  size_t len ) noexcept
 {
-  this->out_mhdr = (mmsghdr *) this->alloc_temp( sizeof( mmsghdr ) );
+  uint32_t nmsgs = ++this->out_nmsgs;
+  mmsghdr * mhdr = (mmsghdr *) this->alloc_temp( sizeof( mmsghdr ) * nmsgs );
   iovec * iov    = (iovec *) this->alloc_temp( sizeof( iovec ) );
   iov->iov_base  = this->append( data, len );
   iov->iov_len   = len;
+  if ( nmsgs > 1 )
+    ::memcpy( mhdr, this->out_mhdr, sizeof( mhdr[ 0 ] ) * ( nmsgs - 1 ) );
+  this->out_mhdr = mhdr;
 
   if ( debug_name )
     this->name.print_addr( "mcast", NULL );
 
-  mmsghdr & oh = this->out_mhdr[ 0 ];
+  mmsghdr & oh = mhdr[ nmsgs - 1 ];
   oh.msg_hdr.msg_name       = NULL; /* sendto is connected */
   oh.msg_hdr.msg_namelen    = 0;
   oh.msg_hdr.msg_iov        = iov;
@@ -146,7 +150,7 @@ EvNameConnect::send_msg( const void *data,  size_t len ) noexcept
   oh.msg_hdr.msg_controllen = 0;
   oh.msg_hdr.msg_flags      = 0;
   oh.msg_len                = 0;
-  this->out_nmsgs = 1;
+  this->out_nmsgs = nmsgs;
   this->msgs_sent++;
   this->idle_push( EV_WRITE );
 }
@@ -155,10 +159,14 @@ void
 EvNameListen::send_msg( const void *data,  size_t len,
                         NameInbox &inbox ) noexcept
 {
-  this->out_mhdr = (mmsghdr *) this->alloc_temp( sizeof( mmsghdr ) );
+  uint32_t nmsgs = ++this->out_nmsgs;
+  mmsghdr * mhdr = (mmsghdr *) this->alloc_temp( sizeof( mmsghdr ) * nmsgs );
   iovec * iov    = (iovec *) this->alloc_temp( sizeof( iovec ) );
   iov->iov_base  = this->append( data, len );
   iov->iov_len   = len;
+  if ( nmsgs > 1 )
+    ::memcpy( mhdr, this->out_mhdr, sizeof( mhdr[ 0 ] ) * ( nmsgs - 1 ) );
+  this->out_mhdr = mhdr;
 
   struct sockaddr_in * dest;
   dest = (struct sockaddr_in *) this->alloc_temp( sizeof( sockaddr_in ) );
@@ -168,7 +176,7 @@ EvNameListen::send_msg( const void *data,  size_t len,
   if ( debug_name )
     this->name.print_addr( "send", dest );
 
-  mmsghdr & oh = this->out_mhdr[ 0 ];
+  mmsghdr & oh = mhdr[ nmsgs - 1 ];
   oh.msg_hdr.msg_name       = (void *) dest;
   oh.msg_hdr.msg_namelen    = sizeof( *dest );
   oh.msg_hdr.msg_iov        = iov;
@@ -177,7 +185,7 @@ EvNameListen::send_msg( const void *data,  size_t len,
   oh.msg_hdr.msg_controllen = 0;
   oh.msg_hdr.msg_flags      = 0;
   oh.msg_len                = 0;
-  this->out_nmsgs = 1;
+  this->out_nmsgs = nmsgs;
   this->msgs_sent++;
   this->idle_push( EV_WRITE );
 }
@@ -388,7 +396,8 @@ UserDB::on_name_svc( NameSvc &name,  CabaMsg *msg ) noexcept
   else
     inbox.val = 0;
 
-  if ( this->node_ht->find( bridge_id.nonce, n_pos, uid ) ) {
+  if ( this->node_ht->find( bridge_id.nonce, n_pos, uid ) ||
+       this->zombie_ht->find( bridge_id.nonce, n_pos, uid ) ) {
     if ( uid == MY_UID )
       return;
     n = this->bridge_tab[ uid ];

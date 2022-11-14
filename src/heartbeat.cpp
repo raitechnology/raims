@@ -2,6 +2,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#define __STDC_FORMAT_MACROS
+#include <inttypes.h>
 #include <stdarg.h>
 #include <math.h>
 #include <raims/session.h>
@@ -270,7 +272,7 @@ UserDB::on_heartbeat( const MsgFramePublish &pub,  UserBridge &n,
     this->set_mesh_url( *n.user_route, dec, "hb" );
 
   if ( dec.test( FID_UCAST_URL ) )
-    this->set_ucast_url( *n.user_route, dec );
+    this->set_ucast_url( *n.user_route, dec, "hb" );
 
   /*if ( seqno <= n.hb_seqno )
     return true;*/
@@ -328,7 +330,7 @@ UserDB::on_heartbeat( const MsgFramePublish &pub,  UserBridge &n,
       if ( do_challenge ) {
         this->compare_version( n, dec );
         n.auth[ 0 ].construct( time, seqno, cnonce );
-        n.auth[ 1 ].construct( cur_time, ++n.send_inbox_seqno,
+        n.auth[ 1 ].construct( cur_time, n.inbox.next_send( U_INBOX_AUTH ),
                                this->cnonce->calc() );
         this->send_challenge( n, AUTH_FROM_HELLO );
         if ( ! n.test_set( CHALLENGE_STATE ) ) {
@@ -521,7 +523,7 @@ UserDB::send_ping_request( UserBridge &n ) noexcept
   m.reserve( e.sz );
 
   m.open( this->bridge_id.nonce, ibx.len() )
-   .seqno     ( ++n.send_inbox_seqno   )
+   .seqno     ( ++n.ping_send_seqno )
    .stamp     ( stamp                  )
    .sub_seqno ( this->sub_db.sub_seqno )
    .link_state( this->link_state_seqno );
@@ -533,11 +535,38 @@ UserDB::send_ping_request( UserBridge &n ) noexcept
 }
 
 bool
-UserDB::recv_ping_request( const MsgFramePublish &,  UserBridge &n,
-                           const MsgHdrDecoder &dec ) noexcept
+UserDB::recv_ping_request( MsgFramePublish &pub,  UserBridge &n,
+                           const MsgHdrDecoder &dec,
+                           bool is_mcast_ping ) noexcept
 {
-  char     ret_buf[ 16 ];
+  char         ret_buf[ 16 ];
   const char * suf = dec.get_return( ret_buf, _PONG );
+  uint64_t     seqno;
+
+  if ( dec.seqno != 0 ) {
+    if ( is_mcast_ping ) {
+      seqno = n.mcast_recv_seqno;
+      if ( dec.seqno > seqno )
+        n.mcast_recv_seqno = dec.seqno;
+    }
+    else if ( suf == ret_buf ) { /* when using _I.<bridge>.N, uses inbox seqno */
+      seqno = n.inbox.recv_seqno;
+      if ( dec.seqno > seqno )
+        n.inbox.set_recv( dec.seqno, U_INBOX_PING );
+    }
+    else { /* using _I.<bridge>.PING, uses ping seqno */
+      seqno = n.ping_recv_seqno;
+      if ( dec.seqno > seqno )
+        n.ping_recv_seqno = dec.seqno;
+    }
+    if ( dec.seqno <= seqno ) {
+      n.printf(
+        "%.*s ignoring ping seqno replay %" PRIu64 " -> %" PRIu64 " (%s)\n",
+        (int) pub.subject_len, pub.subject, seqno, dec.seqno, pub.rte.name );
+      pub.status = FRAME_STATUS_DUP_SEQNO;
+      return true;
+    }
+  }
   InboxBuf ibx( n.bridge_id, suf );
   uint64_t stamp = 0, token = 0;
   uint64_t cur_time = current_realtime_ns();
@@ -568,9 +597,14 @@ UserDB::recv_ping_request( const MsgFramePublish &,  UserBridge &n,
   MsgCat m;
   m.reserve( e.sz );
 
+  if ( suf == ret_buf )
+    seqno = n.inbox.next_send( U_INBOX_PONG );
+  else
+    seqno = ++n.pong_send_seqno;
+
   m.open( this->bridge_id.nonce, ibx.len() )
-   .seqno       ( ++n.send_inbox_seqno )
-   .stamp       ( stamp )
+   .seqno       ( seqno    )
+   .stamp       ( stamp    )
    .reply_stamp ( cur_time );
   if ( token != 0 )
     m.token( token );
@@ -596,9 +630,18 @@ UserDB::recv_ping_request( const MsgFramePublish &,  UserBridge &n,
 }
 
 bool
-UserDB::recv_pong_result( const MsgFramePublish &,  UserBridge &n,
+UserDB::recv_pong_result( MsgFramePublish &pub,  UserBridge &n,
                           const MsgHdrDecoder &dec ) noexcept
 {
+  if ( dec.seqno <= n.pong_recv_seqno ) {
+    n.printf( "%.*s ignoring pong seqno replay %u -> %" PRIu64 " (%s)\n",
+              (int) pub.subject_len, pub.subject,
+              n.pong_recv_seqno, dec.seqno, pub.rte.name );
+    pub.status = FRAME_STATUS_DUP_SEQNO;
+    return true;
+  }
+  n.pong_recv_seqno = dec.seqno;
+
   uint64_t stamp = 0, reply_stamp = 0,
            cur_time = current_realtime_ns();
 

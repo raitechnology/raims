@@ -39,7 +39,8 @@ TransportRoute::TransportRoute( kv::EvPoll &p,  SessionMgr &m,
       state( f ), mesh_id( 0 ), dev_id( 0 ), listener( 0 ),
       connect_ctx( 0 ), notify_ctx( 0 ), pgm_tport( 0 ), ibx_tport( 0 ),
       inbox_fd( -1 ), mcast_fd( -1 ), mesh_url_hash( 0 ), conn_hash( 0 ),
-      oldest_uid( 0 ), primary_count( 0 ), ext( 0 ), svc( s ), transport( t )
+      ucast_url_hash( 0 ), oldest_uid( 0 ), primary_count( 0 ), ext( 0 ),
+      svc( s ), transport( t )
 {
   uint8_t i;
   this->uid_connected.tport      = t.tport;
@@ -109,13 +110,14 @@ TransportRoute::init_state( void ) noexcept
   this->mesh_url.zero();
   this->conn_url.zero();
   this->ucast_url.zero();
-  this->mesh_id       = NULL;
-  this->dev_id        = NULL;
-  this->uid_in_mesh   = &this->mesh_connected;
-  this->uid_in_device = &this->mesh_connected;
-  this->mesh_csum     = &this->mesh_csum2;
-  this->mesh_url_hash = 0;
-  this->conn_hash     = 0;
+  this->mesh_id        = NULL;
+  this->dev_id         = NULL;
+  this->uid_in_mesh    = &this->mesh_connected;
+  this->uid_in_device  = &this->mesh_connected;
+  this->mesh_csum      = &this->mesh_csum2;
+  this->mesh_url_hash  = 0;
+  this->conn_hash      = 0;
+  this->ucast_url_hash = 0;
 }
 
 void
@@ -146,10 +148,12 @@ void
 TransportRoute::update_cost( UserBridge &n,
                              uint32_t cost[ COST_PATH_COUNT ] ) noexcept
 {
-  uint8_t i;
+  uint8_t i, eq_count = 0;
   uint32_t *cost2 = this->uid_connected.cost;
   for ( i = 0; i < COST_PATH_COUNT; i++ ) {
-    if ( cost[ i ] != cost2[ i ] ) {
+    if ( cost[ i ] == cost2[ i ] )
+      eq_count++;
+    else {
       if ( this->uid_connected.is_advertised ) {
         n.printe( "conflicting cost[%u] "
                    "[%u,%u,%u,%u] (advert) != [%u,%u,%u,%u] (config) on %s\n", i,
@@ -159,7 +163,7 @@ TransportRoute::update_cost( UserBridge &n,
       }
     }
   }
-  if ( i == COST_PATH_COUNT )
+  if ( eq_count == COST_PATH_COUNT )
     return;
 #if 0
   if ( this->uid_connected.is_advertised ) {
@@ -171,6 +175,9 @@ TransportRoute::update_cost( UserBridge &n,
 #endif
   for ( i = 0; i < COST_PATH_COUNT; i++ )
     this->uid_connected.cost[ i ] = cost[ i ];
+  if ( debug_tran )
+    n.printf( "update cost [%u,%u,%u,%u] on %s\n", cost[ 0 ], cost[ 1 ],
+              cost[ 2 ], cost[ 3 ], this->name );
 
   this->user_db.peer_dist.invalidate( ADVERTISED_COST_INV );
   this->user_db.adjacency_change.append( n.bridge_id.nonce, n.uid,
@@ -752,6 +759,7 @@ TransportRoute::create_pgm( int kind,  ConfigTree::Transport &tport ) noexcept
   int  len = ::snprintf( tmp, sizeof( tmp ), "inbox://%s:%u",
                          l->pgm.gsr_addr, port );
   this->user_db.string_tab.ref_string( tmp, len, this->ucast_url );
+  this->ucast_url_hash = kv_crc_c( tmp, len, 0 );
   this->inbox_fd       = s->fd;
   this->mcast_fd       = l->fd;
   d_tran( "set mcast_fd=%u inbox_route=%u\n", l->fd, s->fd );

@@ -287,6 +287,7 @@ struct SessionMgr : public kv::EvSocket {
                        EvTcpTransport &conn ) noexcept;
   bool add_mesh_connect( TransportRoute &mesh_rte ) noexcept;
   TransportRoute * find_mesh( const StringVal &mesh_url ) noexcept;
+  TransportRoute * find_ucast( const StringVal &ucast_url ) noexcept;
   TransportRoute * find_mesh( TransportRoute &mesh_rte,
                               struct addrinfo *addr_list ) noexcept;
   bool add_mesh_connect( TransportRoute &mesh_rte,  const char **mesh_url,

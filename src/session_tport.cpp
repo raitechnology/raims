@@ -660,7 +660,7 @@ SessionMgr::add_mesh_connect( TransportRoute &mesh_rte,  const char **mesh_url,
   count = (uint32_t) this->user_db.transport_tab.count;
   for ( i = 0; i < url_count; i++ ) {
     if ( mesh_rte.is_set( TPORT_IS_LISTEN ) &&
-         mesh_rte.mesh_url_hash == mesh_hash[ i ] ) {
+         mesh_rte.mesh_equal( mesh_url[ i ], mesh_hash[ i ] ) ) {
       mesh_rte.printf( "not connecting to self (%s)\n", mesh_url[ i ] );
       mesh_url[ i ]  = NULL;
       mesh_hash[ i ] = 0;
@@ -671,7 +671,7 @@ SessionMgr::add_mesh_connect( TransportRoute &mesh_rte,  const char **mesh_url,
         rte = this->user_db.transport_tab.ptr[ tport_id ];
         if ( rte != &mesh_rte && rte->mesh_id == mesh_rte.mesh_id &&
              ! rte->is_set( TPORT_IS_SHUTDOWN ) ) {
-          if ( rte->mesh_url_hash == mesh_hash[ i ] ) {
+          if ( rte->mesh_equal( mesh_url[ i ], mesh_hash[ i ] ) ) {
             if ( debug_tran )
               mesh_rte.printf( "already connected (%s)\n", mesh_url[ i ] );
             skip |= 1 << i;
@@ -717,17 +717,11 @@ SessionMgr::add_mesh_connect( TransportRoute &mesh_rte,  const char *url,
     rte = this->user_db.transport_tab.ptr[ tport_id ];
     if ( rte->all_set( TPORT_IS_SHUTDOWN | TPORT_IS_MESH ) &&
          rte->mesh_id == mesh_rte.mesh_id ) {
-      if ( rte->connect_ctx == NULL ) {
+      if ( rte->connect_ctx == NULL || rte->mesh_equal( url, url_hash ) ) {
         rte->init_state();
         is_new = false;
         break;
       }
-      /*if ( rte->connect_ctx != NULL &&
-           rte->connect_ctx->state == ConnectCtx::CONN_SHUTDOWN ) {
-        rte->clear( TPORT_IS_SHUTDOWN );
-        is_new = false;
-        break;
-      }*/
     }
   }
   if ( is_new ) {

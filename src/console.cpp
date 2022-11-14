@@ -371,7 +371,7 @@ Console::log_output( int stream,  uint64_t stamp,  size_t len,
     return;
   }
   if ( this->last_log_repeat_count > 0 ) {
-    static const char   repeat_cnt[]  = " repeated ";
+    static const char   repeat_cnt[]  = " line repeated ";
     static const size_t repeat_cnt_sz = sizeof( repeat_cnt ) - 1;
     char   repeat[ 16 ];
     size_t cnt_sz = uint32_to_string( this->last_log_repeat_count, repeat );
@@ -1932,6 +1932,7 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
       this->colorize_log( p, this->log.ptr, this->log_index );
       break;
     case CMD_SHOW_COUNTERS:  this->show_counters( p );  break;
+    case CMD_SHOW_INBOX:     this->show_inbox( p, arg, len ); break;
     case CMD_SHOW_LOSS:      this->show_loss( p );      break;
     case CMD_SHOW_SKEW:      this->show_skew( p );      break;
     case CMD_SHOW_REACHABLE: this->show_reachable( p ); break;
@@ -2676,7 +2677,7 @@ Console::recv_remote_request( const MsgFramePublish &,  UserBridge &n,
   m.reserve( e.sz );
 
   m.open( this->user_db.bridge_id.nonce, ibx.len() )
-   .seqno( ++n.send_inbox_seqno );
+   .seqno( n.inbox.next_send( U_INBOX ) );
   if ( token != 0 )
     m.token( token );
   m.data( out.result.ptr, out.result.count );
@@ -4307,8 +4308,8 @@ Console::show_counters( ConsoleOutput *p ) noexcept
        .set_time( n->start_time )        /* start */
        .set_long( n->hb_seqno )          /* hb */
        .set_time( n->hb_time )           /* hb_time */
-       .set_long( n->send_inbox_seqno )  /* isnd */
-       .set_long( n->recv_inbox_seqno )  /* ircv */
+       .set_long( n->inbox.send_seqno )  /* isnd */
+       .set_long( n->inbox.recv_seqno )  /* ircv */
        .set_long( n->ping_send_count )   /* pisnd */
        .set_time( n->ping_send_time )    /* ping_stime */
        .set_long( n->pong_recv_count )   /* porcv */
@@ -4317,6 +4318,71 @@ Console::show_counters( ConsoleOutput *p ) noexcept
   static const char *hdr[ ncols ] =
     { "user", "start", "hb seqno", "hb time", "snd ibx", "rcv ibx",
       "ping snd", "ping stime", "pong rcv", "ping rcv" };
+  this->print_table( p, hdr, ncols );
+}
+
+void
+Console::show_inbox( ConsoleOutput *p, const char *arg, size_t arglen ) noexcept
+{
+  static const uint32_t ncols = 5;
+  TabOut out( this->table, this->tmp, ncols );
+
+  for ( uint32_t uid = 1; uid < this->user_db.next_uid; uid++ ) {
+    UserBridge * n = this->user_db.bridge_tab[ uid ];
+    if ( n == NULL || ! n->is_set( AUTHENTICATED_STATE ) )
+      continue;
+    if ( arglen > 0 && ! n->peer.user.equals( arg, arglen ) )
+      continue;
+
+    if ( out.table.count > 0 )
+      out.row( ncols - 1 ).typ |= PRINT_SEP;
+    uint64_t send_seqno = n->inbox.send_seqno,
+             recv_seqno = n->inbox.recv_seqno;
+    if ( send_seqno > 32 )
+      send_seqno -= 32;
+    else
+      send_seqno = 1;
+    if ( recv_seqno > 32 )
+      recv_seqno -= 32;
+    else
+      recv_seqno = 1;
+    bool first = true;
+    while ( send_seqno < n->inbox.send_seqno ||
+            recv_seqno <= n->inbox.recv_seqno ) {
+      TabPrint * tab = out.add_row_p();
+      uint32_t i = 0;
+      if ( first ) {
+        tab[ i++ ].set( n, PRINT_USER );    /* user */
+        first = false;
+      }
+      else
+        tab[ i++ ].set_null();
+      if ( send_seqno < n->inbox.send_seqno ) {
+        tab[ i++ ].set_long( send_seqno );/* send seqno */
+        tab[ i++ ].set(
+          publish_type_to_string(
+            (PublishType) n->inbox.send_type[ send_seqno % 32 ] ) );
+      }
+      else {
+        tab[ i++ ].set_null();
+        tab[ i++ ].set_null();
+      }
+      if ( recv_seqno <= n->inbox.recv_seqno ) {
+        tab[ i++ ].set_long( recv_seqno );/* recv seqno */
+        tab[ i++ ].set(
+          publish_type_to_string(
+            (PublishType) n->inbox.recv_type[ recv_seqno % 32 ] ) );
+      }
+      else {
+        tab[ i++ ].set_null();
+        tab[ i++ ].set_null();
+      }
+      send_seqno++;
+      recv_seqno++;
+    }
+  }
+  static const char *hdr[ ncols ] =
+    { "user", "send seqno", "send type", "recv seqno", "recv type" };
   this->print_table( p, hdr, ncols );
 }
 

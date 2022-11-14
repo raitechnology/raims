@@ -193,6 +193,7 @@ struct TransportRoute : public kv::EvSocket, public kv::EvConnectionNotify,
                           mcast_fd,       /* fd of mcast pgm */
                           mesh_url_hash,  /* hash of mesh_url */
                           conn_hash,      /* hash of connecting url */
+                          ucast_url_hash, /* hash of outgoing inbox url */
                           oldest_uid,     /* which uid is oldest connect */
                           primary_count;
   IpcRteList            * ext;      
@@ -210,6 +211,11 @@ struct TransportRoute : public kv::EvSocket, public kv::EvConnectionNotify,
   bool is_mcast( void )  const { return this->is_set( TPORT_IS_MCAST ) != 0; }
   bool is_mesh( void )   const { return this->is_set( TPORT_IS_MESH ) != 0; }
   bool is_edge( void )   const { return this->is_set( TPORT_IS_EDGE ) != 0; }
+  bool is_ipc( void )    const { return this->is_set( TPORT_IS_IPC ) != 0; }
+  bool mesh_equal( const char *url,  uint32_t hash ) const {
+    if ( hash != this->mesh_url_hash ) return false;
+    return this->mesh_url.equals( url );
+  }
 
   int init( void ) noexcept;
   void init_state( void ) noexcept;

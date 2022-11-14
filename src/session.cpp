@@ -209,6 +209,8 @@ SessionMgr::init_session( const CryptPass &pwd ) noexcept
   this->ibx.init( ibx, _ADJ_RPY  , U_INBOX_ADJ_RPY );
   this->ibx.init( ibx, _MESH_REQ , U_INBOX_MESH_REQ );
   this->ibx.init( ibx, _MESH_RPY , U_INBOX_MESH_RPY );
+  this->ibx.init( ibx, _UCAST_REQ, U_INBOX_UCAST_REQ );
+  this->ibx.init( ibx, _UCAST_RPY, U_INBOX_UCAST_RPY );
   this->ibx.init( ibx, _TRACE    , U_INBOX_TRACE );
   this->ibx.init( ibx, _ACK      , U_INBOX_ACK );
   this->ibx.init( ibx, _ANY      , U_INBOX_ANY );
@@ -974,9 +976,13 @@ SessionMgr::on_msg( EvPublish &pub ) noexcept
         this->user_db.add_inbox_route( n, NULL ); /* need an inbox */
     }
     /* authorize user by verifying the DSA key exchange */
-    if ( type == U_INBOX_AUTH && fpub.status == FRAME_STATUS_INBOX_AUTH )
+    if ( type == U_INBOX_AUTH && fpub.status == FRAME_STATUS_INBOX_AUTH ) {
+      uint64_t seqno = n.inbox.recv_seqno;
+      n.inbox.set_recv( dec.seqno, U_INBOX_AUTH );
+      if ( seqno > dec.seqno ) /* auth trust reuses seqno from auth */
+        n.inbox.recv_seqno = seqno;
       return this->user_db.on_inbox_auth( fpub, n, dec );
-
+    }
     /* maybe authorize if needed by starting DSA exchange */
     if ( ( type == U_SESSION_HELLO || type == U_SESSION_HB ) &&
          ( fpub.status == FRAME_STATUS_OK ||
@@ -1057,8 +1063,8 @@ SessionMgr::on_msg( EvPublish &pub ) noexcept
     case U_PEER_DEL:       /* _Z.DEL */
     case U_BLOOM_FILTER:   /* _Z.BLM */
     case U_ADJACENCY: {    /* _Z.ADJ */
-      if ( dec.seqno > n.recv_peer_seqno ) {
-        n.recv_peer_seqno = dec.seqno;
+      if ( dec.seqno > n.peer_recv_seqno ) {
+        n.peer_recv_seqno = dec.seqno;
         /* bloom and adj are sequenced independently (sub_seqno, link_state) */
         switch ( type ) {
           case U_BLOOM_FILTER: return this->sub_db.recv_bloom_result( fpub, n, dec );
@@ -1072,15 +1078,16 @@ SessionMgr::on_msg( EvPublish &pub ) noexcept
         if ( debug_sess ) {
           n.printf( "%.*s ignoring peer seqno replay %" PRIu64 " -> %" PRIu64 " (%s)\n",
                     (int) fpub.subject_len, fpub.subject,
-                    n.recv_peer_seqno, dec.seqno, fpub.rte.name );
+                    n.peer_recv_seqno, dec.seqno, fpub.rte.name );
         }
         fpub.status = FRAME_STATUS_DUP_SEQNO;
       }
       break;
     }
+    case U_INBOX_PING: return this->user_db.recv_ping_request( fpub, n, dec );/* _I.Nonce.ping */
+    case U_INBOX_PONG: return this->user_db.recv_pong_result( fpub, n, dec ); /* _I.Nonce.pong */
+
     case U_INBOX_SUBS:      /* _I.Nonce.subs      */
-    case U_INBOX_PING:      /* _I.Nonce.ping      */
-    case U_INBOX_PONG:      /* _I.Nonce.pong      */
     case U_INBOX_REM:       /* _I.Nonce.rem       */
     case U_INBOX_RESUB:     /* _I.Nonce.resub     */
     case U_INBOX_REPSUB:    /* _I.Nonce.repsub    */
@@ -1093,21 +1100,29 @@ SessionMgr::on_msg( EvPublish &pub ) noexcept
     case U_INBOX_ADJ_RPY:   /* _I.Nonce.adj_rpy   */
     case U_INBOX_MESH_REQ:  /* _I.Nonce.mesh_req  */
     case U_INBOX_MESH_RPY:  /* _I.Nonce.mesh_rpy  */
+    case U_INBOX_UCAST_REQ: /* _I.Nonce.ucast_req */
+    case U_INBOX_UCAST_RPY: /* _I.Nonce.ucast_rpy */
     case U_INBOX_ANY_RTE:   /* _I.Nonce.any, ipc_rt inbox */
-      if ( dec.seqno > n.recv_inbox_seqno ) {
-        if ( n.recv_inbox_seqno != 0 && dec.seqno != n.recv_inbox_seqno + 1 ) {
+      if ( dec.seqno > n.inbox.recv_seqno ) {
+        if ( n.inbox.recv_seqno != 0 && dec.seqno != n.inbox.recv_seqno + 1 ) {
+          /*uint64_t recv_seqno = n.inbox.recv_seqno;
+          if ( recv_seqno > 32 ) recv_seqno -= 32; else recv_seqno = 1;
+          while ( recv_seqno < n.inbox.recv_seqno ) {
+            printf( "recv: %lu, type %s\n",
+              recv_seqno, publish_type_to_string(
+                (PublishType) n.inbox.recv_type[ recv_seqno % 32 ] ) );
+            recv_seqno++;
+          }*/
           n.inbox_msg_loss_time   = this->timer_time;
-          n.inbox_msg_loss_count += dec.seqno - ( n.recv_inbox_seqno + 1 );
+          n.inbox_msg_loss_count += dec.seqno - ( n.inbox.recv_seqno + 1 );
           n.printf( "%.*s missing inbox seqno %" PRIu64 " -> %" PRIu64 " (%s)\n",
                     (int) fpub.subject_len, fpub.subject,
-                    n.recv_inbox_seqno, dec.seqno, fpub.rte.name );
+                    n.inbox.recv_seqno, dec.seqno, fpub.rte.name );
         }
         /* these should be in order, otherwise message loss occurred */
-        n.recv_inbox_seqno = dec.seqno;
+        n.inbox.set_recv( dec.seqno, type );
         switch ( type ) {
           case U_INBOX_SUBS:      return this->sub_db.recv_subs_request( fpub, n, dec );
-          case U_INBOX_PING:      return this->user_db.recv_ping_request( fpub, n, dec );
-          case U_INBOX_PONG:      return this->user_db.recv_pong_result( fpub, n, dec );
           case U_INBOX_REM:       return this->console.recv_remote_request( fpub, n, dec );
           case U_INBOX_RESUB:     return this->sub_db.recv_resub_result( fpub, n, dec );
           case U_INBOX_REPSUB:    return this->sub_db.recv_repsub_result( fpub, n, dec );
@@ -1120,6 +1135,8 @@ SessionMgr::on_msg( EvPublish &pub ) noexcept
           case U_INBOX_ADJ_RPY:   return this->user_db.recv_adjacency_result( fpub, n, dec );
           case U_INBOX_MESH_REQ:  return this->user_db.recv_mesh_request( fpub, n, dec );
           case U_INBOX_MESH_RPY:  return this->user_db.recv_mesh_result( fpub, n, dec );
+          case U_INBOX_UCAST_REQ: return true; /* probably don't need these */
+          case U_INBOX_UCAST_RPY: return true;
           case U_INBOX_ANY_RTE:   return this->ipc_rt.on_inbox( fpub, n, dec );
           default: break;
         }
@@ -1127,29 +1144,14 @@ SessionMgr::on_msg( EvPublish &pub ) noexcept
       else {
         n.printf( "%.*s ignoring inbox seqno replay %" PRIu64 " -> %" PRIu64 " (%s)\n",
                   (int) fpub.subject_len, fpub.subject,
-                  n.recv_inbox_seqno, dec.seqno, fpub.rte.name );
+                  n.inbox.recv_seqno, dec.seqno, fpub.rte.name );
         fpub.status = FRAME_STATUS_DUP_SEQNO;
       }
       break;
 
     case U_MCAST_PING:
     case U_MCAST:
-      if ( dec.seqno > n.recv_mcast_seqno ) {
-        if ( n.recv_mcast_seqno != 0 && dec.seqno != n.recv_mcast_seqno + 1 ) {
-          n.printf( "%.*s missing mcast seqno %" PRIu64 " -> %" PRIu64 " (%s)\n",
-                    (int) fpub.subject_len, fpub.subject,
-                    n.recv_mcast_seqno, dec.seqno, fpub.rte.name );
-        }
-        n.recv_mcast_seqno = dec.seqno;
-        return this->user_db.recv_ping_request( fpub, n, dec );
-      }
-      else {
-        n.printf( "%.*s ignoring mcast seqno replay %" PRIu64 " -> %" PRIu64 " (%s)\n",
-                  (int) fpub.subject_len, fpub.subject,
-                  n.recv_mcast_seqno, dec.seqno, fpub.rte.name );
-        fpub.status = FRAME_STATUS_DUP_SEQNO;
-      }
-      break;
+      return this->user_db.recv_ping_request( fpub, n, dec, true );
 
     case U_NORMAL:        /* _SUBJECT */
     case U_INBOX:         /* _I.Nonce.<inbox_ret> */
@@ -1176,13 +1178,13 @@ SessionMgr::on_msg( EvPublish &pub ) noexcept
 
       /* if _I.Nonce.<inbox_ret>, find the inbox_ret */
       if ( dec.inbox_ret != 0 || type == U_INBOX_ANY ) {
-        if ( dec.seqno != n.recv_inbox_seqno + 1 ) {
+        if ( n.inbox.recv_seqno != 0 && dec.seqno != n.inbox.recv_seqno + 1 ) {
           n.printf( "%.*s missing inbox return seqno %" PRIu64 " -> %" PRIu64 " (%s)\n",
                     (int) fpub.subject_len, fpub.subject,
-                    n.recv_inbox_seqno, dec.seqno, fpub.rte.name );
+                    n.inbox.recv_seqno, dec.seqno, fpub.rte.name );
         }
         /* these should be in order, otherwise message loss occurred */
-        n.recv_inbox_seqno = dec.seqno;
+        n.inbox.set_recv( dec.seqno, type );
         if ( type != U_INBOX_ANY ) {
           const char * num = &fpub.subject[ this->ibx.len ];
           size_t       len = fpub.subject_len - this->ibx.len;
@@ -1278,13 +1280,13 @@ SessionMgr::publish( PubMcastData &mc ) noexcept
     if ( ::memcmp( inbox_prefix, mc.sub, inbox_prefix_len ) == 0 ) {
       dest_bridge_id = this->user_db.is_inbox_sub( mc.sub, mc.sublen );
       if ( dest_bridge_id != NULL ) {
-        mc.seqno = ++dest_bridge_id->send_inbox_seqno;
+        mc.seqno   = dest_bridge_id->inbox.next_send( U_INBOX );
         need_seqno = false;
         fl.set_type( CABA_INBOX );
       }
     }
     else if ( ::memcmp( mcast_prefix, mc.sub, mcast_prefix_len ) == 0 ) {
-      mc.seqno = ++this->user_db.mcast_seqno;
+      mc.seqno = ++this->user_db.mcast_send_seqno;
       need_seqno = false;
     }
     if ( caba_rtr_alert( mc.sub ) )
@@ -1428,7 +1430,7 @@ SessionMgr::forward_inbox( EvPublish &fwd ) noexcept
     m.reserve( e.sz );
 
     m.open( this->user_db.bridge_id.nonce, ibx.len() )
-     .seqno ( ++n->send_inbox_seqno );
+     .seqno ( n->inbox.next_send( U_INBOX_ANY ) );
 
     m.subject( fwd.subject, fwd.subject_len );
     if ( fwd.reply_len != 0 )
@@ -1612,7 +1614,7 @@ SessionMgr::publish_to( PubPtpData &ptp ) noexcept
     ibx.i( ptp.reply );
   else
     ibx.s( _ANY );
-  ptp.seqno = ++ptp.peer.send_inbox_seqno;
+  ptp.seqno = ptp.peer.inbox.next_send( U_INBOX );
 
   MsgEst e( ibx.len() );
   e.seqno  ()
@@ -1684,7 +1686,7 @@ SessionMgr::send_ack( const MsgFramePublish &pub,  UserBridge &n,
   MsgCat m;
   m.reserve( e.sz );
   m.open( this->user_db.bridge_id.nonce, ibx.len() )
-   .seqno    ( ++n.send_inbox_seqno )
+   .seqno    ( n.inbox.next_send( U_INBOX_ACK /* or TRACE */ ) )
    .stamp    ( stamp );
   if ( token != 0 )
     m.token( token );

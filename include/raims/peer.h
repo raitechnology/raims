@@ -6,6 +6,7 @@
 #include <raikv/bit_set.h>
 #include <raims/adjacency.h>
 #include <raims/ed25519.h>
+#include <raims/msg.h>
 
 namespace rai {
 namespace ms {
@@ -176,6 +177,40 @@ struct PeerKeyHash {
   }
 };
 
+struct PeerDBRec : public MsgFldSet {
+  Nonce        nonce;
+  const char * user;
+  uint32_t     user_len,
+               hops;
+  uint64_t     sub_seqno,
+               link_state;
+  int64_t      hb_skew;
+  PeerDBRec  * next;
+  void * operator new( size_t, void *ptr ) { return ptr; }
+  PeerDBRec() : user( 0 ), user_len( 0 ), hops( 0 ), sub_seqno( 0 ),
+                link_state( 0 ), hb_skew( 0 ), next( 0 ) {
+    this->nonce.zero();
+  }
+  void set_field( uint32_t fid,  md::MDReference &mref ) {
+    switch ( fid ) {
+      case FID_BRIDGE:     this->nonce.copy_from( mref.fptr ); break;
+      case FID_HOPS:       md::cvt_number<uint32_t>( mref, this->hops ); break;
+      case FID_SUB_SEQNO:  md::cvt_number<uint64_t>( mref, this->sub_seqno ); break;
+      case FID_LINK_STATE: md::cvt_number<uint64_t>( mref, this->link_state ); break;
+      case FID_HB_SKEW:    md::cvt_number<int64_t>( mref, this->hb_skew ); break;
+      case FID_USER:
+        this->user     = (const char *) mref.fptr;
+        this->user_len = (uint32_t) mref.fsize;
+        break;
+      default:
+        break;
+    }
+  }
+  void print( void ) const noexcept;
+  static void print_rec_list( const PeerDBRec *rec_list,
+                              UserBridge &n ) noexcept;
+};
+
 struct PeerKeyCache {
   uint32_t off;
   uint8_t  cache[ HASH_DIGEST_SIZE * 1024 ]; /* cache 1024 of them */
@@ -286,7 +321,7 @@ struct AdjChangeList : public kv::DLinkList< AdjChange > {
   }
 };
 
-struct MeshDBFilter {
+struct UrlDBFilter {
   uint32_t except_uid,
            match_count,
            url_count,
@@ -294,12 +329,13 @@ struct MeshDBFilter {
            request_count,
          * hash;
   bool   * matched;
-  bool     invert_match;
+  bool     invert_match,
+           is_mesh_filter;
 
-  MeshDBFilter( uint32_t except,  MsgHdrDecoder *dec = NULL ) :
+  UrlDBFilter( uint32_t except,  bool is_mesh,  MsgHdrDecoder *dec = NULL ) :
       except_uid( except ), match_count( 0 ), url_count( 0 ),
       return_count( 0 ), request_count( 0 ), hash( 0 ), matched( 0 ),
-      invert_match( false ) {
+      invert_match( false ), is_mesh_filter( is_mesh ) {
     if ( dec != NULL )
       this->setup_filter( *dec );
   }
