@@ -129,11 +129,14 @@ The "parameters:" structure is optional and not necessary to define them.
 | heartbeat       | time     | 10 secs | Interval of heartbeat
 | reliability     | time     | 15 secs | Time of publish reliability
 | timestamp       | string   | LOCAL   | Log using local time or GMT
-| tcp_noencrypt   | boolean  | false   | Default for TCP/mesh encryption
-| tcp_timeout     | time     | 10 secs | Default timeout for TCP/mesh connect
+| pid_file        | string   | none    | Daemon pid file
 | map_file        | string   | none    | Use for key value storage
 | db_num          | string   | none    | Default db number for key value
 | ipc_name        | string   | none    | Connect to IPC sockets
+| tcp_timeout     | time     | 10 secs | Default timeout for TCP/mesh connect
+| tcp_ipv4only    | boolean  | false   | Use IPv4 addressing only
+| tcp_ipv6only    | boolean  | false   | Use IPv6 addressing only
+| tcp_noencrypt   | boolean  | false   | Default for TCP/mesh encryption
 |=============================================
 
 - salt, pass, salt_data, pass_data -- The salt, pass or salt_data, pass_data
@@ -157,10 +160,7 @@ The "parameters:" structure is optional and not necessary to define them.
 - timestamp -- When set to GMT, the time stamps are not offset by the local
   timezone.
 
-- tcp_noencrypt -- When true, the default for TCP and mesh connections is to
-  to not encrypt the traffic.
-
-- tcp_timeout -- The default retry timeout for TCP and mesh connections.
+- pid_file -- A file that contains the process id when forked in rvd mode.
 
 - map_file -- If a Redis transport is used, this is where the data is stored.
   If no map is defined, then the data stored will fail and data retrieved will
@@ -172,3 +172,11 @@ The "parameters:" structure is optional and not necessary to define them.
   and subscription maps using the same name.  If the processes are shutdown,
   they will restart or stop the subscriptions using the maps.
 
+- tcp_timeout -- The default retry timeout for TCP and mesh connections.
+
+- tcp_ip4only -- Resolve DNS hostnames to IPv4 addresses only.
+
+- tcp_ip6only -- Resolve DNS hostnames to IPv6 addresses only.
+
+- tcp_noencrypt -- When true, the default for TCP and mesh connections is to
+  to not encrypt the traffic.

@@ -60,8 +60,8 @@ SessionMgr::SessionMgr( EvPoll &p,  Logger &l,  ConfigTree &c,
              sub_window_size( 4 * 1024 * 1024 ),
              pub_window_ival( sec_to_ns( 10 ) ),
              sub_window_ival( sec_to_ns( 10 ) ),
-             tcp_timeout( 10 ), tcp_noencrypt( false ), tcp_ip4( true ),
-             tcp_ip6( true ), session_started( false )
+             tcp_timeout( 10 ), tcp_noencrypt( false ), tcp_ipv4( true ),
+             tcp_ipv6( true ), session_started( false )
 {
   this->sock_opts = OPT_NO_POLL;
   this->tcp_accept_sock_type = p.register_type( "ev_tcp_tport" );
@@ -93,6 +93,7 @@ SessionMgr::init_param( void ) noexcept
 {
   const char *s = "", *val = NULL;
   uint64_t hb_ival, rel_ival, time_val;
+  bool ipv4_only = false, ipv6_only = false;
 
   if ( this->tree.find_parameter( s = P_PUB_WINDOW_SIZE, val, NULL ) &&
        ! ConfigTree::string_to_bytes( val, this->pub_window_size ) ) goto fail;
@@ -121,6 +122,20 @@ SessionMgr::init_param( void ) noexcept
   if ( this->tree.find_parameter( s = P_TCP_TIMEOUT, val, NULL ) ) {
     if ( ! ConfigTree::string_to_secs( val, time_val ) ) goto fail;
     this->tcp_timeout = (int) time_val;
+  }
+  if ( this->tree.find_parameter( s = P_TCP_IPV4ONLY, val, NULL ) ) {
+    if ( ! ConfigTree::string_to_bool( val, ipv4_only ) ) goto fail;
+  }
+  if ( this->tree.find_parameter( s = P_TCP_IPV6ONLY, val, NULL ) ) {
+    if ( ! ConfigTree::string_to_bool( val, ipv6_only ) ) goto fail;
+  }
+  if ( ipv4_only && ! ipv6_only ) {
+    this->tcp_ipv4 = true;
+    this->tcp_ipv6 = false;
+  }
+  if ( ipv6_only && ! ipv4_only ) {
+    this->tcp_ipv6 = true;
+    this->tcp_ipv4 = false;
   }
   update_tz_stamp();
   return true;
@@ -332,7 +347,17 @@ SessionMgr::fork_daemon( int err_fd ) noexcept
   ::umask( 0 );
   if ( ::fork() > 0 )
     ::exit( 0 );
-  printf( "running background deamon PID: %u\n", ::getpid() );
+  pid_t pid = ::getpid();
+  const char * pidfile = NULL;
+  printf( "running background deamon PID: %d\n", pid );
+  if ( this->tree.find_parameter( P_PID_FILE, pidfile, NULL ) &&
+       pidfile != NULL ) {
+    FILE * fp;
+    if ( (fp = ::fopen( pidfile, "w" )) != NULL ) {
+      fprintf( fp, "%d\n", pid );
+      ::fclose( fp );
+    }
+  }
 }
 
 void

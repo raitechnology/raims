@@ -110,6 +110,7 @@ main( int argc, char *argv[] )
              * map_file    = NULL,
              * db_num      = NULL,
              * use_console = NULL,
+             * pid_file    = NULL,
              * reliability = NULL,
              * get_help    = NULL;
   static const char cfg_dir[] = "config";
@@ -154,7 +155,8 @@ main( int argc, char *argv[] )
   "   -no-http           : no http service\n" \
   "   -http              : port for http service (default: listen + 80)\n" \
   "   -no-mcast          : no multicast\n" \
-  "   -console           : run with console\n"
+  "   -console           : run with console\n" \
+  "   -pidfile           : write daemon pid to file\n"
     cfg         = get_arg( argc, argv, 1, "-cfg", rv_file );
     reliability = get_arg( argc, argv, 1, "-reliability", NULL );
     user        = get_arg( argc, argv, 1, "-user", NULL );
@@ -172,6 +174,7 @@ main( int argc, char *argv[] )
     http        = get_arg( argc, argv, 1, "-http", NULL );
     no_mcast    = get_arg( argc, argv, 0, "-no-multicast", NULL );
     use_console = get_arg( argc, argv, 0, "-console", NULL );
+    pid_file    = get_arg( argc, argv, 1, "-pidfile", NULL );
     if ( use_console != NULL )
       foreground = use_console;
     get_help    = get_arg( argc, argv, 0, "-help", NULL );
@@ -252,6 +255,8 @@ main( int argc, char *argv[] )
     tree->set_parameter( st, P_IPC_NAME, ipc_name );
   if ( reliability != NULL )
     tree->set_parameter( st, P_RELIABILITY, reliability );
+  if ( pid_file != NULL )
+    tree->set_parameter( st, P_PID_FILE, pid_file );
 
   ConfigTree::User      * usr   = NULL;
   ConfigTree::Service   * svc   = NULL;

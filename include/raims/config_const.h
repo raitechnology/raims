@@ -27,8 +27,11 @@ CONFIG_CONST( P_PUB_WINDOW_TIME , "pub_window_time" )
 CONFIG_CONST( P_SUB_WINDOW_TIME , "sub_window_time" )
 CONFIG_CONST( P_HEARTBEAT       , "heartbeat" )
 CONFIG_CONST( P_TIMESTAMP       , "timestamp" )
-CONFIG_CONST( P_TCP_NOENCRYPT   , "tcp_noencrypt" )
+CONFIG_CONST( P_PID_FILE        , "pid_file" )
 CONFIG_CONST( P_TCP_TIMEOUT     , "tcp_timeout" )
+CONFIG_CONST( P_TCP_IPV4ONLY    , "tcp_ipv4only" )
+CONFIG_CONST( P_TCP_IPV6ONLY    , "tcp_ipv6only" )
+CONFIG_CONST( P_TCP_NOENCRYPT   , "tcp_noencrypt" )
 
 /* T_: transport / networks */
 CONFIG_CONST( T_ANY          , "any" )

@@ -36,22 +36,22 @@ void
 EvTcpTransportOpts::parse( ConfigTree::Transport &tport,
                            int ptype,  SessionMgr &mgr ) noexcept
 {
-  bool ip4, ip6;
+  bool ipv4, ipv6;
   if ( ! tport.get_route_int( R_TIMEOUT, this->timeout ) )
     this->timeout = mgr.tcp_timeout;
   if ( ! tport.get_route_bool( R_EDGE, this->edge ) )
     this->edge = false;
-  if ( ! tport.get_route_bool( R_IPV4ONLY, ip4 ) )
-    ip4 = mgr.tcp_ip4;
-  if ( ! tport.get_route_bool( R_IPV6ONLY, ip6 ) )
-    ip6 = mgr.tcp_ip6;
+  if ( ! tport.get_route_bool( R_IPV4ONLY, ipv4 ) )
+    ipv4 = mgr.tcp_ipv4;
+  if ( ! tport.get_route_bool( R_IPV6ONLY, ipv6 ) )
+    ipv6 = mgr.tcp_ipv6;
   if ( ! tport.get_route_bool( R_NOENCRYPT, this->noencrypt ) )
     this->noencrypt = mgr.tcp_noencrypt;
   if ( ! this->noencrypt )
     this->opts |= TCP_OPT_ENCRYPT;
-  if ( ip4 )
+  if ( ipv4 )
     this->opts = ( this->opts & ~OPT_AF_INET6 ) | OPT_AF_INET;
-  else if ( ip4 )
+  else if ( ipv4 )
     this->opts = ( this->opts & ~OPT_AF_INET ) | OPT_AF_INET6;
   if ( ( ptype & PARAM_LISTEN ) != 0 )
     this->opts |= kv::OPT_REUSEADDR;

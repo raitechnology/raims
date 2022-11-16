@@ -257,8 +257,8 @@ struct SessionMgr : public kv::EvSocket {
                         tcp_connect_sock_type;
   int                   tcp_timeout;
   bool                  tcp_noencrypt,
-                        tcp_ip4,
-                        tcp_ip6,
+                        tcp_ipv4,
+                        tcp_ipv6,
                         session_started;
 
   SessionMgr( kv::EvPoll &p,  kv::Logger &l,  ConfigTree &c,
