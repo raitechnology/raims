@@ -217,7 +217,8 @@ struct UserBridge : public UserStateTest<UserBridge> {
                      inbox_msg_loss_time,
                      inbox_msg_loss_count, /* inbox message loss */
                      name_recv_seqno,
-                     name_recv_time;
+                     name_recv_time,
+                     name_recv_mask;
   void * operator new( size_t, void *ptr ) { return ptr; }
 
   UserBridge( PeerEntry &pentry,  kv::BloomDB &db,  uint32_t seed )

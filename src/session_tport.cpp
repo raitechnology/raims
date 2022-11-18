@@ -837,7 +837,8 @@ SessionMgr::create_name( ConfigTree::Transport &tport ) noexcept
   Unrouteable & un = this->unrouteable.upsert( &tport );
   if ( un.name == NULL ) {
     void * p = aligned_malloc( sizeof( NameSvc ) );
-    un.name = new ( p ) NameSvc( this->poll, *this, this->user_db, tport );
+    un.name = new ( p ) NameSvc( this->poll, *this, this->user_db,
+                                 tport, un.un_id );
   }
   if ( ! un.name->is_connected ) {
     if ( ! un.name->connect() )

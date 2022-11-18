@@ -18,9 +18,10 @@ using namespace kv;
 using namespace md;
 
 NameSvc::NameSvc( EvPoll &p,  SessionMgr &m,  UserDB &u,
-                  ConfigTree::Transport &tp ) noexcept
+                  ConfigTree::Transport &tp,  uint32_t id ) noexcept
        : mgr( m ), user_db( u ), tport( tp ), mcast_recv( p, *this ),
-         mcast_send( p, *this ), connect_fail_count( 0 ),
+         inbox_recv( p, *this ), mcast_send( p, *this ),
+         connect_fail_count( 0 ), name_id( id ),
          is_connected( false ), is_closed( true )
 {
   this->inbox.val = 0;
@@ -32,10 +33,10 @@ NameSvc::connect( void ) noexcept
   int mcast_send_opts =
       ( DEFAULT_UDP_CONNECT_OPTS | OPT_NO_DNS | OPT_AF_INET ) & ~OPT_AF_INET6,
       mcast_recv_opts =
-      ( DEFAULT_UDP_LISTEN_OPTS  | OPT_NO_DNS | OPT_AF_INET ) & ~OPT_AF_INET6;
-    /*ucast_recv_opts = mcast_recv_opts | OPT_UNICAST;*/
+      ( DEFAULT_UDP_LISTEN_OPTS  | OPT_NO_DNS | OPT_AF_INET ) & ~OPT_AF_INET6,
+      inbox_recv_opts = mcast_recv_opts | OPT_UNICAST;
   char buf[ 256 ];
-  PeerAddrStr paddr;
+  PeerAddrStr paddr, ibx_paddr;
   struct sockaddr_in sa;
   socklen_t len = sizeof( sa );
   const char * ip = NULL;
@@ -72,17 +73,32 @@ NameSvc::connect( void ) noexcept
     fprintf( stderr, "name: failed to listen mcast_recv (%s:%d)\n", ip, port );
     goto fail;
   }
-  if ( ::getsockname( this->mcast_recv.fd, (struct sockaddr *) &sa,
+  if ( ::getsockname( this->mcast_send.fd, (struct sockaddr *) &sa,
                       &len ) != 0 ) {
     perror( "name: getsockname" );
     goto fail;
   }
+  paddr.set_address( (struct sockaddr *) &sa );
+
+  char ucast[ 256 ];
+  inet_ntop( AF_INET, &sa.sin_addr, ucast, sizeof( ucast ) );
+  x = this->inbox_recv.listen2( ucast, 0, inbox_recv_opts, "ucast_recv", -1 );
+  if ( x != 0 ) {
+    fprintf( stderr, "name: failed to listen inbox_recv (%s)\n", ucast );
+    goto fail;
+  }
+  if ( ::getsockname( this->inbox_recv.fd, (struct sockaddr *) &sa,
+                      &len ) != 0 ) {
+    perror( "name: getsockname" );
+    goto fail;
+  }
+  this->inbox_recv.set_addr( (struct sockaddr *) &sa );
   this->inbox.ip.s_addr   = sa.sin_addr.s_addr;
   this->inbox.ip.sin_port = sa.sin_port;
 
-  paddr.set_sock_addr( this->mcast_send.fd );
-  printf( "name: connect %s -> %s\n", paddr.buf,
-          this->mcast_send.peer_address.buf );
+  ibx_paddr.set_address( (struct sockaddr *) &sa );
+  printf( "name: connect %s -> %s, inbox %s\n", paddr.buf,
+          this->mcast_send.peer_address.buf, ibx_paddr.buf );
 
   x = ::snprintf( buf, sizeof( buf ), "%s.%s.send", this->tport.type.val,
                   this->tport.tport.val );
@@ -90,6 +106,10 @@ NameSvc::connect( void ) noexcept
   x = ::snprintf( buf, sizeof( buf ), "%s.%s.recv", this->tport.type.val,
                   this->tport.tport.val );
   this->mcast_recv.set_name( buf, x );
+  x = ::snprintf( buf, sizeof( buf ), "%s.%s.inbox", this->tport.type.val,
+                  this->tport.tport.val );
+  this->inbox_recv.set_name( buf, x );
+
   this->connect_fail_count = 0;
   this->is_connected = true;
   this->start_transports();
@@ -108,9 +128,10 @@ NameSvc::close( void ) noexcept
 {
   if ( this->mcast_send.in_list( IN_ACTIVE_LIST ) )
     this->mcast_send.idle_push( EV_CLOSE );
-
   if ( this->mcast_recv.in_list( IN_ACTIVE_LIST ) )
     this->mcast_recv.idle_push( EV_CLOSE );
+  if ( this->inbox_recv.in_list( IN_ACTIVE_LIST ) )
+    this->inbox_recv.idle_push( EV_CLOSE );
 
   this->is_closed    = true;
   this->is_connected = false;
@@ -208,7 +229,7 @@ NameSvc::print_addr( const char *what,  const void *sa ) noexcept
 }
 
 void
-EvNameListen::process( void ) noexcept
+EvNameSock::process( void ) noexcept
 {
   uint32_t cnt = this->in_nmsgs - this->in_moff;
   void   * msg;
@@ -235,40 +256,21 @@ EvNameListen::process( void ) noexcept
 }
 
 void
-EvNameListen::process_close( void ) noexcept
+EvNameSock::process_close( void ) noexcept
 {
   this->EvSocket::process_close();
 }
 
 void
-EvNameListen::release( void ) noexcept
+EvNameSock::release( void ) noexcept
 {
   if ( this->name.mcast_send.in_list( IN_ACTIVE_LIST ) )
     this->name.mcast_send.idle_push( EV_CLOSE );
-  else
-    this->name.is_connected = false;
-}
-
-void
-EvNameConnect::process( void ) noexcept
-{
-  this->pop( EV_PROCESS );
-  this->clear_buffers();
-}
-
-void
-EvNameConnect::process_close( void ) noexcept
-{
-  this->EvSocket::process_close();
-}
-
-void
-EvNameConnect::release( void ) noexcept
-{
   if ( this->name.mcast_recv.in_list( IN_ACTIVE_LIST ) )
     this->name.mcast_recv.idle_push( EV_CLOSE );
-  else
-    this->name.is_connected = false;
+  if ( this->name.inbox_recv.in_list( IN_ACTIVE_LIST ) )
+    this->name.inbox_recv.idle_push( EV_CLOSE );
+  this->name.is_connected = false;
 }
 
 void
@@ -398,8 +400,10 @@ UserDB::on_name_svc( NameSvc &name,  CabaMsg *msg ) noexcept
 
   if ( this->node_ht->find( bridge_id.nonce, n_pos, uid ) ||
        this->zombie_ht->find( bridge_id.nonce, n_pos, uid ) ) {
-    if ( uid == MY_UID )
+    if ( uid == MY_UID ) {
+      d_name( "ignoring, my uid\n" );
       return;
+    }
     n = this->bridge_tab[ uid ];
     if ( n == NULL ) {
       d_name( "ignoring, nonce is null\n" );
@@ -439,16 +443,27 @@ UserDB::on_name_svc( NameSvc &name,  CabaMsg *msg ) noexcept
     }
   }
   if ( dec.seqno <= n->name_recv_seqno || stamp <= n->name_recv_time ) {
-    d_name( "ignoring msg, out of order or replay %lu %lu\n",
-            n->name_recv_seqno, n->name_recv_time );
-    return;
+    if ( dec.seqno == n->name_recv_seqno && stamp == n->name_recv_time &&
+         ( n->name_recv_mask & ( (uint64_t) 1 << name.name_id ) ) == 0 ) {
+      n->name_recv_mask |= ( (uint64_t) 1 << name.name_id );
+    }
+    else {
+      d_name(
+        "%s: ignoring msg, out of order or replay %lu < %lu || %lu < %lu\n",
+              n->peer.user.val, dec.seqno, n->name_recv_seqno,
+              stamp, n->name_recv_time );
+      return;
+    }
   }
-  n->name_recv_seqno = dec.seqno;
-  n->name_recv_time  = stamp;
-  tport_name    = (const char *) dec.mref[ FID_TPORT ].fptr;
-  tport_len     = (uint32_t)     dec.mref[ FID_TPORT ].fsize;
-  type_name     = (const char *) dec.mref[ FID_TPORT_TYPE ].fptr;
-  type_len      = (uint32_t)     dec.mref[ FID_TPORT_TYPE ].fsize;
+  else {
+    n->name_recv_seqno = dec.seqno;
+    n->name_recv_time  = stamp;
+    n->name_recv_mask  = ( (uint64_t) 1 << name.name_id );
+  }
+  tport_name = (const char *) dec.mref[ FID_TPORT ].fptr;
+  tport_len  = (uint32_t)     dec.mref[ FID_TPORT ].fsize;
+  type_name  = (const char *) dec.mref[ FID_TPORT_TYPE ].fptr;
+  type_len   = (uint32_t)     dec.mref[ FID_TPORT_TYPE ].fsize;
 
   if ( type_len == T_ANY_SZ && ::memcmp( type_name, T_ANY, T_ANY_SZ ) == 0 ) {
     for ( size_t i = 0; i < adverts.count; i++ ) {

@@ -22,24 +22,25 @@ union NameInbox {
   } ip;
 };
 
-struct EvNameListen : public kv::EvUdp {
+struct EvNameSock : public kv::EvUdp {
   NameSvc       & name;
   MsgFrameDecoder msg_in;
-  EvNameListen( kv::EvPoll &p, NameSvc &n )
-    : EvUdp( p, p.register_type( "name_listen" )  ), name( n ) {}
+  EvNameSock( kv::EvPoll &p, NameSvc &n,  const char *k )
+    : EvUdp( p, p.register_type( k )  ), name( n ) {}
   virtual void process( void ) noexcept;
   virtual void release( void ) noexcept;
   virtual void process_close( void ) noexcept;
+};
+
+struct EvNameListen : public EvNameSock {
+  EvNameListen( kv::EvPoll &p, NameSvc &n )
+    : EvNameSock( p, n, "name_listen" ) {}
   void send_msg( const void *data,  size_t len,  NameInbox &inbox ) noexcept;
 };
 
-struct EvNameConnect : public kv::EvUdp {
-  NameSvc & name;
+struct EvNameConnect : public EvNameSock {
   EvNameConnect( kv::EvPoll &p, NameSvc &n )
-    : EvUdp( p, p.register_type( "name_connect" ) ), name( n ) {}
-  virtual void process( void ) noexcept;
-  virtual void release( void ) noexcept;
-  virtual void process_close( void ) noexcept;
+    : EvNameSock( p, n, "name_connect" ) {}
   void send_msg( const void *data,  size_t len ) noexcept;
 };
 
@@ -87,16 +88,18 @@ struct NameSvc {
   SessionMgr            & mgr;
   UserDB                & user_db;
   ConfigTree::Transport & tport;
-  EvNameListen            mcast_recv; /*ucast_recv;*/
+  EvNameListen            mcast_recv,
+                          inbox_recv;
   EvNameConnect           mcast_send;
   AdvertList              adverts;
   NameInbox               inbox;
-  uint32_t                connect_fail_count;
+  uint32_t                connect_fail_count,
+                          name_id;
   bool                    is_connected,
                           is_closed;
   void * operator new( size_t, void *ptr ) { return ptr; }
   NameSvc( kv::EvPoll &p,  SessionMgr &m,  UserDB &u,
-           ConfigTree::Transport &tp ) noexcept;
+           ConfigTree::Transport &tp,  uint32_t id ) noexcept;
   bool connect( void ) noexcept;
   void close( void ) noexcept;
   void start_transports( void ) noexcept;

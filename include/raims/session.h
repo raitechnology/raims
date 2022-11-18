@@ -192,6 +192,7 @@ struct Unrouteable {
   WebListen             * web;
   NameSvc               * name;
   ConfigTree::Transport * tport;
+  uint32_t                un_id;
   bool is_active( void ) const;
 };
 
@@ -203,6 +204,7 @@ struct UnrouteableList : public kv::ArrayCount<Unrouteable, 4> {
     }
     Unrouteable & x = this->push();
     x.tport = tport;
+    x.un_id = this->count;
     return x;
   }
   Unrouteable *find( ConfigTree::Transport * tport ) const {

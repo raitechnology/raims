@@ -387,7 +387,7 @@ SessionMgr::start( void ) noexcept
   this->sub_db.seqno_tab.flip_time     = cur_time - this->sub_window_ival;
   this->sub_db.seqno_tab.trailing_time = cur_time - this->sub_window_ival;
   uint64_t ival = sec_to_ns( this->user_db.hb_interval );
-  this->timer_ival         = (uint32_t) ( ival / 1000 );
+  this->timer_ival         = (uint32_t) ( ival / 250 );
   this->user_db.hb_ival_ns = ival;
   this->user_db.hb_ival_mask = ival;
   for ( int i = 1; i <= 32; i *= 2 )
