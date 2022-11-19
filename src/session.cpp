@@ -167,13 +167,16 @@ SessionMgr::init_sock( void ) noexcept
   int  len;
   this->ipc_rt.PeerData::init_peer( efd, -1, NULL, "ipc" );
   len = ::snprintf( buf, sizeof( buf ), "%s.ipc", this->svc.svc.val );
-  this->ipc_rt.PeerData::set_name( buf, len );
+  this->ipc_rt.PeerData::set_name( buf,
+    min_int( len, (int) sizeof( buf ) - 1 ) );
   this->console_rt.PeerData::init_peer( ifd, -1, NULL, "console" );
   len = ::snprintf( buf, sizeof( buf ), "%s.console", this->svc.svc.val );
-  this->console_rt.PeerData::set_name( buf, len );
+  this->console_rt.PeerData::set_name( buf,
+    min_int( len, (int) sizeof( buf ) - 1 ) );
   this->PeerData::init_peer( pfd, -1, NULL, "session" );
   len = ::snprintf( buf, sizeof( buf ), "%s.session", this->svc.svc.val );
-  this->PeerData::set_name( buf, len );
+  this->PeerData::set_name( buf, 
+    min_int( len, (int) sizeof( buf ) - 1 ) );
 
   int status = this->poll.add_sock( &this->ipc_rt );
   if ( status == 0 )
@@ -307,7 +310,7 @@ SessionMgr::fork_daemon( int err_fd ) noexcept
                         ipc->transport.tport.val,
                         ipc->listener->peer_address.buf );
         if ( n > 0 )
-          os_write( err_fd, buf, n );
+          os_write( err_fd, buf, min_int( n, (int) sizeof( buf ) - 1 ) );
       }
     }
     for ( i = 0; i < this->unrouteable.count; i++ ) {
@@ -322,7 +325,7 @@ SessionMgr::fork_daemon( int err_fd ) noexcept
       n = ::snprintf( buf, sizeof( buf ), "%s running at %s\n",
                       u.tport->tport.val, addr );
       if ( n > 0 )
-        os_write( err_fd, buf, n );
+        os_write( err_fd, buf, min_int( n, (int) sizeof( buf ) - 1 ) );
     }
     for ( i = 1; i < this->user_db.transport_tab.count; i++ ) {
       TransportRoute * rte = this->user_db.transport_tab.ptr[ i ];
@@ -335,7 +338,7 @@ SessionMgr::fork_daemon( int err_fd ) noexcept
                         rte->name );
       }
       if ( n > 0 )
-        os_write( err_fd, buf, n );
+        os_write( err_fd, buf, min_int( n, (int) sizeof( buf ) - 1 ) );
     }
     static char status_line[] = "moving to background daemon\n";
     os_write( err_fd, status_line, sizeof( status_line ) - 1 );

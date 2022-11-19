@@ -854,11 +854,12 @@ UserRoute::inbox_route_str( char *buf,  size_t buflen ) noexcept
       len = this->mesh_url.len;
       break;
   }
-  if ( uaddr != NULL )
+  if ( uaddr != NULL && i < buflen )
     i += ::snprintf( &buf[ i ], buflen - i, "%s.%u@", uaddr, uid );
-  if ( pre != NULL )
+  if ( pre != NULL && i < buflen )
     i += ::snprintf( &buf[ i ], buflen - i, "%s://", pre );
-  ::snprintf( &buf[ i ], buflen - i, "%.*s", (int) len, s );
+  if ( i < buflen )
+    ::snprintf( &buf[ i ], buflen - i, "%.*s", (int) len, s );
   return buf;
 }
 /* initialize a route index for rte */
@@ -1752,9 +1753,9 @@ UserDB::uid_names( const UIntBitSet &uids,  uint32_t max_uid,
     const UserBridge &n = *this->bridge_tab.ptr[ uid ];
     off += ::snprintf( &buf[ off ], buflen - off, "%s.%u ",
                        n.peer.user.val, uid );
+    if ( off >= buflen )
+      break;
   }
-  if ( off > 0 )
-    buf[ off - 1 ] = '\0';
   return buf;
 }
 

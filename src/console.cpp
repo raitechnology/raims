@@ -616,6 +616,8 @@ JsonFileOutput::create( const char *path,  size_t pathlen ) noexcept
   int  fd    = os_open( fn, O_APPEND | O_WRONLY | O_CREAT, 0666 );
   if ( fd < 0 )
     return NULL;
+  if ( (size_t) fnlen >= sizeof( fn ) )
+    return NULL;
   void       * p   = ::malloc( sizeof( JsonFileOutput ) + fnlen + 1 );
   JsonFileOutput * out = new ( p ) JsonFileOutput( fd );
 
@@ -3234,8 +3236,9 @@ PortOutput::output( void ( PortOutput::*put )( void ) ) noexcept
         else
           h = "";
         char * tmp = this->console.tmp.str_make( len );
-        this->remote.len = ::snprintf( tmp, len, "%s:%d", h,
-                                       rte->connect_ctx->addr_info.port );
+        int    x   = ::snprintf( tmp, len, "%s:%d", h,
+                                 rte->connect_ctx->addr_info.port );
+        this->remote.len = min_int( x, (int) len - 1 );
         this->remote.val = tmp;
       }
       else {
@@ -3333,8 +3336,8 @@ PortOutput::output( void ( PortOutput::*put )( void ) ) noexcept
         paddr.set_sock_addr( fd2 );
         size_t len = paddr.len() + maddr.len() + 8;
         char * tmp = this->console.tmp.str_make( len );
-        int n = ::snprintf( tmp, len, "%s;%s", paddr.buf, maddr.buf );
-        this->local_addr( tmp, (uint32_t) n );
+        int    x   = ::snprintf( tmp, len, "%s;%s", paddr.buf, maddr.buf );
+        this->local_addr( tmp, min_int( x, (int) len - 1 ) );
         poll.sock[ fd2 ]->client_stats( this->stats );
       }
       else {
@@ -3675,19 +3678,19 @@ Console::show_tports( ConsoleOutput *p, const char *name,  size_t len ) noexcept
 
     if ( listen != NULL ) {
       size_t off = ::snprintf( buf, len, "%s://%s", tport->type.val, listen );
-      if ( port != 0 )
+      if ( port != 0 && off < len )
         ::snprintf( &buf[ off ], len - off, ":%u", port );
       this->tab_string( buf, listen_col ); /* listen */
     }
     if ( connect != NULL ) {
       size_t off = ::snprintf( buf, len, "%s://%s", tport->type.val, connect );
-      if ( port != 0 )
+      if ( port != 0 && off < len )
         ::snprintf( &buf[ off ], len - off, ":%u", port );
       this->tab_string( buf, connect_col ); /* connect */
     }
     if ( device != NULL ) {
       size_t off = ::snprintf( buf, len, "%s://%s", tport->type.val, device );
-      if ( port != 0 )
+      if ( port != 0 && off < len )
         ::snprintf( &buf[ off ], len - off, ":%u", port );
       this->tab_string( buf, device_col ); /* connect */
     }

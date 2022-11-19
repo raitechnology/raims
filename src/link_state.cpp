@@ -698,10 +698,12 @@ UserDB::send_adjacency_request( UserBridge &n, AdjacencyRequest reas ) noexcept
   n.set( ADJACENCY_REQUEST_STATE );
   this->adj_queue.push( &n );
 
-  bool use_primary   = ( reas == DIJKSTRA_SYNC_REQ || n.user_route == NULL );
+  bool use_primary   = ( reas == DIJKSTRA_SYNC_REQ || 
+                         reas == REQUEST_SYNC_REQ || n.user_route == NULL );
   uint32_t tport_id  = ( use_primary ? n.primary_route :
                          n.user_route->rte.tport_id );
-  size_t peer_db_len = this->peer_db_size( n, true );
+  size_t peer_db_len = ( reas == REQUEST_SYNC_REQ ? 0 :
+                         this->peer_db_size( n, true ) );
   this->events.send_adjacency_request( n.uid, tport_id, 0, reas );
 
   InboxBuf ibx( n.bridge_id, _ADJ_REQ );
@@ -891,10 +893,13 @@ UserDB::adjacency_submsg( UserBridge *sync,  MsgCat &m ) noexcept
 }
 
 enum {
-  SYNC_NONE = 0,
-  SYNC_LINK = 1,
-  SYNC_SUB  = 2,
-  SYNC_ALL  = 3
+  SYNC_NONE    = 0,
+  SYNC_LINK    = 1,
+  SYNC_SUB     = 2,
+  SYNC_ANY     = 1 + 2,
+  RQ_SYNC_LINK = 4,
+  RQ_SYNC_SUB  = 8,
+  RQ_SYNC_ANY  = 4 + 8
 };
 bool
 UserDB::recv_adjacency_request( const MsgFramePublish &,  UserBridge &n,
@@ -938,15 +943,22 @@ UserDB::recv_adjacency_request( const MsgFramePublish &,  UserBridge &n,
   int which = SYNC_NONE;
   if ( link_seqno > rq_link_seqno )
     which |= SYNC_LINK;
+  else if ( link_seqno < rq_link_seqno )
+    which |= RQ_SYNC_LINK;
   if ( sub_seqno > rq_sub_seqno )
     which |= SYNC_SUB;
+  else if ( link_seqno < rq_link_seqno )
+    which |= RQ_SYNC_SUB;
 
   this->events.recv_adjacency_request( n.uid, n.user_route->rte.tport_id,
                                        ( sync == NULL ? 0 : sync->uid ), reas );
   bool b = true, sent_one = false;
-  if ( which != SYNC_NONE ) {
+  if ( ( which & SYNC_ANY ) != 0 ) {
     b &= this->send_adjacency( n, sync, ibx, time_val, reas, which );
     sent_one = true;
+  }
+  if ( sync != NULL && ( which & RQ_SYNC_ANY ) != 0 ) {
+    b &= this->send_adjacency_request( *sync, REQUEST_SYNC_REQ );
   }
   if ( dec.test( FID_PEER_DB ) ) {
     PeerDBRec * rec_list = dec.decode_rec_list<PeerDBRec>( FID_PEER_DB );
@@ -959,11 +971,18 @@ UserDB::recv_adjacency_request( const MsgFramePublish &,  UserBridge &n,
           int which = SYNC_NONE;
           if ( sync->link_state_seqno > rec.link_state )
             which |= SYNC_LINK;
+          else if ( sync->link_state_seqno < rec.link_state )
+            which |= RQ_SYNC_LINK;
           if ( sync->sub_seqno > rec.sub_seqno )
             which |= SYNC_SUB;
-          if ( which != SYNC_NONE ) {
+          else if ( sync->sub_seqno < rec.sub_seqno )
+            which |= RQ_SYNC_SUB;
+          if ( ( which & SYNC_ANY ) != 0 ) {
             b &= this->send_adjacency( n, sync, ibx, time_val, reas, which );
             sent_one = true;
+          }
+          else if ( ( which & RQ_SYNC_ANY ) != 0 ) {
+            b &= this->send_adjacency_request( *sync, REQUEST_SYNC_REQ );
           }
         }
       }

@@ -128,7 +128,7 @@ TransportRoute::set_peer_name( PeerData &pd,  const char *suff ) noexcept
   char buf[ 256 ];
   int len = ::snprintf( buf, sizeof( buf ), "%s.%s.%s.%u",
                         svc.svc.val, tport.tport.val, suff, this->tport_id );
-  pd.set_name( buf, len );
+  pd.set_name( buf, min_int( len, (int) sizeof( buf ) - 1 ) );
 }
 
 int
@@ -758,6 +758,7 @@ TransportRoute::create_pgm( int kind,  ConfigTree::Transport &tport ) noexcept
   char tmp[ 256 ];
   int  len = ::snprintf( tmp, sizeof( tmp ), "inbox://%s:%u",
                          l->pgm.gsr_addr, port );
+  len = min_int( len, (int) sizeof( tmp ) - 1 );
   this->user_db.string_tab.ref_string( tmp, len, this->ucast_url );
   this->ucast_url_hash = kv_crc_c( tmp, len, 0 );
   this->inbox_fd       = s->fd;

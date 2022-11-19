@@ -531,6 +531,7 @@ GenCfg::populate_example_transports( const char *dir_name ) noexcept
     int n = ::snprintf( buf, sizeof( buf ), tport_fmt, tports[ i ][ 0 ],
                 tports[ i ][ 1 ], tports[ i ][ 2 ], tports[ i ][ 3 ],
                 tports[ i ][ 4 ], tports[ i ][ 5 ] );
+    n = min_int( n, (int) sizeof( buf ) - 1 );
     GenFileTrans *t = GenFileTrans::create_file_fmt( GEN_CREATE_FILE,
                                                    "%s/tport_%s.yaml.new",
                                                    dir_name, tports[ i ][ 0 ] );

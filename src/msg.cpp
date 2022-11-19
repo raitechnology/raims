@@ -456,49 +456,60 @@ MsgFrameDecoder::build_msg_dict( void ) noexcept
     if ( ( t->type_mask & BOOL_1 ) != 0 ) {
       fmt = "%s_b { CLASS_ID %d; DATA_SIZE 1; DATA_TYPE boolean; }\n";
       fid = t->fid | ( BOOL_CLASS << FID_TYPE_SHIFT );
-      out += ::snprintf( out, end - out, fmt, t->type_name, fid );
+      if ( out < end )
+        out += ::snprintf( out, end - out, fmt, t->type_name, fid );
     }
     if ( ( t->type_mask & U_SHORT ) != 0 ) {
       fmt = "%s_2 { CLASS_ID %d; DATA_SIZE 2; DATA_TYPE u_short; }\n";
       fid = t->fid | ( U_SHORT_CLASS << FID_TYPE_SHIFT );
-      out += ::snprintf( out, end - out, fmt, t->type_name, fid );
+      if ( out < end )
+        out += ::snprintf( out, end - out, fmt, t->type_name, fid );
     }
     if ( ( t->type_mask & U_INT ) != 0 ) {
       fmt = "%s_4 { CLASS_ID %d; DATA_SIZE 4; DATA_TYPE u_int; }\n";
       fid = t->fid | ( U_INT_CLASS << FID_TYPE_SHIFT );
-      out += ::snprintf( out, end - out, fmt, t->type_name, fid );
+      if ( out < end )
+        out += ::snprintf( out, end - out, fmt, t->type_name, fid );
     }
     if ( ( t->type_mask & U_LONG ) != 0 ) {
       fmt = "%s_8 { CLASS_ID %d; DATA_SIZE 8; DATA_TYPE u_long; }\n";
       fid = t->fid | ( U_LONG_CLASS << FID_TYPE_SHIFT );
-      out += ::snprintf( out, end - out, fmt, t->type_name, fid );
+      if ( out < end )
+        out += ::snprintf( out, end - out, fmt, t->type_name, fid );
     }
     if ( ( t->type_mask & OPAQUE_16) != 0 ) {
       fmt = "%s_16 { CLASS_ID %d; DATA_SIZE 16; DATA_TYPE opaque; }\n";
       fid = t->fid | ( OPAQUE_16_CLASS << FID_TYPE_SHIFT );
-      out += ::snprintf( out, end - out, fmt, t->type_name, fid );
+      if ( out < end )
+        out += ::snprintf( out, end - out, fmt, t->type_name, fid );
     }
     if ( ( t->type_mask & OPAQUE_32) != 0 ) {
       fmt = "%s_32 { CLASS_ID %d; DATA_SIZE 32; DATA_TYPE opaque; }\n";
       fid = t->fid | ( OPAQUE_32_CLASS << FID_TYPE_SHIFT );
-      out += ::snprintf( out, end - out, fmt, t->type_name, fid );
+      if ( out < end )
+        out += ::snprintf( out, end - out, fmt, t->type_name, fid );
     }
     if ( ( t->type_mask & OPAQUE_64) != 0 ) {
       fmt = "%s_64 { CLASS_ID %d; DATA_SIZE 64; DATA_TYPE opaque; }\n";
       fid = t->fid | ( OPAQUE_64_CLASS << FID_TYPE_SHIFT );
-      out += ::snprintf( out, end - out, fmt, t->type_name, fid );
+      if ( out < end )
+        out += ::snprintf( out, end - out, fmt, t->type_name, fid );
     }
     if ( ( t->type_mask & SHORT_STRING) != 0 ) {
       fmt = "%s_s2 { CLASS_ID %d; DATA_SIZE 1024; IS_FIXED false; DATA_TYPE string; }\n";
       fid = t->fid | ( SHORT_STRING_CLASS << FID_TYPE_SHIFT );
-      out += ::snprintf( out, end - out, fmt, t->type_name, fid );
+      if ( out < end )
+        out += ::snprintf( out, end - out, fmt, t->type_name, fid );
     }
     if ( ( t->type_mask & LONG_OPAQUE) != 0 ) {
       fmt = "%s_o4 { CLASS_ID %d; DATA_SIZE 65536; IS_FIXED false; DATA_TYPE opaque; }\n";
       fid = t->fid | ( LONG_OPAQUE_CLASS << FID_TYPE_SHIFT );
-      out += ::snprintf( out, end - out, fmt, t->type_name, fid );
+      if ( out < end )
+        out += ::snprintf( out, end - out, fmt, t->type_name, fid );
     }
   }
+  if ( out >= end )
+    out = end - 1;
   *out = '\0';
 
   status = CFile::parse_string( dict_build, dict_buf, out - dict_buf );

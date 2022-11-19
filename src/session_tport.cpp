@@ -243,6 +243,7 @@ SessionMgr::add_network( const char *net,  size_t net_len,
     else
       svc_buf_len = ::snprintf( svc_buf, sizeof( svc_buf ), "net%d_%.*s", i,
                                 (int) svc_len, svc );
+    svc_buf_len = min_int( svc_buf_len, (int) sizeof( svc_buf ) - 1 );
     t = tree.find_transport( svc_buf, svc_buf_len );
     if ( t == NULL )
       break;
@@ -353,6 +354,7 @@ SessionMgr::add_transport2( ConfigTree::Transport &t,
     f |= TPORT_IS_IPC;
     size_t svc_len =
       ::snprintf( svc_name, sizeof( svc_name ), "%s.ipc", this->svc.svc.val );
+    svc_len = min_int( svc_len, sizeof( svc_name ) - 1 );
     tptr = this->tree.find_transport( svc_name, svc_len );
     if ( tptr == NULL ) {
       tptr = stab.make<ConfigTree::Transport>();
@@ -791,7 +793,7 @@ SessionMgr::create_telnet( ConfigTree::Transport &tport ) noexcept
     char buf[ 256 ];
     int len = ::snprintf( buf, sizeof( buf ), "%s.%s", tport.type.val,
                           tport.tport.val );
-    un.telnet->set_name( buf, len );
+    un.telnet->set_name( buf, min_int( len, (int) sizeof( buf ) - 1 ) );
     return true;
   }
   return false;
@@ -825,7 +827,7 @@ SessionMgr::create_web( ConfigTree::Transport &tport ) noexcept
     char buf[ 256 ];
     int len = ::snprintf( buf, sizeof( buf ), "%s.%s", tport.type.val,
                           tport.tport.val );
-    un.web->set_name( buf, len );
+    un.web->set_name( buf, min_int( len, (int) sizeof( buf ) - 1 ) );
     return true;
   }
   return false;

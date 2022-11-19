@@ -178,6 +178,8 @@ main( int argc, char *argv[] )
     if ( use_console != NULL )
       foreground = use_console;
     get_help    = get_arg( argc, argv, 0, "-help", NULL );
+    if ( get_help == NULL )
+      get_help = get_arg( argc, argv, 0, "-version", NULL );
   }
   else {
   #define MS_SERVER_HELP \
@@ -204,6 +206,8 @@ main( int argc, char *argv[] )
     db_num      = get_arg( argc, argv, 1, "-D", NULL );
     use_console = get_arg( argc, argv, 0, "-c", NULL );
     get_help    = get_arg( argc, argv, 0, "-h", NULL );
+    if ( get_help == NULL )
+      get_help = get_arg( argc, argv, 0, "-v", NULL );
   }
   if ( get_help != NULL ) {
     if ( is_rvd )

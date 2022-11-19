@@ -383,6 +383,14 @@ UserDB::on_heartbeat( const MsgFramePublish &pub,  UserBridge &n,
           n.printf( "uid_csum not equal %s=[%s] hb[%s]\n",
                    n.peer.user.val, this->uid_csum.to_base64_str( buf ),
                    csum.to_base64_str( buf2 ) );
+          /*uint32_t uid;
+          BitSpace &uids = this->uid_authenticated;
+          for ( bool ok = uids.first( uid ); ok; ok = uids.next( uid ) ) {
+            UserBridge * n = this->bridge_tab.ptr[ uid ];
+            printf( "%s %lu ", n->peer.user.val, n->link_state_seqno );
+          }
+          printf( "\n" );*/
+          this->send_adjacency_request( n, HB_SYNC_REQ );
           /*if ( debug_hb )
             this->debug_uids( this->uid_authenticated, csum );*/
         }

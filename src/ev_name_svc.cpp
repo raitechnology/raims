@@ -102,13 +102,13 @@ NameSvc::connect( void ) noexcept
 
   x = ::snprintf( buf, sizeof( buf ), "%s.%s.send", this->tport.type.val,
                   this->tport.tport.val );
-  this->mcast_send.set_name( buf, x );
+  this->mcast_send.set_name( buf, min_int( x, (int) sizeof( buf ) - 1 ) );
   x = ::snprintf( buf, sizeof( buf ), "%s.%s.recv", this->tport.type.val,
                   this->tport.tport.val );
-  this->mcast_recv.set_name( buf, x );
+  this->mcast_recv.set_name( buf, min_int( x, (int) sizeof( buf ) - 1 ) );
   x = ::snprintf( buf, sizeof( buf ), "%s.%s.inbox", this->tport.type.val,
                   this->tport.tport.val );
-  this->inbox_recv.set_name( buf, x );
+  this->inbox_recv.set_name( buf, min_int( x, (int) sizeof( buf ) - 1 ) );
 
   this->connect_fail_count = 0;
   this->is_connected = true;

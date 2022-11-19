@@ -25,17 +25,19 @@ const char *
 AdjDistance::uid_name( uint32_t uid,  char *buf,  size_t &off,
                        size_t buflen ) noexcept
 {
-  if ( this->user_db.bridge_tab.ptr[ uid ] == NULL ) {
-    if ( uid == 0 )
-      off += ::snprintf( &buf[ off ], buflen - off, "%s.*",
-                         this->user_db.user.user.val );
-    else
-      off += ::snprintf( &buf[ off ], buflen - off, "???.%u",  uid );
-  }
-  else {
-    const UserBridge &n = *this->user_db.bridge_tab.ptr[ uid ];
-    off += ::snprintf( &buf[ off ], buflen - off, "%s.%u",
-                       n.peer.user.val, uid );
+  if ( off < buflen ) {
+    if ( this->user_db.bridge_tab.ptr[ uid ] == NULL ) {
+      if ( uid == 0 )
+        off += ::snprintf( &buf[ off ], buflen - off, "%s.*",
+                           this->user_db.user.user.val );
+      else
+        off += ::snprintf( &buf[ off ], buflen - off, "???.%u",  uid );
+    }
+    else {
+      const UserBridge &n = *this->user_db.bridge_tab.ptr[ uid ];
+      off += ::snprintf( &buf[ off ], buflen - off, "%s.%u",
+                         n.peer.user.val, uid );
+    }
   }
   return buf;
 }
@@ -63,8 +65,11 @@ AdjDistance::uid_set_names( kv::UIntBitSet &set,  char *buf,
     if ( off < buflen )
       buf[ off++ ] = ' ';
   }
-  if ( off > 0 )
+  if ( off > 0 ) {
+    if ( off > buflen )
+      off = buflen;
     buf[ off - 1 ] = '\0';
+  }
   return buf;
 }
 

@@ -114,6 +114,7 @@ SessionMgr::publish_stats( uint64_t cur_time ) noexcept
           }
           latency_len = ::snprintf( lat_buf, sizeof( lat_buf ),
                                     "%.3g%s", (double) lat / 1000.0, units );
+          latency_len = min_int( latency_len, (int) sizeof( lat_buf ) - 1 );
           latency_val = lat_buf;
         }
       }

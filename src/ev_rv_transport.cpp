@@ -86,10 +86,13 @@ EvRvTransportListen::timer_expire( uint64_t tid,  uint64_t kind ) noexcept
 static size_t
 make_rv_name( RvHost &host,  char *name,  const char *suf ) noexcept
 {
+  int x;
   if ( host.service_len == 0 )
-    return ::snprintf( name, 256, "rv_7500%s", suf );
-  return ::snprintf( name, 256, "rv_%.*s%s", host.service_len, host.service,
-                     suf );
+    x = ::snprintf( name, 256, "rv_7500%s", suf );
+  else
+    x = ::snprintf( name, 256, "rv_%.*s%s", host.service_len, host.service,
+                    suf );
+  return min_int( x, 255 );
 }
 
 ConfigTree::Transport *
@@ -197,7 +200,8 @@ int
 RvMcast2::device_ip( char *buf,  size_t len ) const noexcept
 {
   const uint8_t * p = (const uint8_t *) (const void *) &this->host_ip;
-  return ::snprintf( buf, len, "%u.%u.%u.%u", p[ 0 ], p[ 1 ], p[ 2 ], p[ 3 ] );
+  int x = ::snprintf( buf, len, "%u.%u.%u.%u", p[ 0 ], p[ 1 ], p[ 2 ], p[ 3 ] );
+  return min_int( x, (int) len - 1 );
 }
 
 void
@@ -311,8 +315,10 @@ EvRvTransportListen::start_host( RvHost &host,  const char *net, size_t net_len,
         StringTab  & stab = this->rte.user_db.string_tab;
         this->rte.mgr.shutdown_transport( *t );
         char old_name[ 256 ];
-        size_t name_len = ::snprintf( old_name, 256, "%s_old", t->tport.val );
-        stab.ref_string( old_name, name_len, t->tport );
+        int  name_len = ::snprintf( old_name, sizeof( old_name ), "%s_old",
+                                    t->tport.val );
+        stab.ref_string( old_name,
+          min_int( (int) sizeof( old_name ) - 1, name_len ), t->tport );
         t = NULL;
         rte = NULL;
       }
