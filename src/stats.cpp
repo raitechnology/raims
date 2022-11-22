@@ -301,7 +301,7 @@ SessionMgr::fwd_port_stat_msg( SubjectVar &s,  TransportRoute *rte,
    .user    ( this->user.user.val, this->user.user.len );
 
   if ( peer_len != 0 ) {
-    m.peer    ( peer_val, peer_len );
+    m.peer  ( peer_val, peer_len );
   }
 
   if ( tport_len != 0 ) {

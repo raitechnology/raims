@@ -67,6 +67,7 @@ function update_msg_rate( msg ) {
   }
   if ( total_m > max_rate && rate.checked )
     set_max_rate( total_m );
+  update_uid_rate( uid, total_m, max_rate );
   if ( rate.g == null ) {
     if ( rate.checked )
       rate.add = true;

@@ -7,8 +7,9 @@
   <link rel="stylesheet" href="menu.css" />
   <title>Graph Nodes</title>
   <script src="cytoscape-min-3.21.2.js"></script>
-  <script src="cola.min-3.3.8.js"></script>
-  <script src="cytoscape-cola-2.5.1.js"></script>
+  <script src="layout-base-2.0.1.js"></script>
+  <script src="cose-base-2.1.0.js"></script>
+  <script src="cytoscape-fcose-2.1.0.js"></script>
   <script src="canvas2svg-1.0.19.js"></script>
   <script src="cytoscape-svg-0.4.0.js"></script>
   <script src="menu.js"></script>
@@ -38,6 +39,13 @@
       if ( r > 255 ) r = 510 - r;
       return "rgb(" + r + "," + g + "," + b + ")";
     };
+    var seed = 0x7f4a7c13;
+    var mulberry32 = function() {
+      var t = seed += 0x6D2B79F5;
+      t = Math.imul(t ^ t >>> 15, t | 1);
+      t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    }
 
     function step_color( colnum ) {
       if ( colnum == -1 )
@@ -52,6 +60,18 @@
       return "rgb(" + r + "," + g + "," + b + ")";
     }
 
+    let layout_opts = {
+      name : 'fcose',
+      quality : 'proof',
+      animate : false,
+      randomize : true,
+      rand : mulberry32,
+      nodeRepulsion : 20000,
+      idealEdgeLength : 40,
+      edgeElasticity : 0.50,
+      numIter : 30000
+    };
+
     var cy = null;
     function init_graph( els ) {
       let container = document.getElementById( "cy" );
@@ -60,11 +80,7 @@
         container: container,
         autounselectify: true,
         boxSelectionEnabled: false,
-
-        layout: {
-          name: 'cola',
-          animate: false
-        },
+        layout: layout_opts,
 
         style: [
           {
@@ -126,11 +142,10 @@
     var cur_path = 0;
     function reload_graph( n ) {
       if ( graphs != null ) {
-        for ( let i = 0; i < max_uid; i++ ) {
-          cy.remove( cy.getElementById( i ) );
-        }
+        cy.elements().remove();
         cy.add( transform( graphs[ n ] ) );
-        cy.layout( { name: "cola", animate: false } ).run();
+        seed = 0x7f4a7c13;
+        cy.layout( layout_opts ).run();
       }
       document.getElementById("p" + cur_path).checked = false;
       cur_path = n;

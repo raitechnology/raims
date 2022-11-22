@@ -38,15 +38,16 @@ function update_msg_rate( msg ) {
     }
   }
 
+  let uid = next_gid;
+  if ( peer == null && msg.hasOwnProperty( "peer" ) )
+    peer = msg[ "peer" ];
+  if ( peer != null && user_uid_map.hasOwnProperty( peer ) )
+    uid = user_uid_map[ peer ];
+
   if ( rate == null ) {
-    let active = false,
-        uid    = next_gid;
+    let active = false;
     if ( nodes_active.hasOwnProperty( user ) )
       active = nodes_active[ user ];
-    if ( peer == null && msg.hasOwnProperty( "peer" ) )
-      peer = msg[ "peer" ];
-    if ( peer != null && user_uid_map.hasOwnProperty( peer ) )
-      uid = user_uid_map[ peer ];
     rate = new_rate( user, uid, active );
     user_gid_map[ user_tpid ] = next_gid;
     user_rate[ next_gid ] = rate;
@@ -85,6 +86,10 @@ function update_msg_rate( msg ) {
   }
   if ( total_m > max_rate && rate.checked )
     set_max_rate( total_m );
+  let user_uid = 0;
+  if ( user_uid_map.hasOwnProperty( user ) )
+    user_uid = user_uid_map[ user ];
+  update_tport_rate( user_uid, uid, total_m, max_rate );
   if ( rate.g == null ) {
     if ( rate.checked )
       rate.add = true;

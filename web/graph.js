@@ -32,7 +32,7 @@ function init_geom() {
               document.body.clientWidth;
   return {
     nodes_width  : width / 2 - 40,
-    nodes_height : 400,
+    nodes_height : 800,
     graph_width  : width - 40,
     graph_height : 600,
   }
