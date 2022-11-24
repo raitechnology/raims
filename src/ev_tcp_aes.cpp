@@ -32,36 +32,41 @@ AES_Connection::recv_key( void ) noexcept
 
   ::memcpy( &check, this->recv, CHECK_SIZE );
   check = kv_bswap64( check );
-
-  ex.recv_nonce.copy_from( &this->recv[ CHECK_SIZE ] );
-  ex.ecdh.pub.copy_from( &this->recv[ CHECK_SIZE + NONCE_SIZE ] );
-
-  check2 = kv_crc_c( ex.ecdh.pub.key, EC25519_KEY_LEN, 
-                     kv_crc_c( ex.recv_nonce.digest(), NONCE_SIZE,
-                     kv_crc_c( ex.psk, ex.psk_len, AES_CONN_VER ) ) );
-  if ( check != check2 ) {
-    fprintf( stderr, "ignoring, failed crc check\n" );
-    this->pushpop( EV_CLOSE, EV_PROCESS );
+  if ( ( check >> 32 ) != 0 ) {
+    printf( "ignoring, zero prefix missing\n" );
     ok = false;
   }
   else {
-    ex.ecdh.shared_secret();
-    this->recv_aes.init_secret( ex.recv_nonce, ex.ecdh.secret, KEY_EXCH_SIZE );
-    this->send_aes.init_secret( ex.send_nonce, ex.ecdh.secret, KEY_EXCH_SIZE );
+    ex.recv_nonce.copy_from( &this->recv[ CHECK_SIZE ] );
+    ex.ecdh.pub.copy_from( &this->recv[ CHECK_SIZE + NONCE_SIZE ] );
 
-    this->off          = KEY_EXCH_SIZE;
-    this->have_key     = true;
-
-    if ( ex.save_len != 0 ) {
-      void * ptr = this->alloc_temp( ex.save_len );
-      ::memcpy( ptr, ex.save, ex.save_len );
-      this->insert_iov( 0, ptr, ex.save_len );
-      this->push( EV_WRITE );
+    check2 = kv_crc_c( ex.ecdh.pub.key, EC25519_KEY_LEN, 
+                       kv_crc_c( ex.recv_nonce.digest(), NONCE_SIZE,
+                       kv_crc_c( ex.psk, ex.psk_len, AES_CONN_VER ) ) );
+    if ( check != check2 ) {
+      printf( "ignoring, failed crc check\n" );
+      this->pushpop( EV_CLOSE, EV_PROCESS );
+      ok = false;
     }
+    else {
+      ex.ecdh.shared_secret();
+      this->recv_aes.init_secret( ex.recv_nonce, ex.ecdh.secret, KEY_EXCH_SIZE);
+      this->send_aes.init_secret( ex.send_nonce, ex.ecdh.secret, KEY_EXCH_SIZE);
+
+      this->off      = KEY_EXCH_SIZE;
+      this->have_key = true;
+
+      if ( ex.save_len != 0 ) {
+        void * ptr = this->alloc_temp( ex.save_len );
+        ::memcpy( ptr, ex.save, ex.save_len );
+        this->insert_iov( 0, ptr, ex.save_len );
+        this->push( EV_WRITE );
+      }
+    }
+    /*printf( "recv aes key, bytes recv %lu, bytes_sent %lu, recv_off %lu, send_off %lu\n",
+            this->bytes_recv, this->bytes_sent,
+            this->recv_aes.off, this->send_aes.off );*/
   }
-  /*printf( "recv aes key, bytes recv %lu, bytes_sent %lu, recv_off %lu, send_off %lu\n",
-          this->bytes_recv, this->bytes_sent,
-          this->recv_aes.off, this->send_aes.off );*/
   delete this->exch;
   this->exch = NULL;
   return ok;
@@ -79,7 +84,7 @@ AES_Connection::read( void ) noexcept
     size_t enc_len = this->bytes_recv - this->recv_aes.off;
     if ( enc_len > 0 ) {
       if ( enc_len > this->len ) {
-        fprintf( stderr, "bad enc_len\n" );
+        printf( "bad enc_len\n" );
         this->pushpop( EV_CLOSE, EV_PROCESS );
         return;
       }

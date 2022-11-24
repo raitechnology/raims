@@ -1112,7 +1112,8 @@ UserDB::process_mesh_pending( uint64_t curr_mono ) noexcept
   for ( MeshRoute *m = this->mesh_pending.hd; m != NULL; m = next ) {
     next = m->next;
     if ( m->conn_mono_time == 0 ) {
-      if ( this->node_ht->find( m->b_nonce, n_pos, uid ) ) {
+      if ( this->node_ht->find( m->b_nonce, n_pos, uid ) ||
+           this->zombie_ht->find( m->b_nonce, n_pos, uid ) ) {
         n = this->bridge_tab[ uid ];
         if ( n != NULL ) {
           m->conn_mono_time = curr_mono;

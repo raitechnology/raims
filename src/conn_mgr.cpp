@@ -121,6 +121,7 @@ TransportRoute::on_shutdown( EvSocket &conn,  const char *err,
     this->user_db.retire_source( *this, conn.fd );
     if ( this->connected.test_clear( conn.fd ) ) {
       if ( --this->connect_count == 0 ) {
+        this->last_connect_count = 0;
         if ( ! this->is_set( TPORT_IS_LISTEN ) ) {
           this->set( TPORT_IS_SHUTDOWN );
           if ( this->notify_ctx != NULL ) {
@@ -136,6 +137,7 @@ TransportRoute::on_shutdown( EvSocket &conn,  const char *err,
   }
   else if ( this->connect_count == 0 ) {
     this->set( TPORT_IS_SHUTDOWN );
+    this->last_connect_count = 0;
   }
   d_tran( "%s connect_count %u\n", this->name, this->connect_count );
 }
@@ -298,8 +300,10 @@ ConnectMgr::on_shutdown( ConnectCtx &ctx,  const char *msg,
   rte->on_shutdown( *ctx.client, msg, len );
   if ( ctx.client->sock_err == EV_ERR_CONN_SELF )
     return false;
-  rte->set( TPORT_IS_INPROGRESS );
-  rte->clear( TPORT_IS_SHUTDOWN );
+  if ( ctx.state != ConnectCtx::CONN_SHUTDOWN ) {
+    rte->set( TPORT_IS_INPROGRESS );
+    rte->clear( TPORT_IS_SHUTDOWN );
+  }
   return true;
 }
 

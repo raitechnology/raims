@@ -589,7 +589,7 @@ SessionMgr::add_tcp_accept( TransportRoute &listen_rte,
   conn.notify   = rte;
   conn.route_id = rte->sub_route.route_id;
 
-  rte->printf( "add_tcp_accept\n" );
+  rte->printf( "add_tcp_accept from %s\n", conn.peer_address.buf );
   this->events.on_connect( rte->tport_id, TPORT_IS_TCP, conn.encrypt );
   if ( ! rte->connected.test_set( conn.fd ) )
     rte->connect_count++;

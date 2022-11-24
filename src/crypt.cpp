@@ -96,7 +96,7 @@ rai::ms::alloc_secure_mem( size_t len ) noexcept
       static int first;
       if ( first++ == 0 ) {
         int e = errno;
-        fprintf( stderr, "unable to mlock() memory, ulimit -l (%d/%s)\n",
+        printf( "unable to mlock() memory, ulimit -l (errno=%d/%s)\n",
                  e, strerror( e ) );
       }
     }

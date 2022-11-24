@@ -638,14 +638,17 @@ TransportRoute::create_tcp_connect( ConfigTree::Transport &tport ) noexcept
   EvTcpTransportParameters parm;
   parm.parse_tport( tport, PARAM_NB_CONNECT, this->mgr );
 
-  if ( this->connect_ctx == NULL )
-    this->connect_ctx = this->mgr.connect_mgr.create( this->tport_id );
+  if ( ! this->is_set( TPORT_IS_DEVICE ) ) {
+    if ( this->connect_ctx == NULL )
+      this->connect_ctx = this->mgr.connect_mgr.create( this->tport_id );
 
-  this->printf( "create_tcp_connect timeout=%u encrypt=%s host=%s port=%d\n",
-                parm.timeout, parm.noencrypt ? "false" : "true",
-                parm.host[ 0 ] ? parm.host[ 0 ] : "*", parm.port[ 0 ] );
-  this->connect_ctx->connect( parm.host[ 0 ], parm.port[ 0 ], parm.opts,
-                              parm.timeout );
+    this->printf( "create_tcp_connect timeout=%u encrypt=%s host=%s port=%d\n",
+                  parm.timeout, parm.noencrypt ? "false" : "true",
+                  parm.host[ 0 ] ? parm.host[ 0 ] : "*", parm.port[ 0 ] );
+
+    this->connect_ctx->connect( parm.host[ 0 ], parm.port[ 0 ], parm.opts,
+                                parm.timeout );
+  }
   return true;
 }
 
@@ -655,36 +658,36 @@ TransportRoute::add_tcp_connect( const char *conn_url,
 {
   TransportRoute   * rte = this;
   EvTcpTransportOpts opts;
-  char   host_buf[ MAX_TCP_HOST_LEN ];
-  size_t len = sizeof( host_buf );
-  int    port;
+  char         host_buf[ MAX_TCP_HOST_LEN ];
+  size_t       len  = sizeof( host_buf );
+  const char * host = conn_url;
+  int          port;
 
   opts.parse( rte->transport, PARAM_NB_CONNECT, this->mgr );
 
   rte->printf( "add_tcp_connect timeout=%u encrypt=%s %s (%x)\n",
                 opts.timeout, opts.noencrypt ? "false" : "true", conn_url,
                 conn_hash );
-  if ( rte->connect_ctx != NULL &&
-       rte->connect_ctx->state != ConnectCtx::CONN_SHUTDOWN ) {
-    if ( rte->conn_hash == conn_hash ) {
-      if ( ! rte->connect_ctx->state == ConnectCtx::CONN_IDLE ) {
-        rte->connect_ctx->opts    = opts.opts;
-        rte->connect_ctx->timeout = opts.timeout;
-        rte->connect_ctx->reconnect();
+  if ( rte->connect_ctx != NULL ) {
+    if ( rte->connect_ctx->state != ConnectCtx::CONN_SHUTDOWN ) {
+      if ( rte->conn_hash == conn_hash ) {
+        if ( rte->connect_ctx->state == ConnectCtx::CONN_IDLE ) {
+          rte->connect_ctx->opts    = opts.opts;
+          rte->connect_ctx->timeout = opts.timeout;
+          rte->connect_ctx->reconnect();
+        }
+        return true;
       }
-      return true;
     }
     rte = NULL;
   }
-  if ( rte == NULL ) {
+  if ( rte == NULL || rte->connect_ctx == NULL ) {
     rte = this->mgr.add_tcp_rte( *this, conn_hash );
-
     if ( rte == NULL )
       return false;
     if ( rte->connect_ctx == NULL )
       rte->connect_ctx = rte->mgr.connect_mgr.create( rte->tport_id );
   }
-  const char * host = conn_url;
   port = ConfigTree::Transport::get_host_port( host, host_buf, len );
   rte->conn_hash = conn_hash;
   rte->connect_ctx->connect( host, port, opts.opts, opts.timeout );

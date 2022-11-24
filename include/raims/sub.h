@@ -593,7 +593,7 @@ struct SeqnoTab {
     SeqnoT * p = this->tab;
     if ( p->vec_size * sizeof( SeqnoT::VecData ) > max_size ) {
       kv::RouteLoc loc;
-      for ( SubSeqno *s = this->tab_old->first( loc ); p != NULL;
+      for ( SubSeqno *s = this->tab_old->first( loc ); s != NULL;
             this->tab_old->next( loc ) )
         s->release();
       this->tab_old->release();
