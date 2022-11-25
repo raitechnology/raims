@@ -34,6 +34,7 @@ AES_Connection::recv_key( void ) noexcept
   check = kv_bswap64( check );
   if ( ( check >> 32 ) != 0 ) {
     printf( "ignoring, zero prefix missing\n" );
+    this->pushpop( EV_CLOSE, EV_PROCESS );
     ok = false;
   }
   else {
