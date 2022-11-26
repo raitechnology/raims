@@ -200,12 +200,18 @@ TransportRoute::update_cost( UserBridge &n,
   }
 }
 
-static void
-make_url_from_sock( StringTab &string_tab,  StringVal &url,
-                    EvSocket &sock ) noexcept
+void
+TransportRoute::make_url_from_sock( StringTab &string_tab,  StringVal &url,
+                                    EvSocket &sock, const char *proto ) noexcept
 {
-  char   buf[ MAX_TCP_HOST_LEN ];
-  ::memcpy( buf, "tcp://", 6 );
+  char   buf[ MAX_TCP_HOST_LEN + 1 ];
+  size_t off = ::strlen( proto );
+  if ( off > MAX_TCP_HOST_LEN )
+    off = MAX_TCP_HOST_LEN;
+  ::memcpy( buf, proto, off );
+  if ( off < MAX_TCP_HOST_LEN ) buf[ off++ ] = ':';
+  if ( off < MAX_TCP_HOST_LEN ) buf[ off++ ] = '/';
+  if ( off < MAX_TCP_HOST_LEN ) buf[ off++ ] = '/';
 
   size_t len = get_strlen64( sock.peer_address.buf );
   bool is_ip4_wildcard, is_ip6_wildcard;
@@ -213,21 +219,23 @@ make_url_from_sock( StringTab &string_tab,  StringVal &url,
   is_ip6_wildcard = ( ! is_ip4_wildcard &&
                       ::strncmp( sock.peer_address.buf, "[::]:", 5 ) == 0 );
   if ( is_ip4_wildcard || is_ip6_wildcard ) {
-    size_t i = 0, j = 6;
-    if ( ::gethostname( &buf[ 6 ], MAX_TCP_HOST_LEN - 6 ) == 0 ) {
-      j += ::strlen( &buf[ 6 ] );
+    size_t i = 0;
+    if ( ::gethostname( &buf[ off ], MAX_TCP_HOST_LEN - off ) == 0 ) {
+      off += ::strlen( &buf[ off ] );
       if ( is_ip4_wildcard )
         i = 7;
       else
         i = 4;
     }
-    while ( j < MAX_TCP_HOST_LEN - 1 && i < len )
-      buf[ j++ ] = sock.peer_address.buf[ i++ ];
-    len = j;
+    while ( off < MAX_TCP_HOST_LEN && i < len )
+      buf[ off++ ] = sock.peer_address.buf[ i++ ];
+    len = off;
   }
   else {
-    ::memcpy( &buf[ 6 ], sock.peer_address.buf, len );
-    len += 6;
+    if ( len > MAX_TCP_HOST_LEN - off )
+      len = MAX_TCP_HOST_LEN - off;
+    ::memcpy( &buf[ off ], sock.peer_address.buf, len );
+    len += off;
   }
   buf[ len ] = '\0';
   string_tab.ref_string( buf, len, url );
@@ -361,7 +369,7 @@ void
 TransportRoute::create_listener_mesh_url( void ) noexcept
 {
   make_url_from_sock( this->user_db.string_tab, this->mesh_url,
-                      *this->listener );
+                      *this->listener, "mesh" );
   this->mesh_url_hash = kv_crc_c( this->mesh_url.val, this->mesh_url.len, 0 );
   d_tran( "%s: %s (%x)\n", this->name, this->mesh_url.val,
           this->mesh_url_hash );
@@ -371,7 +379,7 @@ void
 TransportRoute::create_listener_conn_url( void ) noexcept
 {
   make_url_from_sock( this->user_db.string_tab, this->conn_url,
-                      *this->listener );
+                      *this->listener, "tcp" );
   this->conn_hash = kv_crc_c( this->conn_url.val, this->conn_url.len, 0 );
   d_tran( "%s: %s (%x)\n", this->name, this->conn_url.val,
           this->conn_hash );
@@ -561,6 +569,8 @@ TransportRoute::create_rv_listener( ConfigTree::Transport &tport ) noexcept
     l->no_permanent = b;
   if ( tport.get_route_bool( R_NO_MCAST, b ) )
     l->no_mcast = b;
+  if ( tport.get_route_bool( R_NO_FAKEIP, b ) )
+    l->no_fakeip = b;
   this->start_listener( l, tport );
   if ( l == NULL )
     return false;

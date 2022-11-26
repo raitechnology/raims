@@ -80,13 +80,16 @@ struct EvRvTransportListen : public sassrv::EvRvListen {
   TransportRoute & rte;
   RvHostTab        tab;
   uint64_t         last_active_mono;
-  uint32_t         active_cnt;
+  uint32_t         active_cnt,
+                   fake_ip;
   bool             no_mcast,
-                   no_permanent;
+                   no_permanent,
+                   no_fakeip;
   EvRvTransportListen( kv::EvPoll &p,  TransportRoute &r ) noexcept;
 
   ConfigTree::Transport *get_rv_transport( sassrv::RvHost &host,
                                            bool create ) noexcept;
+  uint32_t get_fake_ip( void ) noexcept;
   void make_rv_transport( ConfigTree::Transport *&t,  sassrv::RvHost &host,
                           bool &is_listener ) noexcept;
   /* sassrv rv listen */

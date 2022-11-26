@@ -84,6 +84,7 @@ struct WebListen : public kv::EvTcpListen {
   Console    & console;
   const char * http_dir;
   size_t       http_dir_len;
+  StringVal    http_url;
 
   ds::HttpServerNonce * svr;
   ds::HtDigestDB      * db;

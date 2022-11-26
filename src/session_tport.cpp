@@ -612,7 +612,7 @@ SessionMgr::add_mesh_connect( TransportRoute &mesh_rte ) noexcept
     char   * url    = url_buf[ i ];
     size_t & url_sz = url_buf_sz[ i ];
     char     pbuf[ 24 ];
-    ::memcpy( url, "tcp://", 6 );
+    ::memcpy( url, "mesh://", 7 );
     if ( parm.host[ i ] == NULL ) {
       if ( i == 0 ) {
         if ( mesh_rte.is_set( TPORT_IS_DEVICE ) )
@@ -620,10 +620,10 @@ SessionMgr::add_mesh_connect( TransportRoute &mesh_rte ) noexcept
       }
       if ( i > 0 )
         break;
-      url_sz = EvTcpTransportParameters::copy_host_buf( url, 6, "127.0.0.1" );
+      url_sz = EvTcpTransportParameters::copy_host_buf( url, 7, "127.0.0.1" );
     }
     else {
-      url_sz = EvTcpTransportParameters::copy_host_buf( url, 6, parm.host[ i ]);
+      url_sz = EvTcpTransportParameters::copy_host_buf( url, 7, parm.host[ i ]);
     }
     if ( parm.port[ i ] != 0 ) {
       j = uint32_to_string( parm.port[ i ], pbuf );
@@ -828,6 +828,9 @@ SessionMgr::create_web( ConfigTree::Transport &tport ) noexcept
     int len = ::snprintf( buf, sizeof( buf ), "%s.%s", tport.type.val,
                           tport.tport.val );
     un.web->set_name( buf, min_int( len, (int) sizeof( buf ) - 1 ) );
+    TransportRoute::make_url_from_sock( this->user_db.string_tab,
+                                        un.web->http_url, *un.web, "http" );
+    printf( "http_url %s\n", un.web->http_url.val );
     return true;
   }
   return false;

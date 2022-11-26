@@ -231,6 +231,8 @@ struct TransportRoute : public kv::EvSocket, public kv::EvConnectionNotify,
   virtual void release( void ) noexcept;
   virtual bool on_msg( kv::EvPublish &pub ) noexcept;
 
+  static void make_url_from_sock( StringTab &string_tab,  StringVal &url,
+                                  EvSocket &sock, const char *proto ) noexcept;
   void create_listener_mesh_url( void ) noexcept;
   void create_listener_conn_url( void ) noexcept;
   bool create_transport( ConfigTree::Transport &tport ) noexcept;

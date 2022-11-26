@@ -2,7 +2,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <netdb.h>
 #include <raims/ev_rv_transport.h>
+#include <raims/ev_web.h>
 #include <raims/transport.h>
 #include <raims/session.h>
 
@@ -22,8 +24,8 @@ static const int RV_TIMEOUT_SECS = 2 * 60 + 10;
 EvRvTransportListen::EvRvTransportListen( kv::EvPoll &p,
                                           TransportRoute &r ) noexcept
     : EvRvListen( p, r.sub_route ), rte( r ),
-      last_active_mono( 0 ), active_cnt( 0 ), no_mcast( false ),
-      no_permanent( false )
+      last_active_mono( 0 ), active_cnt( 0 ), fake_ip( 0 ), no_mcast( false ),
+      no_permanent( false ), no_fakeip( false )
 {
   static kv_atom_uint64_t rv_timer_id;
   this->notify = &r;
@@ -272,6 +274,25 @@ EvRvTransportListen::make_rv_transport( ConfigTree::Transport *&t, RvHost &host,
   }
 }
 
+uint32_t
+EvRvTransportListen::get_fake_ip( void ) noexcept
+{
+  if ( this->fake_ip == 0 ) {
+    UserDB & user_db = this->rte.mgr.user_db;
+    this->fake_ip = (uint32_t) ( user_db.start_time / 1000 );
+    for ( uint32_t uid = 1; uid < user_db.next_uid; uid++ ) {
+      if ( user_db.bridge_tab[ uid ] != NULL ) {
+        uint64_t t = user_db.bridge_tab[ uid ]->start_time;
+        if ( (uint32_t) ( t / 1000 ) == this->fake_ip ) {
+          rand::fill_urandom_bytes( &this->fake_ip, 4 );
+          break;
+        }
+      }
+    }
+  }
+  return this->fake_ip;
+}
+
 int
 EvRvTransportListen::start_host( RvHost &host,  const char *net, size_t net_len,
                                  const char *svc,  size_t svc_len ) noexcept
@@ -288,13 +309,49 @@ EvRvTransportListen::start_host( RvHost &host,  const char *net, size_t net_len,
          ! host.is_same_network( net, net_len, svc, svc_len ) ) {
       RvMcast2 mc;
       int status = mc.parse_network2( net, net_len );
-      if ( status == HOST_OK )
+      if ( status == HOST_OK ) {
+        if ( mc.fake_ip == 0 && ! this->no_fakeip )
+          mc.fake_ip = this->get_fake_ip();
+        host.host_id_len = (uint16_t)
+          min_int( (size_t) this->rte.mgr.user_db.user.user.len,
+                   MAX_RV_HOST_ID_LEN - 1 );
+        ::memcpy( host.host_id, this->rte.mgr.user_db.user.user.val,
+                  host.host_id_len );
+        ::memset( &host.host_id[ host.host_id_len ], 0,
+                  MAX_RV_HOST_ID_LEN - host.host_id_len );
+        for ( uint32_t i = 0; i < this->rte.mgr.unrouteable.count; i++ ) {
+          Unrouteable & un = this->rte.mgr.unrouteable.ptr[ i ];
+          if ( un.web != NULL ) {
+            char         tmp[ 256 ];
+            const char * addr = un.web->http_url.val;
+            size_t       len  = sizeof( tmp );
+            int          port = un.tport->get_host_port( addr, tmp, len );
+            if ( port != 0 && len > 0 ) {
+              AddrInfo info;
+              if ( info.get_address(addr, port, OPT_AF_INET|OPT_LISTEN) == 0 ) {
+                for ( addrinfo * ai = info.ai; ai != NULL; ai = ai->ai_next ) {
+                  if ( ai->ai_family == AF_INET ) {
+                    host.http_addr =
+                      ((struct sockaddr_in *) ai->ai_addr)->sin_addr.s_addr;
+                    host.http_port =
+                      ((struct sockaddr_in *) ai->ai_addr)->sin_port;
+                    goto break_loop;
+                  }
+                }
+              }
+            }
+          break_loop:;
+            break;
+          }
+        }
         status = host.start_network( mc, net, net_len, svc, svc_len );
+      }
       if ( status != HOST_OK )
         return status;
     }
     host.start_in_progress = true;
   }
+
   RvHostRoute           * hr   = this->tab.find( &host );
   TransportRoute        * rte  = NULL;
   ConfigTree::Transport * t    = NULL;

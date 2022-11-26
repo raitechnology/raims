@@ -67,6 +67,7 @@ CONFIG_CONST( R_EDGE               , "edge" )
 CONFIG_CONST( R_USE_SERVICE_PREFIX , "use_service_prefix" )
 CONFIG_CONST( R_NO_PERMANENT       , "no_permanent" )
 CONFIG_CONST( R_NO_MCAST           , "no_mcast" )
+CONFIG_CONST( R_NO_FAKEIP          , "no_fakeip" )
 CONFIG_CONST( R_SERVICE            , "service" )
 CONFIG_CONST( R_NETWORK            , "network" )
 CONFIG_CONST( R_COST               , "cost" )         /* 2,3,4 */
@@ -99,19 +100,20 @@ CONFIG_CONST( R_NOENCRYPT          , "noencrypt" )
   CMD_TPORT_USE_SERVICE_PREFIX = CMD_TPORT_BASE+13,\
   CMD_TPORT_NO_PERMANENT       = CMD_TPORT_BASE+14,\
   CMD_TPORT_NO_MCAST           = CMD_TPORT_BASE+15,\
-  CMD_TPORT_SERVICE            = CMD_TPORT_BASE+16,\
-  CMD_TPORT_NETWORK            = CMD_TPORT_BASE+17,\
-  CMD_TPORT_COST               = CMD_TPORT_BASE+18,\
-  CMD_TPORT_HTTP_DIR           = CMD_TPORT_BASE+19,\
-  CMD_TPORT_HTTP_USERNAME      = CMD_TPORT_BASE+20,\
-  CMD_TPORT_HTTP_PASSWORD      = CMD_TPORT_BASE+21,\
-  CMD_TPORT_HTTP_REALM         = CMD_TPORT_BASE+22,\
-  CMD_TPORT_HTDIGEST           = CMD_TPORT_BASE+23,\
-  CMD_TPORT_IPV4ONLY           = CMD_TPORT_BASE+24,\
-  CMD_TPORT_IPV6ONLY           = CMD_TPORT_BASE+25,\
-  CMD_TPORT_NOENCRYPT          = CMD_TPORT_BASE+26,\
-  CMD_TPORT_SHOW               = CMD_TPORT_BASE+27,\
-  CMD_TPORT_QUIT               = CMD_TPORT_BASE+28
+  CMD_TPORT_NO_FAKEIP          = CMD_TPORT_BASE+16,\
+  CMD_TPORT_SERVICE            = CMD_TPORT_BASE+17,\
+  CMD_TPORT_NETWORK            = CMD_TPORT_BASE+18,\
+  CMD_TPORT_COST               = CMD_TPORT_BASE+19,\
+  CMD_TPORT_HTTP_DIR           = CMD_TPORT_BASE+20,\
+  CMD_TPORT_HTTP_USERNAME      = CMD_TPORT_BASE+21,\
+  CMD_TPORT_HTTP_PASSWORD      = CMD_TPORT_BASE+22,\
+  CMD_TPORT_HTTP_REALM         = CMD_TPORT_BASE+23,\
+  CMD_TPORT_HTDIGEST           = CMD_TPORT_BASE+24,\
+  CMD_TPORT_IPV4ONLY           = CMD_TPORT_BASE+25,\
+  CMD_TPORT_IPV6ONLY           = CMD_TPORT_BASE+26,\
+  CMD_TPORT_NOENCRYPT          = CMD_TPORT_BASE+27,\
+  CMD_TPORT_SHOW               = CMD_TPORT_BASE+28,\
+  CMD_TPORT_QUIT               = CMD_TPORT_BASE+29
 
 /* configure transport route parameters */
 #define CMD_TPORT_CMD \
@@ -131,6 +133,7 @@ CONFIG_CONST( R_NOENCRYPT          , "noencrypt" )
   { CMD_TPORT_USE_SERVICE_PREFIX, R_USE_SERVICE_PREFIX,0,0},\
   { CMD_TPORT_NO_PERMANENT      , R_NO_PERMANENT,0,0},\
   { CMD_TPORT_NO_MCAST          , R_NO_MCAST   ,0,0},\
+  { CMD_TPORT_NO_FAKEIP         , R_NO_FAKEIP  ,0,0},\
   { CMD_TPORT_SERVICE           , R_SERVICE    ,0,0},\
   { CMD_TPORT_NETWORK           , R_NETWORK    ,0,0},\
   { CMD_TPORT_COST              , R_COST       ,0,0},\
@@ -164,6 +167,7 @@ CONFIG_CONST( R_NOENCRYPT          , "noencrypt" )
   { CMD_TPORT_USE_SERVICE_PREFIX, R_USE_SERVICE_PREFIX,"B","When false, no service prefix" },\
   { CMD_TPORT_NO_PERMANENT, R_NO_PERMANENT,"B","Quit when no connections for 2 minutes" },\
   { CMD_TPORT_NO_MCAST   ,  R_NO_MCAST,"B","Disable multicast networks" },\
+  { CMD_TPORT_NO_FAKEIP  ,  R_NO_FAKEIP,"B","Disable fake host ip used in inbox subjects" },\
   { CMD_TPORT_SERVICE    ,  R_SERVICE,"S", "Use service name" },\
   { CMD_TPORT_NETWORK    ,  R_NETWORK,"A", "Connect to network" },\
   { CMD_TPORT_COST       ,  R_COST,"N",    "Cost used for calculating routes" },\
@@ -194,7 +198,9 @@ CONFIG_CONST( R_NOENCRYPT          , "noencrypt" )
 #define VALID_PGM    VALID_COMMON, CMD_TPORT_MTU, CMD_TPORT_TXW_SQNS, CMD_TPORT_RXW_SQNS, \
                      CMD_TPORT_TXW_SECS, CMD_TPORT_MCAST_LOOP
 
-#define VALID_RV     CMD_TPORT_LISTEN, CMD_TPORT_DEVICE, CMD_TPORT_PORT
+#define VALID_RV     CMD_TPORT_LISTEN, CMD_TPORT_DEVICE, CMD_TPORT_PORT, \
+                     CMD_TPORT_USE_SERVICE_PREFIX, \
+                     CMD_TPORT_NO_PERMANENT, CMD_TPORT_NO_MCAST, CMD_TPORT_NO_FAKEIP
 
 #define VALID_NATS   CMD_TPORT_LISTEN, CMD_TPORT_DEVICE, CMD_TPORT_PORT, \
                      CMD_TPORT_SERVICE, CMD_TPORT_NETWORK, \
