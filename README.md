@@ -1,5 +1,7 @@
 # Rai Multicast Services
 
+[![Copr build status](https://copr.fedorainfracloud.org/coprs/injinj/gold/package/raims/status_image/last_build.png)](https://copr.fedorainfracloud.org/coprs/injinj/gold/package/raims/)
+
 Rai MS is a Link-State based protocol for the construction of Pub/Sub messaging
 services which allows for loops and redundancies in the network connections
 between systems.  It has, at present, 4 different types of network transports:
@@ -21,5 +23,6 @@ so that streams are delivered in order discarding duplicates, but messages
 which are lost in transit because of node or network failures, are not
 retransmitted.
 
-The [Rai Multicast Services Guide](doc/index.adoc) describes the protocol,
-operating procedures, and architecture in more detail.
+The [Rai Multicast Services Guide](doc/index.adoc) (or in
+[html](https://www.raitechnology.com/raims)) describes the protocol, operating
+procedures, and architecture in more detail.

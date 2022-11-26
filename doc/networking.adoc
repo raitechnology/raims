@@ -420,11 +420,16 @@ Example `tport_myrv.yaml`:
 | use_service_prefix | true         | Use a service namespace
 | no_permanent       | false        | Exit if no connections
 | no_mcast           | false        | Ignore multicast networking
+| no_fakeip          | false        | Use IPv4 address for session
 |======================================================
 
 Unless the use_service_prefix is false, the traffic is segregated to the
 `_rv_7500` where service is 7500.  If it is true, then all services that also
-have use_service_prefix set to true will share the same namespace.
+have use_service_prefix set to true will share the same namespace.  Without
+`no_fakeip` set to true, the session and inbox values are random and not based
+on the IPv4 address of the host.  This allows RV networks to work without a
+routable IPv4 network across private address spaces that are common with
+NATs, VMs, and/or container networks.
 
 NATS
 ~~~~
