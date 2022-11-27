@@ -18,6 +18,8 @@ libd      := $(build_dir)/lib64
 objd      := $(build_dir)/obj
 dependd   := $(build_dir)/dep
 
+have_asciidoctor := $(shell if [ -x /usr/bin/asciidoctor ]; then echo true; fi)
+
 default_cflags := -ggdb -O3
 # use 'make port_extra=-g' for debug build
 ifeq (-g,$(findstring -g,$(port_extra)))
@@ -544,6 +546,12 @@ all_exes    += $(bind)/ms_server
 all_depends += $(ms_server_deps)
 
 all_dirs := $(bind) $(libd) $(objd) $(dependd)
+
+ifeq ($(have_asciidoctor),true)
+doc/index.html: $(wildcard doc/*.adoc)
+	asciidoctor -b html5 doc/index.adoc
+gen_files += doc/index.html
+endif
 
 # the default targets
 .PHONY: all
