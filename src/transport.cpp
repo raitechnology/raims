@@ -465,47 +465,60 @@ out_listen:;
 }
 
 uint32_t
-TransportRoute::shutdown( void ) noexcept
+TransportRoute::shutdown( ConfigTree::Transport &tport ) noexcept
 {
   uint32_t count = 0;
-  if ( this->transport.type.equals( T_TCP, T_TCP_SZ ) ||
-       this->transport.type.equals( T_MESH, T_MESH_SZ ) ) {
-    this->notify_ctx = NULL;
-    if ( this->listener != NULL && this->listener->in_list( IN_ACTIVE_LIST ) ) {
-      this->listener->idle_push( EV_SHUTDOWN );
-      count++;
-    }
-    if ( this->connect_ctx != NULL ) {
-      this->connect_ctx->state = ConnectCtx::CONN_SHUTDOWN;
-      this->clear( TPORT_IS_INPROGRESS );
-      if ( this->connect_ctx->client != NULL )
-        this->connect_ctx->client->idle_push( EV_SHUTDOWN );
-      count++;
-    }
-    uint32_t fd;
-    for ( bool ok = this->connected.first( fd ); ok;
-          ok = this->connected.next( fd ) ) {
-      if ( fd <= this->poll.maxfd ) {
-        EvSocket *s = this->poll.sock[ fd ];
-        if ( s != NULL ) {
-          if ( ! s->test( EV_SHUTDOWN ) ) {
-            s->idle_push( EV_SHUTDOWN );
-            count++;
+  if ( &this->transport == &tport ) {
+    if ( this->transport.type.equals( T_TCP, T_TCP_SZ ) ||
+         this->transport.type.equals( T_MESH, T_MESH_SZ ) ) {
+      this->notify_ctx = NULL;
+      if ( this->listener != NULL &&
+           this->listener->in_list( IN_ACTIVE_LIST ) ) {
+        this->listener->idle_push( EV_SHUTDOWN );
+        count++;
+      }
+      if ( this->connect_ctx != NULL ) {
+        this->connect_ctx->state = ConnectCtx::CONN_SHUTDOWN;
+        this->clear( TPORT_IS_INPROGRESS );
+        if ( this->connect_ctx->client != NULL )
+          this->connect_ctx->client->idle_push( EV_SHUTDOWN );
+        count++;
+      }
+      uint32_t fd;
+      for ( bool ok = this->connected.first( fd ); ok;
+            ok = this->connected.next( fd ) ) {
+        if ( fd <= this->poll.maxfd ) {
+          EvSocket *s = this->poll.sock[ fd ];
+          if ( s != NULL ) {
+            if ( ! s->test( EV_SHUTDOWN ) ) {
+              s->idle_push( EV_SHUTDOWN );
+              count++;
+            }
           }
         }
       }
+      this->set( TPORT_IS_SHUTDOWN );
     }
-    this->set( TPORT_IS_SHUTDOWN );
+    else if ( this->transport.type.equals( T_PGM, T_PGM_SZ ) ) {
+      if ( ! this->test_set( TPORT_IS_SHUTDOWN ) ) {
+        if ( this->pgm_tport != NULL )
+          this->pgm_tport->idle_push( EV_SHUTDOWN );
+        if ( this->ibx_tport != NULL )
+          this->ibx_tport->idle_push( EV_SHUTDOWN );
+        count++;
+      }
+      this->set( TPORT_IS_SHUTDOWN );
+    }
   }
-  else if ( this->transport.type.equals( T_PGM, T_PGM_SZ ) ) {
-    if ( ! this->test_set( TPORT_IS_SHUTDOWN ) ) {
-      if ( this->pgm_tport != NULL )
-        this->pgm_tport->idle_push( EV_SHUTDOWN );
-      if ( this->ibx_tport != NULL )
-        this->ibx_tport->idle_push( EV_SHUTDOWN );
-      count++;
+  else if ( this->ext != NULL ) {
+    for ( IpcRte *el = this->ext->list.hd; el != NULL; el = el->next ) {
+      if ( &el->transport == &tport ) {
+        if ( el->listener->in_list( IN_ACTIVE_LIST ) ) {
+          el->listener->idle_push( EV_SHUTDOWN );
+          count++;
+        }
+      }
     }
-    this->set( TPORT_IS_SHUTDOWN );
   }
   return count;
 }
@@ -559,9 +572,19 @@ TransportRoute::create_tcp_listener( ConfigTree::Transport &tport ) noexcept
 bool
 TransportRoute::create_rv_listener( ConfigTree::Transport &tport ) noexcept
 {
-  EvRvTransportListen * l =
-    new ( aligned_malloc( sizeof( EvRvTransportListen ) ) )
-    EvRvTransportListen( this->poll, *this );
+  IpcRte *el = this->ext->find( tport );
+  if ( el != NULL && el->listener->in_list( IN_ACTIVE_LIST ) )
+    return true;
+  EvRvTransportListen * l;
+  if ( el == NULL ) {
+    l = new ( aligned_malloc( sizeof( EvRvTransportListen ) ) )
+      EvRvTransportListen( this->poll, *this );
+    el = new ( ::malloc( sizeof( IpcRte ) ) ) IpcRte( tport, l );
+    this->ext->list.push_tl( el );
+  }
+  else {
+    l = (EvRvTransportListen *) el->listener;
+  }
   bool b;
   if ( tport.get_route_bool( R_USE_SERVICE_PREFIX, b ) )
     l->has_service_prefix = b;
@@ -571,12 +594,7 @@ TransportRoute::create_rv_listener( ConfigTree::Transport &tport ) noexcept
     l->no_mcast = b;
   if ( tport.get_route_bool( R_NO_FAKEIP, b ) )
     l->no_fakeip = b;
-  this->start_listener( l, tport );
-  if ( l == NULL )
-    return false;
-  this->ext->list.push_tl(
-    new ( ::malloc( sizeof( IpcRte ) ) ) IpcRte( tport, l ) );
-  return true;
+  return this->start_listener( l, tport );
 }
 
 void
@@ -615,31 +633,41 @@ TransportRoute::get_tport_service( ConfigTree::Transport &tport,
 bool
 TransportRoute::create_nats_listener( ConfigTree::Transport &tport ) noexcept
 {
-  EvNatsTransportListen * l =
-    new ( aligned_malloc( sizeof( EvNatsTransportListen ) ) )
-    EvNatsTransportListen( this->poll, *this );
+  IpcRte *el = this->ext->find( tport );
+  if ( el != NULL && el->listener->in_list( IN_ACTIVE_LIST ) )
+    return true;
+  EvNatsTransportListen * l;
+  if ( el == NULL ) {
+    l = new ( aligned_malloc( sizeof( EvNatsTransportListen ) ) )
+      EvNatsTransportListen( this->poll, *this );
+    el = new ( ::malloc( sizeof( IpcRte ) ) ) IpcRte( tport, l );
+    this->ext->list.push_tl( el );
+  }
+  else {
+    l = (EvNatsTransportListen *) el->listener;
+  }
   this->get_tport_service( tport, l->service, l->service_len );
-  this->start_listener( l, tport );
-  if ( l == NULL )
-    return false;
-  this->ext->list.push_tl(
-    new ( ::malloc( sizeof( IpcRte ) ) ) IpcRte( tport, l ) );
-  return true;
+  return this->start_listener( l, tport );
 }
 
 bool
 TransportRoute::create_redis_listener( ConfigTree::Transport &tport ) noexcept
 {
-  EvRedisTransportListen * l =
-    new ( aligned_malloc( sizeof( EvRedisTransportListen ) ) )
-    EvRedisTransportListen( this->poll, *this );
+  IpcRte *el = this->ext->find( tport );
+  if ( el != NULL && el->listener->in_list( IN_ACTIVE_LIST ) )
+    return true;
+  EvRedisTransportListen * l;
+  if ( el == NULL ) {
+    l = new ( aligned_malloc( sizeof( EvRedisTransportListen ) ) )
+      EvRedisTransportListen( this->poll, *this );
+    el = new ( ::malloc( sizeof( IpcRte ) ) ) IpcRte( tport, l );
+    this->ext->list.push_tl( el );
+  }
+  else {
+    l = (EvRedisTransportListen *) el->listener;
+  }
   this->get_tport_service( tport, l->service, l->service_len );
-  this->start_listener( l, tport );
-  if ( l == NULL )
-    return false;
-  this->ext->list.push_tl(
-    new ( ::malloc( sizeof( IpcRte ) ) ) IpcRte( tport, l ) );
-  return true;
+  return this->start_listener( l, tport );
 }
 
 bool

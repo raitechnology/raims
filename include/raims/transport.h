@@ -143,6 +143,12 @@ struct IpcRteList : public kv::RouteNotify {
   void operator delete( void *ptr ) { ::free( ptr ); }
   IpcRteList( TransportRoute &rte ) noexcept;
 
+  IpcRte *find( ConfigTree::Transport &tport ) {
+    for ( IpcRte *el = this->list.hd; el != NULL; el = el->next )
+      if ( &el->transport == &tport )
+        return el;
+    return NULL;
+  }
   /* sub notify */
   virtual void on_sub( kv::NotifySub &sub ) noexcept;
   virtual void on_unsub( kv::NotifySub &sub ) noexcept;
@@ -269,7 +275,7 @@ struct TransportRoute : public kv::EvSocket, public kv::EvConnectionNotify,
   bool forward_to_connected_auth_not_fd( kv::EvPublish &pub,  uint32_t fd ) {
     return this->sub_route.forward_set_not_fd( pub, this->connected_auth, fd );
   }
-  uint32_t shutdown( void ) noexcept;
+  uint32_t shutdown( ConfigTree::Transport &t ) noexcept;
   bool start_listener( kv::EvTcpListen *l,
                        ConfigTree::Transport &tport ) noexcept;
   bool is_self_connect( kv::EvSocket &conn ) noexcept;

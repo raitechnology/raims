@@ -411,13 +411,15 @@ SessionMgr::shutdown_transport( ConfigTree::Transport &t ) noexcept
     return this->shutdown_telnet( t );
   if ( t.type.equals( T_WEB, T_WEB_SZ ) )
     return this->shutdown_web( t );
+  if ( t.type.equals( T_NAME, T_NAME_SZ ) )
+    return this->shutdown_name( t );
 
   uint32_t count = (uint32_t) this->user_db.transport_tab.count,
            match = 0;
   for ( uint32_t id = 0; id < count; id++ ) {
     TransportRoute *rte = this->user_db.transport_tab.ptr[ id ];
-    if ( &rte->transport == &t ) {
-      match += rte->shutdown();
+    if ( &rte->transport == &t || rte->ext != NULL ) {
+      match += rte->shutdown( t );
     }
   }
   return match;
