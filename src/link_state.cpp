@@ -532,7 +532,7 @@ UserDB::send_adjacency_change( void ) noexcept
   uint32_t count = (uint32_t) this->transport_tab.count;
   for ( uint32_t i = 0; i < count; i++ ) {
     TransportRoute *rte = this->transport_tab.ptr[ i ];
-    if ( rte->connect_count > 0 ) {
+    if ( rte->connect_count > 0 && ! rte->is_set( TPORT_IS_IPC ) ) {
       EvPublish pub( Z_ADJ, Z_ADJ_SZ, NULL, 0, m.msg, m.len(),
                      rte->sub_route, this->my_src_fd, adj_h,
                      CABA_TYPE_ID, 'p' );

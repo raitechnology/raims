@@ -191,7 +191,8 @@ struct UserBridge : public UserStateTest<UserBridge> {
                      challenge_count,     /* count of challenges */
                      unknown_refs,        /* link refs are yet to be resolved */
                      auth_count,          /* number of times authenticated */
-                     adj_req_count;       /* throttle the number of requests */
+                     adj_req_count,       /* throttle the number of requests */
+                     bridge_nonce_int;
   uint64_t           unknown_link_seqno,  /* edge of link_state_seqno */
                      peer_recv_seqno,     /* seqno used for add/del/blm peer */
                      mcast_recv_seqno,    /* recv side mcast seqno */
@@ -473,7 +474,8 @@ struct UserDB {
                         uid_auth_count,  /* total trusted nodes */
                         uid_hb_count,    /* total hb / distance zero nones */
                         uid_ping_count,
-                        next_ping_uid;
+                        next_ping_uid,
+                        bridge_nonce_int;
   uint64_t              send_peer_seqno, /* a unique seqno for peer multicast */
                         link_state_seqno,/* seqno of adjacency updates */
                         mcast_send_seqno,/* seqno of mcast subjects */
@@ -618,6 +620,7 @@ struct UserDB {
   UserBridge * add_user2( const UserNonce &user_bridge_id,  
                           PeerEntry &peer,  uint64_t start,
                           HashDigest &hello ) noexcept;
+  bool check_uid_csum( const UserBridge &n,  const Nonce &peer_csum ) noexcept;
   void set_ucast_url( UserRoute &u_rte, const MsgHdrDecoder &dec,
                       const char *src ) noexcept;
   void set_ucast_url( UserRoute &u_rte, const UserRoute *ucast_src,

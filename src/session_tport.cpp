@@ -255,7 +255,7 @@ SessionMgr::add_network( const char *net,  size_t net_len,
 
   char host_ip[ 64 ];
   int  host_ip_len;
-  host_ip_len = mc.device_ip( host_ip, sizeof( host_ip ) );
+  host_ip_len = mc.ip4_string( mc.host_ip, host_ip );
   switch ( mc.type ) {
     default: return false;
     case NET_ANY:

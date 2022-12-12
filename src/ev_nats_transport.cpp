@@ -15,7 +15,7 @@ using namespace md;
 EvNatsTransportListen::EvNatsTransportListen( kv::EvPoll &p,
                                               TransportRoute &r ) noexcept
     : EvNatsListen( p, r.sub_route ), rte( r ),
-      service( "_nats." ), service_len( 6 )
+      service( "_nats." ), service_len( 6 ), rv_host( 0 ), rv_service( 0 )
 {
   this->notify = &r;
 }
@@ -31,6 +31,7 @@ EvNatsTransportListen::accept( void ) noexcept
       ::memcpy( svc->prefix, this->service, this->service_len );
       svc->prefix_len = this->service_len;
     }
+    svc->notify = this->notify;
   }
   return c;
 }

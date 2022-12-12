@@ -24,6 +24,7 @@ struct EvTcpTransportParameters;
 struct EvInboxTransport;
 struct EvTcpTransportListen;
 struct EvRvTransportListen;
+struct RvTransportService;
 struct EvNatsTransportListen;
 struct NameSvc;
 struct ConnectDB;
@@ -152,10 +153,15 @@ struct IpcRteList : public kv::RouteNotify {
   /* sub notify */
   virtual void on_sub( kv::NotifySub &sub ) noexcept;
   virtual void on_unsub( kv::NotifySub &sub ) noexcept;
+  virtual void on_resub( kv::NotifySub &sub ) noexcept;
   virtual void on_psub( kv::NotifyPattern &pat ) noexcept;
   virtual void on_punsub( kv::NotifyPattern &pat ) noexcept;
+  virtual void on_repsub( kv::NotifyPattern &pat ) noexcept;
   virtual void on_reassert( uint32_t fd,  kv::RouteVec<kv::RouteSub> &sub_db,
                             kv::RouteVec<kv::RouteSub> &pat_db ) noexcept;
+  void send_listen( void *src,  char src_type,  const char *subj,  size_t sublen,
+                    const char *reply,  size_t replen,  uint32_t refcnt,
+                    bool is_start ) noexcept;
 };
 
 struct TransportRoute : public kv::EvSocket, public kv::EvConnectionNotify,
@@ -192,6 +198,7 @@ struct TransportRoute : public kv::EvSocket, public kv::EvConnectionNotify,
                         * notify_ctx;     /* if accept drop, notify reconnect */
   EvPgmTransport        * pgm_tport;      /* if pgm mcast */
   EvInboxTransport      * ibx_tport;      /* if pgm, point-to-point ucast */
+  RvTransportService    * rv_svc;
   StringVal               ucast_url,      /* url address of ucast ptp */
                           mesh_url,       /* url address of mesh listener */
                           conn_url;       /* url address of connection */
@@ -252,7 +259,8 @@ struct TransportRoute : public kv::EvSocket, public kv::EvConnectionNotify,
   bool create_tcp_connect( ConfigTree::Transport &tport ) noexcept;
 
   void get_tport_service( ConfigTree::Transport &tport,
-                          const char *&service,  size_t &service_len ) noexcept;
+                          const char *&service,  size_t &service_len,
+                          uint16_t &rv_svc ) noexcept;
   bool create_rv_listener( ConfigTree::Transport &tport ) noexcept;
   bool create_rv_connect( ConfigTree::Transport &tport ) noexcept;
 

@@ -41,6 +41,9 @@ UserDB::UserDB( EvPoll &p,  ConfigTree::User &u,
   }
   this->start_mono_time = current_monotonic_time_ns(); 
   this->rand.static_init( this->start_mono_time, this->start_time );
+  /* bridge id is public user hmac + nonce which identifies this peer */
+  this->bridge_id.nonce.seed_random();    /* random nonce */
+  ::memcpy( &this->bridge_nonce_int, this->bridge_id.nonce.digest(), 4 );
 }
 
 bool
@@ -76,8 +79,6 @@ UserDB::init( const CryptPass &pwd,  uint32_t my_fd,
     printf( "service %s key pair loaded\n", this->my_svc.service );
   }
 
-  /* bridge id is public user hmac + nonce which identifies this peer */
-  this->bridge_id.nonce.seed_random();    /* random nonce */
   /* session key is private key used to authenticate messages for bridge_id */
   this->session_key->make_session_rand(); /* random session key */
 
@@ -292,7 +293,7 @@ UserDB::forward_pub( const MsgFramePublish &pub,  const UserBridge &,
       for ( size_t i = 0; i < count; i++ ) {
         TransportRoute * rte = this->transport_tab.ptr[ i ];
         tmp.pub_type = 'p';
-        if ( rte->connect_count > 0 ) {
+        if ( rte->connect_count > 0 && ! rte->is_set( TPORT_IS_IPC ) ) {
           if ( rte != &pub.rte )
             b &= rte->forward_to_connected_auth( tmp );
           else if ( rte->connect_count > 1 )
@@ -1192,6 +1193,7 @@ UserDB::add_user( TransportRoute &rte,  const UserRoute *src,  uint32_t fd,
   seed = (uint32_t) this->rand.next();
   n    = this->make_user_bridge( size, peer, this->poll.g_bloom_db, seed );
   n->bridge_id  = user_bridge_id;
+  ::memcpy( &n->bridge_nonce_int, user_bridge_id.nonce.digest(), 4 );
   n->uid        = uid;
   n->start_time = start;
   n->peer_hello = hello;
@@ -1219,6 +1221,7 @@ UserDB::add_user2( const UserNonce &user_bridge_id,  PeerEntry &peer,
   seed = (uint32_t) this->rand.next();
   n    = this->make_user_bridge( size, peer, this->poll.g_bloom_db, seed );
   n->bridge_id  = user_bridge_id;
+  ::memcpy( &n->bridge_nonce_int, user_bridge_id.nonce.digest(), 4 );
   n->uid        = uid;
   n->start_time = start;
   n->peer_hello = hello;
@@ -1473,6 +1476,33 @@ UserDB::remove_authenticated( UserBridge &n,  ByeReason bye ) noexcept
     this->send_adjacency_change();
   if ( send_del )
     this->send_peer_del( n );
+}
+
+bool
+UserDB::check_uid_csum( const UserBridge &n,  const Nonce &peer_csum ) noexcept
+{
+  if ( this->uid_csum == peer_csum )
+    return true;
+
+  Nonce check_csum = this->bridge_id.nonce;
+  uint32_t count = 0;
+
+  for ( uint32_t uid = 1; uid < this->next_uid; uid++ ) {
+    UserBridge *n2 = this->bridge_tab[ uid ];
+    if ( n2 == NULL || ! n2->is_set( AUTHENTICATED_STATE ) )
+      continue;
+    check_csum ^= n2->bridge_id.nonce;
+    count++;
+  }
+  char buf[ NONCE_B64_LEN + 1 ], buf2[ NONCE_B64_LEN + 1 ];
+  n.printf( "uid_csum not equal my=[%s] hb[%s] uid_count=%u/%u check=%s\n",
+            this->uid_csum.to_base64_str( buf ),
+            peer_csum.to_base64_str( buf2 ), count, this->next_uid,
+            ( check_csum == this->uid_csum ) ? "ok" : "incorrect" );
+
+  if ( check_csum != this->uid_csum )
+    this->uid_csum = check_csum;
+  return this->uid_csum == peer_csum;
 }
 
 void

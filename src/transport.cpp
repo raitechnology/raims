@@ -21,6 +21,9 @@ using namespace rai;
 using namespace ms;
 using namespace kv;
 using namespace md;
+using namespace ds;
+using namespace sassrv;
+using namespace natsmd;
 
 TransportRoute::TransportRoute( kv::EvPoll &p,  SessionMgr &m,
                                 ConfigTree::Service &s,
@@ -38,9 +41,9 @@ TransportRoute::TransportRoute( kv::EvPoll &p,  SessionMgr &m,
       last_hb_count( 0 ), connect_count( 0 ), last_connect_count( 0 ),
       state( f ), mesh_id( 0 ), dev_id( 0 ), listener( 0 ),
       connect_ctx( 0 ), notify_ctx( 0 ), pgm_tport( 0 ), ibx_tport( 0 ),
-      inbox_fd( -1 ), mcast_fd( -1 ), mesh_url_hash( 0 ), conn_hash( 0 ),
-      ucast_url_hash( 0 ), oldest_uid( 0 ), primary_count( 0 ), ext( 0 ),
-      svc( s ), transport( t )
+      rv_svc( 0 ), inbox_fd( -1 ), mcast_fd( -1 ), mesh_url_hash( 0 ),
+      conn_hash( 0 ), ucast_url_hash( 0 ), oldest_uid( 0 ),
+      primary_count( 0 ), ext( 0 ), svc( s ), transport( t )
 {
   uint8_t i;
   this->uid_connected.tport      = t.tport;
@@ -577,8 +580,11 @@ TransportRoute::create_rv_listener( ConfigTree::Transport &tport ) noexcept
     return true;
   EvRvTransportListen * l;
   if ( el == NULL ) {
+    if ( this->rv_svc == NULL )
+      this->rv_svc = new ( malloc( sizeof( RvTransportService ) ) )
+        RvTransportService( *this );
     l = new ( aligned_malloc( sizeof( EvRvTransportListen ) ) )
-      EvRvTransportListen( this->poll, *this );
+      EvRvTransportListen( this->poll, *this, *this->rv_svc );
     el = new ( ::malloc( sizeof( IpcRte ) ) ) IpcRte( tport, l );
     this->ext->list.push_tl( el );
   }
@@ -589,41 +595,69 @@ TransportRoute::create_rv_listener( ConfigTree::Transport &tport ) noexcept
   if ( tport.get_route_bool( R_USE_SERVICE_PREFIX, b ) )
     l->has_service_prefix = b;
   if ( tport.get_route_bool( R_NO_PERMANENT, b ) )
-    l->no_permanent = b;
+    this->rv_svc->no_permanent |= b;
   if ( tport.get_route_bool( R_NO_MCAST, b ) )
-    l->no_mcast = b;
+    this->rv_svc->no_mcast |= b;
   if ( tport.get_route_bool( R_NO_FAKEIP, b ) )
-    l->no_fakeip = b;
+    this->rv_svc->no_fakeip |= b;
   return this->start_listener( l, tport );
 }
 
 void
 TransportRoute::get_tport_service( ConfigTree::Transport &tport,
-                                   const char *&service,
-                                   size_t &service_len ) noexcept
+                                   const char *&service,  size_t &service_len,
+                                   uint16_t &rv_service ) noexcept
 {
-  const char * tmp, * net;
-  if ( tport.get_route_str( R_SERVICE, tmp ) ) {
-    size_t tmplen = ::strlen( tmp );
-    if ( tmp[ 0 ] != '_' || tmp[ tmplen - 1 ] != '.' ) {
-      char * buf = (char *) ::malloc( tmplen + 3 );
-      buf[ 0 ] = '_';
-      if ( tmp[ 0 ] == '_' ) {
-        tmp++;
-        tmplen--;
-      }
-      ::memcpy( &buf[ 1 ], tmp, tmplen );
-      if ( tmp[ tmplen - 1 ] != '.' )
-        buf[ 1 + tmplen++ ] = '.';
-      buf[ 1 + tmplen ] = '\0';
-      tmp = buf;
+  const char * tmp = NULL,
+             * net = NULL;
+  rv_service = 0;
+
+  if ( ! tport.get_route_str( R_SERVICE, tmp ) || ::strlen( tmp ) == 0 )
+    tmp = tport.type.val;
+
+  size_t tmplen = ::strlen( tmp );
+  if ( tmp[ 0 ] != '_' || tmp[ tmplen - 1 ] != '.' ) {
+    char * buf = (char *) ::malloc( tmplen + 3 );
+    buf[ 0 ] = '_';
+    if ( tmp[ 0 ] == '_' ) {
+      tmp++;
+      tmplen--;
     }
-    service     = tmp;
-    service_len = ::strlen( tmp );
+    ::memcpy( &buf[ 1 ], tmp, tmplen );
+    if ( tmp[ tmplen - 1 ] != '.' )
+      buf[ 1 + tmplen++ ] = '.';
+    buf[ 1 + tmplen ] = '\0';
+
+    StringTab & stab = this->user_db.string_tab;
+    StringVal   svc_tmp;
+    stab.ref_string( buf, 1 + tmplen, svc_tmp );
+    ::free( buf );
+    tmp = svc_tmp.val;
   }
-  if ( service_len > 0 )
+  service     = tmp;
+  service_len = ::strlen( tmp );
+
+  if ( service_len > 0 ) {
+    uint64_t svc = 0;
+    size_t   i;
+    for ( i = 1; i < service_len - 1; i++ ) {
+      if ( service[ i ] < '0' || service[ i ] > '9' )
+        break;
+      svc = svc * 10 + ( service[ i ] - '0' );
+      if ( svc > (size_t) 0xffffU )
+        break;
+    }
+    if ( svc > 0 && svc <= (size_t) 0xffffU )
+      rv_service = (uint16_t) svc;
     this->printf( "%s.%s service: %.*s\n", tport.type.val, tport.tport.val,
                   (int) service_len - 2, &service[ 1 ] );
+    if ( rv_service != 0 ) {
+      if ( this->rv_svc == NULL )
+        this->rv_svc = new ( malloc( sizeof( RvTransportService ) ) )
+          RvTransportService( *this );
+    }
+  }
+
   if ( tport.get_route_str( R_NETWORK, net ) ) {
     this->mgr.add_network( net, ::strlen( net ), &service[ 1 ],
                            service_len - 2 );
@@ -636,6 +670,13 @@ TransportRoute::create_nats_listener( ConfigTree::Transport &tport ) noexcept
   IpcRte *el = this->ext->find( tport );
   if ( el != NULL && el->listener->in_list( IN_ACTIVE_LIST ) )
     return true;
+
+  const char * service     = NULL;
+  size_t       service_len = 0;
+  uint16_t     rv_service  = 0;
+
+  this->get_tport_service( tport, service, service_len, rv_service );
+
   EvNatsTransportListen * l;
   if ( el == NULL ) {
     l = new ( aligned_malloc( sizeof( EvNatsTransportListen ) ) )
@@ -646,7 +687,9 @@ TransportRoute::create_nats_listener( ConfigTree::Transport &tport ) noexcept
   else {
     l = (EvNatsTransportListen *) el->listener;
   }
-  this->get_tport_service( tport, l->service, l->service_len );
+  l->service     = service;
+  l->service_len = service_len;
+  l->rv_service  = rv_service;
   return this->start_listener( l, tport );
 }
 
@@ -656,6 +699,13 @@ TransportRoute::create_redis_listener( ConfigTree::Transport &tport ) noexcept
   IpcRte *el = this->ext->find( tport );
   if ( el != NULL && el->listener->in_list( IN_ACTIVE_LIST ) )
     return true;
+
+  const char * service     = NULL;
+  size_t       service_len = 0;
+  uint16_t     rv_service  = 0;
+
+  this->get_tport_service( tport, service, service_len, rv_service );
+
   EvRedisTransportListen * l;
   if ( el == NULL ) {
     l = new ( aligned_malloc( sizeof( EvRedisTransportListen ) ) )
@@ -666,7 +716,9 @@ TransportRoute::create_redis_listener( ConfigTree::Transport &tport ) noexcept
   else {
     l = (EvRedisTransportListen *) el->listener;
   }
-  this->get_tport_service( tport, l->service, l->service_len );
+  l->service     = service;
+  l->service_len = service_len;
+  l->rv_service  = rv_service;
   return this->start_listener( l, tport );
 }
 
@@ -818,14 +870,16 @@ IpcRteList::IpcRteList( TransportRoute &r ) noexcept
 {
   r.sub_route.add_route_notify( *this );
 }
-
+/* src_type : 'M' = console, 'V' = RV, ''N' = NATS, 'R' = redis, 'K' = kv */
 void
 IpcRteList::on_sub( NotifySub &sub ) noexcept
 {
   if ( sub.src_type != 'M' ) {
     this->rte.mgr.sub_db.ipc_sub_start( sub, this->rte.tport_id );
+    this->send_listen( sub.src, sub.src_type, sub.subject, sub.subject_len,
+                       (const char *) sub.reply, sub.reply_len, 1, true );
     d_tran( "on_sub(%.*s) rcnt=%u src_type=%c\n", (int) sub.subject_len,
-           sub.subject, sub.sub_count, sub.src_type );
+            sub.subject, sub.sub_count, sub.src_type );
   }
 }
 
@@ -833,12 +887,22 @@ void
 IpcRteList::on_unsub( NotifySub &sub ) noexcept
 {
   if ( sub.src_type != 'M' ) {
+    this->send_listen( sub.src, sub.src_type, sub.subject, sub.subject_len,
+                       NULL, 0, 0, false );
     if ( sub.sub_count == 0 ) {
       this->rte.mgr.sub_db.ipc_sub_stop( sub, this->rte.tport_id );
     }
     d_tran( "on_unsub(%.*s) rcnt=%u src_type=%c\n", (int) sub.subject_len,
-          sub.subject, sub.sub_count, sub.src_type );
+            sub.subject, sub.sub_count, sub.src_type );
   }
+}
+
+void
+IpcRteList::on_resub( NotifySub &sub ) noexcept
+{
+  if ( sub.src_type != 'M' )
+    this->send_listen( sub.src, sub.src_type, sub.subject, sub.subject_len,
+                 (const char *) sub.reply, sub.reply_len, sub.sub_count, true );
 }
 
 void
@@ -846,6 +910,9 @@ IpcRteList::on_psub( NotifyPattern &pat ) noexcept
 {
   if ( pat.src_type != 'M' ) {
     this->rte.mgr.sub_db.ipc_psub_start( pat, this->rte.tport_id );
+    if ( pat.src_type != 'R' )
+      this->send_listen( pat.src, pat.src_type, pat.pattern, pat.pattern_len,
+                         NULL, 0, 1, true );
     d_tran( "on_psub(%.*s) rcnt=%u src_type=%c\n", (int) pat.pattern_len,
           pat.pattern, pat.sub_count, pat.src_type );
   }
@@ -855,10 +922,73 @@ void
 IpcRteList::on_punsub( NotifyPattern &pat ) noexcept
 {
   if ( pat.src_type != 'M' ) {
+    if ( pat.src_type != 'R' )
+      this->send_listen( pat.src, pat.src_type, pat.pattern, pat.pattern_len,
+                         NULL, 0, 0, false );
     if ( pat.sub_count == 0 )
       this->rte.mgr.sub_db.ipc_psub_stop( pat, this->rte.tport_id );
     d_tran( "on_punsub(%.*s) rcnt=%u src_type=%c\n", (int) pat.pattern_len,
           pat.pattern, pat.sub_count, pat.src_type );
+  }
+}
+
+void
+IpcRteList::on_repsub( NotifyPattern &pat ) noexcept
+{
+  if ( pat.src_type != 'M' ) {
+    if ( pat.src_type != 'R' )
+      this->send_listen( pat.src, pat.src_type, pat.pattern, pat.pattern_len,
+                         NULL, 0, pat.sub_count, true );
+  }
+}
+
+void
+IpcRteList::send_listen( void *src,  char src_type,
+                         const char *subj,  size_t sublen,
+                         const char *reply,  size_t replen,
+                         uint32_t refcnt,  bool is_start ) noexcept
+{
+  RvHost     * host        = NULL;
+  const char * session     = NULL;
+  size_t       session_len = 0;
+
+  if ( src_type == 'N' ) {
+    EvNatsService * nats_service = (EvNatsService *) src;
+    if ( nats_service != NULL )
+      host = ((EvNatsTransportListen &) nats_service->listen).rv_host;
+    if ( host != NULL ) {
+      session     = nats_service->session;
+      session_len = nats_service->session_len;
+    }
+  }
+  else if ( src_type == 'R' ) {
+    RedisExec      * redis_exec    = (RedisExec *) src;
+    EvRedisService * redis_service = NULL;
+    if ( redis_exec != NULL ) {
+      redis_service = static_cast<EvRedisService *>( redis_exec );
+      host = ((EvRedisTransportListen &) redis_service->listen).rv_host;
+    }
+    if ( host != NULL ) {
+      session     = redis_service->session;
+      session_len = redis_service->session_len;
+    }
+  }
+
+  if ( host != NULL && session_len != 0 &&
+       sublen > (size_t) host->service_len + 2 ) {
+    subj   = &subj[ host->service_len + 2 ];
+    sublen = sublen - ( host->service_len + 2 );
+    if ( is_start ) {
+      if ( replen > (size_t) host->service_len + 2 ) {
+        reply   = &reply[ host->service_len + 2 ];
+        replen -= host->service_len + 2;
+      }
+      host->send_listen_start( session, session_len, subj, sublen,
+                               reply, replen, refcnt );
+    }
+    else {
+      host->send_listen_stop( session, session_len, subj, sublen, refcnt );
+    }
   }
 }
 

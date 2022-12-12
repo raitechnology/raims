@@ -14,7 +14,7 @@ using namespace kv;
 EvRedisTransportListen::EvRedisTransportListen( kv::EvPoll &p,
                                                 TransportRoute &r ) noexcept
     : EvRedisListen( p, r.sub_route ), rte( r ),
-      service( "_redis." ), service_len( 7 )
+      service( "_redis." ), service_len( 7 ), rv_host( 0 ), rv_service( 0 )
 {
   this->notify = &r;
 }
@@ -30,6 +30,7 @@ EvRedisTransportListen::accept( void ) noexcept
       ::memcpy( svc->prefix, this->service, this->service_len );
       svc->prefix_len = this->service_len;
     }
+    svc->notify = this->notify;
   }
   return c;
 }

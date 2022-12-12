@@ -6,10 +6,16 @@
 #include <raims/transport.h>
 #include <raims/session.h>
 #include <raims/ev_tcp_transport.h>
+#include <raims/ev_nats_transport.h>
+#include <raims/ev_redis_transport.h>
+#include <raims/ev_rv_transport.h>
 
 using namespace rai;
 using namespace ms;
 using namespace kv;
+using namespace ds;
+using namespace natsmd;
+using namespace sassrv;
 
 bool
 TransportRoute::is_self_connect( kv::EvSocket &conn ) noexcept
@@ -42,55 +48,118 @@ TransportRoute::on_connect( kv::EvSocket &conn ) noexcept
   uint32_t connect_type  = 0;
   bool     is_encrypt    = false,
            first_connect = true;
-  this->clear( TPORT_IS_SHUTDOWN );
-  if ( ! this->is_mcast() ) {
-    EvTcpTransport &tcp = (EvTcpTransport &) conn;
-    is_encrypt = tcp.encrypt;
 
-    if ( this->connect_ctx != NULL ) { /* connected sock */
-      if ( (EvConnection *) &tcp == this->connect_ctx->client &&
-           this->connect_ctx->connect_tries > 1 )
-        first_connect = false;
-    }
-    else if ( this->is_self_connect( conn ) ) /* accepted sock */
-      return;
+  if ( this->is_set( TPORT_IS_IPC ) ) {
+    if ( ! this->connected.test_set( conn.fd ) ) {
+      EvNatsService  * nats_service  = NULL;
+      EvRedisService * redis_service = NULL;
+      RvHost ** rv_host    = NULL;
+      uint16_t  rv_service = 0;
 
-    if ( first_connect ) {
-      this->printf( "connect %s %s %s using %s fd %u\n",
-                    tcp.encrypt ? "encrypted" : "plaintext",
-                    conn.peer_address.buf, conn.type_string(),
-                    this->sub_route.service_name, conn.fd );
-    }
-    if ( this->is_mesh() ) {
-      if ( ! tcp.is_connect ) {
-        this->mgr.add_mesh_accept( *this, tcp );
-        return;
+      this->connect_count++;
+      if ( ::strcmp( conn.kind, "nats" ) == 0 ) {
+        nats_service = (EvNatsService *) &conn;
+        EvNatsTransportListen & listen =
+          (EvNatsTransportListen &) nats_service->listen;
+        rv_service = listen.rv_service;
+        rv_host    = &listen.rv_host;
       }
-      connect_type = TPORT_IS_CONNECT | TPORT_IS_MESH;
-    }
-    else {
-      if ( ! tcp.is_connect ) {
-        if ( ! this->is_edge() ) {
-          this->mgr.add_tcp_accept( *this, tcp );
-          return;
+      else if ( ::strcmp( conn.kind, "redis" ) == 0 ) {
+        redis_service = (EvRedisService *) &conn;
+        EvRedisTransportListen & listen =
+          (EvRedisTransportListen &) redis_service->listen;
+        rv_service = listen.rv_service;
+        rv_host    = &listen.rv_host;
+      }
+      if ( rv_service != 0 ) {
+        RvHost  * host;
+        RvHostNet hn( rv_service, 0, true );
+        uint32_t  delay_secs;
+        int       status = 0;
+        if ( debug_tran )
+          this->printf( "connect service %u fd %d\n", rv_service, conn.fd);
+        *rv_host = NULL;
+        status = this->rv_svc->db.start_service( host, this->poll,
+                                                 this->sub_route, hn );
+        if ( status == 0 ) {
+          if ( this->rv_svc->start_host( *host, hn, delay_secs ) == 0 ) {
+            host->active_clients++;
+            host->start_host2( 0 );
+            char session[ MAX_SESSION_LEN ], userid[ MAX_USERID_LEN ];
+            size_t session_len, userid_len = 0;
+            session_len = host->make_session( conn.active_ns, session );
+
+            if ( nats_service != NULL ) {
+              nats_service->set_session( session, session_len );
+              userid_len = nats_service->get_userid( userid );
+            }
+            else if ( redis_service != NULL ) {
+              redis_service->set_session( session, session_len );
+              userid_len = redis_service->get_userid( userid );
+            }
+            if ( userid_len != 0 ) {
+              if ( host->active_clients == 1 )
+                host->send_host_start( NULL );
+              host->send_session_start( userid, userid_len,
+                                        session, session_len );
+              *rv_host = host;
+            }
+          }
         }
-        connect_type = TPORT_IS_TCP;
-      }
-      else {
-        connect_type = TPORT_IS_CONNECT | TPORT_IS_TCP;
       }
     }
   }
   else {
-    connect_type = TPORT_IS_MCAST;
-    this->printf( "connect %s %s using %s fd %u\n",
-                  conn.peer_address.buf, conn.type_string(),
-                  this->sub_route.service_name, conn.fd );
+    this->clear( TPORT_IS_SHUTDOWN );
+    if ( ! this->is_mcast() ) {
+      EvTcpTransport &tcp = (EvTcpTransport &) conn;
+      is_encrypt = tcp.encrypt;
+
+      if ( this->connect_ctx != NULL ) { /* connected sock */
+        if ( (EvConnection *) &tcp == this->connect_ctx->client &&
+             this->connect_ctx->connect_tries > 1 )
+          first_connect = false;
+      }
+      else if ( this->is_self_connect( conn ) ) /* accepted sock */
+        return;
+
+      if ( first_connect ) {
+        this->printf( "connect %s %s %s using %s fd %u\n",
+                      tcp.encrypt ? "encrypted" : "plaintext",
+                      conn.peer_address.buf, conn.type_string(),
+                      this->sub_route.service_name, conn.fd );
+      }
+      if ( this->is_mesh() ) {
+        if ( ! tcp.is_connect ) {
+          this->mgr.add_mesh_accept( *this, tcp );
+          return;
+        }
+        connect_type = TPORT_IS_CONNECT | TPORT_IS_MESH;
+      }
+      else {
+        if ( ! tcp.is_connect ) {
+          if ( ! this->is_edge() ) {
+            this->mgr.add_tcp_accept( *this, tcp );
+            return;
+          }
+          connect_type = TPORT_IS_TCP;
+        }
+        else {
+          connect_type = TPORT_IS_CONNECT | TPORT_IS_TCP;
+        }
+      }
+    }
+    else {
+      connect_type = TPORT_IS_MCAST;
+      this->printf( "connect %s %s using %s fd %u\n",
+                    conn.peer_address.buf, conn.type_string(),
+                    this->sub_route.service_name, conn.fd );
+    }
+    if ( first_connect )
+      this->mgr.events.on_connect( this->tport_id, connect_type, is_encrypt );
+    if ( ! this->connected.test_set( conn.fd ) )
+      this->connect_count++;
   }
-  if ( first_connect )
-    this->mgr.events.on_connect( this->tport_id, connect_type, is_encrypt );
-  if ( ! this->connected.test_set( conn.fd ) )
-    this->connect_count++;
 }
 
 void
@@ -99,45 +168,91 @@ TransportRoute::on_shutdown( EvSocket &conn,  const char *err,
 {
   const char *s = "disconnected";
   char errbuf[ 256 ];
-  if ( &conn == (EvSocket *) this->listener )
-    s = "listener stopped";
-  else if ( errlen >= 15 && ::memcmp( err, "already connect", 15 ) == 0 )
-    s = "stopped trying";
-  if ( errlen == 0 ) {
-    errlen = conn.print_sock_error( errbuf, sizeof( errbuf ) );
-    if ( errlen > 0 )
-      err = errbuf;
-  }
-  if ( conn.bytes_recv > 0  ) {
-    if ( errlen > 0 )
-      this->printf( "%s %s (%.*s)\n", s, conn.peer_address.buf,
-                    (int) errlen, err );
-    else
-      this->printf( "%s %s (count=%u)\n", s, conn.peer_address.buf,
-                    this->connect_count );
-    this->mgr.events.on_shutdown( this->tport_id, conn.fd >= 0 );
-  }
-  if ( conn.fd >= 0 ) {
-    this->user_db.retire_source( *this, conn.fd );
+
+  if ( this->is_set( TPORT_IS_IPC ) ) {
     if ( this->connected.test_clear( conn.fd ) ) {
-      if ( --this->connect_count == 0 ) {
-        this->last_connect_count = 0;
-        if ( ! this->is_set( TPORT_IS_LISTEN ) ) {
-          this->set( TPORT_IS_SHUTDOWN );
-          if ( this->notify_ctx != NULL ) {
-            if ( this->notify_ctx->state == ConnectCtx::CONN_SHUTDOWN )
-              this->notify_ctx->reconnect();
-            this->notify_ctx = NULL;
+      this->connect_count--;
+      EvNatsService  * nats_service  = NULL;
+      EvRedisService * redis_service = NULL;
+      RvHost * rv_host    = NULL;
+      uint16_t rv_service = 0;
+      if ( ::strcmp( conn.kind, "nats" ) == 0 ) {
+        nats_service = (EvNatsService *) &conn;
+        EvNatsTransportListen & listen =
+          (EvNatsTransportListen &) nats_service->listen;
+        rv_service = listen.rv_service;
+        rv_host    = listen.rv_host;
+      }
+      else if ( ::strcmp( conn.kind, "redis" ) == 0 ) {
+        redis_service = (EvRedisService *) &conn;
+        EvRedisTransportListen & listen =
+          (EvRedisTransportListen &) redis_service->listen;
+        rv_service = listen.rv_service;
+        rv_host    = listen.rv_host;
+      }
+      if ( rv_host != NULL ) {
+        char session[ MAX_SESSION_LEN ], userid[ MAX_USERID_LEN ];
+        size_t session_len = 0, userid_len = 0;
+
+        if ( debug_tran )
+          this->printf( "shut service %u fd %d\n", rv_service, conn.fd );
+        if ( nats_service != NULL ) {
+          userid_len = nats_service->get_userid( userid );
+          session_len = nats_service->get_session( NULL, 0, session );
+        }
+        else if ( redis_service != NULL ) {
+          userid_len = redis_service->get_userid( userid );
+          session_len = redis_service->get_session( NULL, 0, session );
+        }
+        if ( userid_len != 0 && session_len != 0 )
+          rv_host->send_session_stop( userid, userid_len,
+                                      session, session_len );
+        if ( rv_host->stop_network() )
+          this->rv_svc->stop_host( *rv_host );
+      }
+    }
+  }
+  else {
+    if ( &conn == (EvSocket *) this->listener )
+      s = "listener stopped";
+    else if ( errlen >= 15 && ::memcmp( err, "already connect", 15 ) == 0 )
+      s = "stopped trying";
+    if ( errlen == 0 ) {
+      errlen = conn.print_sock_error( errbuf, sizeof( errbuf ) );
+      if ( errlen > 0 )
+        err = errbuf;
+    }
+    if ( conn.bytes_recv > 0  ) {
+      if ( errlen > 0 )
+        this->printf( "%s %s (%.*s)\n", s, conn.peer_address.buf,
+                      (int) errlen, err );
+      else
+        this->printf( "%s %s (count=%u)\n", s, conn.peer_address.buf,
+                      this->connect_count );
+      this->mgr.events.on_shutdown( this->tport_id, conn.fd >= 0 );
+    }
+    if ( conn.fd >= 0 ) {
+      this->user_db.retire_source( *this, conn.fd );
+      if ( this->connected.test_clear( conn.fd ) ) {
+        if ( --this->connect_count == 0 ) {
+          this->last_connect_count = 0;
+          if ( ! this->is_set( TPORT_IS_LISTEN ) ) {
+            this->set( TPORT_IS_SHUTDOWN );
+            if ( this->notify_ctx != NULL ) {
+              if ( this->notify_ctx->state == ConnectCtx::CONN_SHUTDOWN )
+                this->notify_ctx->reconnect();
+              this->notify_ctx = NULL;
+            }
           }
         }
       }
+      else if ( &conn == (EvSocket *) this->listener )
+        this->set( TPORT_IS_SHUTDOWN );
     }
-    else if ( &conn == (EvSocket *) this->listener )
+    else if ( this->connect_count == 0 ) {
       this->set( TPORT_IS_SHUTDOWN );
-  }
-  else if ( this->connect_count == 0 ) {
-    this->set( TPORT_IS_SHUTDOWN );
-    this->last_connect_count = 0;
+      this->last_connect_count = 0;
+    }
   }
   d_tran( "%s connect_count %u\n", this->name, this->connect_count );
 }

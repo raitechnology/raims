@@ -30,7 +30,6 @@ struct RvMcast2 : public sassrv::RvMcast {
   int parse_network2( const char *net,  size_t net_len ) noexcept;
   static NetTransport net_to_transport( const char *net,
                                         size_t &net_len ) noexcept;
-  int device_ip( char *buf,  size_t len ) const noexcept;
 };
 
 struct RvHostRoute {
@@ -76,29 +75,44 @@ struct RvHostTab {
   }
 };
 
-struct EvRvTransportListen : public sassrv::EvRvListen {
+struct RvTransportService : public kv::EvTimerCallback {
   TransportRoute & rte;
+  sassrv::RvHostDB db;
   RvHostTab        tab;
   uint64_t         last_active_mono;
   uint32_t         active_cnt,
-                   fake_ip;
+                   start_cnt;
   bool             no_mcast,
                    no_permanent,
                    no_fakeip;
-  EvRvTransportListen( kv::EvPoll &p,  TransportRoute &r ) noexcept;
 
+  void * operator new( size_t, void *ptr ) { return ptr; }
+  RvTransportService( TransportRoute &r ) noexcept;
+
+  void start( void ) noexcept;
   ConfigTree::Transport *get_rv_transport( sassrv::RvHost &host,
                                            bool create ) noexcept;
-  uint32_t get_fake_ip( void ) noexcept;
   void make_rv_transport( ConfigTree::Transport *&t,  sassrv::RvHost &host,
                           bool &is_listener ) noexcept;
+
+  int start_host( sassrv::RvHost &host, const sassrv::RvHostNet &hn,
+                  uint32_t &delay_secs ) noexcept;
+  void stop_host( sassrv::RvHost &host ) noexcept;
+  /* EvTimerCallback */
+  virtual bool timer_cb( uint64_t, uint64_t ) noexcept;
+};
+
+struct EvRvTransportListen : public sassrv::EvRvListen {
+  TransportRoute     & rte;
+  RvTransportService & svc;
+  EvRvTransportListen( kv::EvPoll &p,  TransportRoute &r,
+                       RvTransportService &s ) noexcept;
   /* sassrv rv listen */
   virtual EvSocket *accept( void ) noexcept;
   virtual int listen( const char *ip,  int port,  int opts ) noexcept;
-  virtual int start_host( sassrv::RvHost &host, const char *net, size_t net_len,
-                           const char *svc,  size_t svc_len ) noexcept;
+  virtual int start_host( sassrv::RvHost &host,
+                          const sassrv::RvHostNet &hn ) noexcept;
   virtual int stop_host( sassrv::RvHost &host ) noexcept;
-  virtual bool timer_expire( uint64_t tid,  uint64_t kind ) noexcept;
 };
 
 }

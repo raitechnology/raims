@@ -133,7 +133,7 @@ UserDB::hello_hb( void ) noexcept
   this->events.send_hello();
   for ( size_t i = 0; i < count; i++ ) {
     TransportRoute *rte = this->transport_tab.ptr[ i ];
-    if ( rte->connect_count > 0 ) {
+    if ( rte->connect_count > 0 && ! rte->is_set( TPORT_IS_IPC ) ) {
       MsgCat m;
       this->push_hb_time( *rte, this->start_time, this->start_mono_time );
       this->make_hb( *rte, X_HELLO, X_HELLO_SZ, hello_h, m );
@@ -159,7 +159,7 @@ UserDB::bye_hb( void ) noexcept
   size_t   count    = this->transport_tab.count;
   for ( size_t i = 0; i < count; i++ ) {
     TransportRoute *rte = this->transport_tab.ptr[ i ];
-    if ( rte->connect_count > 0 ) {
+    if ( rte->connect_count > 0 && ! rte->is_set( TPORT_IS_IPC ) ) {
       this->push_hb_time( *rte, cur_time, cur_mono );
       this->make_hb( *rte, X_BYE, X_BYE_SZ, bye_h, m );
       d_hb( "bye\n" );
@@ -178,7 +178,7 @@ UserDB::interval_hb( uint64_t cur_mono,  uint64_t cur_time ) noexcept
   size_t   count = this->transport_tab.count;
   for ( size_t i = 0; i < count; i++ ) {
     TransportRoute *rte = this->transport_tab.ptr[ i ];
-    if ( rte->connect_count > 0 ) {
+    if ( rte->connect_count > 0 && ! rte->is_set( TPORT_IS_IPC ) ) {
       bool do_hb = false;
       if ( rte->hb_mono_time + ival < cur_mono + ival / 64 )
         do_hb = true;
@@ -379,20 +379,8 @@ UserDB::on_heartbeat( const MsgFramePublish &pub,  UserBridge &n,
         Nonce csum;
         csum.copy_from( dec.mref[ FID_UID_CSUM ].fptr );
         n.uid_csum = csum;
-        if ( this->uid_csum != csum ) {
-          n.printf( "uid_csum not equal %s=[%s] hb[%s]\n",
-                   n.peer.user.val, this->uid_csum.to_base64_str( buf ),
-                   csum.to_base64_str( buf2 ) );
-          /*uint32_t uid;
-          BitSpace &uids = this->uid_authenticated;
-          for ( bool ok = uids.first( uid ); ok; ok = uids.next( uid ) ) {
-            UserBridge * n = this->bridge_tab.ptr[ uid ];
-            printf( "%s %lu ", n->peer.user.val, n->link_state_seqno );
-          }
-          printf( "\n" );*/
+        if ( ! this->check_uid_csum( n, csum ) ) {
           this->send_adjacency_request( n, HB_SYNC_REQ );
-          /*if ( debug_hb )
-            this->debug_uids( this->uid_authenticated, csum );*/
         }
       }
       if ( dec.test( FID_MESH_CSUM ) && pub.rte.is_mesh() ) {

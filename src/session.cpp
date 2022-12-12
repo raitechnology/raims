@@ -776,7 +776,8 @@ IpcRoute::on_msg( EvPublish &pub ) noexcept
         if ( &fpub.rte != rte && rte->is_set( TPORT_IS_IPC ) ) {
           EvPublish pub( fpub.subject, fpub.subject_len, reply, replylen,
                          data, datalen, rte->sub_route, this->fd,
-                         fpub.subj_hash, fmt, 'p', seq.msg_loss );
+                         fpub.subj_hash, fmt, 'p', seq.msg_loss,
+                         n.bridge_nonce_int );
           b &= rte->sub_route.forward_except( pub, this->mgr.router_set );
         }
       }
@@ -788,7 +789,8 @@ IpcRoute::on_msg( EvPublish &pub ) noexcept
       if ( &fpub.rte != rte && rte->is_set( TPORT_IS_IPC ) ) {
         EvPublish pub( fpub.subject, fpub.subject_len, reply, replylen,
                        data, datalen, rte->sub_route, this->fd,
-                       fpub.subj_hash, fmt, 'p', seq.msg_loss );
+                       fpub.subj_hash, fmt, 'p', seq.msg_loss,
+                       n.bridge_nonce_int );
         b &= rte->sub_route.forward_except( pub, this->mgr.router_set );
       }
     }
@@ -897,7 +899,7 @@ ConsoleRoute::fwd_console( EvPublish &pub,  bool is_caba ) noexcept
 /* decapsulate a message published to my inbox subscribed by an ipc route,
  * usually an _INBOX subject */
 bool
-IpcRoute::on_inbox( const MsgFramePublish &fpub,  UserBridge &,
+IpcRoute::on_inbox( const MsgFramePublish &fpub,  UserBridge &n,
                     MsgHdrDecoder &dec ) noexcept
 {
   if ( ! dec.test( FID_SUBJECT ) ) {
@@ -929,7 +931,8 @@ IpcRoute::on_inbox( const MsgFramePublish &fpub,  UserBridge &,
     TransportRoute *rte = this->user_db.transport_tab.ptr[ i ];
     if ( &fpub.rte != rte && rte->is_set( TPORT_IS_IPC ) ) {
       EvPublish pub( subject, subjlen, reply, replylen,
-                     data, datalen, rte->sub_route, this->fd, h, fmt, 'p' );
+                     data, datalen, rte->sub_route, this->fd, h, fmt, 'p',
+                     0, n.bridge_nonce_int );
       b &= rte->sub_route.forward_except( pub, this->mgr.router_set );
     }
   }
@@ -1402,24 +1405,6 @@ SessionMgr::publish( PubMcastData &mc ) noexcept
     b &= rte->sub_route.forward_except( pub, this->router_set );
   }
   return b;
-#if 0
-  size_t count = this->user_db.transport_tab.count;
-  for ( size_t i = 0; i < count; i++ ) {
-    TransportRoute *rte = this->user_db.transport_tab.ptr[ i ];
-    if ( rte->connect_count > 0 ) {
-      EvPublish pub( mc.sub, mc.sublen, NULL, 0, m.msg, m.len(),
-                     rte->sub_route, this->fd, h, CABA_TYPE_ID, 'p' );
-      b &= rte->sub_route.forward_except( pub, this->router_set );
-    }
-    else if ( rte->is_set( TPORT_IS_IPC ) ) {
-      EvPublish pub( mc.sub, mc.sublen, NULL, 0, mc.data, mc.datalen,
-                     rte->sub_route, this->fd, h, 
-                     ( mc.fmt ? mc.fmt : (uint32_t) MD_STRING ), 'p' );
-      b &= rte->sub_route.forward_except( pub, this->router_set );
-    }
-  }
-  return b;
-#endif
 }
 /* find a peer target for an _INBOX endpoint, and send it direct to the peer */
 bool
@@ -1591,29 +1576,6 @@ SessionMgr::forward_ipc( TransportRoute &src_rte,  EvPublish &pub ) noexcept
     }
   }
   return b;
-#if 0
-  bool b = true;
-  size_t count = this->user_db.transport_tab.count;
-  for ( size_t i = 0; i < count; i++ ) {
-    TransportRoute *rte = this->user_db.transport_tab.ptr[ i ];
-    if ( &src_rte != rte ) {
-      if ( rte->connect_count > 0 ) {
-        EvPublish pub( fwd.subject, fwd.subject_len, NULL, 0, m.msg, m.len(),
-                       rte->sub_route, this->fd, fwd.subj_hash,
-                       CABA_TYPE_ID, 'p' );
-        b &= rte->sub_route.forward_except( pub, this->router_set );
-      }
-      else if ( rte->is_set( TPORT_IS_IPC ) ) {
-        EvPublish pub( fwd.subject, fwd.subject_len, NULL, 0,
-                       fwd.msg, fwd.msg_len,
-                       rte->sub_route, this->fd, fwd.subj_hash,
-                       fwd.msg_enc, 'p' );
-        b &= rte->sub_route.forward_except( pub, this->router_set );
-      }
-    }
-  }
-  return b;
-#endif
 }
 /* forward a message to any peer, chosen randomly */
 bool

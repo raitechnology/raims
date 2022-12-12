@@ -22,15 +22,20 @@ enum {
 static const int RV_TIMEOUT_SECS = 2 * 60 + 10;
 
 EvRvTransportListen::EvRvTransportListen( kv::EvPoll &p,
-                                          TransportRoute &r ) noexcept
-    : EvRvListen( p, r.sub_route ), rte( r ),
-      last_active_mono( 0 ), active_cnt( 0 ), fake_ip( 0 ), no_mcast( false ),
-      no_permanent( false ), no_fakeip( false )
+                                          TransportRoute &r,
+                                          RvTransportService &s ) noexcept
+    : EvRvListen( p, r.sub_route, s.db, true ), rte( r ), svc( s )
 {
   static kv_atom_uint64_t rv_timer_id;
   this->notify = &r;
   this->timer_id = ( (uint64_t) this->sock_type << 56 ) |
                    kv_sync_add( &rv_timer_id, (uint64_t) 1 );
+}
+
+RvTransportService::RvTransportService( TransportRoute &r ) noexcept
+    : rte( r ), last_active_mono( 0 ), active_cnt( 0 ), start_cnt( 0 ),
+      no_mcast( false ), no_permanent( false ), no_fakeip( false )
+{
 }
 
 EvSocket *
@@ -46,41 +51,59 @@ int
 EvRvTransportListen::listen( const char *ip,  int port,  int opts ) noexcept
 {
   int res = this->EvRvListen::listen( ip, port, opts );
-  if ( res == 0 ) {
+  if ( res == 0 )
     this->rte.set_peer_name( *this, "rv.list" );
-    if ( this->no_permanent ) {
-      this->poll.timer.add_timer_seconds( this->fd, RV_TIMEOUT_SECS,
-                                          this->timer_id, RV_START_TIMER );
-    }
-  }
   return res;
 }
 
-bool
-EvRvTransportListen::timer_expire( uint64_t tid,  uint64_t kind ) noexcept
+int
+EvRvTransportListen::start_host( sassrv::RvHost &host,
+                                 const sassrv::RvHostNet &hn ) noexcept
 {
-  if ( tid != this->timer_id )
-    return false;
+  uint32_t delay_secs = 0;
+  int status = this->svc.start_host( host, hn, delay_secs );
+  if ( status != 0 )
+    return status;
+  return this->EvRvListen::start_host2( host, delay_secs );
+}
+
+int
+EvRvTransportListen::stop_host( RvHost &host ) noexcept
+{
+  this->svc.stop_host( host );
+  return this->EvRvListen::stop_host( host );
+}
+
+void
+RvTransportService::start( void ) noexcept
+{
+  if ( this->no_permanent ) {
+    this->rte.poll.timer.add_timer_seconds( *this, RV_TIMEOUT_SECS,
+                                            0, RV_START_TIMER );
+  }
+}
+
+bool
+RvTransportService::timer_cb( uint64_t,  uint64_t kind ) noexcept
+{
   if ( kind == RV_START_TIMER ) {
-    if ( this->accept_cnt == 0 ) {
+    if ( this->start_cnt == 0 ) {
       this->rte.printf( "no client connected, shutting down\n" );
-      this->poll.timer.add_timer_seconds( this->fd, 1,
-                                          this->timer_id, RV_QUIT_TIMER );
+      this->rte.poll.timer.add_timer_seconds( *this, 1, 0, RV_QUIT_TIMER );
     }
   }
   else if ( kind == RV_STOP_TIMER ) {
     if ( this->active_cnt == 0 ) {
-      uint64_t cur_mono = this->poll.timer.current_monotonic_time_ns();
+      uint64_t cur_mono = this->rte.poll.timer.current_monotonic_time_ns();
       if ( this->last_active_mono +
            sec_to_ns( RV_TIMEOUT_SECS - 1 ) <= cur_mono ) {
         this->rte.printf( "no active clients, shutting down\n" );
-        this->poll.timer.add_timer_seconds( this->fd, 1,
-                                            this->timer_id, RV_QUIT_TIMER );
+        this->rte.poll.timer.add_timer_seconds( *this, 1, 0, RV_QUIT_TIMER );
       }
     }
   }
   else if ( kind == RV_QUIT_TIMER ) {
-    this->poll.quit = 1;
+    this->rte.poll.quit = 1;
   }
   return false;
 }
@@ -98,7 +121,7 @@ make_rv_name( RvHost &host,  char *name,  const char *suf ) noexcept
 }
 
 ConfigTree::Transport *
-EvRvTransportListen::get_rv_transport( RvHost &host,  bool create ) noexcept
+RvTransportService::get_rv_transport( RvHost &host,  bool create ) noexcept
 {
   ConfigTree::Transport * t;
   ConfigTree & tree = this->rte.mgr.tree;
@@ -168,8 +191,11 @@ match_route_str( ConfigTree::Transport &t,  const char *name,
 static bool
 net_equals( RvHost &host,  ConfigTree::Transport &t ) noexcept
 {
-  size_t net_len = host.network_len;
+  size_t net_len = host.network_len,
+         host_ip_len;
+  char   host_ip[ 64 ];
 
+  host_ip_len = host.mcast.ip4_string( host.mcast.host_ip, host_ip );
   switch ( RvMcast2::net_to_transport( host.network, net_len ) ) {
     default:
     case NET_NONE:
@@ -177,19 +203,19 @@ net_equals( RvHost &host,  ConfigTree::Transport &t ) noexcept
 
     case NET_ANY:
       return t.type.equals( T_ANY, T_ANY_SZ ) &&
-             match_route_str( t, R_DEVICE, host.host_ip, host.host_ip_len );
+             match_route_str( t, R_DEVICE, host_ip, host_ip_len );
 
     case NET_MESH_CONNECT:
     case NET_MESH:
     case NET_MESH_LISTEN:
       return t.type.equals( T_MESH, T_MESH_SZ ) &&
-             match_route_str( t, R_DEVICE, host.host_ip, host.host_ip_len );
+             match_route_str( t, R_DEVICE, host_ip, host_ip_len );
 
     case NET_TCP_CONNECT:
     case NET_TCP:
     case NET_TCP_LISTEN:
       return t.type.equals( T_TCP, T_TCP_SZ ) &&
-             match_route_str( t, R_DEVICE, host.host_ip, host.host_ip_len );
+             match_route_str( t, R_DEVICE, host_ip, host_ip_len );
 
     case NET_MCAST:
       return t.type.equals( T_PGM, T_PGM_SZ ) &&
@@ -198,23 +224,18 @@ net_equals( RvHost &host,  ConfigTree::Transport &t ) noexcept
   }
 }
 
-int
-RvMcast2::device_ip( char *buf,  size_t len ) const noexcept
-{
-  const uint8_t * p = (const uint8_t *) (const void *) &this->host_ip;
-  int x = ::snprintf( buf, len, "%u.%u.%u.%u", p[ 0 ], p[ 1 ], p[ 2 ], p[ 3 ] );
-  return min_int( x, (int) len - 1 );
-}
-
 void
-EvRvTransportListen::make_rv_transport( ConfigTree::Transport *&t, RvHost &host,
-                                        bool &is_listener ) noexcept
+RvTransportService::make_rv_transport( ConfigTree::Transport *&t,
+                                      RvHost &host, bool &is_listener ) noexcept
 {
   ConfigTree & tree = this->rte.mgr.tree;
   StringTab  & stab = this->rte.user_db.string_tab;
-  size_t       net_len = host.network_len;
+  size_t       net_len = host.network_len,
+               host_ip_len;
+  char         host_ip[ 64 ];
 
   is_listener = true;
+  host_ip_len = host.mcast.ip4_string( host.mcast.host_ip, host_ip );
   NetTransport type = RvMcast2::net_to_transport( host.network, net_len );
   if ( type == NET_NONE )
     t = NULL;
@@ -238,8 +259,7 @@ EvRvTransportListen::make_rv_transport( ConfigTree::Transport *&t, RvHost &host,
       default: break;
       case NET_ANY:
         stab.reref_string( T_ANY, T_ANY_SZ, t->type );
-        tree.set_route_str( *t, stab, R_DEVICE,
-                            host.host_ip, host.host_ip_len );
+        tree.set_route_str( *t, stab, R_DEVICE, host_ip, host_ip_len );
         break;
 
       case NET_MESH_CONNECT:
@@ -247,8 +267,7 @@ EvRvTransportListen::make_rv_transport( ConfigTree::Transport *&t, RvHost &host,
       case NET_MESH:
       case NET_MESH_LISTEN:
         stab.reref_string( T_MESH, T_MESH_SZ, t->type );
-        tree.set_route_str( *t, stab, R_DEVICE,
-                            host.host_ip, host.host_ip_len );
+        tree.set_route_str( *t, stab, R_DEVICE, host_ip, host_ip_len );
         break;
 
       case NET_TCP_CONNECT:
@@ -256,8 +275,7 @@ EvRvTransportListen::make_rv_transport( ConfigTree::Transport *&t, RvHost &host,
       case NET_TCP:
       case NET_TCP_LISTEN:
         stab.reref_string( T_TCP, T_TCP_SZ, t->type );
-        tree.set_route_str( *t, stab, R_DEVICE,
-                            host.host_ip, host.host_ip_len );
+        tree.set_route_str( *t, stab, R_DEVICE, host_ip, host_ip_len );
         break;
 
       case NET_MCAST:
@@ -274,44 +292,26 @@ EvRvTransportListen::make_rv_transport( ConfigTree::Transport *&t, RvHost &host,
   }
 }
 
-uint32_t
-EvRvTransportListen::get_fake_ip( void ) noexcept
-{
-  if ( this->fake_ip == 0 ) {
-    UserDB & user_db = this->rte.mgr.user_db;
-    this->fake_ip = (uint32_t) ( user_db.start_time / 1000 );
-    for ( uint32_t uid = 1; uid < user_db.next_uid; uid++ ) {
-      if ( user_db.bridge_tab[ uid ] != NULL ) {
-        uint64_t t = user_db.bridge_tab[ uid ]->start_time;
-        if ( (uint32_t) ( t / 1000 ) == this->fake_ip ) {
-          rand::fill_urandom_bytes( &this->fake_ip, 4 );
-          break;
-        }
-      }
-    }
-  }
-  return this->fake_ip;
-}
-
 int
-EvRvTransportListen::start_host( RvHost &host,  const char *net, size_t net_len,
-                                 const char *svc,  size_t svc_len ) noexcept
+RvTransportService::start_host( RvHost &host,  const RvHostNet &hn,
+                                uint32_t &delay_secs ) noexcept
 {
   bool not_running = ! host.start_in_progress && ! host.network_started;
+  this->start_cnt++;
   if ( host.network_started ) {
     if ( host.mcast.host_ip == 0 ||
-         ! host.is_same_network( net, net_len, svc, svc_len ) )
+         ! host.is_same_network( hn ) )
       return ERR_SAME_SVC_TWO_NETS;
     return HOST_OK;
   }
   if ( ! host.start_in_progress ) {
     if ( host.mcast.host_ip == 0 ||
-         ! host.is_same_network( net, net_len, svc, svc_len ) ) {
+         ! host.is_same_network( hn ) ) {
       RvMcast2 mc;
-      int status = mc.parse_network2( net, net_len );
+      int status = mc.parse_network2( hn.network, hn.network_len );
       if ( status == HOST_OK ) {
         if ( mc.fake_ip == 0 && ! this->no_fakeip )
-          mc.fake_ip = this->get_fake_ip();
+          mc.fake_ip = this->rte.mgr.user_db.bridge_nonce_int;
         host.host_id_len = (uint16_t)
           min_int( (size_t) this->rte.mgr.user_db.user.user.len,
                    MAX_RV_HOST_ID_LEN - 1 );
@@ -344,7 +344,7 @@ EvRvTransportListen::start_host( RvHost &host,  const char *net, size_t net_len,
             break;
           }
         }
-        status = host.start_network( mc, net, net_len, svc, svc_len );
+        status = host.start_network( mc, hn );
       }
       if ( status != HOST_OK )
         return status;
@@ -355,7 +355,6 @@ EvRvTransportListen::start_host( RvHost &host,  const char *net, size_t net_len,
   RvHostRoute           * hr   = this->tab.find( &host );
   TransportRoute        * rte  = NULL;
   ConfigTree::Transport * t    = NULL;
-  uint32_t                delay_secs = 0;
   bool                    exists = false;
 
   /* exists -> do not shutdown, do not startup
@@ -386,6 +385,7 @@ EvRvTransportListen::start_host( RvHost &host,  const char *net, size_t net_len,
     if ( t != NULL && hr == NULL )
       exists = true;
   }
+  delay_secs = 0;
   if ( host.network_len == 0 || exists )
     rte = NULL;
   else if ( rte == NULL || rte->is_set( TPORT_IS_SHUTDOWN ) ) {
@@ -419,26 +419,30 @@ EvRvTransportListen::start_host( RvHost &host,  const char *net, size_t net_len,
     hr->tport_exists = exists;
   }
   if ( not_running ) {
-    printf( "start_network:        service %.*s, \"%.*s\"\n",
-            (int) host.service_len, host.service, (int) host.network_len,
-            host.network );
-    this->last_active_mono = this->poll.timer.current_monotonic_time_ns();
+    printf( "start network: service %.*s, host %.*s (%.*s), \"%.*s\"\n",
+            (int) host.service_len, host.service,
+            (int) host.session_ip_len, host.session_ip,
+            (int) host.sess_ip_len, host.sess_ip,
+            (int) host.network_len, host.network );
+    this->last_active_mono = this->rte.poll.timer.current_monotonic_time_ns();
     if ( hr != NULL ) {
       hr->last_active_mono = this->last_active_mono;
       hr->is_active = true;
     }
     this->active_cnt++;
   }
-  return this->EvRvListen::start_host2( host, delay_secs );
+  return 0;
 }
 
-int
-EvRvTransportListen::stop_host( RvHost &host ) noexcept
+void
+RvTransportService::stop_host( RvHost &host ) noexcept
 {
-  printf( "stop_network:         service %.*s, \"%.*s\"\n",
-          (int) host.service_len, host.service, (int) host.network_len,
-          host.network );
-  uint64_t cur_mono = this->poll.timer.current_monotonic_time_ns();
+  printf( "stop network:  service %.*s, host %.*s (%.*s), \"%.*s\"\n",
+          (int) host.service_len, host.service,
+          (int) host.session_ip_len, host.session_ip,
+          (int) host.sess_ip_len, host.sess_ip,
+          (int) host.network_len, host.network );
+  uint64_t cur_mono = this->rte.poll.timer.current_monotonic_time_ns();
   RvHostRoute * hr  = this->tab.find( &host );
   if ( hr != NULL ) {
     hr->last_active_mono = cur_mono;
@@ -446,8 +450,7 @@ EvRvTransportListen::stop_host( RvHost &host ) noexcept
   }
   if ( --this->active_cnt == 0 && this->no_permanent ) {
     this->last_active_mono = cur_mono;
-    this->poll.timer.add_timer_seconds( this->fd, RV_TIMEOUT_SECS,
-                                        this->timer_id, RV_STOP_TIMER );
+    this->rte.poll.timer.add_timer_seconds( *this, RV_TIMEOUT_SECS,
+                                            0, RV_STOP_TIMER );
   }
-  return this->EvRvListen::stop_host( host );
 }

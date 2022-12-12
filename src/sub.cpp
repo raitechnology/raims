@@ -159,7 +159,7 @@ SubDB::fwd_sub( SubArgs &ctx ) noexcept
     rte = this->user_db.ipc_transport;
     if ( rte != NULL ) {
       NotifySub nsub( ctx.sub, ctx.sublen, ctx.hash, this->my_src_fd,
-                      false, 'M');
+                      false, 'M' );
       nsub.bref = &this->console;
       if ( ctx.is_start )
         rte->sub_route.do_notify_sub( nsub );

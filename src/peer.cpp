@@ -542,9 +542,9 @@ UserDB::send_peer_add( UserBridge &n,
   for ( size_t i = 0; i < count; i++ ) {
     TransportRoute * rte = this->transport_tab.ptr[ i ];
     if ( rte != except_rte ) {
-      d_peer( "send Z_ADD for %s via %s, connect %u\n",
-              n.peer.user.val, rte->transport.tport.val, rte->connect_count );
-      if ( rte->connect_count > 0 ) {
+      if ( rte->connect_count > 0 && ! rte->is_set( TPORT_IS_IPC ) ) {
+        d_peer( "send Z_ADD for %s via %s, connect %u\n",
+                n.peer.user.val, rte->transport.tport.val, rte->connect_count );
         uint32_t hops = 0;
         if ( ! rte->uid_connected.is_member( n.uid ) )
           hops = 1;
@@ -590,7 +590,7 @@ UserDB::send_peer_del( UserBridge &n ) noexcept
   size_t count = this->transport_tab.count;
   for ( size_t i = 0; i < count; i++ ) {
     TransportRoute * rte = this->transport_tab.ptr[ i ];
-    if ( rte->connect_count > 0 ) {
+    if ( rte->connect_count > 0 && ! rte->is_set( TPORT_IS_IPC ) ) {
       if ( debug_peer )
         printf( "send Z_DEL(%" PRIu64 ") for %s via %s, connect=%u\n",
                 this->send_peer_seqno, n.peer.user.val,
