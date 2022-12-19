@@ -100,6 +100,8 @@ struct RvTransportService : public kv::EvTimerCallback {
   void stop_host( sassrv::RvHost &host ) noexcept;
   /* EvTimerCallback */
   virtual bool timer_cb( uint64_t, uint64_t ) noexcept;
+  void outbound_data_loss( uint16_t svc,  uint32_t msg_loss,  uint32_t pub_host,
+                           const char *pub_host_id ) noexcept;
 };
 
 struct EvRvTransportListen : public sassrv::EvRvListen {

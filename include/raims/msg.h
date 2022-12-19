@@ -297,7 +297,9 @@ enum MsgFid {
   FID_PUBKEY         = 77 , /* ec pubkey */
 
   FID_UCAST_DB       = 78 , /* ucast urls */
-  FID_UCAST_FILTER   = 79   /* filter ucast db requests */
+  FID_UCAST_FILTER   = 79 , /* filter ucast db requests */
+  FID_IDL_SERVICE    = 80 , /* inbound data loss service */
+  FID_IDL_MSG_LOSS   = 81   /* inbound data loss message loss */
 };
 static const int FID_TYPE_SHIFT = 8,
                  FID_MAX        = 1 << FID_TYPE_SHIFT; /* 256 */
@@ -808,7 +810,9 @@ static FidTypeName fid_type_name[] = {
 { FID_PUBKEY      , OPAQUE_32                   , XCL , 0 ,"pubkey"          },
 
 { FID_UCAST_DB    , LONG_OPAQUE                 , XCL , 0 ,"ucast_db"        },
-{ FID_UCAST_FILTER, LONG_OPAQUE                 , XCL , 0 ,"ucast_filter"    }
+{ FID_UCAST_FILTER, LONG_OPAQUE                 , XCL , 0 ,"ucast_filter"    },
+{ FID_IDL_SERVICE , U_SHORT                     , XCL , 0 ,"idl_service"     },
+{ FID_IDL_MSG_LOSS, U_SHORT | U_INT | U_LONG    , XCL , 0 ,"idl_msg_loss"    }
 };
 
 #endif

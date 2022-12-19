@@ -1116,7 +1116,9 @@ StringTab::ref_string( const char *str,  size_t len,  StringVal &sv ) noexcept
                     id_h,
                     id_val;
 
-  if ( str == NULL ) {
+  while ( len > 0 && ( str[ len - 1 ] == ' ' || str[ len - 1 ] == '\t' ) )
+    len--;
+  if ( str == NULL || len == 0 ) {
     sv.zero();
     return 0;
   }
@@ -2281,18 +2283,19 @@ ConfigTree::remove_parameter( const char *name ) noexcept
 }
 
 static bool
-int_prefix( const char *s,  uint64_t &n,  size_t &off ) noexcept
+int_prefix( const char *s,  MDDecimal &dec,  size_t &off ) noexcept
 {
-  size_t i, j, k, len = ::strlen( s );
+  size_t j, len = ::strlen( s );
   if ( len == 0 )
     return false;
 
   for ( j = len; ; ) {
-    if ( isdigit( s[ j - 1 ] ) )
+    if ( isdigit( s[ j - 1 ] ) || s[ j - 1 ] == '.' )
       break;
     if ( --j == 0 )
       return false;
   }
+#if 0
   for ( i = 0; i < j; i++ )
     if ( ! isspace( s[ i ] ) )
       break;
@@ -2300,6 +2303,9 @@ int_prefix( const char *s,  uint64_t &n,  size_t &off ) noexcept
     if ( ! isdigit( s[ k ] ) )
       return false;
   n = string_to_uint64( &s[ i ], j - i );
+#endif
+  if ( dec.parse( s, j ) != 0 )
+    return false;
   while ( j < len && isspace( s[ j ] ) )
     j++;
   off = j;
@@ -2310,47 +2316,42 @@ int_prefix( const char *s,  uint64_t &n,  size_t &off ) noexcept
 bool
 ConfigTree::string_to_bytes( const char *s,  uint64_t &bytes ) noexcept
 {
+  MDDecimal dec;
+  double val;
   size_t off;
-  if ( ! int_prefix( s, bytes, off ) )
+  if ( ! int_prefix( s, dec, off ) )
+    return false;
+  if ( dec.get_real( val ) != 0 )
     return false;
   switch ( s[ off ] ) {
-    case '\0': case 'b': case 'B':                   return true;
-    case 'k': case 'K': bytes *= 1024;               return true;
-    case 'm': case 'M': bytes *= 1024 * 1024;        return true;
-    case 'g': case 'G': bytes *= 1024 * 1024 * 1024; return true;
+    case '\0': case 'b': case 'B': break;
+    case 'k': case 'K': val *= 1024.0; break;
+    case 'm': case 'M': val *= 1024.0 * 1024; break;
+    case 'g': case 'G': val *= 1024.0 * 1024 * 1024; break;
+    default: return false;
   }
-  return false;
+  bytes = (uint64_t) val;
+  return true;
 }
 
 bool
 ConfigTree::string_to_secs( const char *s,  uint64_t &secs ) noexcept
 {
-  size_t off;
-  if ( ! int_prefix( s, secs, off ) )
+  MDStamp stamp;
+  if( stamp.parse( s, ::strlen( s ), true ) != 0 )
     return false;
-  switch ( s[ off ] ) {
-    case '\0': case 's': case 'S':            return true;
-    case 'm': case 'M': secs *= 60;           return true;
-    case 'h': case 'H': secs *= 60 * 60;      return true;
-    case 'd': case 'D': secs *= 24 * 60 * 60; return true;
-  }
-  return false;
+  secs = stamp.seconds();
+  return true;
 }
 
 bool
 ConfigTree::string_to_nanos( const char *s,  uint64_t &nanos ) noexcept
 {
-  size_t off;
-  if ( ! int_prefix( s, nanos, off ) )
+  MDStamp stamp;
+  if( stamp.parse( s, ::strlen( s ), true ) != 0 )
     return false;
-  nanos *= 1000000000;
-  switch ( s[ off ] ) {
-    case '\0': case 's': case 'S':             return true;
-    case 'm': case 'M': nanos *= 60;           return true;
-    case 'h': case 'H': nanos *= 60 * 60;      return true;
-    case 'd': case 'D': nanos *= 24 * 60 * 60; return true;
-  }
-  return false;
+  nanos = stamp.nanos();
+  return true;
 }
 
 bool

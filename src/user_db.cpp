@@ -19,7 +19,7 @@ UserDB::UserDB( EvPoll &p,  ConfigTree::User &u,
   : ipc_transport( 0 ), poll( p ), user( u ), svc( s ), sub_db( sdb ),
     string_tab( st ), events( ev ), svc_dsa( 0 ), user_dsa( 0 ),
     session_key( 0 ), hello_key( 0 ), cnonce( 0 ), hb_keypair( 0 ),
-    node_ht( 0 ), zombie_ht( 0 ), peer_ht( 0 ), peer_key_ht( 0 ),
+    node_ht( 0 ), zombie_ht( 0 ), host_ht( 0 ), peer_ht( 0 ), peer_key_ht( 0 ),
     peer_keys( 0 ), peer_bloom( 0, "(peer)", p.g_bloom_db ),
     hb_interval( HB_DEFAULT_INTERVAL ), reliability( DEFAULT_RELIABILITY ),
     next_uid( 0 ), free_uid_count( 0 ), my_src_fd( -1 ), uid_auth_count( 0 ),
@@ -42,8 +42,11 @@ UserDB::UserDB( EvPoll &p,  ConfigTree::User &u,
   this->start_mono_time = current_monotonic_time_ns(); 
   this->rand.static_init( this->start_mono_time, this->start_time );
   /* bridge id is public user hmac + nonce which identifies this peer */
-  this->bridge_id.nonce.seed_random();    /* random nonce */
-  ::memcpy( &this->bridge_nonce_int, this->bridge_id.nonce.digest(), 4 );
+  do {
+    this->bridge_id.nonce.seed_random();    /* random nonce */
+    ::memcpy( &this->bridge_nonce_int, this->bridge_id.nonce.digest(), 4 );
+  } while ( this->bridge_nonce_int == 0 ||
+            this->bridge_nonce_int == 0xffffffffU );
 }
 
 bool
@@ -92,6 +95,8 @@ UserDB::init( const CryptPass &pwd,  uint32_t my_fd,
   this->peer_ht          = NodeHashTab::resize( NULL );
   /* index hash (src_uid, dest_uid) -> encrypted peer key */
   this->peer_key_ht      = PeerKeyHashTab::resize( NULL );
+  /* index nonce_int -> uid */
+  this->host_ht          = HostHashTab::resize( NULL );
   this->next_uid         = 0; /* uid assigned to each node */
   this->free_uid_count   = 0; /* after uid freed, this count updated */
   this->uid_auth_count   = 0; /* how many peers are trusted */
@@ -116,6 +121,7 @@ UserDB::init( const CryptPass &pwd,  uint32_t my_fd,
   this->bridge_tab[ MY_UID ] = NULL;
   /* MY_UID = 0, data for it is *this, peer data are at bridge_tab[ uid ] */
   this->node_ht->upsert_rsz( this->node_ht, this->bridge_id.nonce, MY_UID );
+  this->host_ht->upsert_rsz( this->host_ht, this->bridge_nonce_int, MY_UID );
   i = 0;
   for ( u = tree.users.hd; u != NULL; u = u->next )
     if ( u->svc.equals( this->svc.svc ) )
@@ -404,6 +410,10 @@ UserDB::release( void ) noexcept
   if ( this->zombie_ht != NULL ) {
     delete this->zombie_ht;
     this->zombie_ht = NULL;
+  }
+  if ( this->host_ht != NULL ) {
+    delete this->host_ht;
+    this->host_ht = NULL;
   }
   if ( this->bridge_tab.size != 0 ) {
     this->bridge_tab.clear();
@@ -1184,19 +1194,28 @@ UserDB::add_user( TransportRoute &rte,  const UserRoute *src,  uint32_t fd,
                   HashDigest &hello ) noexcept
 {
   UserBridge * n;
-  size_t       size, rtsz;
+  size_t       size, rtsz, pos;
   uint32_t     uid,
-               seed;
+               seed,
+               nonce_int;
+
+  ::memcpy( &nonce_int, user_bridge_id.nonce.digest(), 4 );
+  if ( this->host_ht->find( nonce_int, pos ) ) {
+    fprintf( stderr, "peer %s host %x exists\n", peer.user.val, nonce_int );
+  }
   uid  = this->new_uid();
+  this->host_ht->upsert_rsz( this->host_ht, nonce_int, uid );
   rtsz = sizeof( UserRoute ) * UserBridge::USER_ROUTE_BASE;
   size = sizeof( UserBridge ) + rtsz;
   seed = (uint32_t) this->rand.next();
   n    = this->make_user_bridge( size, peer, this->poll.g_bloom_db, seed );
-  n->bridge_id  = user_bridge_id;
-  ::memcpy( &n->bridge_nonce_int, user_bridge_id.nonce.digest(), 4 );
-  n->uid        = uid;
-  n->start_time = start;
-  n->peer_hello = hello;
+
+  n->bridge_id        = user_bridge_id;
+  n->bridge_nonce_int = nonce_int;
+  n->uid              = uid;
+  n->start_time       = start;
+  n->peer_hello       = hello;
+
   hello.zero();
   ::memset( (void *) &n[ 1 ], 0, rtsz );
   n->u_buf[ 0 ] = (UserRoute *) (void *) &n[ 1 ];
@@ -1212,19 +1231,28 @@ UserDB::add_user2( const UserNonce &user_bridge_id,  PeerEntry &peer,
                    uint64_t start,  HashDigest &hello ) noexcept
 {
   UserBridge * n;
-  size_t       size, rtsz;
+  size_t       size, rtsz, pos;
   uint32_t     uid,
-               seed;
+               seed,
+               nonce_int;
+
+  ::memcpy( &nonce_int, user_bridge_id.nonce.digest(), 4 );
+  if ( this->host_ht->find( nonce_int, pos ) ) {
+    fprintf( stderr, "peer %s host %x exists\n", peer.user.val, nonce_int );
+  }
   uid  = this->new_uid();
+  this->host_ht->upsert_rsz( this->host_ht, nonce_int, uid );
   rtsz = sizeof( UserRoute ) * UserBridge::USER_ROUTE_BASE;
   size = sizeof( UserBridge ) + rtsz;
   seed = (uint32_t) this->rand.next();
   n    = this->make_user_bridge( size, peer, this->poll.g_bloom_db, seed );
-  n->bridge_id  = user_bridge_id;
-  ::memcpy( &n->bridge_nonce_int, user_bridge_id.nonce.digest(), 4 );
-  n->uid        = uid;
-  n->start_time = start;
-  n->peer_hello = hello;
+
+  n->bridge_id        = user_bridge_id;
+  n->bridge_nonce_int = nonce_int;
+  n->uid              = uid;
+  n->start_time       = start;
+  n->peer_hello       = hello;
+
   hello.zero();
   ::memset( (void *) &n[ 1 ], 0, rtsz );
   n->u_buf[ 0 ] = (UserRoute *) (void *) &n[ 1 ];

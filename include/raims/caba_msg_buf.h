@@ -102,7 +102,7 @@ struct BMsgBufT {
     this->emit_u32( n );
     return (T &) *this;
   }
-  T &i8( uint8_t opt,  uint32_t n ) {  /* uint16 out */
+  T &i8( uint8_t opt,  uint64_t n ) {  /* uint16 out */
     this->emit_u16( CLS_U_LONG | opt );
     this->emit_u64( n );
     return (T &) *this;
@@ -282,6 +282,8 @@ struct MsgBufDigestT : public BMsgBufT<T> {
   T  & auth_stage ( uint16_t n )  { return this->i2( FID_AUTH_STAGE, n ); }
   T  & link_add   ( uint8_t n )   { return this->y( FID_LINK_ADD, n ); }
   T  & conn_port  ( uint16_t n )  { return this->i2( FID_CONN_PORT, n ); }
+  T  & idl_service( uint16_t n )  { return this->i2( FID_IDL_SERVICE, n ); }
+  T  & idl_msg_loss( uint64_t n ) { return this->u( FID_IDL_MSG_LOSS, n ); }
 
   T  & fd_cnt     ( uint32_t n )  { return this->i( FID_FD_CNT, n ); }
   T  & ms_tot     ( uint64_t n )  { return this->u( FID_MS_TOT, n ); }
@@ -476,6 +478,8 @@ struct MsgEst {
   MsgEst & auth_stage ( void ) { sz += fid_est( FID_AUTH_STAGE ); return *this; }
   MsgEst & link_add   ( void ) { sz += fid_est( FID_LINK_ADD ); return *this; }
   MsgEst & conn_port  ( void ) { sz += fid_est( FID_CONN_PORT ); return *this; }
+  MsgEst & idl_service( void ) { sz += fid_est( FID_IDL_SERVICE ); return *this; }
+  MsgEst & idl_msg_loss( void ){ sz += fid_est( FID_IDL_MSG_LOSS ); return *this; }
 
   MsgEst & fd_cnt     ( void ) { sz += fid_est( FID_FD_CNT ); return *this; }
   MsgEst & ms_tot     ( void ) { sz += fid_est( FID_MS_TOT ); return *this; }

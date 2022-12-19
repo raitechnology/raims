@@ -1189,6 +1189,18 @@ connect:
 <td class="tableblock halign-left valign-top"><p class="tableblock">false</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">Default for TCP/mesh encryption</p></td>
 </tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">tcp_write_timeout</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">time</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">10 secs</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Timeout for TCP write</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">tcp_write_highwater</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">bytes</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">1 MB</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">TCP write buffer size</p></td>
+</tr>
 </tbody>
 </table>
 <div class="ulist">
@@ -1247,6 +1259,18 @@ they will restart or stop the subscriptions using the maps.</p>
 <li>
 <p>tcp_noencrypt&#8201;&#8212;&#8201;When true, the default for TCP and mesh connections is to
 to not encrypt the traffic.</p>
+</li>
+<li>
+<p>tcp_write_timeout&#8201;&#8212;&#8201;Amount of time to wait for TCP write progress if the
+write buffer is full.  After this time, socket is disconnected and messages
+lost.  When a TCP write buffer has equal or more than <code>tcp_write_highwater</code>
+bytes then backpressure can be applied to the sockets that are forwarding
+data, causing them to add latency waiting for the writer to have space
+available.</p>
+</li>
+<li>
+<p>tcp_write_highwater&#8201;&#8212;&#8201;Amount of data to buffer for writing before applying
+back pressure to forwarding sockets.</p>
 </li>
 </ul>
 </div>

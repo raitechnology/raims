@@ -962,12 +962,9 @@ IpcRteList::send_listen( void *src,  char src_type,
     }
   }
   else if ( src_type == 'R' ) {
-    RedisExec      * redis_exec    = (RedisExec *) src;
-    EvRedisService * redis_service = NULL;
-    if ( redis_exec != NULL ) {
-      redis_service = static_cast<EvRedisService *>( redis_exec );
+    EvRedisService * redis_service = (EvRedisService *) src;
+    if ( redis_service != NULL )
       host = ((EvRedisTransportListen &) redis_service->listen).rv_host;
-    }
     if ( host != NULL ) {
       session     = redis_service->session;
       session_len = redis_service->session_len;

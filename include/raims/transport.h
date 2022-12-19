@@ -292,6 +292,7 @@ struct TransportRoute : public kv::EvSocket, public kv::EvConnectionNotify,
   /* a disconnect */
   virtual void on_shutdown( kv::EvSocket &conn,  const char *,
                             size_t ) noexcept;
+  virtual void on_data_loss( kv::EvSocket &conn,  kv::EvPublish &pub ) noexcept;
   void on_timeout( uint32_t connect_tries,  uint64_t nsecs ) noexcept;
   int printf( const char *fmt, ... ) const noexcept __attribute__((format(printf,2,3)));
 };
@@ -308,6 +309,31 @@ struct TransportTab : public kv::ArrayCount<TransportRoute *, 4> {
   }
 };
 
+}
+namespace natsmd {
+struct EvNatsService;
+}
+namespace sassrv {
+struct EvRvService;
+struct RvHost;
+}
+namespace ds {
+struct EvRedisService;
+}
+namespace ms {
+struct TransportRvHost {
+  TransportRoute        & rte;
+  kv::EvSocket          & conn;
+  natsmd::EvNatsService * nats_service;
+  ds::EvRedisService    * redis_service;
+  sassrv::RvHost       ** rv_host;
+  const char            * proto;
+  uint16_t                rv_service;
+
+  TransportRvHost( TransportRoute &r,  kv::EvSocket &c ) noexcept;
+  int start_session( void ) noexcept;
+  void stop_session( void ) noexcept;
+};
 }
 }
 

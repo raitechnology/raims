@@ -92,7 +92,7 @@ bool
 SessionMgr::init_param( void ) noexcept
 {
   const char *s = "", *val = NULL;
-  uint64_t hb_ival, rel_ival, time_val;
+  uint64_t hb_ival, rel_ival, time_val, bytes_val;
   bool ipv4_only = false, ipv6_only = false;
 
   if ( this->tree.find_parameter( s = P_PUB_WINDOW_SIZE, val, NULL ) &&
@@ -122,6 +122,14 @@ SessionMgr::init_param( void ) noexcept
   if ( this->tree.find_parameter( s = P_TCP_TIMEOUT, val, NULL ) ) {
     if ( ! ConfigTree::string_to_secs( val, time_val ) ) goto fail;
     this->tcp_timeout = (int) time_val;
+  }
+  if ( this->tree.find_parameter( s = P_TCP_WRITE_TIMEOUT, val, NULL ) ) {
+    if ( ! ConfigTree::string_to_nanos( val, time_val ) ) goto fail;
+    this->poll.wr_timeout_ns = time_val;
+  }
+  if ( this->tree.find_parameter( s = P_TCP_WRITE_HIGHWATER, val, NULL ) ) {
+    if ( ! ConfigTree::string_to_bytes( val, bytes_val ) ) goto fail;
+    this->poll.send_highwater = (uint32_t) bytes_val;
   }
   if ( this->tree.find_parameter( s = P_TCP_IPV4ONLY, val, NULL ) ) {
     if ( ! ConfigTree::string_to_bool( val, ipv4_only ) ) goto fail;
@@ -372,6 +380,8 @@ SessionMgr::start( void ) noexcept
   printf( "%s: %lu secs\n", P_SUB_WINDOW_TIME, ns_to_sec( this->sub_window_ival ) );
   printf( "%s: %u secs\n", P_HEARTBEAT, this->user_db.hb_interval );
   printf( "%s: %u secs\n", P_RELIABILITY, this->user_db.reliability );
+  printf( "%s: %lu secs\n", P_TCP_WRITE_TIMEOUT, ns_to_sec( this->poll.wr_timeout_ns ) );
+  printf( "%s: %u bytes \n", P_TCP_WRITE_HIGHWATER, this->poll.send_highwater );
 
   uint64_t cur_mono = this->poll.timer.current_monotonic_time_ns(),
            cur_time = this->poll.timer.current_time_ns();
@@ -777,7 +787,7 @@ IpcRoute::on_msg( EvPublish &pub ) noexcept
           EvPublish pub( fpub.subject, fpub.subject_len, reply, replylen,
                          data, datalen, rte->sub_route, this->fd,
                          fpub.subj_hash, fmt, 'p', seq.msg_loss,
-                         n.bridge_nonce_int );
+                         n.bridge_nonce_int, dec.seqno );
           b &= rte->sub_route.forward_except( pub, this->mgr.router_set );
         }
       }
@@ -790,7 +800,7 @@ IpcRoute::on_msg( EvPublish &pub ) noexcept
         EvPublish pub( fpub.subject, fpub.subject_len, reply, replylen,
                        data, datalen, rte->sub_route, this->fd,
                        fpub.subj_hash, fmt, 'p', seq.msg_loss,
-                       n.bridge_nonce_int );
+                       n.bridge_nonce_int, dec.seqno );
         b &= rte->sub_route.forward_except( pub, this->mgr.router_set );
       }
     }
@@ -932,7 +942,7 @@ IpcRoute::on_inbox( const MsgFramePublish &fpub,  UserBridge &n,
     if ( &fpub.rte != rte && rte->is_set( TPORT_IS_IPC ) ) {
       EvPublish pub( subject, subjlen, reply, replylen,
                      data, datalen, rte->sub_route, this->fd, h, fmt, 'p',
-                     0, n.bridge_nonce_int );
+                     0, n.bridge_nonce_int, dec.seqno );
       b &= rte->sub_route.forward_except( pub, this->mgr.router_set );
     }
   }

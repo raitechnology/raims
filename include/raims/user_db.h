@@ -216,10 +216,13 @@ struct UserBridge : public UserStateTest<UserBridge> {
                      msg_loss_time,       /* multicast message loss */
                      msg_loss_count,      /* count mcast msg loss */
                      inbox_msg_loss_time,
-                     inbox_msg_loss_count, /* inbox message loss */
+                     inbox_msg_loss_count,/* inbox message loss */
                      name_recv_seqno,
                      name_recv_time,
-                     name_recv_mask;
+                     name_recv_mask,
+                     last_idl_pub,        /* one loss if many clients subscr */
+                     inbound_msg_loss;    /* count of msg loss from subs */
+  kv::UIntHashTab  * inbound_svc_loss;    /* service msg loss map */
   void * operator new( size_t, void *ptr ) { return ptr; }
 
   UserBridge( PeerEntry &pentry,  kv::BloomDB &db,  uint32_t seed )
@@ -402,7 +405,8 @@ typedef struct kv::PrioQueue< UserPendingRoute *,
                         UserPendingRoute::is_pending_older > UserPendingQueue;
 
 /* nonce -> node_ht[ uid ] -> UserBridge */
-typedef kv::IntHashTabT<Hash128Elem,uint32_t> NodeHashTab;
+typedef kv::IntHashTabT< Hash128Elem, uint32_t > NodeHashTab;
+typedef kv::UIntHashTab HostHashTab;
 
 struct SubDB;
 struct StringTab;
@@ -435,6 +439,7 @@ struct UserDB {
   /* indexes of node instances */
   NodeHashTab         * node_ht,         /* nonce -> uid */
                       * zombie_ht;       /* timed out nodes */
+  HostHashTab         * host_ht;
   UserBridgeTab         bridge_tab;      /* route array bridge_tab[ uid ] */
 
   /* index of node identities */

@@ -9,6 +9,7 @@
 #include <raims/session.h>
 #include <raims/transport.h>
 #include <raims/ev_name_svc.h>
+#include <raims/ev_rv_transport.h>
 
 using namespace rai;
 using namespace ms;
@@ -510,10 +511,12 @@ UserDB::send_ping_request( UserBridge &n ) noexcept
   n.ping_send_time = stamp;
 
   MsgEst e( ibx.len() );
-  e.seqno     ()
-   .stamp     ()
-   .sub_seqno ()
-   .link_state();
+  e.seqno       ()
+   .stamp       ()
+   .sub_seqno   ()
+   .link_state  ()
+   .idl_service ()
+   .idl_msg_loss();
 
   MsgCat m;
   m.reserve( e.sz );
@@ -523,6 +526,19 @@ UserDB::send_ping_request( UserBridge &n ) noexcept
    .stamp     ( stamp                  )
    .sub_seqno ( this->sub_db.sub_seqno )
    .link_state( this->link_state_seqno );
+
+  if ( n.inbound_msg_loss != 0 ) {
+    size_t pos;
+    if ( n.inbound_svc_loss->first( pos ) ) {
+      uint32_t svc, loss;
+      n.inbound_svc_loss->get( pos, svc, loss );
+      m.idl_service( svc )
+       .idl_msg_loss( loss );
+
+      if ( debug_hb )
+        n.printf( "ping svc %u loss %u\n", svc, loss );
+    }
+  }
   uint32_t h = ibx.hash();
   m.close( e.sz, h, CABA_INBOX );
   m.sign( ibx.buf, ibx.len(), *this->session_key );
@@ -584,11 +600,24 @@ UserDB::recv_ping_request( MsgFramePublish &pub,  UserBridge &n,
     n.ping_recv_count++;
     n.ping_recv_time = stamp;
   }
+
+  uint16_t idl_svc  = 0;
+  uint32_t idl_loss = 0;
+  if ( dec.test_2( FID_IDL_SERVICE, FID_IDL_MSG_LOSS ) ) {
+    cvt_number<uint16_t>( dec.mref[ FID_IDL_SERVICE ], idl_svc );
+    cvt_number<uint32_t>( dec.mref[ FID_IDL_MSG_LOSS ], idl_loss );
+
+    if ( debug_hb )
+      n.printf( "ping idl_svc %u idl_loss %u\n", idl_svc, idl_loss );
+  }
+
   MsgEst e( ibx.len() );
   e.seqno       ()
    .stamp       ()
    .reply_stamp ()
-   .token       ();
+   .token       ()
+   .idl_service ()
+   .idl_msg_loss();
 
   MsgCat m;
   m.reserve( e.sz );
@@ -604,6 +633,10 @@ UserDB::recv_ping_request( MsgFramePublish &pub,  UserBridge &n,
    .reply_stamp ( cur_time );
   if ( token != 0 )
     m.token( token );
+  if ( idl_svc != 0 ) {
+   m.idl_service ( idl_svc )
+    .idl_msg_loss( idl_loss );
+  }
   uint32_t h = ibx.hash();
   m.close( e.sz, h, CABA_INBOX );
   m.sign( ibx.buf, ibx.len(), *this->session_key );
@@ -620,6 +653,17 @@ UserDB::recv_ping_request( MsgFramePublish &pub,  UserBridge &n,
                   "ping sub_seqno %lu != sub_seqno %lu\n", n.link_state_seqno,
                   link_seqno, n.sub_seqno, sub_seqno );
       this->send_adjacency_request( n, PING_SYNC_REQ );
+    }
+  }
+  if ( idl_svc != 0 ) {
+    size_t count = this->transport_tab.count;
+    for ( size_t i = 0; i < count; i++ ) {
+      TransportRoute *rte = this->transport_tab.ptr[ i ];
+      if ( rte->is_set( TPORT_IS_IPC ) && rte->rv_svc != NULL ) {
+        rte->rv_svc->outbound_data_loss( idl_svc, idl_loss, n.bridge_nonce_int,
+                                         n.peer.user.val );
+        break;
+      }
     }
   }
   return b;
@@ -673,6 +717,37 @@ UserDB::recv_pong_result( MsgFramePublish &pub,  UserBridge &n,
     this->ping_queue.remove( &n );
     n.ping_fail_count = 0;
   }
+
+  if ( dec.test_2( FID_IDL_SERVICE, FID_IDL_MSG_LOSS ) ) {
+    uint16_t idl_svc  = 0;
+    uint32_t idl_loss = 0, loss = 0;
+    size_t   pos;
+    cvt_number<uint16_t>( dec.mref[ FID_IDL_SERVICE ], idl_svc );
+    cvt_number<uint32_t>( dec.mref[ FID_IDL_MSG_LOSS ], idl_loss );
+
+    if ( debug_hb )
+      n.printf( "pong idl_svc %u idl_loss %u\n", idl_svc, idl_loss );
+
+    if ( n.inbound_svc_loss->find( idl_svc, pos, loss ) ) {
+      if ( idl_loss >= loss ) {
+        if ( n.inbound_svc_loss->elem_count == 1 ) {
+          delete n.inbound_svc_loss;
+          n.inbound_svc_loss = NULL;
+          n.inbound_msg_loss = 0;
+        }
+        else {
+          n.inbound_svc_loss->remove( pos );
+        }
+      }
+      else {
+        loss -= idl_loss;
+        n.inbound_svc_loss->set( idl_svc, pos, loss );
+      }
+    }
+    if ( n.inbound_msg_loss != 0 )
+      this->uid_rtt.add( n.uid );
+  }
+
   if ( debug_hb )
     n.printf( "recv pong\n" );
   return true;

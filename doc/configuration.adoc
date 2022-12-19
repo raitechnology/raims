@@ -115,28 +115,30 @@ The "parameters:" structure is optional and not necessary to define them.
 
 [%autowidth,options="header",grid="cols",stripes="even"]
 |=============================================
-| Name            | Type     | Default | Description
-| salt            | filename | none    | File to find encryption salt
-| pass            | filename | none    | File to find encryption password
-| salt_data       | string   | none    | Base 64 encoded encryption salt
-| pass_data       | string   | none    | Base 64 encoded encryption password
-| listen          | array    | none    | Startup listen transports
-| connect         | array    | none    | Startup connect transports
-| pub_window_size | bytes    | 4 MB    | Size of publish window
-| sub_window_size | bytes    | 4 MB    | Size of subscribe window
-| pub_window_time | time     | 10 secs | Time of publish window
-| sub_window_time | time     | 10 secs | Time of subscribe window
-| heartbeat       | time     | 10 secs | Interval of heartbeat
-| reliability     | time     | 15 secs | Time of publish reliability
-| timestamp       | string   | LOCAL   | Log using local time or GMT
-| pid_file        | string   | none    | Daemon pid file
-| map_file        | string   | none    | Use for key value storage
-| db_num          | string   | none    | Default db number for key value
-| ipc_name        | string   | none    | Connect to IPC sockets
-| tcp_timeout     | time     | 10 secs | Default timeout for TCP/mesh connect
-| tcp_ipv4only    | boolean  | false   | Use IPv4 addressing only
-| tcp_ipv6only    | boolean  | false   | Use IPv6 addressing only
-| tcp_noencrypt   | boolean  | false   | Default for TCP/mesh encryption
+| Name                | Type     | Default | Description
+| salt                | filename | none    | File to find encryption salt
+| pass                | filename | none    | File to find encryption password
+| salt_data           | string   | none    | Base 64 encoded encryption salt
+| pass_data           | string   | none    | Base 64 encoded encryption password
+| listen              | array    | none    | Startup listen transports
+| connect             | array    | none    | Startup connect transports
+| pub_window_size     | bytes    | 4 MB    | Size of publish window
+| sub_window_size     | bytes    | 4 MB    | Size of subscribe window
+| pub_window_time     | time     | 10 secs | Time of publish window
+| sub_window_time     | time     | 10 secs | Time of subscribe window
+| heartbeat           | time     | 10 secs | Interval of heartbeat
+| reliability         | time     | 15 secs | Time of publish reliability
+| timestamp           | string   | LOCAL   | Log using local time or GMT
+| pid_file            | string   | none    | Daemon pid file
+| map_file            | string   | none    | Use for key value storage
+| db_num              | string   | none    | Default db number for key value
+| ipc_name            | string   | none    | Connect to IPC sockets
+| tcp_timeout         | time     | 10 secs | Default timeout for TCP/mesh connect
+| tcp_ipv4only        | boolean  | false   | Use IPv4 addressing only
+| tcp_ipv6only        | boolean  | false   | Use IPv6 addressing only
+| tcp_noencrypt       | boolean  | false   | Default for TCP/mesh encryption
+| tcp_write_timeout   | time     | 10 secs | Timeout for TCP write
+| tcp_write_highwater | bytes    | 1 MB    | TCP write buffer size
 |=============================================
 
 - salt, pass, salt_data, pass_data -- The salt, pass or salt_data, pass_data
@@ -180,3 +182,13 @@ The "parameters:" structure is optional and not necessary to define them.
 
 - tcp_noencrypt -- When true, the default for TCP and mesh connections is to
   to not encrypt the traffic.
+
+- tcp_write_timeout -- Amount of time to wait for TCP write progress if the
+  write buffer is full.  After this time, socket is disconnected and messages
+  lost.  When a TCP write buffer has equal or more than `tcp_write_highwater`
+  bytes then backpressure can be applied to the sockets that are forwarding
+  data, causing them to add latency waiting for the writer to have space
+  available.
+
+- tcp_write_highwater -- Amount of data to buffer for writing before applying
+  back pressure to forwarding sockets.

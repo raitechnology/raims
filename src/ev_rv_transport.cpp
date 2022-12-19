@@ -42,8 +42,10 @@ EvSocket *
 EvRvTransportListen::accept( void ) noexcept
 {
   EvSocket *c = this->EvRvListen::accept();
-  if ( c != NULL )
+  if ( c != NULL ) {
     this->rte.set_peer_name( *c, "rv.acc" );
+    ((EvRvService *) c)->notify = this->notify;
+  }
   return c;
 }
 
@@ -298,11 +300,17 @@ RvTransportService::start_host( RvHost &host,  const RvHostNet &hn,
 {
   bool not_running = ! host.start_in_progress && ! host.network_started;
   this->start_cnt++;
+  if ( hn.has_service_prefix != host.has_service_prefix )
+    return ERR_SAME_SVC_TWO_NETS;
   if ( host.network_started ) {
-    if ( host.mcast.host_ip == 0 ||
-         ! host.is_same_network( hn ) )
-      return ERR_SAME_SVC_TWO_NETS;
-    return HOST_OK;
+    if ( hn.network_len == 0 ) /* allow clients to attach to existing */
+      return HOST_OK;
+    if ( host.network_len != 0 ) {
+      if ( host.mcast.host_ip == 0 ||
+           ! host.is_same_network( hn ) )
+        return ERR_SAME_SVC_TWO_NETS;
+      return HOST_OK;
+    }
   }
   if ( ! host.start_in_progress ) {
     if ( host.mcast.host_ip == 0 ||
@@ -344,12 +352,16 @@ RvTransportService::start_host( RvHost &host,  const RvHostNet &hn,
             break;
           }
         }
-        status = host.start_network( mc, hn );
+        if ( ! host.network_started )
+          status = host.start_network( mc, hn );
+        else
+          status = host.copy_network( mc, hn );
       }
       if ( status != HOST_OK )
         return status;
     }
-    host.start_in_progress = true;
+    if ( ! host.network_started )
+      host.start_in_progress = true;
   }
 
   RvHostRoute           * hr   = this->tab.find( &host );
@@ -454,3 +466,18 @@ RvTransportService::stop_host( RvHost &host ) noexcept
                                             0, RV_STOP_TIMER );
   }
 }
+
+void
+RvTransportService::outbound_data_loss( uint16_t svc,  uint32_t msg_loss,
+                                        uint32_t pub_host,
+                                        const char *pub_host_id ) noexcept
+{
+  printf( "outbound_data_loss svc %u, lost %u, host %x.%s\n", svc, msg_loss,
+          pub_host, pub_host_id );
+  RvHost *host;
+  if ( this->db.get_service( host, svc ) ) {
+    host->send_outbound_data_loss( msg_loss, pub_host, pub_host_id );
+  }
+}
+
+

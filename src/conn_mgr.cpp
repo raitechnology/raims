@@ -42,6 +42,88 @@ TransportRoute::is_self_connect( kv::EvSocket &conn ) noexcept
   return false;
 }
 
+static const char nats_kind[]  = "nats",
+                  redis_kind[] = "redis",
+                  rv_kind[]    = "rv";
+
+TransportRvHost::TransportRvHost( TransportRoute &r,  kv::EvSocket &c ) noexcept
+                : rte( r ), conn( c ), nats_service( 0 ), redis_service( 0 ),
+                  rv_host( 0 ), proto( 0 ), rv_service( 0 )
+{
+  if ( r.rv_svc != NULL ) {
+    if ( ::strcmp( c.kind, nats_kind ) == 0 ) {
+      this->nats_service = (EvNatsService *) &c;
+      EvNatsTransportListen & listen =
+        (EvNatsTransportListen &) nats_service->listen;
+      this->rv_service = listen.rv_service;
+      this->rv_host    = &listen.rv_host;
+      this->proto      = nats_kind;
+    }
+    else if ( ::strcmp( c.kind, redis_kind ) == 0 ) {
+      this->redis_service = (EvRedisService *) &c;
+      EvRedisTransportListen & listen =
+        (EvRedisTransportListen &) redis_service->listen;
+      this->rv_service = listen.rv_service;
+      this->rv_host    = &listen.rv_host;
+      this->proto      = redis_kind;
+    }
+    else if ( ::strcmp( c.kind, rv_kind ) == 0 ) {
+      this->rv_host    = &((EvRvService &) c).host;
+      this->rv_service = (*this->rv_host)->get_service();
+      this->proto      = rv_kind;
+    }
+  }
+}
+
+int
+TransportRvHost::start_session( void ) noexcept
+{
+  if ( this->proto == NULL || this->proto == rv_kind )
+    return 0;
+  RvHost  * host;
+  RvHostNet hn( this->rv_service, 0, true );
+  uint32_t  delay_secs;
+  char      session[ EvSocket::MAX_SESSION_LEN ];
+  size_t    session_len;
+  int       status;
+
+  *this->rv_host = NULL;
+  status = this->rte.rv_svc->db.start_service( host, this->rte.poll,
+                                               this->rte.sub_route, hn );
+  if ( status != 0 )
+    return status;
+  status = this->rte.rv_svc->start_host( *host, hn, delay_secs );
+  if ( status != 0 )
+    return status;
+
+  host->active_clients++;
+  host->start_host2( 0 );
+  session_len = host->make_session( this->conn.active_ns, session );
+
+  if ( this->nats_service != NULL )
+    this->nats_service->set_session( session, session_len );
+  else if ( this->redis_service != NULL )
+    this->redis_service->set_session( session, session_len );
+  if ( host->active_clients == 1 )
+    host->send_host_start( NULL );
+  host->send_session_start( this->conn );
+  *this->rv_host = host;
+  return 0;
+}
+
+void
+TransportRvHost::stop_session( void ) noexcept
+{
+  if ( this->proto == NULL || this->proto == rv_kind )
+    return;
+  if ( this->rv_host != NULL ) {
+    RvHost * host = *this->rv_host;
+    host->send_session_stop( this->conn );
+    if ( host->stop_network() )
+      this->rte.rv_svc->stop_host( *host );
+  }
+}
+
 void
 TransportRoute::on_connect( kv::EvSocket &conn ) noexcept
 {
@@ -51,60 +133,13 @@ TransportRoute::on_connect( kv::EvSocket &conn ) noexcept
 
   if ( this->is_set( TPORT_IS_IPC ) ) {
     if ( ! this->connected.test_set( conn.fd ) ) {
-      EvNatsService  * nats_service  = NULL;
-      EvRedisService * redis_service = NULL;
-      RvHost ** rv_host    = NULL;
-      uint16_t  rv_service = 0;
-
+      TransportRvHost svc( *this, conn );
       this->connect_count++;
-      if ( ::strcmp( conn.kind, "nats" ) == 0 ) {
-        nats_service = (EvNatsService *) &conn;
-        EvNatsTransportListen & listen =
-          (EvNatsTransportListen &) nats_service->listen;
-        rv_service = listen.rv_service;
-        rv_host    = &listen.rv_host;
-      }
-      else if ( ::strcmp( conn.kind, "redis" ) == 0 ) {
-        redis_service = (EvRedisService *) &conn;
-        EvRedisTransportListen & listen =
-          (EvRedisTransportListen &) redis_service->listen;
-        rv_service = listen.rv_service;
-        rv_host    = &listen.rv_host;
-      }
-      if ( rv_service != 0 ) {
-        RvHost  * host;
-        RvHostNet hn( rv_service, 0, true );
-        uint32_t  delay_secs;
-        int       status = 0;
-        if ( debug_tran )
-          this->printf( "connect service %u fd %d\n", rv_service, conn.fd);
-        *rv_host = NULL;
-        status = this->rv_svc->db.start_service( host, this->poll,
-                                                 this->sub_route, hn );
-        if ( status == 0 ) {
-          if ( this->rv_svc->start_host( *host, hn, delay_secs ) == 0 ) {
-            host->active_clients++;
-            host->start_host2( 0 );
-            char session[ MAX_SESSION_LEN ], userid[ MAX_USERID_LEN ];
-            size_t session_len, userid_len = 0;
-            session_len = host->make_session( conn.active_ns, session );
-
-            if ( nats_service != NULL ) {
-              nats_service->set_session( session, session_len );
-              userid_len = nats_service->get_userid( userid );
-            }
-            else if ( redis_service != NULL ) {
-              redis_service->set_session( session, session_len );
-              userid_len = redis_service->get_userid( userid );
-            }
-            if ( userid_len != 0 ) {
-              if ( host->active_clients == 1 )
-                host->send_host_start( NULL );
-              host->send_session_start( userid, userid_len,
-                                        session, session_len );
-              *rv_host = host;
-            }
-          }
+      if ( svc.rv_service != 0 ) {
+        int status;
+        if ( (status = svc.start_session()) != 0 ) {
+          this->printf( "status %d, %s connect to service %u\n",
+                        status, svc.proto, svc.rv_service );
         }
       }
     }
@@ -172,43 +207,20 @@ TransportRoute::on_shutdown( EvSocket &conn,  const char *err,
   if ( this->is_set( TPORT_IS_IPC ) ) {
     if ( this->connected.test_clear( conn.fd ) ) {
       this->connect_count--;
-      EvNatsService  * nats_service  = NULL;
-      EvRedisService * redis_service = NULL;
-      RvHost * rv_host    = NULL;
-      uint16_t rv_service = 0;
-      if ( ::strcmp( conn.kind, "nats" ) == 0 ) {
-        nats_service = (EvNatsService *) &conn;
-        EvNatsTransportListen & listen =
-          (EvNatsTransportListen &) nats_service->listen;
-        rv_service = listen.rv_service;
-        rv_host    = listen.rv_host;
-      }
-      else if ( ::strcmp( conn.kind, "redis" ) == 0 ) {
-        redis_service = (EvRedisService *) &conn;
-        EvRedisTransportListen & listen =
-          (EvRedisTransportListen &) redis_service->listen;
-        rv_service = listen.rv_service;
-        rv_host    = listen.rv_host;
-      }
-      if ( rv_host != NULL ) {
-        char session[ MAX_SESSION_LEN ], userid[ MAX_USERID_LEN ];
-        size_t session_len = 0, userid_len = 0;
+      TransportRvHost svc( *this, conn );
+      if ( svc.rv_service != 0 )
+        svc.stop_session();
 
-        if ( debug_tran )
-          this->printf( "shut service %u fd %d\n", rv_service, conn.fd );
-        if ( nats_service != NULL ) {
-          userid_len = nats_service->get_userid( userid );
-          session_len = nats_service->get_session( NULL, 0, session );
+      if ( conn.sock_err != 0 || errlen != 0 ) {
+        if ( errlen == 0 ) {
+          errlen = conn.print_sock_error( errbuf, sizeof( errbuf ) );
+          if ( errlen > 0 )
+            err = errbuf;
         }
-        else if ( redis_service != NULL ) {
-          userid_len = redis_service->get_userid( userid );
-          session_len = redis_service->get_session( NULL, 0, session );
+        if ( errlen > 0 ) {
+          this->printf( "%s %s (%.*s)\n", conn.kind, conn.peer_address.buf,
+                        (int) errlen, err );
         }
-        if ( userid_len != 0 && session_len != 0 )
-          rv_host->send_session_stop( userid, userid_len,
-                                      session, session_len );
-        if ( rv_host->stop_network() )
-          this->rv_svc->stop_host( *rv_host );
       }
     }
   }
@@ -255,6 +267,59 @@ TransportRoute::on_shutdown( EvSocket &conn,  const char *err,
     }
   }
   d_tran( "%s connect_count %u\n", this->name, this->connect_count );
+}
+
+void
+TransportRoute::on_data_loss( EvSocket &conn,  EvPublish &pub ) noexcept
+{
+  if ( this->is_set( TPORT_IS_IPC ) ) {
+    d_tran( "on_data_loss fd %d pub_status %d\n", conn.fd, pub.pub_status );
+    TransportRvHost svc( *this, conn );
+    if ( svc.rv_host != NULL ) {
+      RvHost  * host = *svc.rv_host;
+      size_t    pos;
+      uint32_t  uid;
+      StringVal user;
+      if ( this->user_db.host_ht->find( pub.pub_host, pos, uid ) ) {
+        if ( uid == 0 )
+          user = this->user_db.user.user;
+        else {
+          UserBridge * n = this->user_db.bridge_tab[ uid ];
+          if ( n != NULL ) {
+            uint32_t msg_loss = pub.pub_status;
+            if ( msg_loss == EV_PUB_RESTART )
+              msg_loss = 1;
+            user = n->peer.user;
+            if ( msg_loss <= EV_MAX_LOSS ) {
+              uint64_t cur_pub = pub.cnt ^ ( (uint64_t) pub.subj_hash << 32 );
+              if ( n->last_idl_pub != cur_pub ) {
+                n->last_idl_pub = cur_pub;
+                n->inbound_msg_loss += msg_loss;
+                if ( n->inbound_svc_loss == NULL ) {
+                  n->inbound_svc_loss = UIntHashTab::resize( NULL );
+                }
+                else {
+                  size_t   pos;
+                  uint32_t val;
+                  if ( n->inbound_svc_loss->find( svc.rv_service, pos, val ) ) {
+                    uint64_t tmp = (uint64_t) val + (uint64_t) msg_loss;
+                    if ( tmp > 0xffffffffU )
+                      tmp = 0xffffffffU;
+                    msg_loss = (uint32_t) tmp;
+                  }
+                }
+                n->inbound_svc_loss->upsert_rsz( n->inbound_svc_loss,
+                                                 svc.rv_service, msg_loss );
+                if ( n->is_set( AUTHENTICATED_STATE ) )
+                  this->user_db.uid_rtt.add( n->uid );
+              }
+            }
+          }
+        }
+      }
+      host->inbound_data_loss( conn, pub, user.val );
+    }
+  }
 }
 
 void
