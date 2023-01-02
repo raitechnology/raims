@@ -4687,12 +4687,6 @@ Console::show_buffers( ConsoleOutput *p ) noexcept
   this->print_table( p, hdr, ncols );
 }
 
-static uint64_t mono_to_real( uint64_t ns,  uint64_t mono,  uint64_t real )
-{
-  if ( ns == 0 || mono > ns ) return 0;
-  return real - ( mono - ns );
-}
-
 void
 Console::show_windows( ConsoleOutput *p ) noexcept
 {
@@ -4700,8 +4694,6 @@ Console::show_windows( ConsoleOutput *p ) noexcept
   TabOut out( this->table, this->tmp, ncols );
   size_t count, size;
   uint64_t last_time, min_ival, win_size, max_size = 0;
-  uint64_t cur_mono = current_monotonic_time_ns(),
-           cur_time = current_realtime_ns();
   int k;
 
   #define K( x, y ) ( ( k == 0 ) ? ( x ) : ( y ) )
@@ -4710,8 +4702,7 @@ Console::show_windows( ConsoleOutput *p ) noexcept
     count     = K( seq.tab, seq.tab_old)->pop_count();
     size      = K( seq.tab->mem_size() + seq.seqno_ht_size,
                    seq.tab_old->mem_size() + seq.old_ht_size );
-    last_time = mono_to_real( K( seq.flip_time, seq.trailing_time ),
-                              cur_mono, cur_time );
+    last_time = K( seq.flip_time, seq.trailing_time );
     min_ival  = ns_to_sec( this->mgr.sub_window_ival );
     win_size  = this->mgr.sub_window_size;
     if ( size > seq.max_size ) seq.max_size = size;
@@ -4741,8 +4732,7 @@ Console::show_windows( ConsoleOutput *p ) noexcept
   for ( k = 0; k < 2; k++ ) {
     count     = K( pub.pub, pub.pub_old )->pop_count();
     size      = K( pub.pub, pub.pub_old )->mem_size();
-    last_time = mono_to_real( K( pub.flip_time, pub.trailing_time ),
-                              cur_mono, cur_time );
+    last_time = K( pub.flip_time, pub.trailing_time );
     min_ival  = ns_to_sec( this->mgr.pub_window_ival );
     win_size  = this->mgr.pub_window_size;
     if ( size > pub.max_size ) pub.max_size = size;

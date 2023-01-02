@@ -419,6 +419,8 @@ SessionMgr::start( void ) noexcept
   this->sub_window_mono_time = cur_mono + this->sub_window_ival;
   this->sub_db.seqno_tab.flip_time     = cur_time - this->sub_window_ival;
   this->sub_db.seqno_tab.trailing_time = cur_time - this->sub_window_ival;
+  this->sub_db.pub_tab.flip_time       = cur_time - this->pub_window_ival;
+  this->sub_db.pub_tab.trailing_time   = cur_time - this->pub_window_ival;
   uint64_t ival = sec_to_ns( this->user_db.hb_interval );
   this->timer_ival         = (uint32_t) ( ival / 250 );
   this->user_db.hb_ival_ns = ival;
