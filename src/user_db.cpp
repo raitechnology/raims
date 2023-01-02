@@ -230,32 +230,32 @@ UserDB::calc_secret_hmac( UserBridge &n,  PolyHmacDigest &secret_hmac ) noexcept
 bool
 UserDB::forward_to( UserBridge &n,  const char *sub,
                     size_t sublen,  uint32_t h,  const void *msg,
-                    size_t msg_len,  UserRoute &u_rte ) noexcept
+                    size_t msg_len,  UserRoute &u_rte,
+                    BPData *data ) noexcept
 {
   if ( &u_rte != n.primary( *this ) || u_rte.rte.is_ipc() ) {
     if ( debug_usr )
       n.printf( "inbox user_route not primary (fd=%u, primary=%u) (%.*s)\n",
                 u_rte.mcast_fd, n.primary( *this )->mcast_fd,
                 (int) sublen, sub );
-    if ( u_rte.rte.is_mcast() && ! u_rte.is_set( UCAST_URL_STATE ) ) {
-      if ( ! u_rte.is_set( UCAST_URL_SRC_STATE ) ) {
-        n.printf( "inbox has no url\n" );
-        uint32_t tmp_cost;
-        UserBridge *m = this->closest_peer_route( u_rte.rte, n, tmp_cost );
-        if ( m != NULL ) {
-          UserRoute *u_peer = m->user_route_ptr( *this, u_rte.rte.tport_id );
-          if ( u_peer->is_valid() &&
-               u_peer->is_set( UCAST_URL_STATE | UCAST_URL_SRC_STATE ) ) {
-            u_rte.mcast_fd = u_peer->mcast_fd;
-            u_rte.inbox_fd = u_peer->inbox_fd;
-            u_rte.hops     = 1;
-            if ( u_peer->is_set( UCAST_URL_STATE ) )
-              this->set_ucast_url( u_rte, u_peer, "fwd" );
-            else
-              this->set_ucast_url( u_rte, u_peer->ucast_src, "fwd2" );
-            n.printf( "inbox has routing through %s\n", m->peer.user.val );
-            this->push_user_route( n, u_rte );
-          }
+    if ( u_rte.rte.is_mcast() &&
+         u_rte.is_set( UCAST_URL_STATE | UCAST_URL_SRC_STATE ) == 0 ) {
+      n.printf( "inbox has no url\n" );
+      uint32_t tmp_cost;
+      UserBridge *m = this->closest_peer_route( u_rte.rte, n, tmp_cost );
+      if ( m != NULL ) {
+        UserRoute *u_peer = m->user_route_ptr( *this, u_rte.rte.tport_id );
+        if ( u_peer->is_valid() &&
+             u_peer->is_set( UCAST_URL_STATE | UCAST_URL_SRC_STATE ) ) {
+          u_rte.mcast_fd = u_peer->mcast_fd;
+          u_rte.inbox_fd = u_peer->inbox_fd;
+          u_rte.hops     = 1;
+          if ( u_peer->is_set( UCAST_URL_STATE ) )
+            this->set_ucast_url( u_rte, u_peer, "fwd" );
+          else
+            this->set_ucast_url( u_rte, u_peer->ucast_src, "fwd2" );
+          n.printf( "inbox has routing through %s\n", m->peer.user.val );
+          this->push_user_route( n, u_rte );
         }
       }
     }
@@ -267,7 +267,7 @@ UserDB::forward_to( UserBridge &n,  const char *sub,
                    this->my_src_fd, h, CABA_TYPE_ID, 'p' );
     /*d_usr( "forwrd %.*s to (%s) inbox %u\n",
             (int) sublen, sub, n.peer.user.val, u_rte.inbox_fd );*/
-    return u_rte.rte.sub_route.forward_to( pub, u_rte.inbox_fd );
+    return u_rte.rte.sub_route.forward_to( pub, u_rte.inbox_fd, data );
   }
   if ( u_rte.is_set( UCAST_URL_SRC_STATE ) == 0 ) {
     InboxPublish ipub( sub, sublen, msg, msg_len, u_rte.rte.sub_route,
@@ -275,7 +275,7 @@ UserDB::forward_to( UserBridge &n,  const char *sub,
                        n.uid, u_rte.url_hash );
     /*d_usr( "forward %.*s to (%s) ucast( %s ) inbox %u\n",
        (int) sublen, sub, n.peer.user.val, u_rte.ucast_url, u_rte.inbox_fd );*/
-    return u_rte.rte.sub_route.forward_to( ipub, u_rte.inbox_fd );
+    return u_rte.rte.sub_route.forward_to( ipub, u_rte.inbox_fd, data );
   }
   const UserRoute  & u_src = *u_rte.ucast_src;
   const UserBridge & n_src = u_src.n;
@@ -284,7 +284,7 @@ UserDB::forward_to( UserBridge &n,  const char *sub,
                      n_src.uid, u_src.url_hash );
   /*d_usr( "forward %.*s to (%s) ucast( %s ) inbox %u\n",
        (int) sublen, sub, n.peer.user.val, u_src.ucast_url, u_src.inbox_fd );*/
-  return u_src.rte.sub_route.forward_to( isrc, u_src.inbox_fd );
+  return u_src.rte.sub_route.forward_to( isrc, u_src.inbox_fd, data );
 }
 
 bool

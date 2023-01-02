@@ -123,7 +123,7 @@ The "parameters:" structure is optional and not necessary to define them.
 | listen              | array    | none    | Startup listen transports
 | connect             | array    | none    | Startup connect transports
 | pub_window_size     | bytes    | 4 MB    | Size of publish window
-| sub_window_size     | bytes    | 4 MB    | Size of subscribe window
+| sub_window_size     | bytes    | 8 MB    | Size of subscribe window
 | pub_window_time     | time     | 10 secs | Time of publish window
 | sub_window_time     | time     | 10 secs | Time of subscribe window
 | heartbeat           | time     | 10 secs | Interval of heartbeat

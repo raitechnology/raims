@@ -486,7 +486,7 @@ struct TabOut {
     b.reuse();
   }
   TabPrint *make_row( void ) {
-    TabPrint *tab = this->table.make( this->table.count + this->ncols );
+    TabPrint *tab = this->table.make( this->table.count + this->ncols, true );
     this->table.count += this->ncols;
     return tab;
   }
@@ -654,6 +654,8 @@ struct Console : public md::MDOutput, public SubOnMsg, public ConfigPrinter {
                   uint8_t path_select ) noexcept;
   void show_path( ConsoleOutput *p,  uint8_t path_select ) noexcept;
   void show_fds( ConsoleOutput *p ) noexcept;
+  void show_buffers( ConsoleOutput *p ) noexcept;
+  void show_windows( ConsoleOutput *p ) noexcept;
   void show_blooms( ConsoleOutput *p,  uint8_t path_select ) noexcept;
   void show_running( ConsoleOutput *p,  int which,  const char *name,
                      size_t len ) noexcept;
@@ -732,38 +734,40 @@ enum ConsoleCmd {
   CMD_SHOW_TREE        = 27, /* show tree [U]              */
   CMD_SHOW_PATH        = 28, /* show path [N]              */
   CMD_SHOW_FDS         = 29, /* show fds                   */
-  CMD_SHOW_BLOOMS      = 30, /* show blooms [N]            */
-  CMD_SHOW_GRAPH       = 31, /* show graph                 */
-  CMD_SHOW_RUN         = 32, /* show running               */
-  CMD_SHOW_RUN_TPORTS  = 33, /* show running transport [T] */
-  CMD_SHOW_RUN_SVCS    = 34, /* show running service [S]   */
-  CMD_SHOW_RUN_USERS   = 35, /* show running user [U]      */
-  CMD_SHOW_RUN_GROUPS  = 36, /* show running group [G]     */
-  CMD_SHOW_RUN_PARAM   = 37, /* show running parameter [P] */
-  CMD_CONNECT          = 38, /* connect [T]                */
-  CMD_LISTEN           = 39, /* listen [T]                 */
-  CMD_SHUTDOWN         = 40, /* shutdown [T]               */
-  CMD_NETWORK          = 41, /* network svc network        */
-  CMD_CONFIGURE        = 42, /* configure                  */
-  CMD_CONFIGURE_TPORT  = 43, /* configure transport T      */
-  CMD_CONFIGURE_PARAM  = 44, /* configure parameter P V    */
-  CMD_SAVE             = 45, /* save                       */
-  CMD_SUB_START        = 46, /* sub subject [file]         */
-  CMD_SUB_STOP         = 47, /* unsub subject [file]       */
-  CMD_PSUB_START       = 48, /* psub rv-wildcard [file]    */
-  CMD_PSUB_STOP        = 49, /* punsub rv-wildcard [file]  */
-  CMD_GSUB_START       = 50, /* gsub glob-wildcard [file]  */
-  CMD_GSUB_STOP        = 51, /* gunsub glob-wildcard [file]*/
-  CMD_PUBLISH          = 52, /* pub subject msg            */
-  CMD_TRACE            = 53, /* trace subject msg          */
-  CMD_PUB_ACK          = 54, /* ack subject msg            */
-  CMD_RPC              = 55, /* rpc subject msg            */
-  CMD_ANY              = 56, /* any subject msg            */
-  CMD_DEBUG            = 58, /* debug ival                 */
-  CMD_CANCEL           = 59, /* cancel                     */
-  CMD_MUTE_LOG         = 60, /* mute                       */
-  CMD_UNMUTE_LOG       = 61, /* unmute                     */
-  CMD_QUIT             = 62, /* quit/exit                  */
+  CMD_SHOW_BUFFERS     = 30, /* show buffers               */
+  CMD_SHOW_WINDOWS     = 31, /* show windows               */
+  CMD_SHOW_BLOOMS      = 32, /* show blooms [N]            */
+  CMD_SHOW_GRAPH       = 33, /* show graph                 */
+  CMD_SHOW_RUN         = 34, /* show running               */
+  CMD_SHOW_RUN_TPORTS  = 35, /* show running transport [T] */
+  CMD_SHOW_RUN_SVCS    = 36, /* show running service [S]   */
+  CMD_SHOW_RUN_USERS   = 37, /* show running user [U]      */
+  CMD_SHOW_RUN_GROUPS  = 38, /* show running group [G]     */
+  CMD_SHOW_RUN_PARAM   = 39, /* show running parameter [P] */
+  CMD_CONNECT          = 40, /* connect [T]                */
+  CMD_LISTEN           = 41, /* listen [T]                 */
+  CMD_SHUTDOWN         = 42, /* shutdown [T]               */
+  CMD_NETWORK          = 43, /* network svc network        */
+  CMD_CONFIGURE        = 44, /* configure                  */
+  CMD_CONFIGURE_TPORT  = 45, /* configure transport T      */
+  CMD_CONFIGURE_PARAM  = 46, /* configure parameter P V    */
+  CMD_SAVE             = 47, /* save                       */
+  CMD_SUB_START        = 48, /* sub subject [file]         */
+  CMD_SUB_STOP         = 49, /* unsub subject [file]       */
+  CMD_PSUB_START       = 50, /* psub rv-wildcard [file]    */
+  CMD_PSUB_STOP        = 51, /* punsub rv-wildcard [file]  */
+  CMD_GSUB_START       = 52, /* gsub glob-wildcard [file]  */
+  CMD_GSUB_STOP        = 53, /* gunsub glob-wildcard [file]*/
+  CMD_PUBLISH          = 54, /* pub subject msg            */
+  CMD_TRACE            = 55, /* trace subject msg          */
+  CMD_PUB_ACK          = 56, /* ack subject msg            */
+  CMD_RPC              = 57, /* rpc subject msg            */
+  CMD_ANY              = 58, /* any subject msg            */
+  CMD_DEBUG            = 60, /* debug ival                 */
+  CMD_CANCEL           = 61, /* cancel                     */
+  CMD_MUTE_LOG         = 62, /* mute                       */
+  CMD_UNMUTE_LOG       = 63, /* unmute                     */
+  CMD_QUIT             = 64, /* quit/exit                  */
 
 #define CMD_TPORT_BASE ( (int) CMD_QUIT + 1 )
   CMD_TPORT_ENUM /* config_const.h */
@@ -892,6 +896,8 @@ static const ConsoleCmdString show_cmd[] = {
   { CMD_SHOW_TREE      , "tree"          ,0,0}, /* show tree */
   { CMD_SHOW_PATH      , "path"          ,0,0}, /* show path */
   { CMD_SHOW_FDS       , "fds"           ,0,0}, /* show fds */
+  { CMD_SHOW_BUFFERS   , "buffers"       ,0,0}, /* show buffers */
+  { CMD_SHOW_WINDOWS   , "windows"       ,0,0}, /* show windows */
   { CMD_SHOW_BLOOMS    , "blooms"        ,0,0}, /* show blooms */
   { CMD_SHOW_GRAPH     , "graph"         ,0,0}, /* show graph */
   { CMD_SHOW_RUN       , "running"       ,0,0}  /* show running */
@@ -945,7 +951,9 @@ static const ConsoleCmdString help_cmd[] = {
   { CMD_SHOW_REACHABLE   , "show reachable", "", "Show reachable peers through active tports"        },
   { CMD_SHOW_TREE        , "show tree", "[U]",   "Show multicast tree from me or U"                  },
   { CMD_SHOW_PATH        , "show path", "[P]",   "Show multicast path P (0->3)"                      },
-  { CMD_SHOW_FDS         , "show fds", "",       "Show fd centric routes"                            },
+  { CMD_SHOW_FDS         , "show fds", "",       "Show fd statistics"                                },
+  { CMD_SHOW_BUFFERS     , "show buffers", "",   "Show fd buffer mem usage"                          },
+  { CMD_SHOW_WINDOWS     , "show windows", "",   "Show pub and sub window mem usage"                 },
   { CMD_SHOW_BLOOMS      , "show blooms", "[P]", "Show bloom centric routes for path P (0-3)"        },
   { CMD_SHOW_GRAPH       , "show graph", "",     "Show network description for node graph"           },
   { CMD_SHOW_RUN         , "show running", "",   "Show current config running"                       },

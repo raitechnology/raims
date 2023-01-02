@@ -328,13 +328,19 @@ struct Pub {
 typedef kv::RouteVec<Pub> PubT;
 
 struct PubTab {
-  PubT pub1,
-       pub2,
-     * pub,
-     * pub_old;
+  PubT     pub1,
+           pub2,
+         * pub,
+         * pub_old;
+  uint64_t flip_time,
+           trailing_time;
+  size_t   max_size;
   PubTab() {
-    this->pub     = &this->pub1;
-    this->pub_old = &this->pub2;
+    this->pub           = &this->pub1;
+    this->pub_old       = &this->pub2;
+    this->flip_time     = 0;
+    this->trailing_time = 0;
+    this->max_size      = 0;
   }
   Pub *upsert( uint32_t h,  const char *sub,  uint16_t sublen,
                kv::RouteLoc &loc ) {
@@ -382,14 +388,18 @@ struct PubTab {
       p = this->pub_old->next( loc );
     return p;
   }
-
   /* limit size of pub sequences */
-  bool flip( size_t max_size ) {
+  bool flip( size_t win_size,  uint64_t cur_time ) {
     PubT * p = this->pub;
-    if ( p->vec_size * sizeof( PubT::VecData ) > max_size ) {
+    size_t sz = p->mem_size();
+    if ( sz > win_size ) {
+      if ( sz > this->max_size )
+        this->max_size = sz;
       this->pub_old->release();
-      this->pub = this->pub_old;
-      this->pub_old = p;
+      this->pub           = this->pub_old;
+      this->pub_old       = p;
+      this->trailing_time = this->flip_time;
+      this->flip_time     = cur_time;
       return true;
     }
     return false;
@@ -524,12 +534,18 @@ struct SeqnoTab {
          * tab_old;
   uint64_t flip_time,
            trailing_time;
+  size_t   seqno_ht_size,
+           old_ht_size,
+           max_size;
 
   SeqnoTab() {
     this->tab     = &this->tab1;
     this->tab_old = &this->tab2;
     this->flip_time     = 0;
     this->trailing_time = 0;
+    this->seqno_ht_size = 0;
+    this->old_ht_size   = 0;
+    this->max_size      = 0;
   }
   SubSeqno *upsert( uint32_t h,  const char *sub,  uint16_t sublen,
                     kv::RouteLoc &loc, kv::RouteLoc &loc2,
@@ -589,18 +605,25 @@ struct SeqnoTab {
       this->tab_old->remove( loc2 );
   }
   /* limit size of pub sequences */
-  bool flip( size_t max_size,  uint64_t cur_time ) {
+  bool flip( size_t win_size,  uint64_t cur_time ) {
     SeqnoT * p = this->tab;
-    if ( p->vec_size * sizeof( SeqnoT::VecData ) > max_size ) {
+    size_t sz = p->mem_size() + this->seqno_ht_size;
+    if ( sz > win_size ) {
+      if ( sz > this->max_size )
+        this->max_size = sz;
       kv::RouteLoc loc;
-      for ( SubSeqno *s = this->tab_old->first( loc ); s != NULL;
-            s = this->tab_old->next( loc ) )
-        s->release();
+      if ( this->old_ht_size > 0 ) {
+        for ( SubSeqno *s = this->tab_old->first( loc ); s != NULL;
+              s = this->tab_old->next( loc ) )
+          s->release();
+      }
       this->tab_old->release();
-      this->tab = this->tab_old;
-      this->tab_old = p;
+      this->tab           = this->tab_old;
+      this->old_ht_size   = this->seqno_ht_size;
+      this->seqno_ht_size = 0;
+      this->tab_old       = p;
       this->trailing_time = this->flip_time;
-      this->flip_time = cur_time;
+      this->flip_time     = cur_time;
       return true;
     }
     return false;

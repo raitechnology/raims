@@ -326,7 +326,7 @@ EvInboxTransport::dispatch_msg2( const void *msg,  size_t msg_len ) noexcept
     if ( len == 0 )
       return;
     int status = this->msg_in.unpack( &data[ off ], len );
-    if ( status != 0 || len == 0 )
+    if ( status != 0 )
       return;
     off += len;
 

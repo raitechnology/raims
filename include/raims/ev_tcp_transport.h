@@ -23,27 +23,37 @@ struct EvTcpTransportListen : public kv::EvTcpListen {
   /* EvListen */
   virtual EvSocket *accept( void ) noexcept;
   virtual int listen( const char *ip,  int port,  int opts ) noexcept;
-  virtual void release( void ) noexcept final;
-  virtual void process_close( void ) noexcept final;
+  virtual void release( void ) noexcept;
+  virtual void process_close( void ) noexcept;
 };
 
-struct EvTcpTransport : public AES_Connection {
+struct EvTcpTransport : public AES_Connection, public kv::BPData {
+  enum {
+    TCP_BACKPRESSURE = 1,
+    TCP_HAS_TIMER    = 2
+  };
   MsgFrameDecoder    msg_in;
   TransportRoute   * rte;
+  uint64_t           timer_id;
+  uint8_t            tcp_state;
   bool               fwd_all_msgs,   /* send publishes */
                      is_connect,
                      encrypt;
 
   EvTcpTransport( kv::EvPoll &p,  uint8_t t ) noexcept;
-  void start( void ) noexcept;
+  void start( uint64_t tid ) noexcept;
 
-  bool dispatch_msg( void ) noexcept;
+  enum { TCP_FLOW_GOOD = 0, TCP_FLOW_BACKPRESSURE = 1, TCP_FLOW_STALLED = 2 };
+  int dispatch_msg( void ) noexcept;
   bool fwd_msg( kv::EvPublish &pub ) noexcept;
 
-  virtual void process( void ) noexcept final; /* decode read buffer */
-  virtual void release( void ) noexcept final; /* after shutdown release mem */
-  virtual void process_close( void ) noexcept final;
+  virtual void process( void ) noexcept; /* decode read buffer */
+  virtual void release( void ) noexcept; /* after shutdown release mem */
+  virtual void process_close( void ) noexcept;
+  virtual void read( void ) noexcept;
   virtual bool on_msg( kv::EvPublish &pub ) noexcept; /* fwd to NATS network */
+  virtual bool timer_expire( uint64_t tid, uint64_t eid ) noexcept;
+  virtual void on_write_ready( void ) noexcept;
 };
 
 static const size_t MAX_TCP_HOST_LEN = 256,
@@ -123,7 +133,7 @@ struct EvTcpTransportClient : public EvTcpTransport {
     this->fwd_all_msgs = false;
   }
   bool connect( int opts, kv::EvConnectionNotify *n,
-                struct addrinfo *addr_list ) noexcept;
+                struct addrinfo *addr_list,  uint64_t timer_id ) noexcept;
 };
 
 struct EvTcpTransportService : public EvTcpTransport {

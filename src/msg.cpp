@@ -91,6 +91,8 @@ int
 CabaMsg::unpack2( uint8_t *bb,  size_t off,  size_t &end,  MDMsgMem *m,
                   CabaMsg *&msg ) noexcept
 {
+  if ( off + 48 > end )
+    return Err::BAD_BOUNDS;
   uint32_t len   = get_u32<MD_BIG>( &bb[ off ] ),
            hash  = get_u32<MD_BIG>( &bb[ off + 4 ] );
   uint16_t flags = len >> CABA_LENGTH_BITS;
@@ -102,8 +104,10 @@ CabaMsg::unpack2( uint8_t *bb,  size_t off,  size_t &end,  MDMsgMem *m,
   }
   if ( CabaFlags::get_ver( flags ) != CABA_MSG_VERSION )
     return Err::BAD_MAGIC_NUMBER;
-  if ( off + len + 8 > end )
+  if ( off + len + 8 > end ) {
+    end = off + len + 8;
     return Err::BAD_BOUNDS;
+  }
   end = off + len + 8;
 
   /* 0    4    8   10     26  28     44  46     48 */
@@ -206,22 +210,6 @@ CabaMsg::verify_sig( const HashDigest &key,  DSA &dsa ) const noexcept
 MsgFrameDecoder::MsgFrameDecoder()
 {
   this->init();
-}
-
-int
-MsgFrameDecoder::unpack( const void *msgbuf,  size_t &msglen ) noexcept
-{
-  int status;
-  this->release();
-  if ( (status = CabaMsg::unpack2( (uint8_t *) msgbuf, 0, msglen,
-                                   &this->mem, this->msg )) != 0 ) {
-    if ( status == Err::BAD_BOUNDS ) {
-      msglen = 0;
-      return 0;
-    }
-    return status;
-  }
-  return 0;
 }
 
 uint32_t

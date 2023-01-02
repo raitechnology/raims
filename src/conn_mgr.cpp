@@ -218,8 +218,8 @@ TransportRoute::on_shutdown( EvSocket &conn,  const char *err,
             err = errbuf;
         }
         if ( errlen > 0 ) {
-          this->printf( "%s %s (%.*s)\n", conn.kind, conn.peer_address.buf,
-                        (int) errlen, err );
+          this->printf( "%s %s (%.*s)\n",
+                        conn.kind, conn.peer_address.buf, (int) errlen, err );
         }
       }
     }
@@ -446,7 +446,7 @@ ConnectMgr::connect( ConnectCtx &ctx ) noexcept
   cl->route_id = rte->sub_route.route_id;
   cl->encrypt  = ( ( ctx.opts & TCP_OPT_ENCRYPT ) != 0 );
   ctx.client   = cl;
-  if ( cl->connect( ctx.opts, &ctx, ai ) )
+  if ( cl->connect( ctx.opts, &ctx, ai, ++this->next_timer ) )
     return true;
   ctx.client = NULL;
   rte->on_shutdown( *cl, NULL, 0 );

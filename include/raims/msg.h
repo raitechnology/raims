@@ -203,7 +203,11 @@ struct MsgFrameDecoder {
     this->init();
     this->mem.reuse();
   }
-  int unpack( const void *msgbuf,  size_t &msglen ) noexcept;
+  int unpack( const void *msgbuf,  size_t &msglen ) {
+    this->release();
+    return CabaMsg::unpack2( (uint8_t *) msgbuf, 0, msglen,
+                             &this->mem, this->msg );
+  }
   void print( void ) noexcept;
   static md::MDDict *build_msg_dict( void ) noexcept;
 };

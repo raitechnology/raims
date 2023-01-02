@@ -1948,6 +1948,8 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
     }
     case CMD_SHOW_PATH:      this->show_path( p, int_arg( arg, len ) ); break;
     case CMD_SHOW_FDS:       this->show_fds( p );       break;
+    case CMD_SHOW_BUFFERS:   this->show_buffers( p );   break;
+    case CMD_SHOW_WINDOWS:   this->show_windows( p );   break;
     case CMD_SHOW_BLOOMS:    this->show_blooms( p, int_arg( arg, len ) ); break;
     case CMD_SHOW_RUN:
       this->show_running( p, PRINT_NORMAL, arg, len ); break;
@@ -4566,8 +4568,8 @@ Console::show_fds( ConsoleOutput *p ) noexcept
   uint32_t     addr_len;
 
   for ( size_t fd = 0; fd <= poll.maxfd; fd++ ) {
-    if ( poll.sock[ fd ] != NULL ) {
-      EvSocket *s = poll.sock[ fd ];
+    EvSocket *s = poll.sock[ fd ];
+    if ( s != NULL ) {
       bool is_connection = ( s->sock_base == EV_CONNECTION_BASE );
       uint64_t sumb = s->bytes_sent + s->bytes_recv,
                summ = s->msgs_sent  + s->msgs_recv;
@@ -4628,6 +4630,146 @@ Console::show_fds( ConsoleOutput *p ) noexcept
   static const char *hdr[ ncols ] =
     { "fd", "rid", "bs", "br", "ms", "mr", "ac", "rq", "wq", "fl",
       "type", "kind", "name", "address" };
+  this->print_table( p, hdr, ncols );
+}
+
+void
+Console::show_buffers( ConsoleOutput *p ) noexcept
+{
+  static const uint32_t ncols = 9;
+  TabOut out( this->table, this->tmp, ncols );
+  EvPoll     & poll = this->mgr.poll;
+  const char * address;
+  uint32_t     addr_len;
+
+  for ( size_t fd = 0; fd <= poll.maxfd; fd++ ) {
+    EvSocket *s = poll.sock[ fd ];
+    if ( s != NULL && s->sock_base == EV_CONNECTION_BASE ) {
+      EvConnection & conn = *(EvConnection *) s;
+      uint64_t wused = 0, rused = 0,
+               wmax  = 0, rmax  = 0;
+      TabPrint * tab = out.add_row_p();
+      uint32_t   i = 0;
+      tab[ i++ ].set_int( (uint32_t) fd );
+      wused = conn.wr_used;
+      wmax  = conn.wr_max;
+      if ( wused < conn.SND_BUFSIZE )
+        wused = conn.SND_BUFSIZE;
+      rused = conn.recv_size;
+      rmax  = conn.recv_max;
+
+      tab[ i++ ].set_long( wused );
+      tab[ i++ ].set_long( wmax );
+      tab[ i++ ].set_long( rused );
+      tab[ i++ ].set_long( rmax );
+      tab[ i++ ].set( s->type_string() );
+      tab[ i++ ].set( s->kind );
+      tab[ i++ ].set( s->name );
+      address  = s->peer_address.buf;
+      addr_len = (uint32_t) get_strlen64( address );
+
+      bool has_ptp_link = false;
+      if ( ! this->user_db.route_list.is_empty( (uint32_t) fd ) ) {
+        UserRoute * u_ptr = this->user_db.route_list[ fd ].hd;
+        if ( ! u_ptr->rte.is_mcast() ) {
+          tab[ i++ ].set_url_dest( &u_ptr->n, NULL, address, addr_len,
+                                   PRINT_UADDR );
+          has_ptp_link = true;
+        }
+      }
+      if ( ! has_ptp_link )
+        tab[ i++ ].set( address, addr_len );
+    }
+  }
+
+  static const char *hdr[ ncols ] =
+    { "fd", "wr", "wmax", "rd", "rmax", "type", "kind", "name", "address" };
+  this->print_table( p, hdr, ncols );
+}
+
+static uint64_t mono_to_real( uint64_t ns,  uint64_t mono,  uint64_t real )
+{
+  if ( ns == 0 || mono > ns ) return 0;
+  return real - ( mono - ns );
+}
+
+void
+Console::show_windows( ConsoleOutput *p ) noexcept
+{
+  static const uint32_t ncols = 7;
+  TabOut out( this->table, this->tmp, ncols );
+  size_t count, size;
+  uint64_t last_time, min_ival, win_size, max_size = 0;
+  uint64_t cur_mono = current_monotonic_time_ns(),
+           cur_time = current_realtime_ns();
+  int k;
+
+  #define K( x, y ) ( ( k == 0 ) ? ( x ) : ( y ) )
+  SeqnoTab & seq = this->sub_db.seqno_tab;
+  for ( k = 0; k < 2; k++ ) {
+    count     = K( seq.tab, seq.tab_old)->pop_count();
+    size      = K( seq.tab->mem_size() + seq.seqno_ht_size,
+                   seq.tab_old->mem_size() + seq.old_ht_size );
+    last_time = mono_to_real( K( seq.flip_time, seq.trailing_time ),
+                              cur_mono, cur_time );
+    min_ival  = ns_to_sec( this->mgr.sub_window_ival );
+    win_size  = this->mgr.sub_window_size;
+    if ( size > seq.max_size ) seq.max_size = size;
+    max_size  = seq.max_size;
+
+    TabPrint * tab = out.add_row_p();
+    uint32_t   i   = 0;
+    tab[ i++ ].set( K( "sub", "sub_old" ) );
+    tab[ i++ ].set_long( count );
+    tab[ i++ ].set_long( size );
+    if ( k == 0 ) {
+      tab[ i++ ].set_long( win_size );
+      tab[ i++ ].set_long( max_size );
+    }
+    else {
+      tab[ i++ ].set_null();
+      tab[ i++ ].set_null();
+    }
+    tab[ i++ ].set_time( last_time );
+    if ( k == 0 )
+      tab[ i++ ].set_long( min_ival );
+    else
+      tab[ i++ ].set_null();
+  }
+
+  PubTab & pub = this->sub_db.pub_tab;
+  for ( k = 0; k < 2; k++ ) {
+    count     = K( pub.pub, pub.pub_old )->pop_count();
+    size      = K( pub.pub, pub.pub_old )->mem_size();
+    last_time = mono_to_real( K( pub.flip_time, pub.trailing_time ),
+                              cur_mono, cur_time );
+    min_ival  = ns_to_sec( this->mgr.pub_window_ival );
+    win_size  = this->mgr.pub_window_size;
+    if ( size > pub.max_size ) pub.max_size = size;
+    max_size  = pub.max_size;
+
+    TabPrint * tab = out.add_row_p();
+    uint32_t   i   = 0;
+    tab[ i++ ].set( K( "pub", "pub_old" ) );
+    tab[ i++ ].set_long( count );
+    tab[ i++ ].set_long( size );
+    if ( k == 0 ) {
+      tab[ i++ ].set_long( win_size );
+      tab[ i++ ].set_long( max_size );
+    }
+    else {
+      tab[ i++ ].set_null();
+      tab[ i++ ].set_null();
+    }
+    tab[ i++ ].set_time( last_time );
+    if ( k == 0 )
+      tab[ i++ ].set_long( min_ival );
+    else
+      tab[ i++ ].set_null();
+  }
+
+  static const char *hdr[ ncols ] =
+    { "tab", "count", "size", "win_size", "max_size","rotate_time", "interval" };
   this->print_table( p, hdr, ncols );
 }
 

@@ -158,7 +158,7 @@ struct WebListen;
 struct NameSvc;
 struct SessionMgr;
 
-struct IpcRoute : public kv::EvSocket {
+struct IpcRoute : public kv::EvSocket, public kv::BPData {
   SessionMgr & mgr;
   UserDB     & user_db;
   SubDB      & sub_db;
@@ -171,6 +171,12 @@ struct IpcRoute : public kv::EvSocket {
   virtual void read( void ) noexcept;
   virtual void process( void ) noexcept;
   virtual void release( void ) noexcept;
+  virtual void on_write_ready( void ) noexcept;
+  bool check_flow_control( bool b ) {
+    if ( ! b && this->bp_in_list() )
+      this->push( kv::EV_WRITE_POLL );
+    return b;
+  }
 };
 
 struct ConsoleRoute : public kv::EvSocket {
@@ -220,16 +226,16 @@ struct UnrouteableList : public kv::ArrayCount<Unrouteable, 4> {
   }
 };
 
-struct SessionMgr : public kv::EvSocket {
+struct SessionMgr : public kv::EvSocket, public kv::BPData {
   IpcRoute              ipc_rt;         /* network -> rv sub, ds sub, etc */
   ConsoleRoute          console_rt;     /* rv pub, ds pub -> console sub */
   ConfigTree          & tree;           /* config db */
   ConfigTree::User    & user;           /* my user */
   ConfigTree::Service & svc;            /* this transport */
   UScoreTab             u_tab;          /* table of _subscriptions */
-  uint32_t              next_timer,     /* session start gets a timer_id */
-                        timer_id;       /* timer_id for this session */
-  uint64_t              timer_mono_time,/* mono updated at timer expire */
+  uint64_t              next_timer,     /* session start gets a timer_id */
+                        timer_id,       /* timer_id for this session */
+                        timer_mono_time,/* mono updated at timer expire */
                         timer_time,     /* real updated at timer expire */
                         timer_converge_time, /* when publishers convege */
                         converge_seqno, /* zero seqno of converge */
@@ -302,12 +308,17 @@ struct SessionMgr : public kv::EvSocket {
   uint32_t add_wildcard_rte( const char *prefix, size_t pref_len,
                              PublishType type ) noexcept;
   void fork_daemon( int err_fd ) noexcept;
-  bool loop( void ) noexcept;
+  bool loop( int &idle ) noexcept;
   void start( void ) noexcept;
   void name_hb( uint64_t cur_mono ) noexcept;
   void stop( void ) noexcept;
   bool is_running( void ) {
     return this->timer_id != 0;
+  }
+  bool check_flow_control( bool b ) {
+    if ( ! b && this->bp_in_list() )
+      this->push( kv::EV_WRITE_POLL );
+    return b;
   }
   /* EvSocket */
   virtual bool on_msg( kv::EvPublish &pub ) noexcept;
@@ -316,6 +327,7 @@ struct SessionMgr : public kv::EvSocket {
   virtual void read( void ) noexcept;
   virtual void process( void ) noexcept;
   virtual void release( void ) noexcept;
+  virtual void on_write_ready( void ) noexcept;
   MsgFrameStatus parse_msg_hdr( MsgFramePublish &fpub,  bool is_ipc ) noexcept;
   void ignore_msg( const MsgFramePublish &fpub ) noexcept;
   void show_debug_msg( const MsgFramePublish &fpub,
@@ -333,7 +345,7 @@ struct SessionMgr : public kv::EvSocket {
   bool publish_to( PubPtpData &ptp ) noexcept;
   void send_ack( const MsgFramePublish &pub,  UserBridge &,
                  const MsgHdrDecoder &dec,  const char *suf ) noexcept;
-  bool forward_inbox( kv::EvPublish &pub ) noexcept;
+  bool forward_inbox( TransportRoute &src_rte,  kv::EvPublish &pub ) noexcept;
   bool forward_ipc( TransportRoute &src_rte, kv::EvPublish &mc ) noexcept;
   bool listen_start_noencrypt( ConfigTree::Transport &tport,
                                kv::EvTcpListen *l, const char *k ) noexcept;

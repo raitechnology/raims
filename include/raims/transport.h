@@ -92,9 +92,11 @@ struct ConnectDB {
 struct ConnectMgr : public ConnectDB {
   SessionMgr & mgr;
   UserDB     & user_db;
+  uint64_t     next_timer;
 
   ConnectMgr( SessionMgr &m,  UserDB &u,  kv::EvPoll &p,  uint8_t st )
-    : ConnectDB( p, st ), mgr( m ), user_db( u ) {}
+    : ConnectDB( p, st ), mgr( m ), user_db( u ),
+      next_timer( (uint64_t) st << 56 ) {}
   virtual bool connect( ConnectCtx &ctx ) noexcept;
   virtual void on_connect( ConnectCtx &ctx ) noexcept;
   virtual bool on_shutdown( ConnectCtx &ctx,  const char *msg,
@@ -114,7 +116,8 @@ enum TransportRouteState {
   TPORT_IS_IPC        = 64,  /* is ipc route */
   TPORT_IS_SHUTDOWN   = 128, /* not running, disconnect or shutdown */
   TPORT_IS_DEVICE     = 256, /* uses name + dev multicast */
-  TPORT_IS_INPROGRESS = 512  /* connect in progress */
+  TPORT_IS_INPROGRESS = 512, /* connect in progress */
+  TPORT_HAS_TIMER     = 1024
 };
 
 enum RvOptions {
@@ -165,7 +168,7 @@ struct IpcRteList : public kv::RouteNotify {
 };
 
 struct TransportRoute : public kv::EvSocket, public kv::EvConnectionNotify,
-                        public StateTest<TransportRoute> {
+                        public kv::BPData, public StateTest<TransportRoute> {
   kv::EvPoll            & poll;           /* event poller */
   SessionMgr            & mgr;            /* session of transport */
   UserDB                & user_db;        /* session of transport */
@@ -183,7 +186,8 @@ struct TransportRoute : public kv::EvSocket, public kv::EvConnectionNotify,
   uint64_t                hb_time,        /* last hb time usecs */
                           hb_mono_time,   /* last hb time monotonic usecs */
                           hb_seqno,       /* last hb seqno */
-                          stats_seqno;
+                          stats_seqno,
+                          timer_id;
   StageAuth               auth[ 3 ];      /* history of last 3 hb */
   uint32_t                tport_id,       /* index in transport_tab[] */
                           hb_count,       /* count of new hb recvd */
@@ -237,12 +241,19 @@ struct TransportRoute : public kv::EvSocket, public kv::EvConnectionNotify,
   const char * connected_names( char *buf,  size_t buflen ) noexcept;
   const char * reachable_names( char *buf,  size_t buflen ) noexcept;
   size_t port_status( char *buf, size_t buflen ) noexcept;
+  bool check_flow_control( bool b ) {
+    if ( ! b && this->bp_in_list() )
+      this->push( kv::EV_WRITE_POLL );
+    return b;
+  }
   /* EvSocket */
   virtual void write( void ) noexcept;
   virtual void read( void ) noexcept;
   virtual void process( void ) noexcept;
   virtual void release( void ) noexcept;
   virtual bool on_msg( kv::EvPublish &pub ) noexcept;
+  /*virtual bool timer_expire( uint64_t tid, uint64_t eid ) noexcept;*/
+  virtual void on_write_ready( void ) noexcept;
 
   static void make_url_from_sock( StringTab &string_tab,  StringVal &url,
                                   EvSocket &sock, const char *proto ) noexcept;
@@ -275,13 +286,14 @@ struct TransportRoute : public kv::EvSocket, public kv::EvConnectionNotify,
   bool create_pgm( int kind,  ConfigTree::Transport &tport ) noexcept;
 
   bool forward_to_connected( kv::EvPublish &pub ) {
-    return this->sub_route.forward_set( pub, this->connected );
+    return this->sub_route.forward_set_no_route( pub, this->connected );
   }
   bool forward_to_connected_auth( kv::EvPublish &pub ) {
-    return this->sub_route.forward_set( pub, this->connected_auth );
+    return this->sub_route.forward_set_no_route( pub, this->connected_auth );
   }
   bool forward_to_connected_auth_not_fd( kv::EvPublish &pub,  uint32_t fd ) {
-    return this->sub_route.forward_set_not_fd( pub, this->connected_auth, fd );
+    return this->sub_route.forward_set_no_route_not_fd( pub,
+                                                     this->connected_auth, fd );
   }
   uint32_t shutdown( ConfigTree::Transport &t ) noexcept;
   bool start_listener( kv::EvTcpListen *l,

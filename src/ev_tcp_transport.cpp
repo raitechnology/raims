@@ -107,6 +107,7 @@ EvTcpTransportParameters::parse_tport( ConfigTree::Transport &tport,
 
 EvTcpTransport::EvTcpTransport( EvPoll &p,  uint8_t t ) noexcept
   : AES_Connection( p, t ), rte( 0 ), /*tport_count( 0 ), not_fd2( 0 ),*/
+    timer_id( 0 ), tcp_state( 0 ),
     fwd_all_msgs( false ), is_connect( false ), encrypt( true )
 {
 }
@@ -142,7 +143,7 @@ EvTcpTransportListen::accept( void ) noexcept
   c->encrypt = this->encrypt;
   if ( ! this->accept2( *c, "tcp_accept" ) )
     return NULL;
-  c->start();
+  c->start( ++this->timer_id );
   return c;
 }
 
@@ -182,7 +183,8 @@ EvTcpTransportClient::connect( EvTcpTransportParameters &p,
 #endif
 bool
 EvTcpTransportClient::connect( int opts,  EvConnectionNotify *n,
-                               struct addrinfo *addr_list ) noexcept
+                               struct addrinfo *addr_list,
+                               uint64_t timer_id ) noexcept
 {
   if ( this->fd != -1 )
     return false;
@@ -191,18 +193,20 @@ EvTcpTransportClient::connect( int opts,  EvConnectionNotify *n,
                                   this->rte->sub_route.route_id ) != 0 )
     return false;
   this->notify = n;
-  this->start();
+  this->start( timer_id );
   return true;
 }
 
 void
-EvTcpTransport::start( void ) noexcept
+EvTcpTransport::start( uint64_t tid ) noexcept
 {
   const char * name;
   if ( this->is_connect )
     name = "tcp_conn";
   else
     name = "tcp_acc";
+  this->timer_id = tid;
+  this->tcp_state = 0;
   this->rte->set_peer_name( *this, name );
 
   if ( this->encrypt && ! no_tcp_aes ) {
@@ -226,38 +230,51 @@ EvTcpTransport::process( void ) noexcept
 {
   size_t  buflen;
   int32_t status = 0;
-  do {
+  int     flow;
+
+  while ( this->off < this->len ) {
     buflen = this->len - this->off;
-    if ( buflen > 0 ) {
-      const char * buf = &this->recv[ off ];
-      status = this->msg_in.unpack( buf, buflen );
-      if ( status != 0 ) {
+    const char * buf = &this->recv[ off ];
+    status = this->msg_in.unpack( buf, buflen );
+    if ( status != 0 ) {
+      if ( status == Err::BAD_BOUNDS )
+        this->recv_need( buflen );
+      else {
         MDOutput mout;
         printf( "tcp msg_in status %d buflen %u\n", status, (uint32_t) buflen );
         mout.print_hex( buf, buflen > 256 ? 256 : buflen );
+        this->push( EV_CLOSE );
       }
-      this->off += (uint32_t) buflen;
-      if ( buflen > 0 && this->msg_in.msg != NULL ) {
-        /* if backpressure, push messages to write side */
-        if ( ! this->dispatch_msg() ) {
-          if ( this->pending() > 0 )
-            this->push( EV_WRITE_HI );
-          if ( this->test( EV_READ ) )
-            this->pushpop( EV_READ_LO, EV_READ );
-          /* EV_PROCESS is still set, so will return after writing others */
-          return;
-        }
-      }
+      break;
     }
-  } while ( status == 0 && buflen > 0 );
-  this->pop( EV_PROCESS );
-  this->push_write();
-  if ( status != 0 ) {
-    this->push( EV_CLOSE );
+    this->off += (uint32_t) buflen;
+    flow = this->dispatch_msg();
+    if ( flow == TCP_FLOW_GOOD )
+      this->tcp_state &= ~TCP_BACKPRESSURE;
+    else {
+      this->tcp_state |= TCP_BACKPRESSURE;
+      if ( flow == TCP_FLOW_STALLED ) {
+        this->off -= buflen;
+        this->pop( EV_PROCESS );
+        this->pop3( EV_READ, EV_READ_LO, EV_READ_HI );
+      }
+      if ( ! this->push_write_high() )
+        this->StreamBuf::reset();
+      return;
+    }
   }
+  this->pop( EV_PROCESS );
+  if ( ! this->push_write() )
+    this->StreamBuf::reset(); 
+#if 0
+  if ( ( this->tcp_state & TCP_HAS_TIMER ) == 0 ) {
+    this->poll.timer.add_timer_micros( this->fd, 100, this->timer_id, 0 );
+    this->tcp_state |= TCP_HAS_TIMER;
+  }
+#endif
 }
 
-bool
+int
 EvTcpTransport::dispatch_msg( void ) noexcept
 {
   const char * sub    = this->msg_in.msg->sub;
@@ -269,7 +286,44 @@ EvTcpTransport::dispatch_msg( void ) noexcept
   d_tcp( "< ev_tcp(%s) dispatch %.*s (%lu)\n", this->rte->name,
          (int) pub.subject_len, pub.subject, this->msgs_recv + 1 );
   this->msgs_recv++;
-  return this->rte->sub_route.forward_not_fd( pub, this->fd );
+  BPData * data = NULL;
+  if ( ( this->tcp_state & TCP_BACKPRESSURE ) != 0 ) {
+    data = this;
+    this->bp_flags = ( this->bp_flags & ~BP_FORWARD ) | BP_NOTIFY;
+  }
+  if ( this->rte->sub_route.forward_not_fd( pub, this->fd, data ) )
+    return TCP_FLOW_GOOD;
+  if ( ! this->bp_in_list() )
+    return TCP_FLOW_BACKPRESSURE;
+  return TCP_FLOW_STALLED;
+}
+
+bool
+EvTcpTransport::timer_expire( uint64_t tid, uint64_t ) noexcept
+{
+  if ( tid == this->timer_id ) {
+    this->tcp_state &= ~TCP_HAS_TIMER;
+    this->push( EV_PROCESS );
+    this->idle_push( EV_READ_LO );
+  }
+  return false;
+}
+
+void
+EvTcpTransport::on_write_ready( void ) noexcept
+{
+  this->push( EV_PROCESS );
+  this->idle_push( EV_READ_LO );
+}
+
+void
+EvTcpTransport::read( void ) noexcept
+{
+  if ( ! this->bp_in_list() ) {
+    this->AES_Connection::read();
+    return;
+  }
+  this->pop3( EV_READ, EV_READ_HI, EV_READ_LO );
 }
 
 void
@@ -280,11 +334,15 @@ EvTcpTransport::release( void ) noexcept
     this->rte->sub_route.del_pattern_route( h, this->fd, 0 );
   }
   this->msg_in.release();
+  if ( ( this->tcp_state & TCP_HAS_TIMER ) != 0 )
+    this->poll.timer.remove_timer( this->fd, this->timer_id, 0 );
+  if ( this->bp_in_list() )
+    this->bp_retire( *this );
   if ( this->encrypt )
     this->AES_Connection::release_aes();
-  this->EvConnection::release_buffers();
   if ( this->notify != NULL )
     this->notify->on_shutdown( *this, NULL, 0 );
+  this->EvConnection::release_buffers();
 }
 
 void

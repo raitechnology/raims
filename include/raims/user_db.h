@@ -540,20 +540,22 @@ struct UserDB {
   /* inbox forwarding */
   bool forward_to( UserBridge &n,  const char *sub,
                    size_t sublen,  uint32_t h,  const void *msg,
-                   size_t msg_len,  UserRoute &u_rte ) noexcept;
+                   size_t msg_len,  UserRoute &u_rte,
+                   kv::BPData *data = NULL ) noexcept;
   bool forward_to_inbox( UserBridge &n,  const char *sub,
                          size_t sublen,  uint32_t h,  const void *msg,
-                         size_t msg_len ) {
+                         size_t msg_len,  kv::BPData *data = NULL ) {
     return this->forward_to( n, sub, sublen, h, msg, msg_len,
-                             *n.primary( *this ) );
+                             *n.primary( *this ), data );
   }
   bool forward_to_inbox( UserBridge &n,  const InboxBuf &ibx,  uint32_t h,
-                         const void *msg,  size_t msg_len,  bool primary ) {
+                         const void *msg,  size_t msg_len,  bool primary,
+                         kv::BPData *data = NULL ) {
     if ( primary )
       return this->forward_to( n, ibx.buf, ibx.len(), h, msg, msg_len,
-                               *n.primary( *this ) );
+                               *n.primary( *this ), data );
     return this->forward_to( n, ibx.buf, ibx.len(), h, msg, msg_len,
-                             *n.user_route );
+                             *n.user_route, data );
   }
 
   PeerEntry *make_peer( const StringVal &user, const StringVal &svc,

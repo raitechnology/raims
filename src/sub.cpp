@@ -738,9 +738,18 @@ SubDB::match_seqno( SeqnoArgs &ctx ) noexcept
     ctx.cb          = seq->on_data;
     ctx.tport_mask  = seq->tport_mask;
   }
-  if ( seq->last_uid != uid &&
-       seq->restore_uid( uid, seqno, time, ctx.stamp ) == SEQNO_UID_FIRST )
-    return SEQNO_UID_FIRST;
+  if ( seq->last_uid != uid ) {
+    size_t sz = 0,
+           newsz;
+    if ( seq->seqno_ht != NULL )
+      sz = seq->seqno_ht->mem_size();
+    SeqnoStatus status = seq->restore_uid( uid, seqno, time, ctx.stamp );
+    newsz = seq->seqno_ht->mem_size();
+    this->seqno_tab.seqno_ht_size =
+      ( this->seqno_tab.seqno_ht_size - sz ) + newsz;
+    if ( status == SEQNO_UID_FIRST )
+      return SEQNO_UID_FIRST;
+  }
 
   const bool     new_sub    = ( ctx.start_seqno != old_start_seqno );
   const uint64_t last_seqno = seq->last_seqno;

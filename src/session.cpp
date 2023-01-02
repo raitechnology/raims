@@ -32,6 +32,15 @@ IpcRoute::IpcRoute( EvPoll &p,  SessionMgr &m ) noexcept
         : EvSocket( p, p.register_type( "ipc_route" ) ),
           mgr( m ), user_db( m.user_db ), sub_db( m.sub_db ) {
   this->sock_opts = OPT_NO_POLL;
+  this->bp_flags  = BP_FORWARD | BP_NOTIFY;
+}
+
+void
+IpcRoute::on_write_ready( void ) noexcept
+{
+  this->pop( EV_WRITE_POLL );
+  if ( ! this->wait_empty() )
+    this->notify_ready();
 }
 
 ConsoleRoute::ConsoleRoute( EvPoll &p,  SessionMgr &m ) noexcept
@@ -45,7 +54,7 @@ SessionMgr::SessionMgr( EvPoll &p,  Logger &l,  ConfigTree &c,
                         StringTab &st ) noexcept
            : EvSocket( p, p.register_type( "session_mgr" ) ),
              ipc_rt( p, *this ), console_rt( p, *this ),
-             tree( c ), user( u ), svc( s ), next_timer( 1 ), timer_id( 0 ),
+             tree( c ), user( u ), svc( s ), timer_id( 0 ),
              timer_mono_time( 0 ), timer_time( 0 ),
              timer_converge_time( 0 ), converge_seqno( 0 ),
              timer_start_mono( 0 ), timer_start( 0 ), timer_ival( 0 ),
@@ -57,13 +66,15 @@ SessionMgr::SessionMgr( EvPoll &p,  Logger &l,  ConfigTree &c,
              pub_window_mono_time( 0 ), sub_window_mono_time( 0 ),
              name_svc_mono_time( 0 ),
              pub_window_size( 4 * 1024 * 1024 ),
-             sub_window_size( 4 * 1024 * 1024 ),
+             sub_window_size( 8 * 1024 * 1024 ),
              pub_window_ival( sec_to_ns( 10 ) ),
              sub_window_ival( sec_to_ns( 10 ) ),
              tcp_timeout( 10 ), tcp_noencrypt( false ), tcp_ipv4( true ),
              tcp_ipv6( true ), session_started( false )
 {
   this->sock_opts = OPT_NO_POLL;
+  this->bp_flags  = BP_FORWARD | BP_NOTIFY;
+  this->next_timer = (uint64_t) this->sock_type << 56;
   this->tcp_accept_sock_type = p.register_type( "ev_tcp_tport" );
   this->tcp_connect_sock_type = p.register_type( "ev_tcp_tport_client" );
   hello_h = kv_crc_c( X_HELLO, X_HELLO_SZ, 0 );
@@ -86,6 +97,14 @@ SessionMgr::SessionMgr( EvPoll &p,  Logger &l,  ConfigTree &c,
 
   md_init_auto_unpack();
   CabaMsg::init_auto_unpack();
+}
+
+void
+SessionMgr::on_write_ready( void ) noexcept
+{
+  this->pop( EV_WRITE_POLL );
+  if ( ! this->wait_empty() )
+    this->notify_ready();
 }
 
 bool
@@ -126,6 +145,7 @@ SessionMgr::init_param( void ) noexcept
   if ( this->tree.find_parameter( s = P_TCP_WRITE_TIMEOUT, val, NULL ) ) {
     if ( ! ConfigTree::string_to_nanos( val, time_val ) ) goto fail;
     this->poll.wr_timeout_ns = time_val;
+    this->poll.so_keepalive_ns = time_val;
   }
   if ( this->tree.find_parameter( s = P_TCP_WRITE_HIGHWATER, val, NULL ) ) {
     if ( ! ConfigTree::string_to_bytes( val, bytes_val ) ) goto fail;
@@ -461,18 +481,20 @@ SessionMgr::timer_expire( uint64_t tid,  uint64_t ) noexcept
   this->console.on_log( this->log );
 
   if ( cur_mono > this->pub_window_mono_time ) {
-    if ( this->sub_db.pub_tab.flip( this->pub_window_size ) ) {
+    if ( this->sub_db.pub_tab.flip( this->pub_window_size, cur_time ) ) {
       this->pub_window_mono_time = cur_mono + this->pub_window_ival;
-      printf( "pub_tab flipped, count %lu\n",
-              this->sub_db.pub_tab.pub_old->pop_count());
+      printf( "pub_tab rotated, count %lu size %lu\n",
+              this->sub_db.pub_tab.pub_old->pop_count(),
+              this->sub_db.pub_tab.pub_old->mem_size() );
     }
   }
 
   if ( cur_mono > this->sub_window_mono_time ) {
     if ( this->sub_db.seqno_tab.flip( this->sub_window_size, cur_time ) ) {
       this->sub_window_mono_time = cur_mono + this->sub_window_ival;
-      printf( "seqno_tab flipped, count %lu\n",
-              this->sub_db.seqno_tab.tab_old->pop_count());
+      printf( "sub_tab rotated, count %lu size %lu\n",
+              this->sub_db.seqno_tab.tab_old->pop_count(),
+              this->sub_db.seqno_tab.tab_old->mem_size() );
     }
   }
   this->sub_db.any_tab.gc();
@@ -788,7 +810,7 @@ IpcRoute::on_msg( EvPublish &pub ) noexcept
                          data, datalen, rte->sub_route, this->fd,
                          fpub.subj_hash, fmt, 'p', seq.msg_loss,
                          n.bridge_nonce_int, dec.seqno );
-          b &= rte->sub_route.forward_except( pub, this->mgr.router_set );
+          b &= rte->sub_route.forward_except( pub, this->mgr.router_set, this );
         }
       }
     }
@@ -801,10 +823,11 @@ IpcRoute::on_msg( EvPublish &pub ) noexcept
                        data, datalen, rte->sub_route, this->fd,
                        fpub.subj_hash, fmt, 'p', seq.msg_loss,
                        n.bridge_nonce_int, dec.seqno );
-        b &= rte->sub_route.forward_except( pub, this->mgr.router_set );
+        b &= rte->sub_route.forward_except( pub, this->mgr.router_set, this );
       }
     }
   }
+  this->check_flow_control( b );
   if ( seq.cb != NULL ) {
     fpub.flags |= MSG_FRAME_IPC_CONTROL;
     SubMsgData val( fpub, &n, data, datalen );
@@ -943,10 +966,10 @@ IpcRoute::on_inbox( const MsgFramePublish &fpub,  UserBridge &n,
       EvPublish pub( subject, subjlen, reply, replylen,
                      data, datalen, rte->sub_route, this->fd, h, fmt, 'p',
                      0, n.bridge_nonce_int, dec.seqno );
-      b &= rte->sub_route.forward_except( pub, this->mgr.router_set );
+      b &= rte->sub_route.forward_except( pub, this->mgr.router_set,&this->mgr);
     }
   }
-  return true;
+  return this->mgr.check_flow_control( b );
 }
 /* system subjects from peers to maintain the network */
 bool
@@ -1418,7 +1441,7 @@ SessionMgr::publish( PubMcastData &mc ) noexcept
 }
 /* find a peer target for an _INBOX endpoint, and send it direct to the peer */
 bool
-SessionMgr::forward_inbox( EvPublish &fwd ) noexcept
+SessionMgr::forward_inbox( TransportRoute &src_rte,  EvPublish &fwd ) noexcept
 {
   AnyMatch * any = this->sub_db.any_match( fwd.subject, fwd.subject_len,
                                            fwd.subj_hash );
@@ -1428,6 +1451,7 @@ SessionMgr::forward_inbox( EvPublish &fwd ) noexcept
   }
   BitSetT<uint64_t> set( any->bits() );
   uint32_t uid, cnt = 0;
+  bool b = true;
 
   set.first( uid, any->max_uid );
   for (;;) {
@@ -1468,12 +1492,13 @@ SessionMgr::forward_inbox( EvPublish &fwd ) noexcept
 
     m.sign( ibx.buf, ibx.len(), *this->user_db.session_key );
     d_sess( "forward inbox %.*s\n", (int) fwd.subject_len, fwd.subject );
-    this->user_db.forward_to_inbox( *n, ibx, h, m.msg, m.len(), true );
+    b &= this->user_db.forward_to_inbox( *n, ibx, h, m.msg, m.len(), true,
+                                         &src_rte );
     if ( ++cnt == any->set_count )
       break;
     set.next( uid, any->max_uid );
   }
-  return true;
+  return src_rte.check_flow_control( b );
 }
 /* match _INBOX and _7500._INBOX, these are inbox endpoints */
 static bool
@@ -1508,7 +1533,7 @@ SessionMgr::forward_ipc( TransportRoute &src_rte,  EvPublish &pub ) noexcept
                                             pub.subject_len, loc );
   if ( p == NULL ) {
     if ( is_ipc_inbox( pub.subject, pub.subject_len ) )
-      return this->forward_inbox( pub );
+      return this->forward_inbox( src_rte, pub );
     p = this->sub_db.pub_tab.upsert( pub.subj_hash, pub.subject,
                                      pub.subject_len, loc );
     if ( p == NULL ) {
@@ -1572,7 +1597,7 @@ SessionMgr::forward_ipc( TransportRoute &src_rte,  EvPublish &pub ) noexcept
                        CABA_TYPE_ID, 'p' );
         evp.shard = path_select;
 
-        b &= rte->sub_route.forward_except( evp, this->router_set );
+        b &= rte->sub_route.forward_except( evp, this->router_set, &src_rte );
       }
     } while ( forward.next( tport_id ) );
   }
@@ -1582,10 +1607,10 @@ SessionMgr::forward_ipc( TransportRoute &src_rte,  EvPublish &pub ) noexcept
                      pub.msg, pub.msg_len,
                      rte->sub_route, this->fd, pub.subj_hash, 
                      pub.msg_enc, 'p' );
-      b &= rte->sub_route.forward_except( evp, this->router_set );
+      b &= rte->sub_route.forward_except( evp, this->router_set, &src_rte );
     }
   }
-  return b;
+  return src_rte.check_flow_control( b );
 }
 /* forward a message to any peer, chosen randomly */
 bool
@@ -1702,13 +1727,18 @@ SessionMgr::send_ack( const MsgFramePublish &pub,  UserBridge &n,
 }
 /* event loop */
 bool
-SessionMgr::loop( void ) noexcept
+SessionMgr::loop( int &idle ) noexcept
 {
-  int status;
+  int status, idle_count = idle;
   if ( this->poll.quit >= 5 )
     return false;
-  if ( (status = this->poll.dispatch()) == EvPoll::DISPATCH_IDLE )
-    this->poll.wait( 100 );
+  if ( (status = this->poll.dispatch()) == EvPoll::DISPATCH_IDLE ) {
+    idle_count++;
+    this->poll.wait( idle_count > 1024 ? 100 : 0 );
+  }
+  else {
+    idle_count = 0;
+  }
   if ( ( status & EvPoll::POLL_NEEDED ) != 0 ) {
     this->poll.wait( 0 );
     status = this->poll.dispatch();
@@ -1720,6 +1750,7 @@ SessionMgr::loop( void ) noexcept
         break;
     }
   }
+  idle = idle_count;
   return true;
 }
 

@@ -184,8 +184,8 @@ struct MsgBufDigestT : public BMsgBufT<T> {
     if ( sz <= CABA_LENGTH_MASK )
       sz |= fl; /* <flags><length> */
     else {
-      sz  = fl; /* length bits == 0 */
       h   = sz; /* size too big, use the hash field */
+      sz  = fl; /* length bits == 0 */
     }
     this->hdr[ 0 ] = kv_bswap32( sz );
     this->hdr[ 1 ] = kv_bswap32( h );
