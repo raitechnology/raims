@@ -21,6 +21,8 @@
 #include <linecook/linecook.h>
 #include <linecook/ttycook.h>
 #include <raimd/json_msg.h>
+#include <sassrv/ev_rv.h>
+#include <natsmd/ev_nats.h>
 
 namespace rai {
 namespace sassrv {
@@ -4694,7 +4696,7 @@ Console::show_windows( ConsoleOutput *p ) noexcept
   TabOut out( this->table, this->tmp, ncols );
   size_t count, size;
   uint64_t last_time, min_ival, win_size, max_size = 0;
-  int k;
+  uint32_t i, k;
 
   #define K( x, y ) ( ( k == 0 ) ? ( x ) : ( y ) )
   SeqnoTab & seq = this->sub_db.seqno_tab;
@@ -4709,7 +4711,7 @@ Console::show_windows( ConsoleOutput *p ) noexcept
     max_size  = seq.max_size;
 
     TabPrint * tab = out.add_row_p();
-    uint32_t   i   = 0;
+    i = 0;
     tab[ i++ ].set( K( "sub", "sub_old" ) );
     tab[ i++ ].set_long( count );
     tab[ i++ ].set_long( size );
@@ -4739,7 +4741,7 @@ Console::show_windows( ConsoleOutput *p ) noexcept
     max_size  = pub.max_size;
 
     TabPrint * tab = out.add_row_p();
-    uint32_t   i   = 0;
+    i = 0;
     tab[ i++ ].set( K( "pub", "pub_old" ) );
     tab[ i++ ].set_long( count );
     tab[ i++ ].set_long( size );
@@ -4756,6 +4758,113 @@ Console::show_windows( ConsoleOutput *p ) noexcept
       tab[ i++ ].set_long( min_ival );
     else
       tab[ i++ ].set_null();
+  }
+  #undef K
+
+  AnyMatchTab & any = this->sub_db.any_tab;
+  count     = any.ht->elem_count;
+  size      = any.max_off * 8 + any.ht->mem_size();
+  last_time = any.gc_time;
+
+  out.add_row()
+     .set( "inbox" )
+     .set_long( count )
+     .set_long( size )
+     .set_null()
+     .set_null()
+     .set_time( last_time )
+     .set_null();
+
+  RoutePDB & rdb = this->mgr.poll.sub_route;
+  count = 0;
+  size  = 0;
+  for ( i = 0; i < MAX_RTE; i++ ) {
+    count += rdb.rt_hash[ i ]->elem_count;
+    size  += rdb.rt_hash[ i ]->mem_size();
+  }
+  size += rdb.zip.code_buf.size * sizeof( rdb.zip.code_buf.ptr[ 0 ] ) +
+          rdb.cache.spc.size * sizeof( rdb.cache.spc.ptr[ 0 ] );
+  RouteLoc pos;
+  for ( RouteService * s = rdb.svc_db.first( pos ); s != NULL;
+        s = rdb.svc_db.next( pos ) ) {
+    for ( i = 0; i < MAX_RTE; i++ ) {
+      count += s->sub_route->rt_hash[ i ]->elem_count;
+      size  += s->sub_route->rt_hash[ i ]->mem_size();
+    }
+    size += s->sub_route->zip.code_buf.size *
+              sizeof( s->sub_route->zip.code_buf.ptr[ 0 ] ) +
+            s->sub_route->cache.spc.size *
+              sizeof( s->sub_route->cache.spc.ptr[ 0 ] );
+  }
+  out.add_row()
+     .set( "route" )
+     .set_long( count )
+     .set_long( size )
+     .set_null()
+     .set_null()
+     .set_null()
+     .set_null();
+
+  count = 0;
+  size  = 0;
+  for ( i = 0; i < this->mgr.poll.g_bloom_db.count; i++ ) {
+    BloomRef * b = this->mgr.poll.g_bloom_db.ptr[ i ];
+    if ( b != NULL ) {
+      count += b->bits->count;
+      size  += b->bits->bwidth + sizeof( *b->bits ) + sizeof( *b );
+    }
+  }
+  out.add_row()
+     .set( "bloom" )
+     .set_long( count )
+     .set_long( size )
+     .set_null()
+     .set_null()
+     .set_null()
+     .set_null();
+
+
+  PeerMatchArgs kr( "rv", 2 );
+  PeerMatchIter riter( this->mgr, kr );
+  count = 0;
+  size  = 0;
+  for ( EvSocket *p = riter.first(); p != NULL; p = riter.next() ) {
+    sassrv::EvRvService *svc = (sassrv::EvRvService *) p;
+
+    count += svc->sub_tab.sub_count() + svc->pat_tab.sub_count;
+    size  += svc->sub_tab.tab.mem_size() + svc->pat_tab.tab.mem_size();
+  }
+  if ( count > 0 ) {
+    out.add_row()
+       .set( "rv" )
+       .set_long( count )
+       .set_long( size )
+       .set_null()
+       .set_null()
+       .set_null()
+       .set_null();
+  }
+
+  PeerMatchArgs kn( "nats", 4 );
+  PeerMatchIter niter( this->mgr, kn );
+  count = 0;
+  size  = 0;
+  for ( EvSocket *p = niter.first(); p != NULL; p = niter.next() ) {
+    natsmd::EvNatsService *svc = (natsmd::EvNatsService *) p;
+
+    count += svc->map.sub_tab.pop_count() + svc->map.pat_tab.pop_count();
+    size  += svc->map.sub_tab.mem_size() + svc->map.pat_tab.mem_size() +
+             svc->map.sid_tab.mem_size();
+  }
+  if ( count > 0 ) {
+    out.add_row()
+       .set( "nats" )
+       .set_long( count )
+       .set_long( size )
+       .set_null()
+       .set_null()
+       .set_null()
+       .set_null();
   }
 
   static const char *hdr[ ncols ] =

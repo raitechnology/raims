@@ -661,14 +661,17 @@ struct AnyMatchTab {
   kv::ArraySpace<uint64_t, 256> tab;
   kv::UIntHashTab * ht;
   size_t            max_off;
+  uint64_t          gc_time;
 
-  AnyMatchTab() : ht( 0 ), max_off( 0 ) {
+  AnyMatchTab() : ht( 0 ), max_off( 0 ), gc_time( 0 ) {
     this->ht = kv::UIntHashTab::resize( NULL );
   }
   void reset( void ) noexcept;
-  void gc( void ) {
-    if ( this->max_off * 8 > 1024 * 1024 )
+  void gc( uint64_t cur_time ) {
+    if ( this->max_off * 8 > 1024 * 1024 ) {
       this->reset();
+      this->gc_time = cur_time;
+    }
   }
   AnyMatch *get_match( const char *sub,  uint16_t sublen,  uint32_t h,
                        const uint32_t *pre_seed,  uint32_t max_uid ) noexcept;

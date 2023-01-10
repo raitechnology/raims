@@ -417,10 +417,11 @@ SessionMgr::start( void ) noexcept
   this->stats.mono_time += sec_to_ns( STATS_INTERVAL );
   this->pub_window_mono_time = cur_mono + this->pub_window_ival;
   this->sub_window_mono_time = cur_mono + this->sub_window_ival;
-  this->sub_db.seqno_tab.flip_time     = cur_time - this->sub_window_ival;
+  this->sub_db.seqno_tab.flip_time     = cur_time;
   this->sub_db.seqno_tab.trailing_time = cur_time - this->sub_window_ival;
-  this->sub_db.pub_tab.flip_time       = cur_time - this->pub_window_ival;
+  this->sub_db.pub_tab.flip_time       = cur_time;
   this->sub_db.pub_tab.trailing_time   = cur_time - this->pub_window_ival;
+  this->sub_db.any_tab.gc_time         = cur_time;
   uint64_t ival = sec_to_ns( this->user_db.hb_interval );
   this->timer_ival         = (uint32_t) ( ival / 250 );
   this->user_db.hb_ival_ns = ival;
@@ -499,7 +500,7 @@ SessionMgr::timer_expire( uint64_t tid,  uint64_t ) noexcept
               this->sub_db.seqno_tab.tab_old->mem_size() );
     }
   }
-  this->sub_db.any_tab.gc();
+  this->sub_db.any_tab.gc( cur_time );
 
   if ( cur_mono < this->stats.mono_time )
     return true;
