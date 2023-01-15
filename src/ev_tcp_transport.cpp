@@ -205,8 +205,9 @@ EvTcpTransport::start( uint64_t tid ) noexcept
     name = "tcp_conn";
   else
     name = "tcp_acc";
-  this->timer_id = tid;
+  this->timer_id  = tid;
   this->tcp_state = 0;
+  this->bp_flags  = BP_NOTIFY;
   this->rte->set_peer_name( *this, name );
 
   if ( this->encrypt && ! no_tcp_aes ) {
@@ -232,8 +233,12 @@ EvTcpTransport::process( void ) noexcept
   int32_t status = 0;
   int     flow;
 
-  while ( this->off < this->len ) {
-    buflen = this->len - this->off;
+  buflen = this->len - this->off;
+  if ( buflen > this->recv_highwater )
+    this->tcp_state |= TCP_BUFFERSIZE;
+  else
+    this->tcp_state &= ~TCP_BUFFERSIZE;
+  while ( buflen > 0 ) {
     const char * buf = &this->recv[ off ];
     status = this->msg_in.unpack( buf, buflen );
     if ( status != 0 ) {
@@ -257,21 +262,16 @@ EvTcpTransport::process( void ) noexcept
         this->off -= buflen;
         this->pop( EV_PROCESS );
         this->pop3( EV_READ, EV_READ_LO, EV_READ_HI );
+        if ( ! this->push_write_high() )
+          this->clear_write_buffers();
+        return;
       }
-      if ( ! this->push_write_high() )
-        this->StreamBuf::reset();
-      return;
     }
+    buflen = this->len - this->off;
   }
   this->pop( EV_PROCESS );
   if ( ! this->push_write() )
-    this->StreamBuf::reset(); 
-#if 0
-  if ( ( this->tcp_state & TCP_HAS_TIMER ) == 0 ) {
-    this->poll.timer.add_timer_micros( this->fd, 100, this->timer_id, 0 );
-    this->tcp_state |= TCP_HAS_TIMER;
-  }
-#endif
+    this->clear_write_buffers(); 
 }
 
 int
@@ -287,10 +287,8 @@ EvTcpTransport::dispatch_msg( void ) noexcept
          (int) pub.subject_len, pub.subject, this->msgs_recv + 1 );
   this->msgs_recv++;
   BPData * data = NULL;
-  if ( ( this->tcp_state & TCP_BACKPRESSURE ) != 0 ) {
+  if ( ( this->tcp_state & ( TCP_BACKPRESSURE | TCP_BUFFERSIZE ) ) != 0 )
     data = this;
-    this->bp_flags = ( this->bp_flags & ~BP_FORWARD ) | BP_NOTIFY;
-  }
   if ( this->rte->sub_route.forward_not_fd( pub, this->fd, data ) )
     return TCP_FLOW_GOOD;
   if ( ! this->bp_in_list() )
@@ -313,6 +311,7 @@ void
 EvTcpTransport::on_write_ready( void ) noexcept
 {
   this->push( EV_PROCESS );
+  this->pop2( EV_READ, EV_READ_HI );
   this->idle_push( EV_READ_LO );
 }
 
@@ -355,11 +354,31 @@ EvTcpTransport::process_close( void ) noexcept
 bool
 EvTcpTransport::fwd_msg( EvPublish &pub ) noexcept
 {
+  uint32_t idx = 0;
   d_tcp( "> ev_tcp(%s) fwd %.*s (%lu)\n", this->rte->name,
           (int) pub.subject_len, pub.subject, this->msgs_sent + 1 );
-  char * buf = this->alloc( pub.msg_len );
-  ::memcpy( buf, pub.msg, pub.msg_len );
-  this->sz += pub.msg_len;
+  if ( pub.pub_type != 'f' ) {
+    if ( pub.msg_len > this->recv_highwater ) {
+      idx = this->poll.zero_copy_ref( pub.src_route, pub.msg, pub.msg_len );
+      if ( idx != 0 )
+        this->append_ref_iov( NULL, 0, pub.msg, pub.msg_len, idx, 0 );
+    }
+    if ( idx == 0 )
+      this->append( pub.msg, pub.msg_len );
+  }
+  else {
+    MsgFragPublish & fpub = (MsgFragPublish &) pub;
+    if ( fpub.trail_sz > this->recv_highwater ) {
+      idx = this->poll.zero_copy_ref( fpub.src_route, fpub.trail,
+                                      fpub.trail_sz );
+      if ( idx != 0 )
+        this->append_ref_iov( fpub.msg, fpub.msg_len, fpub.trail, fpub.trail_sz,
+                              idx, fpub.trail_sz & 1 );
+    }
+    if ( idx == 0 )
+      this->append3( fpub.msg, fpub.msg_len, fpub.trail, fpub.trail_sz,
+                     fpub.trail_sz & 1 );
+  }
   this->msgs_sent++;
 
   return this->idle_push_write();

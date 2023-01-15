@@ -102,7 +102,8 @@ struct SubMsgData {
   UserBridge      * src_bridge; /* which peer it's from */
   uint64_t          seqno,   /* the seqno of the published message */
                     stamp,   /* the optional time of message at the publisher */
-                    token;     /* rpc token */
+                    token,     /* rpc token */
+                    ref_seqno;
   const void      * data;    /* message data */
   size_t            datalen; /* message data length */
   uint32_t          fmt,     /* format of data */
@@ -113,7 +114,7 @@ struct SubMsgData {
   SubMsgData( MsgFramePublish &p,  UserBridge *n,  const void *d,
               size_t dl )
     : pub( p ), src_bridge( n ), seqno( 0 ), stamp( 0 ), token( 0 ),
-      data( d ), datalen( dl ), fmt( 0 ), reply( 0 ) {}
+      ref_seqno( 0 ), data( d ), datalen( dl ), fmt( 0 ), reply( 0 ) {}
 };
 /* a publish sent to all subscribers */
 struct PubMcastData {
@@ -268,6 +269,8 @@ struct SessionMgr : public kv::EvSocket, public kv::BPData {
                         tcp_ipv4,
                         tcp_ipv6,
                         session_started;
+  uint32_t              msg_counter[ 64 ],
+                        idle_busy;
 
   SessionMgr( kv::EvPoll &p,  kv::Logger &l,  ConfigTree &c,
               ConfigTree::User &u,  ConfigTree::Service &s,
@@ -308,7 +311,7 @@ struct SessionMgr : public kv::EvSocket, public kv::BPData {
   uint32_t add_wildcard_rte( const char *prefix, size_t pref_len,
                              PublishType type ) noexcept;
   void fork_daemon( int err_fd ) noexcept;
-  bool loop( int &idle ) noexcept;
+  bool loop( uint32_t &idle ) noexcept;
   void start( void ) noexcept;
   void name_hb( uint64_t cur_mono ) noexcept;
   void stop( void ) noexcept;

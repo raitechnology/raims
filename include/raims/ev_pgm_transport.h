@@ -57,13 +57,13 @@ struct EvPgmTransport : public kv::EvSocket {
   void dispatch_msg( void ) noexcept;
 
   /* EvSocket */
-  virtual void write( void ) noexcept final;
-  virtual void read( void ) noexcept final;
-  virtual void process( void ) noexcept final;
-  virtual void release( void ) noexcept final;
+  virtual void write( void ) noexcept;
+  virtual void read( void ) noexcept;
+  virtual void process( void ) noexcept;
+  virtual void release( void ) noexcept;
   virtual bool timer_expire( uint64_t timer_id, uint64_t event_id ) noexcept;
-  virtual void process_shutdown( void ) noexcept final;
-  virtual void process_close( void ) noexcept final;
+  virtual void process_shutdown( void ) noexcept;
+  virtual void process_close( void ) noexcept;
   virtual bool on_msg( kv::EvPublish &pub ) noexcept;
 };
 

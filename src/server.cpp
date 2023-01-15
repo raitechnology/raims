@@ -422,7 +422,7 @@ main( int argc, char *argv[] )
       sess.fork_daemon( err_fd );
     }
     sess.start();
-    int idle = 0;
+    uint32_t idle = 0;
     while ( sess.loop( idle ) ) {
       if ( sighndl.signaled ) {
         if ( poll.quit == 0 ) {
@@ -435,7 +435,7 @@ main( int argc, char *argv[] )
   }
   else {
     uint64_t timeout_ns = current_monotonic_time_ns() + sec_to_ns( 1 );
-    int idle = 0;
+    uint32_t idle = 0;
     while ( sess.loop( idle ) ) {
       if ( sighndl.signaled || current_monotonic_time_ns() > timeout_ns ) {
         if ( poll.quit == 0 )

@@ -326,6 +326,7 @@ struct EvInboxTransport : public kv::EvUdp {
 
   bool listen( const char *ip, int port ) noexcept; /* open socket */
   void post_msg( InboxPeer &p,  const void *msg, uint32_t msg_len ) noexcept;
+  void post_frag_msg( InboxPeer &p,  MsgFragPublish &fpub ) noexcept;
   bool repair_window( InboxPeer &p ) noexcept;
   bool check_window( InboxPeer &p ) noexcept;
   void dispatch_msg( InboxPeer &p,  InboxPkt &pkt ) noexcept;
@@ -356,7 +357,7 @@ struct EvInboxTransport : public kv::EvUdp {
   virtual void process_close( void ) noexcept final;
 };
 
-struct InboxPublish : public kv::EvPublish {
+struct InboxPublish : public MsgFragPublish {
   const char * peer_url;
   uint32_t     peer_uid,
                url_hash;
@@ -364,10 +365,12 @@ struct InboxPublish : public kv::EvPublish {
   InboxPublish( const char *subj,  size_t subj_len,  const void *data,
                 size_t data_len,  kv::RoutePublish &src_rt,  uint32_t src_fd,
                 uint32_t hash, uint32_t enc,  const char *url,  uint32_t uid,
-                uint32_t url_h ) :
-    EvPublish( subj, subj_len, NULL, 0, data, data_len, src_rt, src_fd, hash,
-               enc, 'I' ),
-    peer_url( url ), peer_uid( uid ), url_hash( url_h ) {}
+                uint32_t url_h,  const void *tr = NULL,  size_t tsz = 0 ) :
+    MsgFragPublish( subj, subj_len, data, data_len, src_rt, src_fd, hash,
+               enc, tr, tsz ),
+      peer_url( url ), peer_uid( uid ), url_hash( url_h ) {
+    this->pub_type = 'I';
+  }
 };
 
 }

@@ -540,7 +540,10 @@ EvInboxTransport::on_msg( kv::EvPublish &pub ) noexcept
       fprintf( stderr, "unable to resolve peer: %s\n", ipub.peer_url );
       return true;
     }
-    this->post_msg( *p, pub.msg, pub.msg_len );
+    if ( ipub.trail_sz == 0 )
+      this->post_msg( *p, pub.msg, pub.msg_len );
+    else
+      this->post_frag_msg( *p, (MsgFragPublish &) pub );
     this->idle_push( EV_WRITE );
   }
   else {
@@ -561,6 +564,18 @@ EvInboxTransport::shutdown_peer( uint32_t peer_uid, uint32_t url_hash ) noexcept
   }
 }
 
+static inline void
+post_msg_fill_pkt_hdr( InboxPktElem &el,  InboxPeer &p,
+                       uint32_t msg_len ) noexcept
+{
+  el.pkt.code.set_message( p.peer_id, p.dest_peer_id );
+  el.pkt.src_uid    = p.src_uid;
+  el.pkt.dest_uid   = p.dest_uid;
+  el.pkt.src_seqno  = ++p.out_seqno;
+  el.pkt.dest_seqno = p.in_seqno;
+  el.pkt.msg_len    = msg_len;
+}
+
 /* add to send window at the next sequence */
 void
 EvInboxTransport::post_msg( InboxPeer &p,  const void *msg,
@@ -571,12 +586,7 @@ EvInboxTransport::post_msg( InboxPeer &p,  const void *msg,
 
   if ( msg_len <= max_payload ) {
     el = p.alloc_window( msg_len );
-    el->pkt.code.set_message( p.peer_id, p.dest_peer_id );
-    el->pkt.src_uid    = p.src_uid;
-    el->pkt.dest_uid   = p.dest_uid;
-    el->pkt.src_seqno  = ++p.out_seqno;
-    el->pkt.dest_seqno = p.in_seqno;
-    el->pkt.msg_len    = msg_len;
+    post_msg_fill_pkt_hdr( *el, p, msg_len );
     ::memcpy( el->pkt.msg(), msg, msg_len );
 
     this->out.push_tl( el );
@@ -588,24 +598,98 @@ EvInboxTransport::post_msg( InboxPeer &p,  const void *msg,
   
   bool is_last = false;
   for ( size_t off = 0; ! is_last; off += max_payload ) {
-    size_t  frag_size = max_payload;
+    size_t frag_size = max_payload;
     if ( off + max_payload >= msg_len ) {
       frag_size = msg_len - off;
       is_last = true;
     }
     el = p.alloc_window( (uint32_t) frag_size );
-    el->pkt.code.set_message( p.peer_id, p.dest_peer_id );
-    el->pkt.src_uid    = p.src_uid;
-    el->pkt.dest_uid   = p.dest_uid;
-    el->pkt.src_seqno  = ++p.out_seqno;
-    el->pkt.dest_seqno = p.in_seqno;
-    el->pkt.msg_len    = (uint32_t) frag_size;
+    post_msg_fill_pkt_hdr( *el, p, (uint32_t) frag_size );
     if ( ! is_last )
       el->pkt.code.set_fragment();
     else
       el->pkt.code.set_rollup();
     ::memcpy( el->pkt.msg(), msg_ptr, frag_size );
     msg_ptr = &msg_ptr[ frag_size ];
+    this->out.push_tl( el );
+    this->out_count++;
+    this->total_sent_count++;
+  }
+}
+
+void
+EvInboxTransport::post_frag_msg( InboxPeer &p,  MsgFragPublish &fpub ) noexcept
+{
+  static const size_t max_payload = this->mtu - sizeof( InboxPktElem );
+  size_t msg_len = fpub.msg_len + fpub.trail_sz + ( fpub.trail_sz & 1 );
+  InboxPktElem * el;
+
+  if ( msg_len <= max_payload ) {
+    el = p.alloc_window( msg_len );
+    post_msg_fill_pkt_hdr( *el, p, msg_len );
+    uint8_t * buf = (uint8_t *) el->pkt.msg();
+
+    ::memcpy( buf, fpub.msg, fpub.msg_len );
+    ::memcpy( &buf[ fpub.msg_len ], fpub.trail, fpub.trail_sz );
+    if ( ( fpub.trail_sz & 1 ) != 0 )
+      buf[ msg_len - 1 ] = 0;
+
+    this->out.push_tl( el );
+    this->out_count++;
+    this->total_sent_count++;
+    return;
+  }
+
+  size_t msg_left   = fpub.msg_len,
+         trail_left = fpub.trail_sz;
+  const uint8_t * msg = (const uint8_t *) fpub.msg,
+                * trl = (const uint8_t *) fpub.trail;
+  bool  is_last = false;
+  for ( size_t off = 0; ! is_last; off += max_payload ) {
+    size_t frag_size = max_payload;
+    if ( off + max_payload >= msg_len ) {
+      frag_size = msg_len - off;
+      is_last = true;
+    }
+    const void * m1 = NULL, * m2 = NULL;
+    size_t       z1 = 0,      z2 = 0,      z3 = 0;
+    size_t       n  = frag_size;
+
+    if ( msg_left > 0 ) {
+      m1 = msg;
+      z1 = min_int( msg_left, n );
+      msg_left -= z1;
+      msg = &msg[ z1 ];
+      n -= z1;
+    }
+    if ( n > 0 && trail_left > 0 ) {
+      m2 = trl;
+      z2 = min_int( trail_left, n );
+      trail_left -= z2;
+      trl = &trl[ z2 ];
+      n -= z2;
+    }
+    if ( n > 0 )
+      z3 = 1;
+    el = p.alloc_window( (uint32_t) frag_size );
+    post_msg_fill_pkt_hdr( *el, p, (uint32_t) frag_size );
+
+    uint8_t * buf = (uint8_t *) el->pkt.msg();
+    if ( z1 > 0 )
+      ::memcpy( buf, m1, z1 );
+    if ( z2 > 0 )
+      ::memcpy( &buf[ z1 ], m2, z2 );
+    if ( z3 > 0 )
+      buf[ z1 + z2 ] = 0;
+    if ( z1 + z2 + z3 > frag_size ) {
+      fprintf( stderr, "post_frag_msg\n" );
+    }
+
+    if ( ! is_last )
+      el->pkt.code.set_fragment();
+    else
+      el->pkt.code.set_rollup();
+
     this->out.push_tl( el );
     this->out_count++;
     this->total_sent_count++;

@@ -291,15 +291,18 @@ PgmSock::start_pgm( const char *network,  int svc,  int &fd ) noexcept
 /* queue data in the send window */
 void
 PgmSock::put_send_window( const void *data,  size_t size,
-                          const void *data2,  size_t size2 ) noexcept
+                          const void *data2,  size_t size2,
+                          const void *data3,  size_t size3,
+                          const void *data4,  size_t size4 ) noexcept
 {
   PgmSendWindow        * w   = this->send_list.tl;
   struct pgm_sk_buff_t * skb;
   /* try to put data into the last skb */
   skb = this->send_buf.last_skb();
   if ( skb != NULL ) {
-    if ( w->extend_skb( this->geom, skb, data, size, data2, size2 ) ) {
-      this->pending += size + size2;
+    if ( w->extend_skb( this->geom, skb, data, size, data2, size2,
+                        data3, size3, data4, size4 ) ) {
+      this->pending += size + size2 + size3 + size4;
       return;
     }
     this->send_buf.next_skb();
@@ -330,10 +333,11 @@ PgmSock::put_send_window( const void *data,  size_t size,
       this->send_list.push_tl( w );
     }
     /* alloc skb from the window */
-    if ( (skb = w->alloc_skb( this->geom, data, size, data2, size2 )) != NULL) {
+    if ( (skb = w->alloc_skb( this->geom, data, size, data2, size2,
+                              data3, size3, data4, size4 )) != NULL) {
       this->send_buf.put_last( skb );
       this->skb_count++;
-      this->pending += size + size2;
+      this->pending += size + size2 + size3 + size4;
       return;
     }
     w = NULL;

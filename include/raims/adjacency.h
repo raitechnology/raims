@@ -43,7 +43,8 @@ enum AdjacencyRequest {
   ADJ_CHG_SYNC_REQ  = 7, /* adjacency change message with link state */
   MISSING_SYNC_REQ  = 8, /* missing sub seqno */
   REQUEST_SYNC_REQ  = 9, /* adjacency request bounce */
-  MAX_ADJ_REQ       = 10
+  UID_CSUM_SYNC_REQ = 10, /* uid csum not correct */
+  MAX_ADJ_REQ       = 11
 };
 enum InvalidReason {
   INVALID_NONE          = 0,
@@ -76,15 +77,16 @@ static const char *adjacency_change_str[] = {
 };
 static const char *adjacency_request_str[] = {
   "unknown",
-  "hb_sync",
   "ping_sync",
+  "hb_sync",
   "dijk_sync",
   "auth_sync",
   "peer_sync",
   "pdb_sync",
   "adjc_sync",
   "missing_sync",
-  "request_sync"
+  "request_sync",
+  "uid_csum_sync"
 };
 static const char *invalid_reason_str[] = {
   "no_reason",

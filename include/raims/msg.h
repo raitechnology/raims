@@ -628,7 +628,7 @@ struct MsgFramePublish : public kv::EvPublish {
     EvPublish( pub ),
     n( 0 ), rte( r ), status( FRAME_STATUS_OK ), flags( 0 ), dec( m ) {
     this->msg        = &((uint8_t *) m->msg_buf)[ m->msg_off ];
-    this->msg_len    = m->msg_end - m->msg_off,
+    this->msg_len    = m->msg_end - m->msg_off;
     this->pub_type   = 'X';
     this->hash       = pub.hash;
     this->prefix     = pub.prefix;
@@ -636,6 +636,18 @@ struct MsgFramePublish : public kv::EvPublish {
   }
   void print( const char *what ) const noexcept;
   const char *status_string( void ) const noexcept;
+};
+
+struct MsgFragPublish : public kv::EvPublish {
+  const void * trail;
+  size_t       trail_sz;
+
+  MsgFragPublish( const char *subj,  size_t subj_len,  const void *msg,
+                  size_t msg_len,  kv::RoutePublish &sub_rt,  uint32_t src_fd,
+                  uint32_t hash,  uint32_t enc,  const void *tr,  size_t tsz ) :
+    EvPublish( subj, subj_len, NULL, 0, msg, msg_len,
+               sub_rt, src_fd, hash, enc, 'f' ),
+    trail( tr ), trail_sz( tsz ) {}
 };
 
 template <class T>
@@ -696,7 +708,10 @@ struct MsgCat : public md::MDMsgMem, public MsgBufDigestT<MsgCat> {
     this->out = this->msg = (char *) this->make( len );
   }
   void close( size_t rsz,  uint32_t h,  CabaFlags fl ) {
-    this->MsgBufDigestT<MsgCat>::close_msg( h, fl );
+    this->close_frag( rsz, 0, h, fl );
+  }
+  void close_frag( size_t rsz,  uint32_t trail_sz,  uint32_t h, CabaFlags fl ) {
+    this->MsgBufDigestT<MsgCat>::close_frag( h, trail_sz, fl );
     if ( rsz < this->len() )
       this->reserve_error( rsz );
   }

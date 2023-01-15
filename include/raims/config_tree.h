@@ -267,6 +267,7 @@ struct ConfigTree {
   void set_route_str( ConfigTree::Transport &t,  StringTab &st,
                       const char *name,  const char *value,
                       size_t value_len ) noexcept;
+  static bool string_to_uint( const char *s,  uint64_t &ival ) noexcept;
   static bool string_to_bytes( const char *s,  uint64_t &bytes ) noexcept;
   static bool string_to_secs( const char *s,  uint64_t &secs ) noexcept;
   static bool string_to_nanos( const char *s,  uint64_t &nanos ) noexcept;

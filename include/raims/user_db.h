@@ -537,26 +537,97 @@ struct UserDB {
   void calc_hello_key( uint64_t start_time, const HmacDigest &user_hmac,
                        HashDigest &ha ) noexcept;
   void calc_secret_hmac( UserBridge &n,  PolyHmacDigest &secret_hmac ) noexcept;
+#if 0
   /* inbox forwarding */
+  struct ForwardInbox {
+    UserBridge & n;
+    const char * sub;
+    size_t       sublen;
+    const void * msg;
+    size_t       msg_len;
+    UserRoute  & u_rte;
+    kv::BPData * data;
+    const void * frag;
+    size_t       frag_sz;
+    uint32_t     subj_hash,
+                 src_route;
+
+    ForwardInbox( UserBridge & node,  const char * subject,
+                  size_t subject_len,  uint32_t h,  const void * message,
+                  size_t message_len,  UserRoute  & user_rte,
+                  kv::BPData * bp_data,  const void * fragment,
+                  size_t frag_size,  uint32_t fd )
+      : n( node ), sub( subject ), sublen( subject_len ), msg( message ),
+        msg_len( message_len ), u_rte( user_rte ), data( bp_data ),
+        frag( fragment ), frag_sz( frag_size ), subj_hash( h ),
+        src_route( fd ) {}
+  };
+  bool forward_to( ForwardInbox &fwd ) noexcept;
+#endif
+#if 0
   bool forward_to( UserBridge &n,  const char *sub,
                    size_t sublen,  uint32_t h,  const void *msg,
                    size_t msg_len,  UserRoute &u_rte,
-                   kv::BPData *data = NULL ) noexcept;
+                   kv::BPData *data = NULL,  const void *frag = NULL,
+                   size_t frag_sz = 0 ) noexcept;
   bool forward_to_inbox( UserBridge &n,  const char *sub,
                          size_t sublen,  uint32_t h,  const void *msg,
                          size_t msg_len,  kv::BPData *data = NULL ) {
+    ForwardInbox f( n, sub, sublen, h, msg, msg_len, data );
     return this->forward_to( n, sub, sublen, h, msg, msg_len,
                              *n.primary( *this ), data );
   }
   bool forward_to_inbox( UserBridge &n,  const InboxBuf &ibx,  uint32_t h,
                          const void *msg,  size_t msg_len,  bool primary,
-                         kv::BPData *data = NULL ) {
+                         kv::BPData *data = NULL,  const void *frag = NULL,
+                         size_t frag_sz = 0 ) {
     if ( primary )
       return this->forward_to( n, ibx.buf, ibx.len(), h, msg, msg_len,
-                               *n.primary( *this ), data );
+                               *n.primary( *this ), data, frag, frag_sz );
     return this->forward_to( n, ibx.buf, ibx.len(), h, msg, msg_len,
-                             *n.user_route, data );
+                             *n.user_route, data, frag, frag_sz );
   }
+#endif
+  void check_inbox_route( UserBridge &n,  UserRoute &u_rte ) noexcept;
+
+  /* use primary route for inbox */
+  bool forward_to_primary_inbox( UserBridge &n,  InboxBuf &ibx,  uint32_t h,
+                                 const void *msg,  size_t msglen,
+                                 kv::BPData *data = NULL,
+                                 const void *frag = NULL,
+                                 size_t frag_size = 0,
+                                 uint32_t src_route = 0 ) {
+    if ( frag_size == 0 )
+      return this->forward_to_primary_inbox( n, ibx.buf, ibx.len(), h,
+                                             msg, msglen, data );
+    return this->forward_to_primary_inbox( n, ibx.buf, ibx.len(), h,
+                                           msg, msglen, data,
+                                           frag, frag_size, src_route );
+  }
+  bool forward_to_primary_inbox( UserBridge &n,  const char *sub,  size_t sublen,
+                                 uint32_t h,  const void *msg,  size_t msglen,
+                                 kv::BPData *data = NULL ) noexcept;
+  bool forward_to_primary_inbox( UserBridge &n,  const char *sub,  size_t sublen,
+                                 uint32_t h,  const void *msg,  size_t msglen,
+                                 kv::BPData *data,  const void *frag,
+                               size_t frag_size,  uint32_t src_route ) noexcept;
+  /* use route that request used (n.user_route) for reply */
+  bool forward_to_inbox( UserBridge &n,  InboxBuf &ibx,  uint32_t h,
+                         const void *msg, size_t msglen ) {
+    return this->forward_to_inbox( n, ibx.buf, ibx.len(), h, msg, msglen, NULL );
+  }
+  bool forward_to_inbox( UserBridge &n,  const char *sub,  size_t sublen,
+                         uint32_t h,  const void *msg, size_t msglen,
+                         kv::BPData *data = NULL ) noexcept;
+  /* use u_rte for inbox */
+  bool forward_to( UserBridge &n,  const char *sub,  size_t sublen, 
+                   uint32_t h,  const void *msg, size_t msglen,
+                   UserRoute &u_rte,  kv::BPData *data ) noexcept;
+  /* use u_rte with fragments for inbox */
+  bool forward_to( UserBridge &n,  const char *sub,  size_t sublen,  uint32_t h,
+                   const void *msg,  size_t msglen,  kv::BPData *data,
+                   const void *frag,  size_t frag_size,
+                   uint32_t src_route ) noexcept;
 
   PeerEntry *make_peer( const StringVal &user, const StringVal &svc,
                         const StringVal &create,
@@ -656,7 +727,7 @@ struct UserDB {
   void print_adjacency( const char *s,  UserBridge &n ) noexcept;
   void add_unknown_adjacency( UserBridge &n ) noexcept;
   void clear_unknown_adjacency( UserBridge &n ) noexcept;
-  void remove_adjacency( const UserBridge &n ) noexcept;
+  void remove_adjacency( UserBridge &n ) noexcept;
   UserBridge *close_source_route( uint32_t fd ) noexcept;
   void push_source_route( UserBridge &n ) noexcept;
   void push_user_route( UserBridge &n,  UserRoute &u_rte ) noexcept;

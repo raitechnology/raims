@@ -17,6 +17,7 @@ extern const uint16_t CON ## _SZ;
 #endif
 
 /* P_: parameters */
+CONFIG_CONST( P_IDLE_BUSY          , "idle_busy" )
 CONFIG_CONST( P_MAP_FILE           , "map_file" )
 CONFIG_CONST( P_IPC_NAME           , "ipc_name" )
 CONFIG_CONST( P_DB_NUM             , "db_num" )

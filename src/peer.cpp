@@ -123,7 +123,7 @@ UserDB::recv_sync_request( const MsgFramePublish &pub,  UserBridge &n,
             "forward b_nonce: %.*s to %s.%u for %s.%u hops=%u, in_mesh=%u\n",
             (int) ibx.len(), ibx.buf, n.peer.user.val, n.uid,
             user_n->peer.user.val, uid, hops, in_mesh?1:0 );
-      return this->forward_to_inbox( n, ibx, h, m.msg, m.len(), false );
+      return this->forward_to_inbox( n, ibx, h, m.msg, m.len() );
     }
   }
   StringVal user_sv;
@@ -438,7 +438,7 @@ UserDB::send_peer_db( UserBridge &n ) noexcept
 
   uint32_t h = ibx.hash();
   if ( this->make_peer_db_msg( n, ibx.buf, ibx.len(), h, m ) )
-    this->forward_to_inbox( n, ibx, h, m.msg, m.len(), false );
+    this->forward_to_inbox( n, ibx, h, m.msg, m.len() );
 }
 
 bool
@@ -1063,7 +1063,7 @@ UserDB::recv_mesh_request( const MsgFramePublish &pub,  UserBridge &n,
   m.close( e.sz, h, CABA_INBOX );
   m.sign( ibx.buf, ibx.len(), *this->session_key );
 
-  return this->forward_to_inbox( n, ibx, h, m.msg, m.len(), false );
+  return this->forward_to_inbox( n, ibx, h, m.msg, m.len() );
 }
 
 bool
@@ -1118,7 +1118,7 @@ UserDB::send_mesh_request( UserBridge &n,  MsgHdrDecoder &dec ) noexcept
   m.close( e.sz, h, CABA_INBOX );
   m.sign( ibx.buf, ibx.len(), *this->session_key );
 
-  return this->forward_to_inbox( n, ibx, h, m.msg, m.len(), false );
+  return this->forward_to_inbox( n, ibx, h, m.msg, m.len() );
 }
 
 void
@@ -1328,7 +1328,7 @@ UserDB::request_pending_peer( UserPendingRoute &p,
             p.user_sv.val, n->peer.user.val,
             peer_sync_reason_string( p.reason ) );
   }
-  return this->forward_to_inbox( *n, ibx, h, m.msg, m.len(), false );
+  return this->forward_to_inbox( *n, ibx, h, m.msg, m.len() );
 }
 
 void

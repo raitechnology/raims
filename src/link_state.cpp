@@ -253,8 +253,9 @@ UserDB::clear_unknown_adjacency( UserBridge &n ) noexcept
 }
 
 void
-UserDB::remove_adjacency( const UserBridge &n ) noexcept
+UserDB::remove_adjacency( UserBridge & ) noexcept
 {
+#if 0
   for ( uint32_t uid = 1; uid < this->next_uid; uid++ ) {
     if ( uid == n.uid )
       continue;
@@ -266,6 +267,7 @@ UserDB::remove_adjacency( const UserBridge &n ) noexcept
       char str64[ NONCE_B64_LEN + 1 ];
       if ( set != NULL ) {
         if ( set->test_clear( n.uid ) ) {
+          n.uid_removed.add( uid );
           n2->uid_csum ^= n.bridge_id.nonce;
           if ( debug_lnk )
             n2->printf( "rem adj %s csum( %s )\n",
@@ -275,6 +277,7 @@ UserDB::remove_adjacency( const UserBridge &n ) noexcept
       }
     }
   }
+#endif
 }
 
 void
@@ -733,7 +736,9 @@ UserDB::send_adjacency_request( UserBridge &n, AdjacencyRequest reas ) noexcept
   if ( debug_lnk )
     n.printf( "*** send_adj_request ls=%lu %s for %s\n", n.link_state_seqno,
               adjacency_request_string( reas ), n.peer.user.val );
-  return this->forward_to_inbox( n, ibx, h, m.msg, m.len(), use_primary );
+  if ( use_primary )
+    return this->forward_to_primary_inbox( n, ibx, h, m.msg, m.len() );
+  return this->forward_to_inbox( n, ibx, h, m.msg, m.len() );
 }
 
 size_t
@@ -962,29 +967,47 @@ UserDB::recv_adjacency_request( const MsgFramePublish &,  UserBridge &n,
   }
   if ( dec.test( FID_PEER_DB ) ) {
     PeerDBRec * rec_list = dec.decode_rec_list<PeerDBRec>( FID_PEER_DB );
+    BitSpace pdb;
+    if ( reas == UID_CSUM_SYNC_REQ ){
+      for ( uid = 1; uid < this->next_uid; uid++ ) {
+        UserBridge * x = this->bridge_tab.ptr[ uid ];
+        if ( x == NULL || ! x->is_set( AUTHENTICATED_STATE ) )
+          continue;
+        pdb.add( uid );
+      }
+    }
     while ( rec_list != NULL ) {
       PeerDBRec  & rec = *rec_list;
       rec_list = rec.next;
       if ( this->node_ht->find( rec.nonce, pos, uid ) ) {
         UserBridge *sync = this->bridge_tab.ptr[ uid ];
         if ( sync != NULL ) {
-          int which = SYNC_NONE;
+          int pdb_which = SYNC_NONE;
           if ( sync->link_state_seqno > rec.link_state )
-            which |= SYNC_LINK;
+            pdb_which |= SYNC_LINK;
           else if ( sync->link_state_seqno < rec.link_state )
-            which |= RQ_SYNC_LINK;
+            pdb_which |= RQ_SYNC_LINK;
           if ( sync->sub_seqno > rec.sub_seqno )
-            which |= SYNC_SUB;
+            pdb_which |= SYNC_SUB;
           else if ( sync->sub_seqno < rec.sub_seqno )
-            which |= RQ_SYNC_SUB;
-          if ( ( which & SYNC_ANY ) != 0 ) {
-            b &= this->send_adjacency( n, sync, ibx, time_val, reas, which );
+            pdb_which |= RQ_SYNC_SUB;
+          if ( ( pdb_which & SYNC_ANY ) != 0 ) {
+            b &= this->send_adjacency( n, sync, ibx, time_val, reas, pdb_which);
             sent_one = true;
           }
-          else if ( ( which & RQ_SYNC_ANY ) != 0 ) {
+          else if ( ( pdb_which & RQ_SYNC_ANY ) != 0 ) {
             b &= this->send_adjacency_request( *sync, REQUEST_SYNC_REQ );
           }
+          pdb.remove( uid );
         }
+      }
+    }
+    if ( reas == UID_CSUM_SYNC_REQ ) {
+      for ( bool b = pdb.first( uid ); b; b = pdb.next( uid ) ) {
+        UserBridge * sync = this->bridge_tab.ptr[ uid ];
+        if ( sync != &n )
+          b &= this->send_adjacency( n, sync, ibx, time_val, reas,
+                                     SYNC_LINK | SYNC_SUB );
       }
     }
   }
@@ -1064,7 +1087,7 @@ UserDB::send_adjacency( UserBridge &n,  UserBridge *sync,  InboxBuf &ibx,
   m.close( e.sz, h, CABA_INBOX );
   m.sign( ibx.buf, ibx.len(), *this->session_key );
 
-  return this->forward_to_inbox( n, ibx, h, m.msg, m.len(), false );
+  return this->forward_to_inbox( n, ibx, h, m.msg, m.len() );
 }
 
 bool

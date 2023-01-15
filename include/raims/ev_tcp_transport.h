@@ -30,7 +30,8 @@ struct EvTcpTransportListen : public kv::EvTcpListen {
 struct EvTcpTransport : public AES_Connection, public kv::BPData {
   enum {
     TCP_BACKPRESSURE = 1,
-    TCP_HAS_TIMER    = 2
+    TCP_BUFFERSIZE   = 2,
+    TCP_HAS_TIMER    = 4
   };
   MsgFrameDecoder    msg_in;
   TransportRoute   * rte;

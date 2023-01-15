@@ -358,6 +358,44 @@ LastTimeStamp::update( uint64_t stamp ) noexcept
 }
 
 void
+Console::log_repeated( void ) noexcept
+{
+  static const char   repeat_cnt[]  = " line repeated ";
+  static const size_t repeat_cnt_sz = sizeof( repeat_cnt ) - 1;
+  char   repeat[ 16 ];
+  size_t cnt_sz = uint32_to_string( this->last_log_repeat_count, repeat );
+
+  size_t sz = cnt_sz + repeat_cnt_sz + TS_HDR_LEN + 1;
+  char * p  = this->log.make( this->log.count + sz );
+  p  = &p[ this->log.count ];
+
+  ::memcpy( p, this->log_ts.ts, TS_ERR_OFF );
+  p = &p[ TS_ERR_OFF ];
+  *p++ = ' ';
+  *p++ = ' ';
+  ::memcpy( p, repeat_cnt, repeat_cnt_sz );
+  p = &p[ repeat_cnt_sz ];
+  ::memcpy( p, repeat, cnt_sz );
+  p = &p[ cnt_sz ];
+  p[ 0 ] = '\n';
+
+  this->log.count += sz;
+  this->last_log_repeat_count = 0;
+  this->last_log_hash = 0;
+}
+
+bool
+Console::timer_cb( uint64_t timer_id, uint64_t ) noexcept
+{
+  if ( this->last_log_repeat_count > 0 &&
+       timer_id == ( this->log_ts.last_ms >> 10 ) ) {
+    this->log_repeated();
+    this->flush_output( NULL );
+  }
+  return false;
+}
+
+void
 Console::log_output( int stream,  uint64_t stamp,  size_t len,
                      const char *buf ) noexcept
 {
@@ -367,34 +405,17 @@ Console::log_output( int stream,  uint64_t stamp,  size_t len,
   stamp += tz_stamp_ns;
   this->log_ts.update( stamp );
 
-  uint32_t h = kv_crc_c( buf, len, this->log_ts.last_ms >> 10 );
+  uint32_t last = (uint32_t)( this->log_ts.last_ms >> 10 );
+  uint32_t h = kv_crc_c( buf, len, last );
   if ( h == this->last_log_hash ) {
-    this->last_log_repeat_count++;
+    if ( this->last_log_repeat_count++ == 0 ) {
+      EvPoll & poll = this->mgr.poll;
+      poll.timer.add_timer_millis( *this, 5, last, 0 );
+    }
     return;
   }
-  if ( this->last_log_repeat_count > 0 ) {
-    static const char   repeat_cnt[]  = " line repeated ";
-    static const size_t repeat_cnt_sz = sizeof( repeat_cnt ) - 1;
-    char   repeat[ 16 ];
-    size_t cnt_sz = uint32_to_string( this->last_log_repeat_count, repeat );
-
-    sz = cnt_sz + repeat_cnt_sz + TS_HDR_LEN + 1;
-    p  = this->log.make( this->log.count + sz );
-    p  = &p[ this->log.count ];
-
-    ::memcpy( p, this->log_ts.ts, TS_ERR_OFF );
-    p = &p[ TS_ERR_OFF ];
-    *p++ = ( stream == 1 ? ' ' : '!' );
-    *p++ = ' ';
-    ::memcpy( p, repeat_cnt, repeat_cnt_sz );
-    p = &p[ repeat_cnt_sz ];
-    ::memcpy( p, repeat, cnt_sz );
-    p = &p[ cnt_sz ];
-    p[ 0 ] = '\n';
-
-    this->log.count += sz;
-    this->last_log_repeat_count = 0;
-  }
+  if ( this->last_log_repeat_count > 0 )
+    this->log_repeated();
   this->last_log_hash = h;
 
   sz = len + TS_HDR_LEN;
@@ -1919,7 +1940,7 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
       this->mute_log = false;
       break;
 
-    case CMD_SHOW_PEERS:     this->show_peers( p );     break;
+    case CMD_SHOW_PEERS:     this->show_peers( p, arg, len ); break;
     case CMD_SHOW_PORTS:     this->show_ports( p, arg, len ); break;
     case CMD_SHOW_COST:      this->show_cost( p, arg, len ); break;
     case CMD_SHOW_STATUS:    this->show_status( p, arg, len ); break;
@@ -1936,6 +1957,7 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
       this->colorize_log( p, this->log.ptr, this->log_index );
       break;
     case CMD_SHOW_COUNTERS:  this->show_counters( p );  break;
+    case CMD_SHOW_PUBTYPE:   this->show_pubtype( p );  break;
     case CMD_SHOW_INBOX:     this->show_inbox( p, arg, len ); break;
     case CMD_SHOW_LOSS:      this->show_loss( p );      break;
     case CMD_SHOW_SKEW:      this->show_skew( p );      break;
@@ -2032,8 +2054,9 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
     case CMD_SHOW_SUBS:
       this->show_subs( p, arg, len, args[ 3 ], arglen[ 3 ] );
       break;
-    case CMD_PING:      this->ping_peer( p, arg, len ); break;
-    case CMD_MPING:     this->mcast_ping( p );          break;
+    case CMD_PING:      this->ping_peer( p, arg, len, false ); break;
+    case CMD_TPING:     this->ping_peer( p, arg, len, true ); break;
+    case CMD_MPING:     this->mcast_ping( p ); break;
 
     case CMD_SUB_START: /* sub */
     case CMD_SUB_STOP: {/* unsub */
@@ -2690,12 +2713,12 @@ Console::recv_remote_request( const MsgFramePublish &,  UserBridge &n,
   uint32_t h = ibx.hash();
   m.close( e.sz, h, CABA_INBOX );
   m.sign( ibx.buf, ibx.len(), *this->user_db.session_key );
-  return this->user_db.forward_to_inbox( n, ibx, h, m.msg, m.len(), false );
+  return this->user_db.forward_to_inbox( n, ibx, h, m.msg, m.len() );
 }
 
 void
 Console::ping_peer( ConsoleOutput *p,  const char *arg,
-                    size_t arglen ) noexcept
+                    size_t arglen,  bool add_trace ) noexcept
 {
   UserBridge  * n;
   char          isub[ UserDB::INBOX_BASE_SIZE + sizeof( _PING ) ];
@@ -2717,6 +2740,8 @@ Console::ping_peer( ConsoleOutput *p,  const char *arg,
       mc.reply = rpc->inbox_num;
       mc.stamp = current_realtime_ns();
       mc.token = rpc->token;
+      if ( add_trace )
+        mc.option = CABA_OPT_TRACE;
       this->mgr.publish( mc );
       rpc->count++;
     }
@@ -3704,38 +3729,98 @@ Console::show_tports( ConsoleOutput *p, const char *name,  size_t len ) noexcept
   this->print_table( p, hdr, ncols );
 }
 
+int
+UserBridgeList::cmp_user( const UserBridgeElem &e1,
+                          const UserBridgeElem &e2 ) noexcept
+{
+  UserBridge * n1 = e1.user_db.bridge_tab.ptr[ e1.uid ],
+             * n2 = e1.user_db.bridge_tab.ptr[ e2.uid ];
+  if ( n1 != NULL && n2 != NULL )
+    return ::strcmp( n1->peer.user.val, n2->peer.user.val );
+  if ( n1 == NULL )
+    return ::strcmp( e1.user_db.user.user.val, n2->peer.user.val );
+  return ::strcmp( n1->peer.user.val, e1.user_db.user.user.val );
+}
+
+int
+UserBridgeList::cmp_nonce( const UserBridgeElem &e1,
+                           const UserBridgeElem &e2 ) noexcept
+{
+  UserBridge * n1 = e1.user_db.bridge_tab.ptr[ e1.uid ],
+             * n2 = e1.user_db.bridge_tab.ptr[ e2.uid ];
+  if ( n1 != NULL && n2 != NULL )
+    return n1->bridge_id.nonce.cmp( n2->bridge_id.nonce );
+  if ( n1 == NULL )
+    return e1.user_db.bridge_id.nonce.cmp( n2->bridge_id.nonce );
+  return n1->bridge_id.nonce.cmp( e1.user_db.bridge_id.nonce );
+}
+
 void
-Console::show_peers( ConsoleOutput *p ) noexcept
+Console::show_peers( ConsoleOutput *p, const char *name,  size_t len ) noexcept
 {
   static const uint32_t ncols = 9;
-  TabOut       out( this->table, this->tmp, ncols );
-  const char * address;
-  uint32_t     addr_len, ucast_fd;
-  EvPoll     & poll = this->mgr.poll;
-  char         nonce[ NONCE_B64_LEN + 1 ];
+  TabOut         out( this->table, this->tmp, ncols );
+  const char   * address, * nstr;
+  uint32_t       addr_len, ucast_fd;
+  EvPoll       & poll = this->mgr.poll;
+  char           nonce[ NONCE_B64_LEN + 1 ];
+  UserBridgeList list;
+  bool           show_ip = false, show_host = false;
 
-  this->user_db.bridge_id.nonce.to_base64_str( nonce );
-
-  out.add_row()
-     .set( this->user_db.user.user, PRINT_SELF )  /* user */
-     .set( nonce )  /* bridge */
-     .set_long( this->sub_db.bloom.bits->count )  /* sub */
-     .set_long( this->sub_db.sub_seqno )          /* seq */
-     .set_long( this->user_db.link_state_seqno )  /* link */
-     .set_null()  /* lat */
-     .set_null()  /* tport */
-     .set_null()  /* cost */
-     .set_null(); /* ptp */
-
+  list.push_tl( new ( this->tmp.make( sizeof( UserBridgeElem ) ) )
+                UserBridgeElem( this->user_db, 0 ) );
   for ( uint32_t uid = 1; uid < this->user_db.next_uid; uid++ ) {
     UserBridge * n = this->user_db.bridge_tab[ uid ];
     if ( n == NULL || ! n->is_set( AUTHENTICATED_STATE ) )
       continue;
+    list.push_tl( new ( this->tmp.make( sizeof( UserBridgeElem ) ) )
+                  UserBridgeElem( this->user_db, uid ) );
+  }
+  if ( len > 0 && ( name[ 0 ] == 'u' || name[ 0 ] == 'U' ) )
+    list.sort<UserBridgeList::cmp_user>();
+  else if ( len > 0 && ( name[ 0 ] == 'n' || name[ 0 ] == 'N' ||
+                         name[ 0 ] == 'h' || name[ 0 ] == 'H' ||
+                         name[ 0 ] == 'i' || name[ 0 ] == 'I' ) )
+    list.sort<UserBridgeList::cmp_nonce>();
+  if ( len > 0 && ( name[ 0 ] == 'i' || name[ 0 ] == 'I' ) )
+    show_ip = true;
+  else if ( len > 0 && ( name[ 0 ] == 'h' || name[ 0 ] == 'H' ) )
+    show_host = true;
 
+  for ( UserBridgeElem * el = list.hd; el != NULL; el = el->next ) {
+    if ( el->uid == 0 ) {
+      if ( show_ip )
+        sassrv::RvMcast::ip4_string( this->user_db.bridge_nonce_int, nonce );
+      else if ( show_host )
+        sassrv::RvMcast::ip4_hex_string( this->user_db.bridge_nonce_int, nonce );
+      else
+        this->user_db.bridge_id.nonce.to_base64_str( nonce );
+      nstr = this->tmp.stralloc( ::strlen( nonce ), nonce );
+      out.add_row()
+         .set( this->user_db.user.user, PRINT_SELF )  /* user */
+         .set( nstr ) /* bridge */
+         .set_long( this->sub_db.bloom.bits->count )  /* sub */
+         .set_long( this->sub_db.sub_seqno )          /* seq */
+         .set_long( this->user_db.link_state_seqno )  /* link */
+         .set_null()  /* lat */
+         .set_null()  /* tport */
+         .set_null()  /* cost */
+         .set_null(); /* ptp */
+      continue;
+    }
+    UserBridge * n = this->user_db.bridge_tab[ el->uid ];
+
+    if ( show_ip )
+      sassrv::RvMcast::ip4_string( n->bridge_nonce_int, nonce );
+    else if ( show_host )
+      sassrv::RvMcast::ip4_hex_string( n->bridge_nonce_int, nonce );
+    else
+      n->bridge_id.nonce.to_base64_str( nonce );
+    nstr = this->tmp.stralloc( ::strlen( nonce ), nonce );
     TabPrint & row =
     out.add_row()
        .set( n, PRINT_USER )             /* user */
-       .set( n, PRINT_NONCE )            /* bridge */
+       .set( nstr )                      /* bridge */
        .set_long( n->bloom.bits->count ) /* sub */
        .set_long( n->sub_seqno )         /* seq */
        .set_long( n->link_state_seqno )  /* link */
@@ -3763,7 +3848,7 @@ Console::show_peers( ConsoleOutput *p ) noexcept
             address  = poll.sock[ ucast_fd ]->peer_address.buf;
             addr_len = (uint32_t) get_strlen64( address );
             if ( u_ptr->rte.uid_connected.first( uid2 ) ) {
-              if ( uid2 != uid ) { /* if routing through another uid */
+              if ( uid2 != el->uid ) { /* if routing through another uid */
                 UserBridge * n = this->user_db.bridge_tab[ uid2 ];
                 if ( n != NULL && n->is_set( AUTHENTICATED_STATE ) ) { /* ptp */
                   ptp.set_url_dest( n, url_type, address, addr_len );
@@ -4329,6 +4414,26 @@ Console::show_counters( ConsoleOutput *p ) noexcept
 }
 
 void
+Console::show_pubtype( ConsoleOutput *p ) noexcept
+{
+  static const uint32_t ncols = 2,
+                        mcnt  = sizeof( this->mgr.msg_counter ) /
+                                sizeof( this->mgr.msg_counter[ 0 ] );
+  TabOut out( this->table, this->tmp, ncols );
+
+  for ( uint32_t i = 0; i < mcnt; i++ ) {
+    if ( this->mgr.msg_counter[ i ] != 0 ) {
+      out.add_row()
+         .set( publish_type_to_string( (PublishType) i ) )
+         .set_int( this->mgr.msg_counter[ i ] );
+    }
+  }
+  static const char *hdr[ ncols ] =
+    { "type", "count" };
+  this->print_table( p, hdr, ncols );
+}
+
+void
 Console::show_inbox( ConsoleOutput *p, const char *arg, size_t arglen ) noexcept
 {
   static const uint32_t ncols = 5;
@@ -4569,7 +4674,7 @@ Console::show_fds( ConsoleOutput *p ) noexcept
   const char * address;
   uint32_t     addr_len;
 
-  for ( size_t fd = 0; fd <= poll.maxfd; fd++ ) {
+  for ( uint32_t fd = 0; fd <= poll.maxfd; fd++ ) {
     EvSocket *s = poll.sock[ fd ];
     if ( s != NULL ) {
       bool is_connection = ( s->sock_base == EV_CONNECTION_BASE );
@@ -4638,13 +4743,11 @@ Console::show_fds( ConsoleOutput *p ) noexcept
 void
 Console::show_buffers( ConsoleOutput *p ) noexcept
 {
-  static const uint32_t ncols = 9;
+  static const uint32_t ncols = 11;
   TabOut out( this->table, this->tmp, ncols );
   EvPoll     & poll = this->mgr.poll;
-  const char * address;
-  uint32_t     addr_len;
 
-  for ( size_t fd = 0; fd <= poll.maxfd; fd++ ) {
+  for ( uint32_t fd = 0; fd <= poll.maxfd; fd++ ) {
     EvSocket *s = poll.sock[ fd ];
     if ( s != NULL && s->sock_base == EV_CONNECTION_BASE ) {
       EvConnection & conn = *(EvConnection *) s;
@@ -4655,8 +4758,11 @@ Console::show_buffers( ConsoleOutput *p ) noexcept
       tab[ i++ ].set_int( (uint32_t) fd );
       wused = conn.wr_used;
       wmax  = conn.wr_max;
-      if ( wused < conn.SND_BUFSIZE )
-        wused = conn.SND_BUFSIZE;
+      size_t snd_size = conn.tmp.mem_size();
+      if ( wused < snd_size )
+        wused = snd_size;
+      if ( wmax < snd_size )
+        wmax = snd_size;
       rused = conn.recv_size;
       rmax  = conn.recv_max;
 
@@ -4664,28 +4770,17 @@ Console::show_buffers( ConsoleOutput *p ) noexcept
       tab[ i++ ].set_long( wmax );
       tab[ i++ ].set_long( rused );
       tab[ i++ ].set_long( rmax );
-      tab[ i++ ].set( s->type_string() );
-      tab[ i++ ].set( s->kind );
-      tab[ i++ ].set( s->name );
-      address  = s->peer_address.buf;
-      addr_len = (uint32_t) get_strlen64( address );
-
-      bool has_ptp_link = false;
-      if ( ! this->user_db.route_list.is_empty( (uint32_t) fd ) ) {
-        UserRoute * u_ptr = this->user_db.route_list[ fd ].hd;
-        if ( ! u_ptr->rte.is_mcast() ) {
-          tab[ i++ ].set_url_dest( &u_ptr->n, NULL, address, addr_len,
-                                   PRINT_UADDR );
-          has_ptp_link = true;
-        }
-      }
-      if ( ! has_ptp_link )
-        tab[ i++ ].set( address, addr_len );
+      tab[ i++ ].set_long( conn.zref_count );
+      tab[ i++ ].set_long( conn.send_count );
+      tab[ i++ ].set_long( conn.recv_count );
+      tab[ i++ ].set_long( conn.malloc_count );
+      tab[ i++ ].set_long( conn.palloc_count );
+      tab[ i++ ].set( conn.name );
     }
   }
 
   static const char *hdr[ ncols ] =
-    { "fd", "wr", "wmax", "rd", "rmax", "type", "kind", "name", "address" };
+ { "fd", "wr", "wmax", "rd", "rmax", "zref", "send", "recv", "mall", "pall", "name" };
   this->print_table( p, hdr, ncols );
 }
 
@@ -4822,7 +4917,6 @@ Console::show_windows( ConsoleOutput *p ) noexcept
      .set_null()
      .set_null()
      .set_null();
-
 
   PeerMatchArgs kr( "rv", 2 );
   PeerMatchIter riter( this->mgr, kr );
@@ -5298,6 +5392,10 @@ ConsolePing::on_data( const SubMsgData &val ) noexcept
 {
   if ( this->complete || val.token != this->token || val.src_bridge == NULL )
     return;
+  if ( val.ref_seqno != 0 ) {
+    this->console.print_data( NULL, val );
+    return;
+  }
   uint32_t i = this->total_recv++;
   PingReply &reply = this->reply[ i ];
   if ( this->total_recv >= this->count )

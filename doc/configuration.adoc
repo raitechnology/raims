@@ -139,6 +139,7 @@ The "parameters:" structure is optional and not necessary to define them.
 | tcp_noencrypt       | boolean  | false   | Default for TCP/mesh encryption
 | tcp_write_timeout   | time     | 10 secs | Timeout for TCP write
 | tcp_write_highwater | bytes    | 1 MB    | TCP write buffer size
+| idle_busy           | count    | 16      | Busy wait loop count
 |=============================================
 
 - salt, pass, salt_data, pass_data -- The salt, pass or salt_data, pass_data
@@ -192,3 +193,7 @@ The "parameters:" structure is optional and not necessary to define them.
 
 - tcp_write_highwater -- Amount of data to buffer for writing before applying
   back pressure to forwarding sockets.
+
+- idle_busy -- Number of times to loop while no activity is present.  More
+  looping while idle keeps the process on a CPU for lower latency at the
+  expense of wasted CPU cycles.

@@ -154,11 +154,34 @@ AES_Connection::write( void ) noexcept
   }
 
   if ( this->have_key ) {
+    size_t i;
     if ( this->sz > 0 )
       this->flush();
     size_t enc_off = this->send_aes.off - this->bytes_sent;
 
-    for ( size_t i = 0; i < this->idx; i++ ) {
+    /* check refs, make sure bufs are not shared with another writer,
+     * since encryption occurs inline on the buffers being sent */
+    for ( i = 0; i < this->ref_cnt; i++ ) {
+      if ( this->poll.zero_copy_ref_count( this->refs[ i ] ) != 1 )
+        break;
+    }
+    /* copy refs if ref_count != 1 (just this) */
+    if ( i != this->ref_cnt ) {
+      for ( i = 0; i < this->idx; i++ ) {
+        iovec & io = this->iov[ i ];
+        if ( io.iov_len > this->recv_highwater ) {
+          char * tmp = this->alloc_temp( io.iov_len );
+          ::memcpy( tmp, io.iov_base, io.iov_len );
+          io.iov_base = tmp;
+        }
+      }
+      /* deref after copy */
+      for ( i = 0; i < this->ref_cnt; i++ )
+        this->poll.zero_copy_deref( this->refs[ i ], false );
+      this->ref_cnt = 0;
+    }
+    /* encrypt */
+    for ( i = 0; i < this->idx; i++ ) {
       iovec & io = this->iov[ i ];
       char  * base = (char *) io.iov_base;
       if ( io.iov_len > enc_off ) {

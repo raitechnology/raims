@@ -190,6 +190,20 @@ struct MsgBufDigestT : public BMsgBufT<T> {
     this->hdr[ 0 ] = kv_bswap32( sz );
     this->hdr[ 1 ] = kv_bswap32( h );
   }
+  void close_frag ( uint32_t h,  uint32_t trail_sz,  CabaFlags caba ) {
+    if ( ( trail_sz & 1 ) == 1 )
+      trail_sz++;
+    uint32_t sz = (uint32_t) ( trail_sz + this->len() - 8 ),
+             fl = ( (uint32_t) caba.flags << CABA_LENGTH_BITS );
+    if ( sz <= CABA_LENGTH_MASK )
+      sz |= fl; /* <flags><length> */
+    else {
+      h   = sz; /* size too big, use the hash field */
+      sz  = fl; /* length bits == 0 */
+    }
+    this->hdr[ 0 ] = kv_bswap32( sz );
+    this->hdr[ 1 ] = kv_bswap32( h );
+  }
   void close_submsg( uint8_t opt ) {
     size_t sz = this->len();
 
@@ -254,7 +268,10 @@ struct MsgBufDigestT : public BMsgBufT<T> {
     return this->o( FID_BLOOM, in, (uint32_t) in_len ); }
   T  & data       ( const void *in, size_t in_len ) {
     return this->o( FID_DATA, in, (uint32_t) in_len ); }
-
+  void data_frag( size_t in_len ) {
+    this->emit_u16( CLS_LONG_OPAQUE | FID_DATA );
+    this->emit_u32( in_len );
+  }
   T  & cnonce( const Nonce &val ) { return this->n( FID_CNONCE, val ); }
 
   T  & seqno      ( uint64_t n )  { return this->u( FID_SEQNO, n ); }
@@ -327,6 +344,17 @@ struct MsgBufDigestT : public BMsgBufT<T> {
                  this->out - &this->dig[ HMAC_SIZE ] );
     ::memcpy( this->dig, hmac.dig, HMAC_SIZE );
   }
+  void insert_digest2( const void *trail,  size_t trail_sz,
+                       const HashDigest &ha1 ) {
+    MeowHmacDigest hmac;
+    hmac.calc_4( ha1, /* msg -> digest */
+                 this->msg, this->dig - this->msg,
+                 /* digest -> end, skip over digest */
+                 &this->dig[ HMAC_SIZE ],
+                 this->out - &this->dig[ HMAC_SIZE ],
+                 trail, trail_sz, "", trail_sz & 1 );
+    ::memcpy( this->dig, hmac.dig, HMAC_SIZE );
+  }
   void insert_pk_digest( const HashDigest &pk_ha1 ) {
     MeowHmacDigest hmac;
     this->out -= 2 + HMAC_SIZE;
@@ -352,6 +380,11 @@ struct MsgBufDigestT : public BMsgBufT<T> {
   void sign( const char *sub,  size_t sublen,  const HashDigest &ha1 ) {
     this->insert_subject( sub, sublen );
     this->insert_digest( ha1 );
+  }
+  void sign_frag( const char *sub,  size_t sublen,  const void *trail,
+                  size_t trail_sz,  const HashDigest &ha1 ) {
+    this->insert_subject( sub, sublen );
+    this->insert_digest2( trail, trail_sz, ha1 );
   }
   /* sign a hb message */
   void sign_hb( const char *sub,  size_t sublen,  const HashDigest &ha1,
@@ -447,6 +480,7 @@ struct MsgEst {
   MsgEst & ucast_filter( size_t l ){ sz += fid_est( FID_UCAST_FILTER, l ); return *this; }
   MsgEst & bloom      ( size_t l ) { sz += fid_est( FID_BLOOM, l ); return *this; }
   MsgEst & data       ( size_t l ) { sz += fid_est( FID_DATA, l ); return *this; }
+  MsgEst & data_frag  ( void )     { sz += fid_est( FID_DATA, 0 ); return *this; }
   MsgEst & peer_db    ( size_t l ) { sz += fid_est( FID_PEER_DB, l ); return *this; }
   MsgEst & mesh_db    ( size_t l ) { sz += fid_est( FID_MESH_DB, l ); return *this; }
   MsgEst & ucast_db   ( size_t l ) { sz += fid_est( FID_UCAST_DB, l ); return *this; }

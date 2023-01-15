@@ -204,7 +204,7 @@ SubDB::send_subs_request( UserBridge &n,  uint64_t seqno ) noexcept
     m.close( e.sz, h, CABA_INBOX );
     m.sign( ibx.buf, ibx.len(), *this->user_db.session_key );
 
-    return this->user_db.forward_to_inbox( n, ibx, h, m.msg, m.len(), true );
+    return this->user_db.forward_to_primary_inbox( n, ibx, h, m.msg, m.len() );
   }
   return true;
 }
@@ -242,7 +242,7 @@ SubDB::fwd_resub( UserBridge &n,  const char *sub,  size_t sublen,
   m.close( e.sz, h, CABA_INBOX );
   m.sign( ibx.buf, ibx.len(), *this->user_db.session_key );
 
-  return this->user_db.forward_to_inbox( n, ibx, h, m.msg, m.len(), false );
+  return this->user_db.forward_to_inbox( n, ibx, h, m.msg, m.len() );
 }
 /* locate sub */
 bool
@@ -343,7 +343,7 @@ SubDB::recv_subs_request( const MsgFramePublish &,  UserBridge &n,
     m.close( e.sz, h, CABA_INBOX );
     m.sign( ibx.buf, ibx.len(), *this->user_db.session_key );
 
-    b &= this->user_db.forward_to_inbox( n, ibx, h, m.msg, m.len(), false );
+    b &= this->user_db.forward_to_inbox( n, ibx, h, m.msg, m.len() );
   }
   return b;
 }
@@ -397,7 +397,7 @@ SubDB::send_bloom_request( UserBridge &n ) noexcept
     m.close( e.sz, h, CABA_INBOX );
     m.sign( ibx.buf, ibx.len(), *this->user_db.session_key );
 
-    return this->user_db.forward_to_inbox( n, ibx, h, m.msg, m.len(), true );
+    return this->user_db.forward_to_primary_inbox( n, ibx, h, m.msg, m.len() );
   }
   return true;
 }
@@ -431,7 +431,7 @@ SubDB::recv_bloom_request( const MsgFramePublish &,  UserBridge &n,
   m.close( e.sz, h, CABA_INBOX );
   m.sign( ibx.buf, ibx.len(), *this->user_db.session_key );
 
-  return this->user_db.forward_to_inbox( n, ibx, h, m.msg, m.len(), false );
+  return this->user_db.forward_to_inbox( n, ibx, h, m.msg, m.len() );
 }
 
 bool

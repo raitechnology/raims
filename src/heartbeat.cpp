@@ -381,7 +381,7 @@ UserDB::on_heartbeat( const MsgFramePublish &pub,  UserBridge &n,
         csum.copy_from( dec.mref[ FID_UID_CSUM ].fptr );
         n.uid_csum = csum;
         if ( ! this->check_uid_csum( n, csum ) ) {
-          this->send_adjacency_request( n, HB_SYNC_REQ );
+          this->send_adjacency_request( n, UID_CSUM_SYNC_REQ );
         }
       }
       if ( dec.test( FID_MESH_CSUM ) && pub.rte.is_mesh() ) {
@@ -543,7 +543,7 @@ UserDB::send_ping_request( UserBridge &n ) noexcept
   m.close( e.sz, h, CABA_INBOX );
   m.sign( ibx.buf, ibx.len(), *this->session_key );
 
-  this->forward_to_inbox( n, ibx, h, m.msg, m.len(), true );
+  this->forward_to_primary_inbox( n, ibx, h, m.msg, m.len() );
 }
 
 bool
@@ -640,8 +640,12 @@ UserDB::recv_ping_request( MsgFramePublish &pub,  UserBridge &n,
   uint32_t h = ibx.hash();
   m.close( e.sz, h, CABA_INBOX );
   m.sign( ibx.buf, ibx.len(), *this->session_key );
-  bool b = this->forward_to_inbox( n, ibx, h, m.msg, m.len(),
-                                   dec.is_mcast_type() );
+  bool b;
+  if ( dec.is_mcast_type() )
+    b = this->forward_to_primary_inbox( n, ibx, h, m.msg, m.len() );
+  else
+    b = this->forward_to_inbox( n, ibx, h, m.msg, m.len() );
+
   if ( dec.test_2( FID_SUB_SEQNO, FID_LINK_STATE ) ) {
     uint64_t link_seqno = 0,
              sub_seqno  = 0;

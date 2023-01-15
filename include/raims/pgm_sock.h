@@ -37,11 +37,14 @@ struct PgmSendWindow : public SendWindow {
   static void * skb_end( struct pgm_sk_buff_t *skb,  size_t size ) {
     return &((char *) (void *) skb)[ size ];
   }
-  struct pgm_sk_buff_t *alloc_skb( PktGeom &geom,  const void *data,
-                                   size_t size,  const void *data2,
-                                   size_t size2 ) {
-    size_t truesize = this->align( geom.header_size + size + size2 +
-                                   sizeof( struct pgm_sk_buff_t ) );
+  struct pgm_sk_buff_t *alloc_skb( PktGeom &geom,
+                                   const void *data,  size_t size,
+                                   const void *data2,  size_t size2,
+                                   const void *data3,  size_t size3,
+                                   const void *data4,  size_t size4 ) {
+    size_t truesize =
+      this->align( geom.header_size + size + size2 + size3 + size4 +
+                   sizeof( struct pgm_sk_buff_t ) );
     if ( this->fits( truesize ) ) {
       struct pgm_sk_buff_t *skb = (struct pgm_sk_buff_t *)
                                   this->alloc( truesize );
@@ -54,10 +57,15 @@ struct PgmSendWindow : public SendWindow {
       skb->end      = skb_end( skb, truesize );
       pgm_skb_reserve( skb, (uint16_t) geom.header_size );
       uint8_t * pkt = (uint8_t *)
-        pgm_skb_put( skb, (uint16_t) ( size + size2 ) );
-      ::memcpy( pkt, data, size );
+        pgm_skb_put( skb, (uint16_t) ( size + size2 + size3 + size4 ) );
+      if ( size > 0 )
+        ::memcpy( pkt, data, size );
       if ( size2 > 0 )
         ::memcpy( &pkt[ size ], data2, size2 );
+      if ( size3 > 0 )
+        ::memcpy( &pkt[ size + size2 ], data3, size3 );
+      if ( size4 > 0 )
+        ::memcpy( &pkt[ size + size2 + size3 ], data4, size4 );
       return skb;
     }
     return NULL;
@@ -78,9 +86,12 @@ struct PgmSendWindow : public SendWindow {
       start = skb->end;
     }
   }
-  bool extend_skb( PktGeom &geom,  struct pgm_sk_buff_t *skb,  const void *data,
-                   size_t size,  const void *data2,  size_t size2 ) {
-    size_t new_len  = (size_t) skb->len + size + size2;
+  bool extend_skb( PktGeom &geom,  struct pgm_sk_buff_t *skb,
+                   const void *data,  size_t size,
+                   const void *data2,  size_t size2,
+                   const void *data3,  size_t size3,
+                   const void *data4,  size_t size4 ) {
+    size_t new_len  = (size_t) skb->len + size + size2 + size3 + size4;
     if ( new_len > geom.max_tsdu )
       return false;
     size_t new_truesize = this->align( geom.header_size + new_len +
@@ -92,10 +103,16 @@ struct PgmSendWindow : public SendWindow {
     this->set_end( new_end );
     skb->truesize = (uint32_t) new_truesize;
     skb->end      = new_end;
-    uint8_t * pkt = (uint8_t *) pgm_skb_put( skb, (uint16_t) ( size + size2 ) );
-    ::memcpy( pkt, data, size );
+    uint8_t * pkt = (uint8_t *)
+                    pgm_skb_put( skb, (uint16_t) ( size + size2 + size3 ) );
+    if ( size > 0 )
+      ::memcpy( pkt, data, size );
     if ( size2 > 0 )
       ::memcpy( &pkt[ size ], data2, size2 );
+    if ( size3 > 0 )
+      ::memcpy( &pkt[ size + size2 ], data3, size3 );
+    if ( size4 > 0 )
+      ::memcpy( &pkt[ size + size2 + size3 ], data4, size4 );
     return true;
   }
 };
@@ -201,7 +218,9 @@ struct PgmSock {
   void close_pgm( void ) noexcept;
   void release( void ) noexcept;
   void put_send_window( const void *data,  size_t size,
-                        const void *data2 = NULL,  size_t size2 = 0 ) noexcept;
+                        const void *data2 = NULL,  size_t size2 = 0,
+                        const void *data3 = NULL,  size_t size3 = 0,
+                        const void *data4 = NULL,  size_t size4 = 0 ) noexcept;
   bool push_send_window( void ) noexcept;
 };
 

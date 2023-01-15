@@ -107,21 +107,70 @@ EvPgmTransport::on_msg( EvPublish &pub ) noexcept
     return true;
   d_pgm( "pgm on_msg( %.*s )\n", (int) pub.subject_len, pub.subject );
   this->msgs_sent++;
-  this->bytes_sent += pub.msg_len;
-  if ( pub.msg_len <= this->pgm.geom.max_tsdu ) {
-    this->pgm.put_send_window( pub.msg, pub.msg_len );
+  MsgFragPublish * fpub = NULL;
+  size_t msg_len = pub.msg_len;
+  if ( pub.pub_type == 'f' ) {
+    fpub = (MsgFragPublish *) &pub;
+    msg_len += fpub->trail_sz + ( fpub->trail_sz & 1 );
+  }
+  this->bytes_sent += msg_len;
+  if ( msg_len <= this->pgm.geom.max_tsdu ) {
+    if ( fpub == NULL )
+      this->pgm.put_send_window( pub.msg, pub.msg_len );
+    else
+      this->pgm.put_send_window( pub.msg, pub.msg_len,
+                                 fpub->trail, fpub->trail_sz,
+                                 "", fpub->trail_sz & 1 );
   }
   else {
     const uint8_t * msg       = (const uint8_t *) pub.msg;
     size_t          frag_size = this->pgm.geom.max_tsdu - sizeof( FragTrailer );
-    FragTrailer     trl( this->pgm.my_tsi(), current_realtime_ns(),
-                         pub.msg_len );
-    for ( trl.off = 0; trl.off < pub.msg_len;
-          trl.off += (uint32_t) frag_size ) {
-      if ( trl.off + frag_size > pub.msg_len )
-        frag_size = pub.msg_len - trl.off;
-      this->pgm.put_send_window( msg, frag_size, &trl, sizeof( FragTrailer ) );
-      msg = &msg[ frag_size ];
+    FragTrailer     trl( this->pgm.my_tsi(), current_realtime_ns(), msg_len );
+
+    if ( fpub == NULL ) {
+      for ( trl.off = 0; trl.off < msg_len; trl.off += (uint32_t) frag_size ) {
+        if ( trl.off + frag_size > msg_len )
+          frag_size = msg_len - trl.off;
+        if ( fpub == NULL ) {
+          this->pgm.put_send_window( msg, frag_size, &trl,
+                                     sizeof( FragTrailer ) );
+          msg = &msg[ frag_size ];
+        }
+      }
+    }
+    else {
+      size_t msg_left  = pub.msg_len,
+             frag_left = fpub->trail_sz;
+      const uint8_t * frag = (const uint8_t *) fpub->trail;
+
+      for ( trl.off = 0; trl.off < msg_len; trl.off += (uint32_t) frag_size ) {
+        if ( trl.off + frag_size > msg_len )
+          frag_size = msg_len - trl.off;
+        const void * m1 = NULL, * m2 = NULL, * m3 = NULL;
+        size_t       z1 = 0,      z2 = 0,      z3 = 0;
+        size_t       n  = frag_size;
+
+        if ( msg_left > 0 ) {
+          m1 = msg;
+          z1 = min_int( msg_left, frag_size );
+          msg_left -= z1;
+          msg = &msg[ z1 ];
+          n -= z1;
+        }
+        if ( n > 0 && frag_left > 0 ) {
+          m2 = frag;
+          z2 = min_int( frag_left, frag_size );
+          frag_left -= z2;
+          frag = &frag[ z2 ];
+          n -= z2;
+        }
+        if ( n > 0 ) {
+          m3 = "";
+          z3 = 1;
+        }
+        this->pgm.put_send_window( m1, z1, m2, z2, m3, z3, &trl,
+                                   sizeof( FragTrailer ) );
+      }
     }
   }
   bool flow_good = ( this->pgm.pending <= this->send_highwater );

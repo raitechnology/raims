@@ -226,12 +226,13 @@ UserDB::calc_secret_hmac( UserBridge &n,  PolyHmacDigest &secret_hmac ) noexcept
   printf( "secret: %s\n", buf );
 #endif
 }
-
+#if 0
 bool
 UserDB::forward_to( UserBridge &n,  const char *sub,
                     size_t sublen,  uint32_t h,  const void *msg,
                     size_t msg_len,  UserRoute &u_rte,
-                    BPData *data ) noexcept
+                    BPData *data,  const void *frag,
+                    size_t frag_sz ) noexcept
 {
   if ( &u_rte != n.primary( *this ) || u_rte.rte.is_ipc() ) {
     if ( debug_usr )
@@ -263,27 +264,147 @@ UserDB::forward_to( UserBridge &n,  const char *sub,
   u_rte.bytes_sent += msg_len;
   u_rte.msgs_sent++;
   if ( u_rte.is_set( UCAST_URL_STATE | UCAST_URL_SRC_STATE ) == 0 ) {
-    EvPublish pub( sub, sublen, NULL, 0, msg, msg_len, u_rte.rte.sub_route,
+    if ( frag_sz == 0 ) {
+      EvPublish pub( sub, sublen, NULL, 0, msg, msg_len, u_rte.rte.sub_route,
+                     this->my_src_fd, h, CABA_TYPE_ID, 'p' );
+      return u_rte.rte.sub_route.forward_to( pub, u_rte.inbox_fd, data );
+    }
+    MsgFragPublish fvp( sub, sublen, NULL, 0, msg, msg_len, u_rte.rte.sub_route,
+                        this->my_src_fd, h, CABA_TYPE_ID, 'p' );
+    return u_rte.rte.sub_route.forward_to( fvp, u_rte.inbox_fd, data );
+  }
+  if ( u_rte.is_set( UCAST_URL_SRC_STATE ) == 0 ) {
+    if ( frag_sz == 0 ) {
+      InboxPublish ipub( sub, sublen, msg, msg_len, u_rte.rte.sub_route,
+                         this->my_src_fd, h, CABA_TYPE_ID, u_rte.ucast_url.val,
+                         n.uid, u_rte.url_hash );
+      return u_rte.rte.sub_route.forward_to( ipub, u_rte.inbox_fd, data );
+    }
+  }
+  const UserRoute  & u_src = *u_rte.ucast_src;
+  const UserBridge & n_src = u_src.n;
+  if ( frag_sz == 0 ) {
+    InboxPublish isrc( sub, sublen, msg, msg_len, u_src.rte.sub_route,
+                       this->my_src_fd, h, CABA_TYPE_ID, u_src.ucast_url.val,
+                       n_src.uid, u_src.url_hash );
+    return u_src.rte.sub_route.forward_to( isrc, u_src.inbox_fd, data );
+  }
+}
+#endif
+
+void
+UserDB::check_inbox_route( UserBridge &n,  UserRoute &u_rte ) noexcept
+{
+  if ( u_rte.rte.is_mcast() &&
+       u_rte.is_set( UCAST_URL_STATE | UCAST_URL_SRC_STATE ) == 0 ) {
+    n.printf( "inbox has no url\n" );
+    uint32_t tmp_cost;
+    UserBridge *m = this->closest_peer_route( u_rte.rte, n, tmp_cost );
+    if ( m != NULL ) {
+      UserRoute *u_peer = m->user_route_ptr( *this, u_rte.rte.tport_id );
+      if ( u_peer->is_valid() &&
+           u_peer->is_set( UCAST_URL_STATE | UCAST_URL_SRC_STATE ) ) {
+        u_rte.mcast_fd = u_peer->mcast_fd;
+        u_rte.inbox_fd = u_peer->inbox_fd;
+        u_rte.hops     = 1;
+        if ( u_peer->is_set( UCAST_URL_STATE ) )
+          this->set_ucast_url( u_rte, u_peer, "fwd" );
+        else
+          this->set_ucast_url( u_rte, u_peer->ucast_src, "fwd2" );
+        n.printf( "inbox has routing through %s\n", m->peer.user.val );
+        this->push_user_route( n, u_rte );
+      }
+    }
+  }
+}
+
+bool
+UserDB::forward_to_primary_inbox( UserBridge &n,  const char *sub,
+                                  size_t sublen,  uint32_t h,  const void *msg,
+                                  size_t msglen,  kv::BPData *data ) noexcept
+{
+  UserRoute & u_rte = *n.primary( *this );
+
+  if ( u_rte.rte.is_ipc() )
+    this->check_inbox_route( n, u_rte );
+  return this->forward_to( n, sub, sublen, h, msg, msglen, u_rte, data );
+}
+
+bool
+UserDB::forward_to_primary_inbox( UserBridge &n,  const char *sub,
+                                  size_t sublen,  uint32_t h,  const void *msg,
+                                  size_t msglen,  kv::BPData *data,
+                                  const void *frag,  size_t frag_size,
+                                  uint32_t src_route ) noexcept
+{
+  return this->forward_to( n, sub, sublen, h, msg, msglen, data,
+                           frag, frag_size, src_route );
+}
+
+bool
+UserDB::forward_to_inbox( UserBridge &n,  const char *sub,  size_t sublen, 
+                          uint32_t h,  const void *msg,  size_t msglen,
+                          kv::BPData *data ) noexcept
+{
+  UserRoute & u_rte = *n.user_route;
+
+  if ( &u_rte != n.primary( *this ) || u_rte.rte.is_ipc() )
+    this->check_inbox_route( n, u_rte );
+  return this->forward_to( n, sub, sublen, h, msg, msglen, u_rte, data );
+}
+
+bool
+UserDB::forward_to( UserBridge &n,  const char *sub,  size_t sublen, 
+                    uint32_t h,  const void *msg, size_t msglen,
+                    UserRoute &u_rte,  kv::BPData *data ) noexcept
+{
+  if ( u_rte.is_set( UCAST_URL_STATE | UCAST_URL_SRC_STATE ) == 0 ) {
+    EvPublish pub( sub, sublen, NULL, 0, msg, msglen, u_rte.rte.sub_route,
                    this->my_src_fd, h, CABA_TYPE_ID, 'p' );
-    /*d_usr( "forwrd %.*s to (%s) inbox %u\n",
-            (int) sublen, sub, n.peer.user.val, u_rte.inbox_fd );*/
     return u_rte.rte.sub_route.forward_to( pub, u_rte.inbox_fd, data );
   }
   if ( u_rte.is_set( UCAST_URL_SRC_STATE ) == 0 ) {
-    InboxPublish ipub( sub, sublen, msg, msg_len, u_rte.rte.sub_route,
+    InboxPublish ipub( sub, sublen, msg, msglen, u_rte.rte.sub_route,
                        this->my_src_fd, h, CABA_TYPE_ID, u_rte.ucast_url.val,
                        n.uid, u_rte.url_hash );
-    /*d_usr( "forward %.*s to (%s) ucast( %s ) inbox %u\n",
-       (int) sublen, sub, n.peer.user.val, u_rte.ucast_url, u_rte.inbox_fd );*/
     return u_rte.rte.sub_route.forward_to( ipub, u_rte.inbox_fd, data );
   }
   const UserRoute  & u_src = *u_rte.ucast_src;
   const UserBridge & n_src = u_src.n;
-  InboxPublish isrc( sub, sublen, msg, msg_len, u_src.rte.sub_route,
+  InboxPublish isrc( sub, sublen, msg, msglen, u_src.rte.sub_route,
                      this->my_src_fd, h, CABA_TYPE_ID, u_src.ucast_url.val,
                      n_src.uid, u_src.url_hash );
-  /*d_usr( "forward %.*s to (%s) ucast( %s ) inbox %u\n",
-       (int) sublen, sub, n.peer.user.val, u_src.ucast_url, u_src.inbox_fd );*/
+  return u_src.rte.sub_route.forward_to( isrc, u_src.inbox_fd, data );
+}
+
+bool
+UserDB::forward_to( UserBridge &n,  const char *sub,  size_t sublen, 
+                    uint32_t h,  const void *msg,  size_t msglen,
+                    kv::BPData *data,  const void *frag,
+                    size_t frag_size,  uint32_t src_route ) noexcept
+{
+  UserRoute & u_rte = *n.primary( *this );
+
+  if ( u_rte.rte.is_ipc() )
+    this->check_inbox_route( n, u_rte );
+
+  if ( u_rte.is_set( UCAST_URL_STATE | UCAST_URL_SRC_STATE ) == 0 ) {
+    MsgFragPublish fvp( sub, sublen, msg, msglen,
+                        u_rte.rte.sub_route, src_route, h,
+                        CABA_TYPE_ID, frag, frag_size );
+    return u_rte.rte.sub_route.forward_to( fvp, u_rte.inbox_fd, data );
+  }
+  if ( u_rte.is_set( UCAST_URL_SRC_STATE ) == 0 ) {
+    InboxPublish ipub( sub, sublen, msg, msglen, u_rte.rte.sub_route,
+                       src_route, h, CABA_TYPE_ID, u_rte.ucast_url.val,
+                       n.uid, u_rte.url_hash, frag, frag_size );
+    return u_rte.rte.sub_route.forward_to( ipub, u_rte.inbox_fd, data );
+  }
+  const UserRoute  & u_src = *u_rte.ucast_src;
+  const UserBridge & n_src = u_src.n;
+  InboxPublish isrc( sub, sublen, msg, msglen, u_src.rte.sub_route,
+                     src_route, h, CABA_TYPE_ID, u_src.ucast_url.val,
+                     n_src.uid, u_src.url_hash, frag, frag_size );
   return u_src.rte.sub_route.forward_to( isrc, u_src.inbox_fd, data );
 }
 
@@ -1443,7 +1564,7 @@ UserDB::remove_authenticated( UserBridge &n,  ByeReason bye ) noexcept
     this->uid_authenticated.remove( n.uid );
     this->uid_rtt.remove( n.uid );
     this->pop_source_route( n );
-    if ( bye != BYE_HB_TIMEOUT )
+    if ( bye != BYE_HB_TIMEOUT && bye != BYE_PING )
       this->remove_adjacency( n );
     this->uid_auth_count--;
     this->sub_db.sub_update_mono_time = this->last_auth_mono;
@@ -1471,6 +1592,7 @@ UserDB::remove_authenticated( UserBridge &n,  ByeReason bye ) noexcept
     this->adj_queue.remove( &n );
   if ( n.test_clear( PING_STATE ) )
     this->ping_queue.remove( &n );
+  n.ping_fail_count = 0;
 
   if ( this->ipc_transport != NULL &&
        n.bloom.has_link( this->ipc_transport->fd ) )

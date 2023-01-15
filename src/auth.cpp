@@ -324,7 +324,7 @@ UserDB::send_challenge( UserBridge &n,  AuthStage stage ) noexcept
   secret_hmac.zero();
   encrypted_ha1.zero();
   challenge_ha1.zero();
-  return this->forward_to_inbox( n, ibx, h, m.msg, m.len(), false );
+  return this->forward_to_inbox( n, ibx, h, m.msg, m.len() );
 }
 /* compute the challenge and match the auth_key field */
 bool
@@ -447,7 +447,7 @@ UserDB::send_trusted( const MsgFramePublish &pub,  UserBridge &n,
   m.close( e.sz, h, CABA_INBOX );
 
   m.sign( ibx.buf, ibx.len(), *this->session_key );
-  bool b = this->forward_to_inbox( n, ibx, h, m.msg, m.len(), false );
+  bool b = this->forward_to_inbox( n, ibx, h, m.msg, m.len() );
 
   uint32_t count = this->transport_tab.count;
   for ( uint32_t tport_id = 0; tport_id < count; tport_id++ ) {
@@ -511,7 +511,7 @@ UserDB::send_trusted( const MsgFramePublish &pub,  UserBridge &n,
         m.close( e.sz, h, CABA_INBOX );
         m.sign( ibx.buf, ibx.len(), *this->session_key );
         b |= this->forward_to( n, ibx.buf, ibx.len(), h, m.msg, m.len(),
-                               *u_ptr );
+                               *u_ptr, NULL );
       }
     }
   }

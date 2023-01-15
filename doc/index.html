@@ -1201,6 +1201,12 @@ connect:
 <td class="tableblock halign-left valign-top"><p class="tableblock">1 MB</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">TCP write buffer size</p></td>
 </tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">idle_busy</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">count</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">16</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Busy wait loop count</p></td>
+</tr>
 </tbody>
 </table>
 <div class="ulist">
@@ -1271,6 +1277,11 @@ available.</p>
 <li>
 <p>tcp_write_highwater&#8201;&#8212;&#8201;Amount of data to buffer for writing before applying
 back pressure to forwarding sockets.</p>
+</li>
+<li>
+<p>idle_busy&#8201;&#8212;&#8201;Number of times to loop while no activity is present.  More
+looping while idle keeps the process on a CPU for lower latency at the
+expense of wasted CPU cycles.</p>
 </li>
 </ul>
 </div>
@@ -4332,7 +4343,7 @@ daemon instances.</p>
 </div>
 <div id="footer">
 <div id="footer-text">
-Last updated 2022-09-20 00:17:59 -0700
+Last updated 2023-01-10 04:37:59 -0800
 </div>
 </div>
 </body>

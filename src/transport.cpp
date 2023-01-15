@@ -310,15 +310,14 @@ TransportRoute::on_msg( EvPublish &pub ) noexcept
   if ( tflag == CABA_INBOX &&
        (ptp_bridge = this->user_db.is_inbox_sub( pub.subject,
                                                  pub.subject_len )) != NULL ) {
-    TransportRoute &rte = ptp_bridge->primary( this->user_db )->rte;
-    if ( &rte != this ) {
-      d_tran( "transport_route: inbox (%.*s) -> %s\n",
-              (int) pub.subject_len, pub.subject, rte.name );
+    if ( ptp_bridge->primary_route != this->tport_id ) {
+      d_tran( "transport_route: inbox (%.*s) -> %u\n",
+              (int) pub.subject_len, pub.subject, ptp_bridge->primary_route );
       /*this->msgs_sent++;
       this->bytes_sent += pub.msg_len;*/
-      bool b = this->user_db.forward_to_inbox( *ptp_bridge, pub.subject,
-                                               pub.subject_len, pub.subj_hash,
-                                               pub.msg, pub.msg_len, this );
+      bool b = this->user_db.forward_to_primary_inbox(
+                 *ptp_bridge, pub.subject, pub.subject_len, pub.subj_hash,
+                 pub.msg, pub.msg_len, this );
       return this->check_flow_control( b );
     }
   }

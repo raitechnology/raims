@@ -2314,6 +2314,21 @@ int_prefix( const char *s,  MDDecimal &dec,  size_t &off ) noexcept
 
 
 bool
+ConfigTree::string_to_uint( const char *s,  uint64_t &ival ) noexcept
+{
+  MDDecimal dec;
+  double val;
+  size_t off;
+  if ( ! int_prefix( s, dec, off ) )
+    return false;
+  if ( dec.hint == MD_DEC_INTEGER )
+    ival = (uint64_t) dec.ival;
+  if ( dec.get_real( val ) != 0 )
+    return false;
+  return (uint64_t) val;
+}
+
+bool
 ConfigTree::string_to_bytes( const char *s,  uint64_t &bytes ) noexcept
 {
   MDDecimal dec;
