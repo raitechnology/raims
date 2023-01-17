@@ -1605,10 +1605,12 @@ SessionMgr::forward_ipc( TransportRoute &src_rte,  EvPublish &pub ) noexcept
 
   const void * frag = NULL;
   size_t frag_sz = 0;
-  uint8_t path_select =
-    ( pub.subj_hash >> ( 32 - CABA_OPT_MC_BITS ) ) % COST_PATH_COUNT;
-  fl.set_opt( path_select << CABA_OPT_MC_SHIFT );
-
+  uint8_t path_select = 0;
+  if ( pub.pub_type == 'p' ) {
+    path_select =
+      ( pub.subj_hash >> ( 32 - CABA_OPT_MC_BITS ) ) % COST_PATH_COUNT;
+    fl.set_opt( path_select << CABA_OPT_MC_SHIFT );
+  }
   MsgEst e( pub.subject_len );
   e.seqno       ()
    .chain_seqno ()
