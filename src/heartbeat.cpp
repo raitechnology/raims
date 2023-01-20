@@ -209,7 +209,8 @@ UserDB::on_heartbeat( const MsgFramePublish &pub,  UserBridge &n,
 {
   Nonce       cnonce;
   ec25519_key pubkey;
-  uint64_t    time, seqno, uptime, start, old_hb_seqno, current_mono_time;
+  uint64_t    time, seqno, uptime, start, old_hb_seqno,
+              current_mono_time = 0;
   uint32_t    cost[ COST_PATH_COUNT ] = { COST_DEFAULT, COST_DEFAULT,
                                           COST_DEFAULT, COST_DEFAULT },
               ival;
@@ -380,8 +381,14 @@ UserDB::on_heartbeat( const MsgFramePublish &pub,  UserBridge &n,
         Nonce csum;
         csum.copy_from( dec.mref[ FID_UID_CSUM ].fptr );
         n.uid_csum = csum;
-        if ( ! this->check_uid_csum( n, csum ) ) {
-          this->send_adjacency_request( n, UID_CSUM_SYNC_REQ );
+        if ( this->uid_csum != csum ) {
+          if ( current_mono_time == 0 )
+            current_mono_time = current_monotonic_time_ns();
+          if ( this->last_auth_mono + sec_to_ns( 1 ) < current_mono_time ) {
+            if ( ! this->check_uid_csum( n, csum ) ) {
+              this->send_adjacency_request( n, UID_CSUM_SYNC_REQ );
+            }
+          }
         }
       }
       if ( dec.test( FID_MESH_CSUM ) && pub.rte.is_mesh() ) {
@@ -389,7 +396,8 @@ UserDB::on_heartbeat( const MsgFramePublish &pub,  UserBridge &n,
         csum.copy_from( dec.mref[ FID_MESH_CSUM ].fptr );
         my_csum ^= this->bridge_id.nonce;
         if ( my_csum != csum ) {
-          current_mono_time = current_monotonic_time_ns();
+          if ( current_mono_time == 0 )
+            current_mono_time = current_monotonic_time_ns();
           if ( this->last_auth_mono + sec_to_ns( 1 ) < current_mono_time )
             n.printf( "mesh_csum not equal %s=[%s] hb[%s] "
                       "mesh pending queue is_empty=%u\n",

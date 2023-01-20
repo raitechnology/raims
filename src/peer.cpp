@@ -539,46 +539,51 @@ UserDB::send_peer_add( UserBridge &n,
                        const TransportRoute *except_rte ) noexcept
 {
   size_t count = this->transport_tab.count;
+  kv::BitSpace unique;
+  unique.add( n.uid );
   for ( size_t i = 0; i < count; i++ ) {
     TransportRoute * rte = this->transport_tab.ptr[ i ];
     if ( rte != except_rte ) {
       if ( rte->connect_count > 0 && ! rte->is_set( TPORT_IS_IPC ) ) {
-        d_peer( "send Z_ADD for %s via %s, connect %u\n",
-                n.peer.user.val, rte->transport.tport.val, rte->connect_count );
-        uint32_t hops = 0;
-        if ( ! rte->uid_connected.is_member( n.uid ) )
-          hops = 1;
-        this->events.send_add_route( n.uid, (uint32_t) i, hops );
+        if ( ! unique.superset( rte->uid_connected ) ) {
+          d_peer( "send Z_ADD for %s via %s, connect %u\n",
+               n.peer.user.val, rte->transport.tport.val, rte->connect_count );
+          uint32_t hops = 0;
+          if ( ! rte->uid_connected.is_member( n.uid ) )
+            hops = 1;
+          this->events.send_add_route( n.uid, (uint32_t) i, hops );
 
-        size_t user_len = n.peer.user.len;
+          size_t user_len = n.peer.user.len;
 
-        MsgEst e( Z_ADD_SZ );
-        e.seqno      ()
-         .time       ()
-         .sync_bridge()
-         .user       ( user_len )
-         .hops       ()
-         .sub_seqno  ()
-         .link_state ();
+          MsgEst e( Z_ADD_SZ );
+          e.seqno      ()
+           .time       ()
+           .sync_bridge()
+           .user       ( user_len )
+           .hops       ()
+           .sub_seqno  ()
+           .link_state ();
 
-        MsgCat m;
-        m.reserve( e.sz );
-        m.open( this->bridge_id.nonce, Z_ADD_SZ )
-         .seqno      ( ++this->send_peer_seqno )
-         .time       ( n.hb_time  )
-         .sync_bridge( n.bridge_id.nonce )
-         .user       ( n.peer.user.val, user_len )  /* for information */
-         .hops       ( hops               )
-         .sub_seqno  ( n.sub_seqno        )
-         .link_state ( n.link_state_seqno );
+          MsgCat m;
+          m.reserve( e.sz );
+          m.open( this->bridge_id.nonce, Z_ADD_SZ )
+           .seqno      ( ++this->send_peer_seqno )
+           .time       ( n.hb_time  )
+           .sync_bridge( n.bridge_id.nonce )
+           .user       ( n.peer.user.val, user_len )  /* for information */
+           .hops       ( hops               )
+           .sub_seqno  ( n.sub_seqno        )
+           .link_state ( n.link_state_seqno );
 
-        m.close( e.sz, add_h, CABA_RTR_ALERT );
-        m.sign( Z_ADD, Z_ADD_SZ, *this->session_key );
+          m.close( e.sz, add_h, CABA_RTR_ALERT );
+          m.sign( Z_ADD, Z_ADD_SZ, *this->session_key );
 
-        EvPublish pub( Z_ADD, Z_ADD_SZ, NULL, 0, m.msg, m.len(),
-                       rte->sub_route, this->my_src_fd, add_h,
-                       CABA_TYPE_ID, 'p' );
-        rte->forward_to_connected_auth( pub );
+          EvPublish pub( Z_ADD, Z_ADD_SZ, NULL, 0, m.msg, m.len(),
+                         rte->sub_route, this->my_src_fd, add_h,
+                         CABA_TYPE_ID, 'p' );
+          rte->forward_to_connected_auth( pub );
+          unique.add( rte->uid_connected );
+        }
       }
     }
   }
@@ -588,36 +593,41 @@ void
 UserDB::send_peer_del( UserBridge &n ) noexcept
 {
   size_t count = this->transport_tab.count;
+  kv::BitSpace unique;
+  unique.add( n.uid );
   for ( size_t i = 0; i < count; i++ ) {
     TransportRoute * rte = this->transport_tab.ptr[ i ];
     if ( rte->connect_count > 0 && ! rte->is_set( TPORT_IS_IPC ) ) {
-      if ( debug_peer )
-        printf( "send Z_DEL(%" PRIu64 ") for %s via %s, connect=%u\n",
-                this->send_peer_seqno, n.peer.user.val,
-                rte->transport.tport.val, rte->connect_count );
-      this->events.send_peer_delete( n.uid, (uint32_t) i );
+      if ( ! unique.superset( rte->uid_connected ) ) {
+        if ( debug_peer )
+          printf( "send Z_DEL(%" PRIu64 ") for %s via %s, connect=%u\n",
+                  this->send_peer_seqno, n.peer.user.val,
+                  rte->transport.tport.val, rte->connect_count );
+        this->events.send_peer_delete( n.uid, (uint32_t) i );
 
-      MsgEst e( Z_DEL_SZ );
-      e.seqno      ()
-       .time       ()
-       .sync_bridge()
-       .user       ( n.peer.user.len ); /* for information */
+        MsgEst e( Z_DEL_SZ );
+        e.seqno      ()
+         .time       ()
+         .sync_bridge()
+         .user       ( n.peer.user.len ); /* for information */
 
-      MsgCat m;
-      m.reserve( e.sz );
-      m.open( this->bridge_id.nonce, Z_DEL_SZ )
-       .seqno      ( ++this->send_peer_seqno )
-       .time       ( n.hb_time )
-       .sync_bridge( n.bridge_id.nonce )
-       .user       ( n.peer.user.val, n.peer.user.len );
+        MsgCat m;
+        m.reserve( e.sz );
+        m.open( this->bridge_id.nonce, Z_DEL_SZ )
+         .seqno      ( ++this->send_peer_seqno )
+         .time       ( n.hb_time )
+         .sync_bridge( n.bridge_id.nonce )
+         .user       ( n.peer.user.val, n.peer.user.len );
 
-      m.close( e.sz, del_h, CABA_RTR_ALERT );
-      m.sign( Z_DEL, Z_DEL_SZ, *this->session_key );
+        m.close( e.sz, del_h, CABA_RTR_ALERT );
+        m.sign( Z_DEL, Z_DEL_SZ, *this->session_key );
 
-      EvPublish pub( Z_DEL, Z_DEL_SZ, NULL, 0, m.msg, m.len(),
-                     rte->sub_route, this->my_src_fd, del_h,
-                     CABA_TYPE_ID, 'p' );
-      rte->forward_to_connected_auth( pub );
+        EvPublish pub( Z_DEL, Z_DEL_SZ, NULL, 0, m.msg, m.len(),
+                       rte->sub_route, this->my_src_fd, del_h,
+                       CABA_TYPE_ID, 'p' );
+        rte->forward_to_connected_auth( pub );
+        unique.add( rte->uid_connected );
+      }
     }
   }
 }

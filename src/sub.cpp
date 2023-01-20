@@ -168,13 +168,17 @@ SubDB::fwd_sub( SubArgs &ctx ) noexcept
     }
   }
   size_t count = this->user_db.transport_tab.count;
+  kv::BitSpace unique;
   for ( size_t i = 0; i < count; i++ ) {
     TransportRoute * rte = this->user_db.transport_tab.ptr[ i ];
     if ( ! rte->is_set( TPORT_IS_IPC ) ) {
-      EvPublish pub( s.msg, s.len(), NULL, 0, m.msg, m.len(),
-                     rte->sub_route, this->my_src_fd, h,
-                     CABA_TYPE_ID, 'p' );
-      rte->forward_to_connected_auth( pub );
+      if ( ! unique.superset( rte->connected_auth ) ) {
+        EvPublish pub( s.msg, s.len(), NULL, 0, m.msg, m.len(),
+                       rte->sub_route, this->my_src_fd, h,
+                       CABA_TYPE_ID, 'p' );
+        rte->forward_to_connected_auth( pub );
+        unique.add( rte->connected_auth );
+      }
     }
   }
 }
@@ -617,13 +621,17 @@ SubDB::resize_bloom( void ) noexcept
     m.sign( Z_BLM, Z_BLM_SZ, *this->user_db.session_key );
 
     size_t count = this->user_db.transport_tab.count;
+    kv::BitSpace unique;
     for ( size_t i = 0; i < count; i++ ) {
       TransportRoute * rte = this->user_db.transport_tab.ptr[ i ];
       if ( ! rte->is_set( TPORT_IS_IPC ) ) {
-        EvPublish pub( Z_BLM, Z_BLM_SZ, NULL, 0, m.msg, m.len(),
-                       rte->sub_route, this->my_src_fd,
-                       blm_h, CABA_TYPE_ID, 'p' );
-        rte->forward_to_connected_auth( pub );
+        if ( ! unique.superset( rte->connected_auth ) ) {
+          EvPublish pub( Z_BLM, Z_BLM_SZ, NULL, 0, m.msg, m.len(),
+                         rte->sub_route, this->my_src_fd,
+                         blm_h, CABA_TYPE_ID, 'p' );
+          rte->forward_to_connected_auth( pub );
+          unique.add( rte->connected_auth );
+        }
       }
     }
   }

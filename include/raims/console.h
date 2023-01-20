@@ -790,7 +790,8 @@ enum ConsoleCmd {
   CMD_CANCEL           = 63, /* cancel                     */
   CMD_MUTE_LOG         = 64, /* mute                       */
   CMD_UNMUTE_LOG       = 65, /* unmute                     */
-  CMD_QUIT             = 66, /* quit/exit                  */
+  CMD_WEVENTS          = 66, /* write events to file       */
+  CMD_QUIT             = 67, /* quit/exit                  */
 
 #define CMD_TPORT_BASE ( (int) CMD_QUIT + 1 )
   CMD_TPORT_ENUM /* config_const.h */
@@ -891,6 +892,7 @@ static const ConsoleCmdString console_cmd[] = {
   { CMD_CANCEL     , "cancel"       ,0,0}, /* cancel incomplete rpc */
   { CMD_MUTE_LOG   , "mute"         ,0,0}, /* mute log */
   { CMD_UNMUTE_LOG , "unmute"       ,0,0}, /* unmute log */
+  { CMD_WEVENTS    , "wevents"      ,0,0},
   { CMD_QUIT       , "quit"         ,0,0},
   { CMD_QUIT       , "exit"         ,0,0}
 };
@@ -1009,6 +1011,7 @@ static const ConsoleCmdString help_cmd[] = {
                            " 0x40=peer,  0x80=auth,  0x100=session,  0x200=hb,  0x400=sub,\n"
                            " 0x800=msg_recv,  0x1000=msg_hex,  0x2000=telnet,  0x4000=name,\n"
                            " dist,  kvpub,  kvps,  rv"                                               },
+  { CMD_WEVENTS          , "wevents","[F]",      "Write events to file"                              },
   { CMD_QUIT             , "quit/exit","",       "Exit console"                                      }
 };
 

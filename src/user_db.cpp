@@ -409,7 +409,7 @@ UserDB::forward_to( UserBridge &n,  const char *sub,  size_t sublen,
 }
 
 bool
-UserDB::forward_pub( const MsgFramePublish &pub,  const UserBridge &,
+UserDB::forward_pub( const MsgFramePublish &pub,  const UserBridge &n,
                      const MsgHdrDecoder &dec ) noexcept
 {
   bool b = true;
@@ -417,14 +417,19 @@ UserDB::forward_pub( const MsgFramePublish &pub,  const UserBridge &,
     size_t count = this->transport_tab.count;
     if ( count > 1 || pub.rte.connect_count > 1 ) {
       kv::EvPublish tmp( pub );
+      kv::BitSpace unique;
+      unique.add( n.uid );
       for ( size_t i = 0; i < count; i++ ) {
         TransportRoute * rte = this->transport_tab.ptr[ i ];
         tmp.pub_type = 'p';
         if ( rte->connect_count > 0 && ! rte->is_set( TPORT_IS_IPC ) ) {
-          if ( rte != &pub.rte )
-            b &= rte->forward_to_connected_auth( tmp );
-          else if ( rte->connect_count > 1 )
-            b &= rte->forward_to_connected_auth_not_fd( tmp, pub.src_route );
+          if ( ! unique.superset( rte->uid_connected ) ) {
+            if ( rte != &pub.rte )
+              b &= rte->forward_to_connected_auth( tmp );
+            else if ( rte->connect_count > 1 )
+              b &= rte->forward_to_connected_auth_not_fd( tmp, pub.src_route );
+            unique.add( rte->uid_connected );
+          }
         }
       }
     }

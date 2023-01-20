@@ -1903,6 +1903,18 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
       p->on_quit();
       return b;
     }
+    case CMD_WEVENTS: {
+      if ( len > 0 )
+        sub_output = this->json_files.open( arg, len );
+      if ( sub_output != NULL ) {
+        this->show_events( sub_output );
+        if ( len > 0 ) {
+          this->flush_output( sub_output );
+          sub_output->on_remove();
+        }
+      }
+      break;
+    }
     case CMD_CONNECT:  this->connect( arg, len ); break;
     case CMD_LISTEN:   this->listen( arg, len ); break;
     case CMD_SHUTDOWN: this->shutdown( arg, len ); break;

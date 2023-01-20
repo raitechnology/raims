@@ -224,12 +224,16 @@ SubDB::fwd_psub( PatternArgs &ctx ) noexcept
     }
   }
   size_t count = this->user_db.transport_tab.count;
+  kv::BitSpace unique;
   for ( size_t i = 0; i < count; i++ ) {
     rte = this->user_db.transport_tab.ptr[ i ];
     if ( ! rte->is_set( TPORT_IS_IPC ) ) {
-      EvPublish pub( s.msg, s.len(), NULL, 0, m.msg, m.len(),
-                     rte->sub_route, this->my_src_fd, h, CABA_TYPE_ID, 'p' );
-      rte->forward_to_connected_auth( pub );
+      if ( ! unique.superset( rte->connected_auth ) ) {
+        EvPublish pub( s.msg, s.len(), NULL, 0, m.msg, m.len(),
+                       rte->sub_route, this->my_src_fd, h, CABA_TYPE_ID, 'p' );
+        rte->forward_to_connected_auth( pub );
+        unique.add( rte->connected_auth );
+      }
     }
   }
 }

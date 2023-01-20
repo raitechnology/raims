@@ -533,13 +533,17 @@ UserDB::send_adjacency_change( void ) noexcept
   m.sign( Z_ADJ, Z_ADJ_SZ, *this->session_key );
 
   uint32_t count = (uint32_t) this->transport_tab.count;
+  kv::BitSpace unique;
   for ( uint32_t i = 0; i < count; i++ ) {
     TransportRoute *rte = this->transport_tab.ptr[ i ];
     if ( rte->connect_count > 0 && ! rte->is_set( TPORT_IS_IPC ) ) {
-      EvPublish pub( Z_ADJ, Z_ADJ_SZ, NULL, 0, m.msg, m.len(),
-                     rte->sub_route, this->my_src_fd, adj_h,
-                     CABA_TYPE_ID, 'p' );
-      rte->forward_to_connected( pub );
+      if ( ! unique.superset( rte->uid_connected ) ) {
+        EvPublish pub( Z_ADJ, Z_ADJ_SZ, NULL, 0, m.msg, m.len(),
+                       rte->sub_route, this->my_src_fd, adj_h,
+                       CABA_TYPE_ID, 'p' );
+        rte->forward_to_connected( pub );
+        unique.add( rte->uid_connected );
+      }
     }
   }
 }
