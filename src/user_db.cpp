@@ -13,12 +13,13 @@ using namespace ms;
 using namespace kv;
 using namespace md;
 
-UserDB::UserDB( EvPoll &p,  ConfigTree::User &u,
-                ConfigTree::Service &s,  SubDB &sdb,
-                StringTab &st,  EventRecord &ev ) noexcept
+UserDB::UserDB( EvPoll &p,  ConfigTree::User &u,  ConfigTree::Service &s,
+                SubDB &sdb,  StringTab &st,  EventRecord &ev,
+                BitSpace &rs ) noexcept
   : ipc_transport( 0 ), poll( p ), user( u ), svc( s ), sub_db( sdb ),
-    string_tab( st ), events( ev ), svc_dsa( 0 ), user_dsa( 0 ),
-    session_key( 0 ), hello_key( 0 ), cnonce( 0 ), hb_keypair( 0 ),
+    string_tab( st ), events( ev ), router_set( rs ),
+    svc_dsa( 0 ), user_dsa( 0 ), session_key( 0 ), hello_key( 0 ),
+    cnonce( 0 ), hb_keypair( 0 ),
     node_ht( 0 ), zombie_ht( 0 ), host_ht( 0 ), peer_ht( 0 ), peer_key_ht( 0 ),
     peer_keys( 0 ), peer_bloom( 0, "(peer)", p.g_bloom_db ),
     hb_interval( HB_DEFAULT_INTERVAL ), reliability( DEFAULT_RELIABILITY ),
@@ -409,9 +410,10 @@ UserDB::forward_to( UserBridge &n,  const char *sub,  size_t sublen,
 }
 
 bool
-UserDB::forward_pub( const MsgFramePublish &pub,  const UserBridge &n,
-                     const MsgHdrDecoder &dec ) noexcept
+UserDB::bcast_pub( const MsgFramePublish &pub,  const UserBridge &n,
+                   const MsgHdrDecoder &dec ) noexcept
 {
+  /* bcast to all connected */
   bool b = true;
   if ( dec.is_mcast_type() ) {
     size_t count = this->transport_tab.count;
@@ -432,6 +434,34 @@ UserDB::forward_pub( const MsgFramePublish &pub,  const UserBridge &n,
           }
         }
       }
+    }
+  }
+  return b;
+}
+
+bool
+UserDB::mcast_pub( const MsgFramePublish &pub,  UserBridge &n,
+                   const MsgHdrDecoder &dec ) noexcept
+{
+  /* mcast using forwarding rules */
+  bool b = true;
+  if ( dec.is_mcast_type() ) {
+    uint8_t path_select = pub.shard;
+    if ( path_select > 0 && n.bloom_rt[ path_select ] == NULL )
+      path_select = 0;
+
+    ForwardCache   & forward = n.forward_path[ path_select ];
+    TransportRoute * rte;
+    uint32_t         tport_id;
+
+    this->peer_dist.update_forward_cache( forward, n.uid, path_select );
+    if ( forward.first( tport_id ) ) {
+      do {
+        kv::EvPublish tmp( pub );
+        tmp.pub_type = 'p';
+        rte = this->transport_tab.ptr[ tport_id ];
+        b  &= rte->sub_route.forward_except( tmp, this->router_set );
+      } while ( forward.next( tport_id ) );
     }
   }
   return b;

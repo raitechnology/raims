@@ -674,7 +674,7 @@ UserDB::recv_adjacency_change( const MsgFramePublish &pub,  UserBridge &n,
     this->peer_dist.invalidate( ADJACENCY_CHANGE_INV );
   }
   this->events.recv_adjacency_change( n.uid, pub.rte.tport_id, adj_change );
-  b &= this->forward_pub( pub, n, dec );
+  b &= this->bcast_pub( pub, n, dec );
   return b;
 }
 

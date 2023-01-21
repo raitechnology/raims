@@ -167,19 +167,18 @@ SubDB::fwd_sub( SubArgs &ctx ) noexcept
         rte->sub_route.do_notify_unsub( nsub );
     }
   }
-  size_t count = this->user_db.transport_tab.count;
-  kv::BitSpace unique;
-  for ( size_t i = 0; i < count; i++ ) {
-    TransportRoute * rte = this->user_db.transport_tab.ptr[ i ];
-    if ( ! rte->is_set( TPORT_IS_IPC ) ) {
-      if ( ! unique.superset( rte->connected_auth ) ) {
-        EvPublish pub( s.msg, s.len(), NULL, 0, m.msg, m.len(),
-                       rte->sub_route, this->my_src_fd, h,
-                       CABA_TYPE_ID, 'p' );
-        rte->forward_to_connected_auth( pub );
-        unique.add( rte->connected_auth );
-      }
-    }
+  ForwardCache & forward = this->user_db.forward_path[ 0 ];
+  uint32_t       tport_id;
+
+  this->user_db.peer_dist.update_forward_cache( forward, 0, 0 );
+  if ( forward.first( tport_id ) ) {
+    do {
+      rte = this->user_db.transport_tab.ptr[ tport_id ];
+      EvPublish pub( s.msg, s.len(), NULL, 0, m.msg, m.len(),
+                     rte->sub_route, this->my_src_fd, h,
+                     CABA_TYPE_ID, 'p' );
+      rte->sub_route.forward_except( pub, this->mgr.router_set );
+    } while ( forward.next( tport_id ) );
   }
 }
 /* request subs from peer */
@@ -476,7 +475,7 @@ SubDB::recv_bloom_result( const MsgFramePublish &pub,  UserBridge &n,
                           const MsgHdrDecoder &dec ) noexcept
 {
   if ( this->recv_bloom( pub, n, dec ) )
-    this->user_db.forward_pub( pub, n, dec );
+    this->user_db.mcast_pub( pub, n, dec );
   if ( n.test_clear( SUBS_REQUEST_STATE ) )
     this->user_db.subs_queue.remove( &n );
   return true;
@@ -502,7 +501,7 @@ SubDB::recv_sub_start( const MsgFramePublish &pub,  UserBridge &n,
     }
     if ( debug_sub )
       n.printf( "start %.*s\n", (int) pub.subject_len, pub.subject );
-    this->user_db.forward_pub( pub, n, dec );
+    this->user_db.mcast_pub( pub, n, dec );
   }
   return true;
 }
@@ -527,7 +526,7 @@ SubDB::recv_sub_stop( const MsgFramePublish &pub,  UserBridge &n,
     }
     if ( debug_sub )
       n.printf( "stop %.*s\n", (int) pub.subject_len, pub.subject );
-    this->user_db.forward_pub( pub, n, dec );
+    this->user_db.mcast_pub( pub, n, dec );
   }
   return true;
 }
@@ -620,19 +619,19 @@ SubDB::resize_bloom( void ) noexcept
     m.close( e.sz, blm_h, CABA_RTR_ALERT );
     m.sign( Z_BLM, Z_BLM_SZ, *this->user_db.session_key );
 
-    size_t count = this->user_db.transport_tab.count;
-    kv::BitSpace unique;
-    for ( size_t i = 0; i < count; i++ ) {
-      TransportRoute * rte = this->user_db.transport_tab.ptr[ i ];
-      if ( ! rte->is_set( TPORT_IS_IPC ) ) {
-        if ( ! unique.superset( rte->connected_auth ) ) {
-          EvPublish pub( Z_BLM, Z_BLM_SZ, NULL, 0, m.msg, m.len(),
-                         rte->sub_route, this->my_src_fd,
-                         blm_h, CABA_TYPE_ID, 'p' );
-          rte->forward_to_connected_auth( pub );
-          unique.add( rte->connected_auth );
-        }
-      }
+    ForwardCache & forward = this->user_db.forward_path[ 0 ];
+    uint32_t       tport_id;
+
+    this->user_db.peer_dist.update_forward_cache( forward, 0, 0 );
+    if ( forward.first( tport_id ) ) {
+      do {
+        TransportRoute *rte = this->user_db.transport_tab.ptr[ tport_id ];
+        EvPublish pub( Z_BLM, Z_BLM_SZ, NULL, 0, m.msg, m.len(),
+                       rte->sub_route, this->my_src_fd,
+                       blm_h, CABA_TYPE_ID, 'p' );
+
+        rte->sub_route.forward_except( pub, this->mgr.router_set );
+      } while ( forward.next( tport_id ) );
     }
   }
 }

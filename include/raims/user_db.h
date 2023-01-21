@@ -424,6 +424,7 @@ struct UserDB {
   SubDB               & sub_db;          /* my subscriptions */
   StringTab           & string_tab;      /* string const (config, user, tport)*/
   EventRecord         & events;          /* event recorder, what happened when*/
+  kv::BitSpace        & router_set;
   uint64_t              start_mono_time, /* monotonic stamp */
                         start_time;      /* set on initialization, used widely*/
   /* my instance */
@@ -503,7 +504,8 @@ struct UserDB {
   ServiceBuf            my_svc;          /* pub key for service */
 
   UserDB( kv::EvPoll &p,  ConfigTree::User &u, ConfigTree::Service &s,
-          SubDB &sdb,  StringTab &st,  EventRecord &ev ) noexcept;
+          SubDB &sdb,  StringTab &st,  EventRecord &ev,
+          kv::BitSpace &rs ) noexcept;
   /* allocate from secure mem */
   void * alloc( size_t size ) {
     void * p;
@@ -537,57 +539,7 @@ struct UserDB {
   void calc_hello_key( uint64_t start_time, const HmacDigest &user_hmac,
                        HashDigest &ha ) noexcept;
   void calc_secret_hmac( UserBridge &n,  PolyHmacDigest &secret_hmac ) noexcept;
-#if 0
-  /* inbox forwarding */
-  struct ForwardInbox {
-    UserBridge & n;
-    const char * sub;
-    size_t       sublen;
-    const void * msg;
-    size_t       msg_len;
-    UserRoute  & u_rte;
-    kv::BPData * data;
-    const void * frag;
-    size_t       frag_sz;
-    uint32_t     subj_hash,
-                 src_route;
 
-    ForwardInbox( UserBridge & node,  const char * subject,
-                  size_t subject_len,  uint32_t h,  const void * message,
-                  size_t message_len,  UserRoute  & user_rte,
-                  kv::BPData * bp_data,  const void * fragment,
-                  size_t frag_size,  uint32_t fd )
-      : n( node ), sub( subject ), sublen( subject_len ), msg( message ),
-        msg_len( message_len ), u_rte( user_rte ), data( bp_data ),
-        frag( fragment ), frag_sz( frag_size ), subj_hash( h ),
-        src_route( fd ) {}
-  };
-  bool forward_to( ForwardInbox &fwd ) noexcept;
-#endif
-#if 0
-  bool forward_to( UserBridge &n,  const char *sub,
-                   size_t sublen,  uint32_t h,  const void *msg,
-                   size_t msg_len,  UserRoute &u_rte,
-                   kv::BPData *data = NULL,  const void *frag = NULL,
-                   size_t frag_sz = 0 ) noexcept;
-  bool forward_to_inbox( UserBridge &n,  const char *sub,
-                         size_t sublen,  uint32_t h,  const void *msg,
-                         size_t msg_len,  kv::BPData *data = NULL ) {
-    ForwardInbox f( n, sub, sublen, h, msg, msg_len, data );
-    return this->forward_to( n, sub, sublen, h, msg, msg_len,
-                             *n.primary( *this ), data );
-  }
-  bool forward_to_inbox( UserBridge &n,  const InboxBuf &ibx,  uint32_t h,
-                         const void *msg,  size_t msg_len,  bool primary,
-                         kv::BPData *data = NULL,  const void *frag = NULL,
-                         size_t frag_sz = 0 ) {
-    if ( primary )
-      return this->forward_to( n, ibx.buf, ibx.len(), h, msg, msg_len,
-                               *n.primary( *this ), data, frag, frag_sz );
-    return this->forward_to( n, ibx.buf, ibx.len(), h, msg, msg_len,
-                             *n.user_route, data, frag, frag_sz );
-  }
-#endif
   void check_inbox_route( UserBridge &n,  UserRoute &u_rte ) noexcept;
 
   /* use primary route for inbox */
@@ -841,8 +793,10 @@ struct UserDB {
     return NULL;
   }
 
-  bool forward_pub( const MsgFramePublish &pub, const UserBridge &n,
-                    const MsgHdrDecoder &dec ) noexcept;
+  bool bcast_pub( const MsgFramePublish &pub, const UserBridge &n,
+                  const MsgHdrDecoder &dec ) noexcept;
+  bool mcast_pub( const MsgFramePublish &pub, UserBridge &n,
+                  const MsgHdrDecoder &dec ) noexcept;
   void debug_uids( kv::BitSpace &uids,  Nonce &csum ) noexcept;
   const char * uid_names( const kv::BitSpace &uids,  char *buf,
                           size_t buflen ) noexcept;
