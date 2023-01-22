@@ -1135,62 +1135,73 @@ void
 UserDB::process_unknown_adjacency( uint64_t current_mono_time ) noexcept
 {
   this->peer_dist.clear_cache_if_dirty();
-  for ( AdjPending *p = this->adjacency_unknown.hd; p != NULL; p = p->next ) {
-    if ( p->request_time_mono == 0 ||
+  AdjPending * next = NULL;
+  for ( AdjPending *p = this->adjacency_unknown.hd; p != NULL; p = next ) {
+    next = p->next;
+
+    if ( p->request_time_mono != 0 &&
          p->request_time_mono +
-           UserPendingRoute::pending_timeout_total < current_mono_time ) {
-      UserPendingRoute * pr = NULL;
-      UserBridge       * n,
-                       * m;
-      uint32_t           uid,
-                         dist;
-      if ( p->reason != UNAUTH_ADJ_SYNC ) {
-        n = this->bridge_tab.ptr[ p->uid ];
-        if ( n->is_set( AUTHENTICATED_STATE ) ) {
-          m = this->closest_peer_route( p->rte, *n, dist );
-          if ( m != NULL )
-            pr = this->start_pending_adj( *p, *m );
-          else
-            pr = this->start_pending_adj( *p, *n );
-        }
-      }
-      for ( bool ok = p->rte.uid_connected.first( uid ); ok;
-            ok = p->rte.uid_connected.next( uid ) ) {
-        UserBridge * n = this->bridge_tab.ptr[ uid ];
-        if ( n->bridge_id.nonce != p->nonce ) {
-          if ( pr == NULL )
-            pr = this->start_pending_adj( *p, *n );
-          else {
-            const PendingUid puid( n->uid, p->rte.tport_id );
-            if ( ! pr->is_member( puid ) )
-              if ( ! pr->push( puid ) )
-                break;
-          }
-        }
-      }
-      if ( debug_peer ) {
-        char buf[ NONCE_B64_LEN + 1 ];
-        if ( pr == NULL ) {
-          printf( "no route found, nonce [%s] user %.*s reason %s\n",
-                  p->nonce.to_base64_str( buf ),
-                  p->user_sv.len, p->user_sv.val,
-                  peer_sync_reason_string( p->reason ) );
-        }
-        else {
-          uint32_t uid = pr->hd.uid,
-                   tid = pr->hd.tport_id;
-          UserBridge     * n   = this->bridge_tab.ptr[ uid ];
-          TransportRoute * rte = this->transport_tab.ptr[ tid ];
-          printf( "route to %s.%u over %s nonce [%s] user %.*s reason %s\n",
-                  n->peer.user.val, uid, rte->transport.tport.val,
-                  p->nonce.to_base64_str( buf ),
-                  p->user_sv.len, p->user_sv.val,
-                  peer_sync_reason_string( p->reason ) );
-        }
-      }
-      p->request_time_mono = current_mono_time;
-      p->request_count++;
+           UserPendingRoute::pending_timeout_total >= current_mono_time )
+      continue;
+
+    if ( p->request_count > 5 ) {
+      next = p->next;
+      this->adjacency_unknown.pop( p );
+      delete p;
+      continue;
     }
+
+    UserPendingRoute * pr = NULL;
+    UserBridge       * n,
+                     * m;
+    uint32_t           uid,
+                       dist;
+    if ( p->reason != UNAUTH_ADJ_SYNC ) {
+      n = this->bridge_tab.ptr[ p->uid ];
+      if ( n->is_set( AUTHENTICATED_STATE ) ) {
+        m = this->closest_peer_route( p->rte, *n, dist );
+        if ( m != NULL )
+          pr = this->start_pending_adj( *p, *m );
+        else
+          pr = this->start_pending_adj( *p, *n );
+      }
+    }
+    for ( bool ok = p->rte.uid_connected.first( uid ); ok;
+          ok = p->rte.uid_connected.next( uid ) ) {
+      UserBridge * n = this->bridge_tab.ptr[ uid ];
+      if ( n->bridge_id.nonce != p->nonce ) {
+        if ( pr == NULL )
+          pr = this->start_pending_adj( *p, *n );
+        else {
+          const PendingUid puid( n->uid, p->rte.tport_id );
+          if ( ! pr->is_member( puid ) )
+            if ( ! pr->push( puid ) )
+              break;
+        }
+      }
+    }
+    if ( debug_peer ) {
+      char buf[ NONCE_B64_LEN + 1 ];
+      if ( pr == NULL ) {
+        printf( "no route found, nonce [%s] user %.*s reason %s\n",
+                p->nonce.to_base64_str( buf ),
+                p->user_sv.len, p->user_sv.val,
+                peer_sync_reason_string( p->reason ) );
+      }
+      else {
+        uint32_t uid = pr->hd.uid,
+                 tid = pr->hd.tport_id;
+        UserBridge     * n   = this->bridge_tab.ptr[ uid ];
+        TransportRoute * rte = this->transport_tab.ptr[ tid ];
+        printf( "route to %s.%u over %s nonce [%s] user %.*s reason %s\n",
+                n->peer.user.val, uid, rte->transport.tport.val,
+                p->nonce.to_base64_str( buf ),
+                p->user_sv.len, p->user_sv.val,
+                peer_sync_reason_string( p->reason ) );
+      }
+    }
+    p->request_time_mono = current_mono_time;
+    p->request_count++;
   }
 }
 

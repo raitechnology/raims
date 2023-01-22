@@ -335,6 +335,9 @@ struct SessionMgr : public kv::EvSocket, public kv::BPData {
   void ignore_msg( const MsgFramePublish &fpub ) noexcept;
   void show_debug_msg( const MsgFramePublish &fpub,
                        const char *where ) noexcept;
+  void show_seqno_status( MsgFramePublish &fpub,  UserBridge &n,
+                          MsgHdrDecoder &dec,  SeqnoArgs &seq,
+                          int status,  bool is_session ) noexcept;
   /* publish data on a subject */
   void publish_stats( uint64_t cur_time ) noexcept;
   void fwd_port_stat_msg( SubjectVar &s,  TransportRoute *rte,  PortStats &rate,

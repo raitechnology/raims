@@ -567,6 +567,67 @@ SubDB::recv_resub_result( const MsgFramePublish &,  UserBridge &,
 }
 
 void
+SubDB::reseed_bloom( void ) noexcept
+{
+  BloomBits * b;
+  uint32_t seed;
+
+  seed = (uint32_t) this->user_db.rand.next();
+  b = this->bloom.bits->reseed( this->bloom.bits, seed );
+  this->bloom.bits = b;
+  this->index_bloom( *b, CONSOLE_SUB | IPC_SUB );
+  if ( debug_sub )
+    print_bloom( *b );
+  this->user_db.events.resize_bloom( (uint32_t) b->count );
+  this->notify_bloom_update( this->bloom );
+
+  seed = (uint32_t) this->user_db.rand.next();
+  b = this->console.bits->reseed( this->console.bits, seed );
+  this->console.bits = b;
+  this->index_bloom( *b, CONSOLE_SUB );
+  this->notify_bloom_update( this->console );
+
+  seed = (uint32_t) this->user_db.rand.next();
+  b = this->ipc.bits->reseed( this->ipc.bits, seed );
+  this->ipc.bits = b;
+  this->index_bloom( *b, IPC_SUB );
+  this->notify_bloom_update( this->ipc );
+
+  BloomCodec code;
+  this->bloom.encode( code );
+
+  MsgEst e( Z_BLM_SZ );
+  e.seqno    ()
+   .sub_seqno()
+   .bloom    ( code.code_sz * 4 );
+
+  MsgCat m;
+  m.reserve( e.sz );
+
+  m.open( this->user_db.bridge_id.nonce, Z_BLM_SZ )
+   .seqno    ( ++this->user_db.send_peer_seqno )
+   .sub_seqno( this->sub_seqno      )
+   .bloom    ( code.ptr, code.code_sz * 4 );
+  m.close( e.sz, blm_h, CABA_RTR_ALERT );
+  m.sign( Z_BLM, Z_BLM_SZ, *this->user_db.session_key );
+
+  ForwardCache & forward = this->user_db.forward_path[ 0 ];
+  uint32_t       tport_id;
+
+  this->user_db.peer_dist.update_forward_cache( forward, 0, 0 );
+  if ( forward.first( tport_id ) ) {
+    do {
+      TransportRoute *rte = this->user_db.transport_tab.ptr[ tport_id ];
+      EvPublish pub( Z_BLM, Z_BLM_SZ, NULL, 0, m.msg, m.len(),
+                     rte->sub_route, this->my_src_fd,
+                     blm_h, CABA_TYPE_ID, 'p' );
+
+      rte->sub_route.forward_except( pub, this->mgr.router_set );
+    } while ( forward.next( tport_id ) );
+  }
+}
+
+void
 SubDB::resize_bloom( void ) noexcept
 {
   bool bloom_resize   = this->bloom.bits->test_resize(),
@@ -1020,6 +1081,29 @@ AnyMatchTab::get_match( const char *sub,  uint16_t sublen,  uint32_t h,
   this->ht->set_rsz( this->ht, h, pos, (uint32_t) this->max_off );
   this->max_off += sz;
   return any;
+}
+
+bool
+AnyMatch::first_dest( uint32_t &pos,  uint32_t &uid ) noexcept
+{
+  bool b = false;
+  pos = 0;
+  if ( this->set_count > 0 ) {
+    BitSetT<uint64_t> set( this->bits() );
+    b = set.first( uid, this->max_uid );
+  }
+  return b;
+}
+
+bool
+AnyMatch::next_dest( uint32_t &pos,  uint32_t &uid ) noexcept
+{
+  bool b = false;
+  if ( ++pos < this->set_count ) {
+    BitSetT<uint64_t> set( this->bits() );
+    b = set.index( uid, pos, this->max_uid );
+  }
+  return b;
 }
 
 UserBridge *

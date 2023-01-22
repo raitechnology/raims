@@ -676,6 +676,7 @@ struct Console : public md::MDOutput, public SubOnMsg, public ConfigPrinter,
   void show_buffers( ConsoleOutput *p ) noexcept;
   void show_windows( ConsoleOutput *p ) noexcept;
   void show_blooms( ConsoleOutput *p,  uint8_t path_select ) noexcept;
+  void show_match( ConsoleOutput *p,  const char *sub,  size_t len ) noexcept;
   void show_running( ConsoleOutput *p,  int which,  const char *name,
                      size_t len ) noexcept;
   void show_graph( ConsoleOutput *p ) noexcept;
@@ -760,38 +761,40 @@ enum ConsoleCmd {
   CMD_SHOW_BUFFERS     = 32, /* show buffers               */
   CMD_SHOW_WINDOWS     = 33, /* show windows               */
   CMD_SHOW_BLOOMS      = 34, /* show blooms [N]            */
-  CMD_SHOW_GRAPH       = 35, /* show graph                 */
-  CMD_SHOW_RUN         = 36, /* show running               */
-  CMD_SHOW_RUN_TPORTS  = 37, /* show running transport [T] */
-  CMD_SHOW_RUN_SVCS    = 38, /* show running service [S]   */
-  CMD_SHOW_RUN_USERS   = 39, /* show running user [U]      */
-  CMD_SHOW_RUN_GROUPS  = 40, /* show running group [G]     */
-  CMD_SHOW_RUN_PARAM   = 41, /* show running parameter [P] */
-  CMD_CONNECT          = 42, /* connect [T]                */
-  CMD_LISTEN           = 43, /* listen [T]                 */
-  CMD_SHUTDOWN         = 44, /* shutdown [T]               */
-  CMD_NETWORK          = 45, /* network svc network        */
-  CMD_CONFIGURE        = 46, /* configure                  */
-  CMD_CONFIGURE_TPORT  = 47, /* configure transport T      */
-  CMD_CONFIGURE_PARAM  = 48, /* configure parameter P V    */
-  CMD_SAVE             = 49, /* save                       */
-  CMD_SUB_START        = 50, /* sub subject [file]         */
-  CMD_SUB_STOP         = 51, /* unsub subject [file]       */
-  CMD_PSUB_START       = 52, /* psub rv-wildcard [file]    */
-  CMD_PSUB_STOP        = 53, /* punsub rv-wildcard [file]  */
-  CMD_GSUB_START       = 54, /* gsub glob-wildcard [file]  */
-  CMD_GSUB_STOP        = 55, /* gunsub glob-wildcard [file]*/
-  CMD_PUBLISH          = 56, /* pub subject msg            */
-  CMD_TRACE            = 57, /* trace subject msg          */
-  CMD_PUB_ACK          = 58, /* ack subject msg            */
-  CMD_RPC              = 59, /* rpc subject msg            */
-  CMD_ANY              = 60, /* any subject msg            */
-  CMD_DEBUG            = 62, /* debug ival                 */
-  CMD_CANCEL           = 63, /* cancel                     */
-  CMD_MUTE_LOG         = 64, /* mute                       */
-  CMD_UNMUTE_LOG       = 65, /* unmute                     */
-  CMD_WEVENTS          = 66, /* write events to file       */
-  CMD_QUIT             = 67, /* quit/exit                  */
+  CMD_SHOW_MATCH       = 35, /* show match  S              */
+  CMD_SHOW_GRAPH       = 36, /* show graph                 */
+  CMD_SHOW_RUN         = 37, /* show running               */
+  CMD_SHOW_RUN_TPORTS  = 38, /* show running transport [T] */
+  CMD_SHOW_RUN_SVCS    = 39, /* show running service [S]   */
+  CMD_SHOW_RUN_USERS   = 40, /* show running user [U]      */
+  CMD_SHOW_RUN_GROUPS  = 41, /* show running group [G]     */
+  CMD_SHOW_RUN_PARAM   = 42, /* show running parameter [P] */
+  CMD_CONNECT          = 43, /* connect [T]                */
+  CMD_LISTEN           = 44, /* listen [T]                 */
+  CMD_SHUTDOWN         = 45, /* shutdown [T]               */
+  CMD_NETWORK          = 46, /* network svc network        */
+  CMD_CONFIGURE        = 47, /* configure                  */
+  CMD_CONFIGURE_TPORT  = 48, /* configure transport T      */
+  CMD_CONFIGURE_PARAM  = 49, /* configure parameter P V    */
+  CMD_SAVE             = 50, /* save                       */
+  CMD_SUB_START        = 51, /* sub subject [file]         */
+  CMD_SUB_STOP         = 52, /* unsub subject [file]       */
+  CMD_PSUB_START       = 53, /* psub rv-wildcard [file]    */
+  CMD_PSUB_STOP        = 54, /* punsub rv-wildcard [file]  */
+  CMD_GSUB_START       = 55, /* gsub glob-wildcard [file]  */
+  CMD_GSUB_STOP        = 56, /* gunsub glob-wildcard [file]*/
+  CMD_PUBLISH          = 57, /* pub subject msg            */
+  CMD_TRACE            = 58, /* trace subject msg          */
+  CMD_PUB_ACK          = 59, /* ack subject msg            */
+  CMD_RPC              = 60, /* rpc subject msg            */
+  CMD_ANY              = 61, /* any subject msg            */
+  CMD_RESEED           = 62, /* reseed bloom filters       */
+  CMD_DEBUG            = 63, /* debug ival                 */
+  CMD_CANCEL           = 64, /* cancel                     */
+  CMD_MUTE_LOG         = 65, /* mute                       */
+  CMD_UNMUTE_LOG       = 66, /* unmute                     */
+  CMD_WEVENTS          = 67, /* write events to file       */
+  CMD_QUIT             = 68, /* quit/exit                  */
 
 #define CMD_TPORT_BASE ( (int) CMD_QUIT + 1 )
   CMD_TPORT_ENUM /* config_const.h */
@@ -888,11 +891,12 @@ static const ConsoleCmdString console_cmd[] = {
   { CMD_PUB_ACK    , "ack"          ,0,0}, /* ack <subject> message */
   { CMD_RPC        , "rpc"          ,0,0}, /* rpc <subject> message */
   { CMD_ANY        , "any"          ,0,0}, /* any <subject> message */
+  { CMD_RESEED     , "reseed"       ,0,0}, /* reseed bloom filter */
   { CMD_DEBUG      , "debug"        ,0,0}, /* debug <integer> */
   { CMD_CANCEL     , "cancel"       ,0,0}, /* cancel incomplete rpc */
   { CMD_MUTE_LOG   , "mute"         ,0,0}, /* mute log */
   { CMD_UNMUTE_LOG , "unmute"       ,0,0}, /* unmute log */
-  { CMD_WEVENTS    , "wevents"      ,0,0},
+  { CMD_WEVENTS    , "wevents"      ,0,0}, /* write events to file */
   { CMD_QUIT       , "quit"         ,0,0},
   { CMD_QUIT       , "exit"         ,0,0}
 };
@@ -927,6 +931,7 @@ static const ConsoleCmdString show_cmd[] = {
   { CMD_SHOW_BUFFERS   , "buffers"       ,0,0}, /* show buffers */
   { CMD_SHOW_WINDOWS   , "windows"       ,0,0}, /* show windows */
   { CMD_SHOW_BLOOMS    , "blooms"        ,0,0}, /* show blooms */
+  { CMD_SHOW_MATCH     , "match"         ,0,0}, /* show match */
   { CMD_SHOW_GRAPH     , "graph"         ,0,0}, /* show graph */
   { CMD_SHOW_RUN       , "running"       ,0,0}  /* show running */
 };
@@ -985,6 +990,7 @@ static const ConsoleCmdString help_cmd[] = {
   { CMD_SHOW_BUFFERS     , "show buffers", "",   "Show fd buffer mem usage"                          },
   { CMD_SHOW_WINDOWS     , "show windows", "",   "Show pub and sub window mem usage"                 },
   { CMD_SHOW_BLOOMS      , "show blooms", "[P]", "Show bloom centric routes for path P (0-3)"        },
+  { CMD_SHOW_MATCH       , "show match", "S",    "Show users which have a bloom that match sub"      },
   { CMD_SHOW_GRAPH       , "show graph", "",     "Show network description for node graph"           },
   { CMD_SHOW_RUN         , "show running", "",   "Show current config running"                       },
   { CMD_SHOW_RUN_TPORTS  , "show running transport","[T]", "Show transports running, T or all"       },
@@ -1006,10 +1012,12 @@ static const ConsoleCmdString help_cmd[] = {
   { CMD_CANCEL           , "cancel","",          "Cancel and show incomplete (ping, show subs)"      },
   { CMD_MUTE_LOG         , "mute","",            "Mute the log output"                               },
   { CMD_UNMUTE_LOG       , "unmute","",          "Unmute the log output"                             },
+  { CMD_RESEED           , "reseed","",          "Reseed bloom filter"                               },
   { CMD_DEBUG            , "debug","[I]",        "Set debug flags to ival I, bit mask of:\n"
                            " 1=tcp,  2=pgm,  4=ibx,  8=transport,  0x10=user,  0x20=link_state,\n"
                            " 0x40=peer,  0x80=auth,  0x100=session,  0x200=hb,  0x400=sub,\n"
                            " 0x800=msg_recv,  0x1000=msg_hex,  0x2000=telnet,  0x4000=name,\n"
+                           " 0x8000=repeat,  0x10000=not_sub,  0x20000=loss,\n"
                            " dist,  kvpub,  kvps,  rv"                                               },
   { CMD_WEVENTS          , "wevents","[F]",      "Write events to file"                              },
   { CMD_QUIT             , "quit/exit","",       "Exit console"                                      }

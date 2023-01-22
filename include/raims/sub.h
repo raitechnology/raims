@@ -442,7 +442,7 @@ enum SeqnoStatus {
   SEQNO_UID_SKIP   = 3, /* is next skipped sequnce */
   SEQNO_UID_REPEAT = 4, /* is a repeated sequence */
   SEQNO_NOT_SUBSCR = 5, /* subscription not matched */
-  SEQNO_ERROR      = 7
+  SEQNO_ERROR      = 6
 };
 
 const char *seqno_status_string( SeqnoStatus status ) noexcept;
@@ -655,6 +655,8 @@ struct AnyMatch {
   uint64_t *bits( void ) {
     return (uint64_t *) &((char *) (void *) this)[ this->bits_off ];
   }
+  bool first_dest( uint32_t &pos,  uint32_t &uid ) noexcept;
+  bool next_dest( uint32_t &pos,  uint32_t &uid ) noexcept;
 };
 
 struct AnyMatchTab {
@@ -743,6 +745,7 @@ struct SubDB {
   bool match_subscription( SeqnoArgs &ctx ) noexcept;
 
   void resize_bloom( void ) noexcept;
+  void reseed_bloom( void ) noexcept;
   static void notify_bloom_update( kv::BloomRef &ref ) noexcept;
 
   static void print_bloom( kv::BloomBits &bits ) noexcept;

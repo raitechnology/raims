@@ -219,8 +219,12 @@ Console::parse_debug_flags( const char *arg,  size_t len,
 
   for ( size_t i = 0; i < debug_str_count; i++ ) {
     size_t dlen = ::strlen( debug_str[ i ] );
-    if ( ::memmem( arg, len, debug_str[ i ], dlen ) != NULL )
-      dbg_flags |= ( 1 << i );
+    void * p;
+    if ( (p = ::memmem( arg, len, debug_str[ i ], dlen )) != NULL ) {
+      if ( (char *) p == arg || ((char *) p)[ -1 ] == ' ' || 
+           ((char *) p)[ -1 ] == ',' || ((char *) p)[ -1 ] == '|' )
+        dbg_flags |= ( 1 << i );
+    }
   }
   if ( len >= 4 && ::memmem( arg, len, "dist", 4 ) != NULL )
     dist_dbg = 1;
@@ -1915,6 +1919,11 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
       }
       break;
     }
+    case CMD_RESEED: {
+      this->sub_db.reseed_bloom();
+      this->outf( p, "bloom seed 0x%x", this->sub_db.bloom.bits->seed );
+      break;
+    }
     case CMD_CONNECT:  this->connect( arg, len ); break;
     case CMD_LISTEN:   this->listen( arg, len ); break;
     case CMD_SHUTDOWN: this->shutdown( arg, len ); break;
@@ -1987,6 +1996,7 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
     case CMD_SHOW_BUFFERS:   this->show_buffers( p );   break;
     case CMD_SHOW_WINDOWS:   this->show_windows( p );   break;
     case CMD_SHOW_BLOOMS:    this->show_blooms( p, int_arg( arg, len ) ); break;
+    case CMD_SHOW_MATCH:     this->show_match( p, arg, len ); break;
     case CMD_SHOW_RUN:
       this->show_running( p, PRINT_NORMAL, arg, len ); break;
     case CMD_SHOW_RUN_TPORTS:
@@ -5051,6 +5061,26 @@ Console::show_blooms( ConsoleOutput *p,  uint8_t path_select ) noexcept
   }
   static const char *hdr[ ncols ] =
     { "fd", "dest", "tport", "bloom", "prefix", "detail", "subs", "total" };
+  this->print_table( p, hdr, ncols );
+}
+
+void
+Console::show_match( ConsoleOutput *p,  const char *sub,  size_t len ) noexcept
+{
+  static const uint32_t ncols = 1;
+  TabOut out( this->table, this->tmp, ncols );
+  uint32_t pos, uid, h = kv_crc_c( sub, len, 0 );
+  AnyMatch * any = this->sub_db.any_match( sub, len, h );
+
+  for ( bool b = any->first_dest( pos, uid ); b;
+        b = any->next_dest( pos, uid ) ) {
+    UserBridge * n = this->user_db.bridge_tab[ uid ];
+    if ( n == NULL || ! n->is_set( AUTHENTICATED_STATE ) )
+      continue;
+    out.add_row()
+       .set( n, PRINT_USER );
+  }
+  static const char *hdr[ ncols ] = { "user" };
   this->print_table( p, hdr, ncols );
 }
 

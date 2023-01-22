@@ -688,6 +688,20 @@ SessionMgr::parse_msg_hdr( MsgFramePublish &fpub,  bool is_ipc ) noexcept
     return FRAME_STATUS_MY_MSG;*/
   return fpub.status;
 }
+
+void
+SessionMgr::show_seqno_status( MsgFramePublish &fpub,  UserBridge &n,
+                               MsgHdrDecoder &dec,  SeqnoArgs &seq,
+                               int status,  bool is_session ) noexcept
+{
+  n.printf( "%s %s %.*s seqno %lu.%lu last %lu.%lu miss 0x%x (%s)\n",
+            is_session ? "session" : "ipc",
+            seqno_status_string( (SeqnoStatus) status ),
+            (int) fpub.subject_len, fpub.subject,
+            seqno_frame( dec.seqno ), seqno_base( dec.seqno ),
+            seqno_frame( seq.last_seqno ), seqno_base( seq.last_seqno ),
+            seq.msg_loss, fpub.rte.name );
+}
 /* forward a message published by my ipc to the network, add a subject seqno */
 bool
 IpcRoute::on_msg( EvPublish &pub ) noexcept
@@ -781,29 +795,30 @@ IpcRoute::on_msg( EvPublish &pub ) noexcept
     if ( status != SEQNO_NOT_SUBSCR ) {
       if ( status > SEQNO_UID_SKIP )
         fpub.status = FRAME_STATUS_DUP_SEQNO;
-    if ( debug_sess )
-      n.printf( "%s %.*s seqno %lu.%lu last %lu.%lu miss 0x%x (%s)\n",
-                seqno_status_string( status ),
-                (int) fpub.subject_len, fpub.subject,
-                seqno_frame( dec.seqno ), seqno_base( dec.seqno ),
-                seqno_frame( seq.last_seqno ), seqno_base( seq.last_seqno ),
-                seq.msg_loss, fpub.rte.name );
     }
     if ( status == SEQNO_UID_REPEAT ) {
+      if ( debug_sess_repeat )
+        this->mgr.show_seqno_status( fpub, n, dec, seq, status, false );
       n.msg_repeat_count++;
       n.msg_repeat_time = this->mgr.timer_time;
     }
     else if ( status == SEQNO_NOT_SUBSCR ) {
+      if ( debug_sess_not_sub )
+        this->mgr.show_seqno_status( fpub, n, dec, seq, status, false );
       n.msg_not_subscr_count++;
       n.msg_not_subscr_time = this->mgr.timer_time;
     }
     else if ( status == SEQNO_UID_SKIP ) {
+      if ( debug_sess_loss )
+        this->mgr.show_seqno_status( fpub, n, dec, seq, status, false );
       n.msg_loss_time = this->mgr.timer_time;
       if ( seq.msg_loss <= MAX_MSG_LOSS )
         n.msg_loss_count += seq.msg_loss;
       else
         n.msg_loss_count++;
     }
+    else if ( debug_sess )
+      this->mgr.show_seqno_status( fpub, n, dec, seq, status, false );
     if ( status > SEQNO_UID_SKIP ) /* forward when skipped ahead */
       return true;
   }
@@ -1307,29 +1322,30 @@ SessionMgr::on_msg( EvPublish &pub ) noexcept
           if ( status != SEQNO_NOT_SUBSCR ) {
             if ( status > SEQNO_UID_SKIP )
               fpub.status = FRAME_STATUS_DUP_SEQNO;
-          if ( debug_sess )
-            n.printf( "%s %.*s seqno %lu.%lu last %lu.%lu miss %x (%s)\n",
-                    seqno_status_string( status ),
-                    (int) fpub.subject_len, fpub.subject,
-                    seqno_frame( dec.seqno ), seqno_base( dec.seqno ),
-                    seqno_frame( seq.last_seqno ), seqno_base( seq.last_seqno ),
-                    seq.msg_loss, fpub.rte.name );
           }
           if ( status == SEQNO_UID_REPEAT ) {
+            if ( debug_sess_repeat )
+              this->show_seqno_status( fpub, n, dec, seq, status, true );
             n.msg_repeat_count++;
             n.msg_repeat_time = this->timer_time;
           }
           else if ( status == SEQNO_NOT_SUBSCR ) {
+            if ( debug_sess_not_sub )
+              this->show_seqno_status( fpub, n, dec, seq, status, true );
             n.msg_not_subscr_count++;
             n.msg_not_subscr_time = this->timer_time;
           }
           else if ( status == SEQNO_UID_SKIP ) {
+            if ( debug_sess_loss )
+              this->show_seqno_status( fpub, n, dec, seq, status, true );
             n.msg_loss_time = this->timer_time;
             if ( seq.msg_loss <= MAX_MSG_LOSS )
               n.msg_loss_count += seq.msg_loss;
             else
               n.msg_loss_count++;
           }
+          else if ( debug_sess )
+            this->show_seqno_status( fpub, n, dec, seq, status, true );
           if ( status > SEQNO_UID_SKIP )
             return true;
         }

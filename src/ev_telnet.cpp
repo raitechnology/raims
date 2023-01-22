@@ -326,6 +326,7 @@ TelnetService::start_term( void ) noexcept
   this->term.lc->complete_arg = this->console;
   this->term.lc->complete_cb = console_complete;
   this->term.help_cb = console_help;
+  this->term.closure = this->console;
   static char iec[] = "-iec", question[] = "?", show_help[] = "&show-help";
   static char *recipe[] = { iec, question, show_help };
   lc_bindkey( term.lc, recipe, 3 );
