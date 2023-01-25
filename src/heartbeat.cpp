@@ -623,6 +623,7 @@ UserDB::recv_ping_request( MsgFramePublish &pub,  UserBridge &n,
   e.seqno       ()
    .stamp       ()
    .reply_stamp ()
+   .tportid     ()
    .token       ()
    .idl_service ()
    .idl_msg_loss();
@@ -638,7 +639,8 @@ UserDB::recv_ping_request( MsgFramePublish &pub,  UserBridge &n,
   m.open( this->bridge_id.nonce, ibx.len() )
    .seqno       ( seqno    )
    .stamp       ( stamp    )
-   .reply_stamp ( cur_time );
+   .reply_stamp ( cur_time )
+   .tportid     ( pub.rte.tport_id );
   if ( token != 0 )
     m.token( token );
   if ( idl_svc != 0 ) {

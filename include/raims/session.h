@@ -107,36 +107,43 @@ struct SubMsgData {
   const void      * data;    /* message data */
   size_t            datalen; /* message data length */
   uint32_t          fmt,     /* format of data */
-                    reply;   /* non-zero when peer wants a ptp reply */
+                    reply,   /* non-zero when peer wants a ptp reply */
+                    tport_id;
   /* start_seqno : seqno of subscripton */
   /* sub2, sublen2 : subject of inbox */
 
   SubMsgData( MsgFramePublish &p,  UserBridge *n,  const void *d,
               size_t dl )
     : pub( p ), src_bridge( n ), seqno( 0 ), stamp( 0 ), token( 0 ),
-      ref_seqno( 0 ), data( d ), datalen( dl ), fmt( 0 ), reply( 0 ) {}
+      ref_seqno( 0 ), data( d ), datalen( dl ), fmt( 0 ), reply( 0 ),
+      tport_id( 0 ) {}
 };
 /* a publish sent to all subscribers */
 struct PubMcastData {
   const char * sub;       /* subject to publish */
   uint16_t     sublen,    /* subject length */
                option;    /* message options for the opt field */
+  uint8_t      path,      /* path specified */
+               path_select; /* path taken */
+  uint32_t     fmt,       /* format of data */
+               reply,     /* if rpc style point to point reply wanted */
+               subj_hash;
   uint64_t     seqno,     /* seqno filled in by the publish */
                stamp,     /* optional time of publish */
                token;     /* token rpc val */
   const void * data;      /* data to publish */
   size_t       datalen;   /* data length */
-  uint32_t     fmt,       /* format of data */
-               reply;     /* if rpc style point to point reply wanted */
 
   PubMcastData( const char *s,  size_t sl,  const void *d,  size_t dl,
                 uint32_t f,  uint32_t rep = 0 )
-    : sub( s ), sublen( (uint16_t) sl ), option( 0 ), seqno( 0 ), stamp( 0 ),
-      token( 0 ), data( d ), datalen( dl ), fmt( f ), reply( rep ) {}
-  PubMcastData( const PubMcastData &mc ) :
-    sub( mc.sub ), sublen( mc.sublen ), option( mc.option ), seqno( mc.seqno ),
-   stamp( mc.stamp ), token( mc.token ), data( mc.data ), datalen( mc.datalen ),
-    fmt( mc.fmt ), reply( mc.reply ) {}
+    : sub( s ), sublen( (uint16_t) sl ), option( 0 ), path( 255 ),
+      path_select( 0 ), fmt( f ), reply( rep ), subj_hash( 0 ),
+      seqno( 0 ), stamp( 0 ), token( 0 ), data( d ), datalen( dl ) {}
+  PubMcastData( const PubMcastData &mc )
+    : sub( mc.sub ), sublen( mc.sublen ), option( mc.option ), path( mc.path ),
+      path_select( mc.path_select ), fmt( mc.fmt ), reply( mc.reply ),
+      subj_hash( mc.subj_hash ), seqno( mc.seqno ), stamp( mc.stamp ),
+      token( mc.token ), data( mc.data ), datalen( mc.datalen ) {}
 };
 /* a publish sent point to point to an inbox */
 struct PubPtpData : public PubMcastData {

@@ -24,7 +24,9 @@ enum DbgFlags {
   NAME_DBG         =  0x4000,
   SESS_REP_DBG     =  0x8000,
   SESS_NOT_SUB_DBG = 0x10000,
-  SESS_LOSS_DBG    = 0x20000
+  SESS_LOSS_DBG    = 0x20000,
+  ADJ_DBG          = 0x40000,
+  CONN_MGR_DBG     = 0x80000
 };
 extern int dbg_flags;
 
@@ -32,11 +34,15 @@ extern int dbg_flags;
 static const char *debug_str[] = {
   "tcp", "pgm", "ibx", "transport", "user", "link_state", "peer", "auth",
   "session", "hb", "sub", "msg_recv", "msg_hex", "telnet", "name", "repeat",
-  "not_sub", "loss"
+  "not_sub", "loss", "adj", "conn"
 };
 static const size_t debug_str_count =
   sizeof( debug_str ) / sizeof( debug_str[ 0 ] );
 #endif
+#define DEBUG_STRING_LIST \
+  "tcp, pgm, ibx, transport, user, link_state, peer, auth,\n" \
+  "session, hb, sub, msg_recv, msg_hex, telnet, name, repeat,\n" \
+  "not_sub, loss, adj, conn"
 
 #define debug_tcp          kv_unlikely( (dbg_flags & TCP_DBG       ) != 0 )
 #define debug_pgm          kv_unlikely( (dbg_flags & PGM_DBG       ) != 0 )
@@ -57,6 +63,8 @@ static const size_t debug_str_count =
 #define debug_sess_repeat  kv_unlikely( (dbg_flags & ( SESSION_DBG | SESS_REP_DBG ) ) != 0 )
 #define debug_sess_not_sub kv_unlikely( (dbg_flags & ( SESSION_DBG | SESS_NOT_SUB_DBG ) ) != 0 )
 #define debug_sess_loss    kv_unlikely( (dbg_flags & ( SESSION_DBG | SESS_LOSS_DBG ) ) != 0 )
+#define debug_adj          kv_unlikely( (dbg_flags & ADJ_DBG       ) != 0 )
+#define debug_conn         kv_unlikely( (dbg_flags & CONN_MGR_DBG  ) != 0 )
 
 #define d_tcp( ... )  do { if ( debug_tcp  ) printf( __VA_ARGS__ ); } while( 0 )
 #define d_pgm( ... )  do { if ( debug_pgm  ) printf( __VA_ARGS__ ); } while( 0 )
@@ -71,6 +79,8 @@ static const size_t debug_str_count =
 #define d_sub( ... )  do { if ( debug_sub  ) printf( __VA_ARGS__ ); } while( 0 )
 #define d_tel( ... )  do { if ( debug_tel  ) printf( __VA_ARGS__ ); } while( 0 )
 #define d_name( ... ) do { if ( debug_name ) printf( __VA_ARGS__ ); } while( 0 )
+#define d_adj( ... )  do { if ( debug_adj  ) printf( __VA_ARGS__ ); } while( 0 )
+#define d_conn( ... ) do { if ( debug_conn ) printf( __VA_ARGS__ ); } while( 0 )
 
 }
 }

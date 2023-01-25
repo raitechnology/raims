@@ -266,14 +266,14 @@ TransportRoute::on_shutdown( EvSocket &conn,  const char *err,
       this->last_connect_count = 0;
     }
   }
-  d_tran( "%s connect_count %u\n", this->name, this->connect_count );
+  d_conn( "%s connect_count %u\n", this->name, this->connect_count );
 }
 
 void
 TransportRoute::on_data_loss( EvSocket &conn,  EvPublish &pub ) noexcept
 {
   if ( this->is_set( TPORT_IS_IPC ) ) {
-    d_tran( "on_data_loss fd %d pub_status %d\n", conn.fd, pub.pub_status );
+    d_conn( "on_data_loss fd %d pub_status %d\n", conn.fd, pub.pub_status );
     TransportRvHost svc( *this, conn );
     if ( svc.rv_host != NULL ) {
       RvHost  * host = *svc.rv_host;
@@ -377,7 +377,7 @@ SessionMgr::find_mesh( TransportRoute &mesh_rte,
          ! rte->is_set( TPORT_IS_SHUTDOWN ) &&
          ! rte->is_set( TPORT_IS_LISTEN ) ) {
       if ( rte->mesh_url_hash == mesh_rte.mesh_url_hash ) {
-        d_tran( "mesh matched %u(%x)(%.*s) %u(%x)(%.*s)\n",
+        d_conn( "mesh matched %u(%x)(%.*s) %u(%x)(%.*s)\n",
          rte->tport_id, rte->mesh_url_hash, rte->mesh_url.len, rte->mesh_url.val,
          mesh_rte.tport_id, mesh_rte.mesh_url_hash, mesh_rte.mesh_url.len, mesh_rte.mesh_url.val );
         return rte;
@@ -432,7 +432,7 @@ ConnectMgr::connect( ConnectCtx &ctx ) noexcept
       host = ctx.addr_info.host;
     rte->clear( TPORT_IS_INPROGRESS );
     rte->set( TPORT_IS_SHUTDOWN );
-    if ( debug_tran )
+    if ( debug_conn )
       rte->printf( "connect %s:%d stopped, accepted connection active\n",
                    host, ctx.addr_info.port );
     ctx.state = ConnectCtx::CONN_SHUTDOWN;
@@ -459,7 +459,7 @@ ConnectMgr::on_dns( ConnectCtx &ctx,  const char *host,  int port,
                     int opts ) noexcept
 {
   TransportRoute * rte = this->user_db.transport_tab.ptr[ ctx.event_id ];
-  if ( debug_tran )
+  if ( debug_conn )
     rte->printf( "resolving %s:%d opts(%x)\n", host, port, opts );
   rte->set( TPORT_IS_INPROGRESS );
 }

@@ -874,6 +874,7 @@ IpcRoute::on_msg( EvPublish &pub ) noexcept
     dec.get_ival<uint64_t>( FID_TOKEN,     val.token );
     dec.get_ival<uint64_t>( FID_REF_SEQNO, val.ref_seqno );
     dec.get_ival<uint32_t>( FID_RET,       val.reply );
+    dec.get_ival<uint32_t>( FID_TPORTID,   val.tport_id );
     seq.cb->on_data( val );
   }
   return b;
@@ -961,8 +962,6 @@ ConsoleRoute::fwd_console( EvPublish &pub,  bool is_caba ) noexcept
       val.ref_seqno = ref_seqno;
       val.stamp     = stamp;
       val.fmt       = pub.msg_enc;
-      val.token     = 0;
-      val.reply     = 0;
       seq.cb->on_data( val );
       return 1;
     }
@@ -1280,6 +1279,7 @@ SessionMgr::on_msg( EvPublish &pub ) noexcept
       dec.get_ival<uint64_t>( FID_REF_SEQNO,   val.ref_seqno );
       dec.get_ival<uint32_t>( FID_RET,         val.reply );
       dec.get_ival<uint32_t>( FID_FMT,         val.fmt );
+      dec.get_ival<uint32_t>( FID_TPORTID,     val.tport_id );
       dec.get_ival<uint64_t>( FID_TIME,        seq.time );
 
       /* if _I.Nonce.<inbox_ret>, find the inbox_ret */
@@ -1369,15 +1369,18 @@ SessionMgr::on_msg( EvPublish &pub ) noexcept
 bool
 SessionMgr::publish( PubMcastData &mc ) noexcept
 {
+  mc.path_select = 0;
+  mc.subj_hash   = kv_crc_c( mc.sub, mc.sublen, 0 );
   if ( ( mc.option & CABA_OPT_ANY ) != 0 )
     return this->publish_any( mc );
 
-  UserBridge * dest_bridge_id = NULL;
-  uint32_t     h  = kv_crc_c( mc.sub, mc.sublen, 0 );
+  UserBridge * dest_bridge_id  = NULL;
+  uint64_t     chain_seqno     = 0,
+               time            = 0;
+  uint32_t     h               = mc.subj_hash;
   CabaFlags    fl( CABA_MCAST );
-  uint64_t     chain_seqno = 0,
-               time        = 0;
-  bool         need_seqno  = true;
+  bool         need_seqno      = true,
+               is_mcast_prefix = false;
   
   if ( mc.sublen > 2 && mc.sub[ 0 ] == '_' ) {
     static const char   inbox_prefix[] = _INBOX ".",
@@ -1395,6 +1398,7 @@ SessionMgr::publish( PubMcastData &mc ) noexcept
     else if ( ::memcmp( mcast_prefix, mc.sub, mcast_prefix_len ) == 0 ) {
       mc.seqno = ++this->user_db.mcast_send_seqno;
       need_seqno = false;
+      is_mcast_prefix = true;
     }
     if ( caba_rtr_alert( mc.sub ) )
       fl.set_type( CABA_RTR_ALERT );
@@ -1412,12 +1416,15 @@ SessionMgr::publish( PubMcastData &mc ) noexcept
     }
   }
 
-  uint8_t  path_select = 0;
-  uint16_t option      = mc.option;
+  uint16_t option = mc.option;
   option &= ~( ( COST_PATH_COUNT - 1 ) << CABA_OPT_MC_SHIFT );
-  if ( fl.get_type() == CABA_MCAST ) {
-    path_select = ( h >> ( 32 - CABA_OPT_MC_BITS ) ) % COST_PATH_COUNT;
-    option |= path_select << CABA_OPT_MC_SHIFT;
+  if ( fl.get_type() == CABA_MCAST ||
+       ( is_mcast_prefix && mc.path < COST_PATH_COUNT ) ) {
+    if ( mc.path >= COST_PATH_COUNT )
+      mc.path_select = ( h >> ( 32 - CABA_OPT_MC_BITS ) ) % COST_PATH_COUNT;
+    else
+      mc.path_select = mc.path;
+    option |= mc.path_select << CABA_OPT_MC_SHIFT;
   }
   fl.set_opt( option );
 
@@ -1460,18 +1467,22 @@ SessionMgr::publish( PubMcastData &mc ) noexcept
                                                    mc.sub, mc.sublen, h,
                                                    m.msg, m.len() );
 
-  ForwardCache   & forward = this->user_db.forward_path[ path_select ];
+  ForwardCache   & forward = this->user_db.forward_path[ mc.path_select ];
   TransportRoute * rte;
   uint32_t         tport_id;
   bool             b = true;
 
-  this->user_db.peer_dist.update_forward_cache( forward, 0, path_select );
+  this->user_db.peer_dist.update_forward_cache( forward, 0, mc.path_select );
   if ( forward.first( tport_id ) ) {
     do {
       rte = this->user_db.transport_tab.ptr[ tport_id ];
+      if ( debug_sess ) {
+        printf( "pub %.*s (0x%x) path %u to %s\n",
+                 (int) mc.sublen, mc.sub, h, mc.path_select, rte->name );
+      }
       EvPublish pub( mc.sub, mc.sublen, NULL, 0, m.msg, m.len(),
                      rte->sub_route, this->fd, h, CABA_TYPE_ID, 'p' );
-      pub.shard = path_select;
+      pub.shard = mc.path_select;
       b &= rte->sub_route.forward_except( pub, this->router_set );
     } while ( forward.next( tport_id ) );
   }
@@ -1714,13 +1725,17 @@ SessionMgr::forward_ipc( TransportRoute &src_rte,  EvPublish &pub ) noexcept
 bool
 SessionMgr::publish_any( PubMcastData &mc ) noexcept
 {
-  uint32_t     h = kv_crc_c( mc.sub, mc.sublen, 0 );
+  uint32_t     h = mc.subj_hash;
   AnyMatch * any = this->sub_db.any_match( mc.sub, mc.sublen, h );
   UserBridge * n = any->get_destination( this->user_db );
 
   if ( n == NULL ) {
     printf( "no match for %.*s\n", (int) mc.sublen, mc.sub );
     return true;
+  }
+  if ( h == 0 ) {
+    h = kv_crc_c( mc.sub, mc.sublen, 0 );
+    mc.subj_hash = h;
   }
   PubPtpData ptp( *n, mc );
   ptp.option |= CABA_OPT_ANY;
@@ -1789,7 +1804,6 @@ SessionMgr::send_ack( const MsgFramePublish &pub,  UserBridge &n,
   InboxBuf ibx( n.bridge_id, dec.get_return( ret_buf, suf ) );
   uint64_t stamp, token = 0, ref_seqno = 0;
   uint32_t d;
-  uint8_t  path_select;
 
   MsgEst e( ibx.len() );
   e.seqno    ()
@@ -1804,7 +1818,8 @@ SessionMgr::send_ack( const MsgFramePublish &pub,  UserBridge &n,
   dec.get_ival<uint64_t>( FID_SEQNO, ref_seqno );
   if ( ! dec.get_ival<uint64_t>( FID_STAMP, stamp ) || stamp == 0 )
     stamp = current_realtime_ns();
-  path_select = ( dec.msg->caba.get_opt() & CABA_OPT_MC_ONE ) ? 1 : 0;
+  uint16_t opt         = dec.msg->caba.get_opt();
+  uint8_t  path_select = ( opt >> CABA_OPT_MC_SHIFT ) % COST_PATH_COUNT;
   d = this->user_db.peer_dist.calc_transport_cache( n.uid, pub.rte.tport_id,
                                                     path_select );
   MsgCat m;

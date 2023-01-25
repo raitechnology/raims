@@ -327,6 +327,10 @@ TransportRoute::on_msg( EvPublish &pub ) noexcept
     if ( path_select > 0 && n.bloom_rt[ path_select ] == NULL )
       path_select = 0;
 
+    if ( debug_tran ) {
+      n.printf( "transport_route sub %.*s (0x%x) path %u\n", 
+               (int) pub.subject_len, pub.subject, pub.subj_hash, path_select );
+    }
     ForwardCache   & forward = n.forward_path[ path_select ];
     TransportRoute * rte;
     uint32_t         tport_id;
@@ -336,6 +340,10 @@ TransportRoute::on_msg( EvPublish &pub ) noexcept
     if ( forward.first( tport_id ) ) {
       do {
         rte = this->user_db.transport_tab.ptr[ tport_id ];
+        if ( debug_tran ) {
+          n.printf( "transport_route fwd %.*s to %s\n", 
+                    (int) pub.subject_len, pub.subject, rte->name );
+        }
         b  &= rte->sub_route.forward_except( pub, this->mgr.router_set, this );
       } while ( forward.next( tport_id ) );
     }

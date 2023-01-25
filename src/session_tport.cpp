@@ -677,7 +677,7 @@ SessionMgr::add_mesh_connect( TransportRoute &mesh_rte,  const char **mesh_url,
              ! rte->is_set( TPORT_IS_SHUTDOWN ) ) {
           if ( rte->mesh_equal( mesh_url[ i ], mesh_hash[ i ] ) ) {
             if ( debug_tran )
-              mesh_rte.printf( "already connected (%s)\n", mesh_url[ i ] );
+              mesh_rte.printf( "skip, already connected (%s)\n", mesh_url[ i ] );
             skip |= 1 << i;
             break;
           }
@@ -704,6 +704,7 @@ SessionMgr::add_mesh_connect( TransportRoute &mesh_rte,  const char *url,
   TransportRoute   * rte;
   EvTcpTransportOpts opts;
 
+  ConfigTree::Transport & t = mesh_rte.transport;
   char         host_buf[ MAX_TCP_HOST_LEN ];
   const char * host = url;
   size_t       len  = sizeof( host_buf );
@@ -719,7 +720,8 @@ SessionMgr::add_mesh_connect( TransportRoute &mesh_rte,  const char *url,
   count = (uint32_t) this->user_db.transport_tab.count;
   for ( uint32_t tport_id = 0; tport_id < count; tport_id++ ) {
     rte = this->user_db.transport_tab.ptr[ tport_id ];
-    if ( rte->all_set( TPORT_IS_SHUTDOWN | TPORT_IS_MESH ) &&
+    if ( &t == &rte->transport &&
+         rte->all_set( TPORT_IS_SHUTDOWN | TPORT_IS_MESH ) &&
          rte->mesh_id == mesh_rte.mesh_id ) {
       if ( rte->connect_ctx == NULL || rte->mesh_equal( url, url_hash ) ) {
         rte->init_state();

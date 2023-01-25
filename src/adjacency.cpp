@@ -7,11 +7,14 @@
 #include <inttypes.h>
 #include <stdarg.h>
 #include <raims/user_db.h>
+#include <raims/debug.h>
 
 using namespace rai;
 using namespace ms;
 using namespace kv;
 using namespace md;
+#else
+#define d_adj( ... )
 #endif
 
 const char *
@@ -500,11 +503,11 @@ AdjDistance::push_link( AdjacencySpace *set ) noexcept
             if ( set->tport_type.cmp( set2->tport_type ) < 0 )
               break;
             if ( set->tport_type.equals( set2->tport_type ) ) {
-              if ( set->tport.cmp( set2->tport ) < 0 )
+           /* if ( set->tport.cmp( set2->tport ) < 0 )
                 break;
-              if ( set->tport.equals( set2->tport ) )
-                if ( set->tport_id < set2->tport_id )
-                  break;
+              if ( set->tport.equals( set2->tport ) )*/
+              if ( set->tport_id < set2->tport_id )
+                break;
             }
           }
           else if ( this->adjacency_start( set->uid ) <
@@ -585,6 +588,7 @@ AdjDistance::coverage_step( void ) noexcept
 
   for ( i = 0; i < this->links.count; i++ ) {
     set = this->links.ptr[ i ];
+#if 0
     /* path_select 0 is oldest, 1 is second oldest, 2 ... */
     if ( path_select > 0 && set->next_link != NULL ) {
       for ( uint8_t j = 0; j < path_select; j++ ) {
@@ -593,6 +597,7 @@ AdjDistance::coverage_step( void ) noexcept
       }
       this->links.ptr[ i ] = set;
     }
+#endif
     this->fwd.or_bits( this->fwd, this->max_uid, *set );
     set->clock = this->adjacency_clock;
   }
@@ -639,8 +644,8 @@ AdjDistance::calc_forward_cache( ForwardCache &fwd,  uint32_t src_uid,
   for ( tport_id = 0; tport_id < fwd.tport_count; tport_id++ ) {
     TransportRoute * rte = this->user_db.transport_tab.ptr[ tport_id ];
     if ( rte->uid_connected.clock == clk ) {
-      /*printf( "fwd_cache(%u) path %u -> tport_id %u\n", src_uid,
-              path_select, tport_id );*/
+      d_adj( "fwd_cache(%u) path %u -> tport_id %u\n", src_uid,
+              path_select, tport_id );
       fwd.add( tport_id );
       fwd.fwd_count++;
     }
@@ -655,6 +660,7 @@ AdjDistance::calc_path( ForwardCache &fwd,  uint8_t path_select ) noexcept
   uint32_t     uid;
   bool         found;
 
+  d_adj( "calc_path %u\n", path_select );
   seqno = this->update_seqno;
   path[ 0 ].zero();
   for ( uid = 1; uid < this->max_uid; uid++ ) {
@@ -666,8 +672,13 @@ AdjDistance::calc_path( ForwardCache &fwd,  uint8_t path_select ) noexcept
         AdjacencySpace * set = this->coverage_link( 0 );
         path[ uid ].src_uid = set->uid;
         path[ uid ].cost    = cost;
-        /*printf( "path %u uid %u src_uid %u cost %u\n", path_select,
-                uid, set->uid, cost );*/
+        d_adj( "path %u uid %u src_uid %u tport_id %u cost %u\n", path_select,
+                uid, set->uid, set->tport_id, cost );
+        while ( set->next_link != NULL ) {
+          set = set->next_link;
+          d_adj( "alt_path %u uid %u src_uid %u tport_id %u cost %u\n", path_select,
+                  uid, set->uid, set->tport_id, cost );
+        }
         found = true;
         break;
       }
@@ -701,13 +712,13 @@ AdjDistance::calc_path( ForwardCache &fwd,  uint8_t path_select ) noexcept
       }
     }
     if ( ! found ) {
-      /*printf( "not found select %u src_uid %u uid %u\n", path_select, uid_src, uid );*/
+      d_adj( "not found select %u src_uid %u uid %u\n", path_select, uid_src, uid );
       path[ uid ].zero();
     }
-    /*else {
-      printf( "path select %u uid %u cost %u tport %u src_uid %u\n", path_select,
+    else {
+      d_adj( "path select %u uid %u cost %u tport %u src_uid %u\n", path_select,
               uid, path[ uid ].cost, path[ uid ].tport, path[ uid ].src_uid );
-    }*/
+    }
   }
 #if 0
     uint32_t tport_id,

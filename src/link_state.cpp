@@ -301,6 +301,8 @@ UserDB::push_user_route( UserBridge &n,  UserRoute &u_rte ) noexcept
     UserRouteList  & list = this->route_list[ fd ];
     TransportRoute & rte  = u_rte.rte;
 
+    if ( debug_lnk )
+      n.printf( "push_user_route %s fd %u\n", u_rte.rte.name, fd );
     if ( u_rte.hops == 0 ) {
       if ( rte.mesh_id != NULL ) {
         if ( ! rte.uid_in_mesh->test_set( n.uid ) ) {
@@ -309,6 +311,9 @@ UserDB::push_user_route( UserBridge &n,  UserRoute &u_rte ) noexcept
           if ( debug_lnk )
             n.printf( "add to mesh %s [%s]\n", rte.transport.tport.val,
                       rte.mesh_csum->to_base64_str( buf ) );
+        }
+        else {
+          n.printf( "already in mesh %s\n", rte.name );
         }
       }
       else if ( rte.dev_id != NULL ) {
@@ -343,7 +348,6 @@ UserDB::push_user_route( UserBridge &n,  UserRoute &u_rte ) noexcept
     }
     u_rte.set( IN_ROUTE_LIST_STATE );
     list.push_tl( &u_rte );
-    n.set( IN_ROUTE_LIST_STATE );
   }
 }
 
@@ -352,14 +356,12 @@ UserDB::pop_source_route( UserBridge &n ) noexcept
 {
   if ( debug_lnk )
     n.printf( "pop_source_route\n" );
-  if ( n.test_clear( IN_ROUTE_LIST_STATE ) ) {
-    uint32_t count = (uint32_t) this->transport_tab.count;
-    for ( uint32_t i = 0; i < count; i++ ) {
-      UserRoute * u_ptr = n.user_route_ptr( *this, i );
-      if ( u_ptr == NULL )
-        break;
-      this->pop_user_route( n, *u_ptr );
-    }
+  uint32_t count = (uint32_t) this->transport_tab.count;
+  for ( uint32_t i = 0; i < count; i++ ) {
+    UserRoute * u_ptr = n.user_route_ptr( *this, i );
+    if ( u_ptr == NULL )
+      break;
+    this->pop_user_route( n, *u_ptr );
   }
 }
 
@@ -371,6 +373,8 @@ UserDB::pop_user_route( UserBridge &n,  UserRoute &u_rte ) noexcept
     UserRouteList  & list = this->route_list[ fd ];
     TransportRoute & rte  = u_rte.rte;
 
+    if ( debug_lnk )
+      n.printf( "pop_user_route %s fd %u\n", u_rte.rte.name, fd );
     list.pop( &u_rte );
     if ( u_rte.hops == 0 ) {
       if ( rte.mesh_id != NULL ) {
@@ -427,10 +431,19 @@ UserDB::close_source_route( uint32_t fd ) noexcept
     return NULL;
   UserRouteList & list = this->route_list[ fd ];
   while ( ! list.is_empty() ) {
-    UserRoute  * u_ptr     = list.pop_hd();
-    UserBridge & n         = u_ptr->n;
+    UserRoute  * u_ptr = list.hd;
+    UserBridge & n     = u_ptr->n;
 
-    this->pop_user_route( n, *u_ptr );
+    if ( debug_lnk )
+      n.printf( "close_source_route fd %u\n", fd );
+    if ( u_ptr->is_set( IN_ROUTE_LIST_STATE ) ) {
+      this->pop_user_route( n, *u_ptr );
+    }
+    else {
+      n.printe( "not in route list fd %u\n", fd );
+      list.pop( u_ptr );
+    }
+#if 0
     u_ptr->hops = UserRoute::NO_HOPS;
     u_ptr = n.primary( *this );
 
@@ -440,6 +453,7 @@ UserDB::close_source_route( uint32_t fd ) noexcept
       if ( ! u_ptr->is_valid() ) /* no other route exists */
         return &n;
     }
+#endif
   }
   return NULL;
 }

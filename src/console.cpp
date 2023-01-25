@@ -1319,6 +1319,32 @@ latency_string( int64_t lat,  char *buf ) noexcept
   return ::snprintf( buf, 80, "%.3g%s", (double) lat / 1000.0, units );
 }
 
+static size_t
+uint64_to_bits( uint64_t b,  char *buf ) noexcept
+{
+  size_t sz = 0;
+  uint32_t n = 0;
+  while ( b != 0 ) {
+    if ( ( b & 1 ) != 0 ) {
+      uint32_t d = uint32_digits( n );
+      if ( sz + 1 + d < 80 ) {
+        if ( sz > 0 ) {
+          if ( buf != NULL ) buf[ sz ] = ',';
+          sz++;
+        }
+        if ( buf != NULL )
+          uint32_to_string( n, &buf[ sz ], d );
+        sz += d;
+      }
+    }
+    b >>= 1;
+    n++;
+  }
+  if ( buf != NULL )
+    buf[ sz ] = '\0';
+  return sz;
+}
+
 uint32_t
 TabPrint::width( Console &console,  char *buf ) noexcept
 {
@@ -1407,6 +1433,8 @@ TabPrint::width( Console &console,  char *buf ) noexcept
     }
     case PRINT_LONG:
       return (uint32_t) uint64_digits( this->ival );
+    case PRINT_BITS:
+      return uint64_to_bits( this->ival, NULL );
     case PRINT_STAMP:
       if ( this->ival == 0 )
         return 0;
@@ -1568,6 +1596,10 @@ TabPrint::string( Console &console,  char *buf ) noexcept
                                  HAS_HB_STATE ), buf );
     case PRINT_LONG:
       sz = uint64_to_string( this->ival, buf );
+      buf[ sz ] = '\0';
+      return buf;
+    case PRINT_BITS:
+      sz = uint64_to_bits( this->ival, buf );
       buf[ sz ] = '\0';
       return buf;
     case PRINT_STAMP: {
@@ -1968,7 +2000,7 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
     case CMD_SHOW_ADJACENCY: this->show_adjacency( p ); break;
     case CMD_SHOW_LINKS:     this->show_links( p );     break;
     case CMD_SHOW_NODES:     this->show_nodes( p );     break;
-    case CMD_SHOW_ROUTES:    this->show_routes( p );    break;
+    case CMD_SHOW_ROUTES:    this->show_routes( p, int_arg( arg, len ) ); break;
     case CMD_SHOW_URLS:      this->show_urls( p );      break;
     case CMD_SHOW_TPORTS:    this->show_tports( p, arg, len ); break;
     case CMD_SHOW_USERS:     this->show_users( p );     break;
@@ -1986,12 +2018,13 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
     case CMD_SHOW_TREE: {
       UserBridge * u = this->find_user( arg, len );
       uint32_t     i = ( u == NULL ? int_arg( arg, len ) : 0 );
-      if ( u != NULL && argc > 1 )
-        i = int_arg( args[ 1 ], arglen[ 1 ] );
+      if ( u != NULL && argc > 2 )
+        i = int_arg( args[ argc - 1 ], arglen[ argc - 1 ] );
       this->show_tree( p, u, i );
       break;
     }
     case CMD_SHOW_PATH:      this->show_path( p, int_arg( arg, len ) ); break;
+    case CMD_SHOW_FORWARD:   this->show_forward( p, int_arg( arg, len ) ); break;
     case CMD_SHOW_FDS:       this->show_fds( p );       break;
     case CMD_SHOW_BUFFERS:   this->show_buffers( p );   break;
     case CMD_SHOW_WINDOWS:   this->show_windows( p );   break;
@@ -2078,7 +2111,7 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
       break;
     case CMD_PING:      this->ping_peer( p, arg, len, false ); break;
     case CMD_TPING:     this->ping_peer( p, arg, len, true ); break;
-    case CMD_MPING:     this->mcast_ping( p ); break;
+    case CMD_MPING:     this->mcast_ping( p, int_arg( arg, len ) ); break;
 
     case CMD_SUB_START: /* sub */
     case CMD_SUB_STOP: {/* unsub */
@@ -2207,8 +2240,6 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
         this->send_remote_request( p, arg, len, data, datalen );
         break;
       }
-      this->outf( p, "pub(%.*s) (%.*s)", (int) len, arg, (int) datalen, data );
-
       PubMcastData mc( arg, len, data, datalen, MD_STRING );
       if ( cmd != CMD_PUBLISH ) {
         if ( this->inbox_num == 0 )
@@ -2224,6 +2255,9 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
           mc.stamp = current_realtime_ns();
       }
       this->mgr.publish( mc );
+      this->outf( p, "pub(%.*s,h=0x%x,s=%u) (%.*s)",
+                  (int) len, arg, mc.subj_hash, mc.path_select,
+                  (int) datalen, data );
       break;
     }
   }
@@ -2782,7 +2816,7 @@ Console::ping_peer( ConsoleOutput *p,  const char *arg,
 }
 
 void
-Console::mcast_ping( ConsoleOutput *p ) noexcept
+Console::mcast_ping( ConsoleOutput *p,  uint8_t path ) noexcept
 {
   ConsolePing * rpc = this->create_rpc<ConsolePing>( p, PING_RPC );
 
@@ -2797,6 +2831,7 @@ Console::mcast_ping( ConsoleOutput *p ) noexcept
     mc.reply = rpc->inbox_num;
     mc.stamp = current_realtime_ns();
     mc.token = rpc->token;
+    mc.path  = path;
     this->mgr.publish( mc );
     rpc->reply.zero();
     rpc->reply.make( rpc->count, true );
@@ -2806,7 +2841,7 @@ Console::mcast_ping( ConsoleOutput *p ) noexcept
 void
 Console::on_ping( ConsolePing &ping ) noexcept
 {
-  static const uint32_t ncols = 4;
+  static const uint32_t ncols = 5;
   TabOut out( this->table, this->tmp, ncols );
   uint32_t p, i = 0;
 
@@ -2814,8 +2849,9 @@ Console::on_ping( ConsolePing &ping ) noexcept
     PingReply & reply = ping.reply.ptr[ p ];
     bool no_route = true;
     TabPrint * tab = out.make_row();
+    UserBridge * n = NULL;
     if ( reply.uid < this->user_db.bridge_tab.count ) {
-      UserBridge * n = this->user_db.bridge_tab[ reply.uid ];
+      n = this->user_db.bridge_tab[ reply.uid ];
       if ( n != NULL ) {
         tab[ i++ ].set( n->peer.user, reply.uid, PRINT_ID );
         tab[ i++ ].set( n, PRINT_DIST );
@@ -2834,8 +2870,22 @@ Console::on_ping( ConsolePing &ping ) noexcept
     }
     else
       tab[ i++ ].set_null();
+
+    if ( reply.rem_tid != 0 ) {
+      if ( n != NULL && reply.rem_tid < n->adjacency.count &&
+           n->adjacency.ptr[ reply.rem_tid ] != NULL ) {
+        tab[ i++ ].set( n->adjacency.ptr[ reply.rem_tid ]->tport,
+                        reply.rem_tid, PRINT_ID );
+      }
+      else {
+        tab[ i++ ].set_int( reply.rem_tid );
+      }
+    }
+    else {
+      tab[ i++ ].set_null();
+    }
   }
-  static const char *hdr[ ncols ] = { "user", "cost", "lat", "tport" };
+  static const char *hdr[ ncols ] = { "user", "cost", "lat", "tport", "peer_tport" };
   for ( size_t n = 0; n < ping.out.count; n++ ) {
     ConsoleOutput * p = ping.out.ptr[ n ];
     this->print_table( p, hdr, ncols );
@@ -3782,9 +3832,7 @@ Console::show_peers( ConsoleOutput *p, const char *name,  size_t len ) noexcept
 {
   static const uint32_t ncols = 9;
   TabOut         out( this->table, this->tmp, ncols );
-  const char   * address, * nstr;
-  uint32_t       addr_len, ucast_fd;
-  EvPoll       & poll = this->mgr.poll;
+  const char   * nstr;
   char           nonce[ NONCE_B64_LEN + 1 ];
   UserBridgeList list;
   bool           show_ip = false, show_host = false;
@@ -3849,61 +3897,70 @@ Console::show_peers( ConsoleOutput *p, const char *name,  size_t len ) noexcept
        .set_long( n->round_trip_time, PRINT_LATENCY ); /* lat */
 
     UserRoute *u_ptr = n->primary( this->user_db );
+
     if ( ! u_ptr->is_valid() ) {
       row.set_null()  /* tport */
          .set_null()  /* cost */
          .set_null(); /* address */
     }
     else {
-      const char * url_type = u_ptr->rte.transport.type.val;
       TabPrint & ptp =
       row.set( u_ptr->rte.transport.tport, u_ptr->rte.tport_id, PRINT_ID )
          .set( n, PRINT_DIST ); /* cost */
 
-      switch ( u_ptr->is_set( UCAST_URL_STATE | UCAST_URL_SRC_STATE |
-                              MESH_URL_STATE ) ) {
-        default: { /* normal tcp */
-          ucast_fd = u_ptr->inbox_fd;
-          if ( ucast_fd <= poll.maxfd && poll.sock[ ucast_fd ] != NULL ) {
-            uint32_t uid2;
-            bool found = false;
-            address  = poll.sock[ ucast_fd ]->peer_address.buf;
-            addr_len = (uint32_t) get_strlen64( address );
-            if ( u_ptr->rte.uid_connected.first( uid2 ) ) {
-              if ( uid2 != el->uid ) { /* if routing through another uid */
-                UserBridge * n = this->user_db.bridge_tab[ uid2 ];
-                if ( n != NULL && n->is_set( AUTHENTICATED_STATE ) ) { /* ptp */
-                  ptp.set_url_dest( n, url_type, address, addr_len );
-                  found = true;
-                }
-              }
-            }
-            if ( ! found )
-              ptp.set_url( url_type, address, addr_len ); /* ptp */
-          }
-          else {
-            ptp.set_null();
-          }
-          break;
-        }
-        case UCAST_URL_STATE:
-          ptp.set( u_ptr->ucast_url.val, u_ptr->ucast_url.len ); /* ptp */
-          break;
-        case UCAST_URL_SRC_STATE: {
-          const UserRoute & u_src = *u_ptr->ucast_src;
-          ptp.set_url_dest( &u_src.n, NULL, /* address */
-                        u_src.ucast_url.val, u_src.ucast_url.len, PRINT_UADDR );
-          break;
-        }
-        case MESH_URL_STATE:
-          ptp.set( u_ptr->mesh_url.val, u_ptr->mesh_url.len ); /* ptp */
-          break;
-      }
+      this->output_user_route( ptp, *u_ptr );
     }
   }
   static const char *hdr[ ncols ] = { "user", "bridge", "sub", "seq", "link",
                                       "lat", "tport", "cost", "address" };
   this->print_table( p, hdr, ncols );
+}
+
+void
+Console::output_user_route( TabPrint &ptp,  UserRoute &u_rte ) noexcept
+{
+  EvPoll     & poll = this->mgr.poll;
+  const char * url_type = u_rte.rte.transport.type.val;
+
+  switch ( u_rte.is_set( UCAST_URL_STATE | UCAST_URL_SRC_STATE |
+                         MESH_URL_STATE ) ) {
+    default: { /* normal tcp */
+      uint32_t ucast_fd = u_rte.inbox_fd;
+      if ( ucast_fd <= poll.maxfd && poll.sock[ ucast_fd ] != NULL ) {
+        uint32_t     uid2;
+        bool         found    = false;
+        const char * address  = poll.sock[ ucast_fd ]->peer_address.buf;
+        uint32_t     addr_len = (uint32_t) get_strlen64( address );
+        if ( u_rte.rte.uid_connected.first( uid2 ) ) {
+          if ( uid2 != u_rte.n.uid ) { /* if routing through another uid */
+            UserBridge * n = this->user_db.bridge_tab[ uid2 ];
+            if ( n != NULL && n->is_set( AUTHENTICATED_STATE ) ) { /* ptp */
+              ptp.set_url_dest( n, url_type, address, addr_len );
+              found = true;
+            }
+          }
+        }
+        if ( ! found )
+          ptp.set_url( url_type, address, addr_len ); /* ptp */
+      }
+      else {
+        ptp.set_null();
+      }
+      break;
+    }
+    case UCAST_URL_STATE:
+      ptp.set( u_rte.ucast_url.val, u_rte.ucast_url.len ); /* ptp */
+      break;
+    case UCAST_URL_SRC_STATE: {
+      const UserRoute & u_src = *u_rte.ucast_src;
+      ptp.set_url_dest( &u_src.n, NULL, /* address */
+                    u_src.ucast_url.val, u_src.ucast_url.len, PRINT_UADDR );
+      break;
+    }
+    case MESH_URL_STATE:
+      ptp.set( u_rte.mesh_url.val, u_rte.mesh_url.len ); /* ptp */
+      break;
+  }
 }
 
 void
@@ -4128,9 +4185,9 @@ Console::show_nodes( ConsoleOutput *p ) noexcept
 }
 
 void
-Console::show_routes( ConsoleOutput *p ) noexcept
+Console::show_routes( ConsoleOutput *p,  uint8_t path_select ) noexcept
 {
-  static const uint32_t ncols = 6;
+  static const uint32_t ncols = 8;
   TabOut       out( this->table, this->tmp, ncols );
   uint32_t     i = 0;
   const char * address;
@@ -4138,6 +4195,7 @@ Console::show_routes( ConsoleOutput *p ) noexcept
   EvPoll     & poll = this->mgr.poll;
   bool         first_tport;
 
+  path_select &= ( COST_PATH_COUNT - 1 );
   for ( uint32_t uid = 1; uid < this->user_db.next_uid; uid++ ) {
     UserBridge * n = this->user_db.bridge_tab[ uid ];
     if ( n == NULL || ! n->is_set( AUTHENTICATED_STATE ) )
@@ -4163,8 +4221,8 @@ Console::show_routes( ConsoleOutput *p ) noexcept
         first_tport = false;
       }
       TransportRoute *rte = this->user_db.transport_tab.ptr[ tport_id ];
-      uint32_t cost =
-        this->user_db.peer_dist.calc_transport_cache( uid, tport_id, 0 );
+      uint32_t cost = this->user_db.peer_dist.calc_transport_cache( uid,
+                                                        tport_id, path_select );
       tab[ i++ ].set( rte->transport.tport, tport_id, PRINT_ID );
       tab[ i++ ].set_int( u_ptr->state, PRINT_STATE ); /* state */
 
@@ -4172,18 +4230,32 @@ Console::show_routes( ConsoleOutput *p ) noexcept
         tab[ i++ ].set_int( cost );  /* cost */
       else
         tab[ i++ ].set( "X" );  /* cost */
+      uint32_t b = 0;
+      for ( uint8_t path = 0; path < COST_PATH_COUNT; path++ ) {
+        if ( n->bloom_rt[ path ] != NULL &&
+             n->bloom_rt[ path ]->r == u_ptr->mcast_fd ) {
+          b |= 1U << path;
+        }
+      }
+      if ( b == 0 )
+        tab[ i++ ].set_null();
+      else
+        tab[ i++ ].set_long( b, PRINT_BITS );
       if ( n->primary_route == tport_id )
         tab[ i++ ].set_long( n->round_trip_time, PRINT_LATENCY ); /* lat */
       else
         tab[ i++ ].set_null();
+      tab[ i++ ].set_int( u_ptr->mcast_fd );
       const char * url_type = u_ptr->rte.transport.type.val;
       switch ( u_ptr->is_set( UCAST_URL_STATE | UCAST_URL_SRC_STATE |
                               MESH_URL_STATE ) ) {
         case MESH_URL_STATE:
+        #if 0
           if ( cost == 1 ) {
             tab[ i++ ].set( u_ptr->mesh_url.val, u_ptr->mesh_url.len ); /* ptp */
             break;
           }
+        #endif
           /* fall through */
         default: {
           ucast_fd = u_ptr->inbox_fd;
@@ -4231,29 +4303,30 @@ Console::show_routes( ConsoleOutput *p ) noexcept
     }
   }
   static const char *hdr[ ncols ] = { "user", "tport", "state",
-                                      "cost", "lat", "route" };
+                                      "cost", "path", "lat", "fd", "route" };
   this->print_table( p, hdr, ncols );
 }
 
 void
 Console::show_urls( ConsoleOutput *p ) noexcept
 {
-  static const uint32_t ncols = 8;
-  TabOut   out( this->table, this->tmp, ncols );
-  uint32_t i = 0;
-  EvPoll & poll = this->mgr.poll;
-  bool     first_tport;
+  static const uint32_t ncols = 9;
+  TabOut     out( this->table, this->tmp, ncols );
+  EvPoll   & poll = this->mgr.poll;
+  TabPrint * tab;
+  uint32_t   i = 0;
 
   for ( uint32_t tid = 0; tid < this->user_db.transport_tab.count; tid++ ) {
     TransportRoute *rte = this->user_db.transport_tab.ptr[ tid ];
-    TabPrint * tab = out.make_row();
     uint32_t uid;
+    tab = out.add_row_p();
+    i = 0;
     if ( rte->uid_connected.first( uid ) ) {
       UserBridge * n = this->user_db.bridge_tab[ uid ];
       if ( n != NULL && n->is_set( AUTHENTICATED_STATE ) )
         tab[ i++ ].set( n, PRINT_USER ); /* user */
     }
-    if ( i % ncols == 0 ) {
+    if ( i == 0 ) {
       tab[ i++ ].set_null(); /* user */
     }
     tab[ i++ ].set( rte->transport.tport, rte->tport_id, PRINT_ID );
@@ -4264,6 +4337,7 @@ Console::show_urls( ConsoleOutput *p ) noexcept
       tab[ i++ ].set_null();
     else
       tab[ i++ ].set( rte->mesh_id->transport.tport );
+    tab[ i++ ].set_int( rte->fd );
 
     if ( ! rte->mesh_url.is_null() ) /* url */
       tab[ i++ ].set( rte->mesh_url.val, rte->mesh_url.len );
@@ -4277,55 +4351,49 @@ Console::show_urls( ConsoleOutput *p ) noexcept
     uint32_t fd;
     for ( bool ok = rte->connected.first( fd ); ok;
           ok = rte->connected.next( fd ) ) {
-      if ( fd <= poll.maxfd ) {
-        EvSocket *s = poll.sock[ fd ];
-        if ( s != NULL ) {
-          const char * url_type = rte->transport.type.val,
-                     * address;
-          uint32_t     addr_len;
-          if ( i % ncols == 0 ) {
-            tab = out.make_row();
-            while ( i % ncols < ncols - 2 )
-              tab[ i++ ].set_null();
-          }
-          PeerAddrStr paddr;
-          paddr.set_sock_addr( fd );
-          this->tab_url( url_type, paddr.buf,
-            (uint32_t) get_strlen64( paddr.buf ), tab[ i++ ] ); /* local */
-          address  = poll.sock[ fd ]->peer_address.buf;
-          addr_len = (uint32_t) get_strlen64( address );
-          tab[ i++ ].set_url( url_type, address, addr_len ); /* remote */
+      if ( fd <= poll.maxfd && poll.sock[ fd ] != NULL ) {
+        EvSocket   * s = poll.sock[ fd ];
+        const char * url_type = rte->transport.type.val,
+                   * address;
+        uint32_t     addr_len;
+        if ( i == ncols ) {
+          tab = out.add_row_p();
+          for ( i = 0; i < ncols - 2; )
+            tab[ i++ ].set_null();
         }
+        PeerAddrStr paddr;
+        paddr.set_sock_addr( fd );
+        this->tab_url( url_type, paddr.buf,
+          (uint32_t) get_strlen64( paddr.buf ), tab[ i++ ] ); /* local */
+        address  = s->peer_address.buf;
+        addr_len = (uint32_t) get_strlen64( address );
+        tab[ i++ ].set_url( url_type, address, addr_len ); /* remote */
       }
     }
-    if ( i % ncols != 0 ) {
-      tab[ i++ ].set_null(); /* local */
-      tab[ i++ ].set_null(); /* remote */
-    }
+    while ( i < ncols )
+      tab[ i++ ].set_null();
   }
   for ( uint32_t uid = 1; uid < this->user_db.next_uid; uid++ ) {
     UserBridge * n = this->user_db.bridge_tab[ uid ];
     if ( n == NULL || ! n->is_set( AUTHENTICATED_STATE ) )
       continue;
 
-    TabPrint * tab = out.make_row();
-    if ( i > 0 )
-      tab[ i - 1 ].typ |= PRINT_SEP;
+    if ( out.table.count > 0 )
+      out.row( ncols - 1 ).typ |= PRINT_SEP;
+    tab = out.add_row_p();
+    i = 0;
     tab[ i++ ].set( n, PRINT_USER ); /* user */
 
     uint32_t count = this->user_db.transport_tab.count;
-    first_tport = true;
     for ( uint32_t tport_id = 0; tport_id < count; tport_id++ ) {
       UserRoute *u_ptr = n->user_route_ptr( this->user_db, tport_id );
       if ( ! u_ptr->is_valid() )
         continue;
 
-      if ( ! first_tport ) {
-        tab = out.make_row();
+      if ( i == ncols ) {
+        tab = out.add_row_p();
+        i = 0;
         tab[ i++ ].set_null(); /* user */
-      }
-      else {
-        first_tport = false;
       }
       TransportRoute *rte = this->user_db.transport_tab.ptr[ tport_id ];
       uint32_t cost =
@@ -4337,10 +4405,13 @@ Console::show_urls( ConsoleOutput *p ) noexcept
         tab[ i++ ].set_int( cost );  /* cost */
       else
         tab[ i++ ].set( "X" );  /* cost */
-      if ( rte->mesh_id == NULL )
-        tab[ i++ ].set_null();
+
+      if ( rte->mesh_id != NULL )
+        tab[ i++ ].set( rte->mesh_id->transport.tport ); /* mesh */
       else
-        tab[ i++ ].set( rte->mesh_id->transport.tport );
+        tab[ i++ ].set_null();
+      tab[ i++ ].set_int( u_ptr->mcast_fd );
+
       const char * url_type = u_ptr->rte.transport.type.val,
                  * address;
       uint32_t     ucast_fd,
@@ -4394,7 +4465,7 @@ Console::show_urls( ConsoleOutput *p ) noexcept
     }
   }
   static const char *hdr[ ncols ] = { "user", "tport", "state",
-                                      "cost", "mesh", "url",
+                                      "cost", "mesh", "fd", "url",
                                       "local", "remote" };
   this->print_table( p, hdr, ncols );
 }
@@ -4577,28 +4648,46 @@ Console::show_skew( ConsoleOutput *p ) noexcept
 void
 Console::show_reachable( ConsoleOutput *p ) noexcept
 {
-  static const uint32_t ncols = 2;
+  static const uint32_t ncols = 4;
   TabOut out( this->table, this->tmp, ncols );
-  size_t       t, count = this->user_db.transport_tab.count;
-  char         buf[ 80 ];
-  TabPrint   * tab;
+  uint32_t fd;
 
-  for ( t = 0; t < count; t++ ) {
-    TransportRoute *rte = this->user_db.transport_tab.ptr[ t ];
-    tab = out.add_row_p();
-    if ( rte->is_set( TPORT_IS_MESH ) && rte->listener != NULL ) {
-      tab[ 0 ].set_tport( rte->transport.tport, "mesh" );
-      this->user_db.uid_names( *rte->uid_in_mesh, buf, sizeof( buf ) );
-      this->tab_string( buf, tab[ 1 ] );
-    }
-    else {
-      tab[ 0 ].set( rte->transport.tport, (uint32_t) t, PRINT_ID );
-      rte->reachable_names( buf, sizeof( buf ) );
-      this->tab_string( buf, tab[ 1 ] );
+  for ( fd = 0; fd < this->user_db.route_list.count; fd++ ) {
+    UserRouteList & list = this->user_db.route_list[ fd ];
+    if ( list.is_empty() )
+      continue;
+
+    if ( out.table.count > 0 )
+      out.row( ncols - 1 ).typ |= PRINT_SEP;
+    for ( UserRoute * u_ptr = list.hd; u_ptr != NULL; u_ptr = u_ptr->next ) {
+      UserBridge & n   = u_ptr->n;
+      TabPrint   * tab = out.add_row_p();
+      uint32_t     i   = 0;
+
+      tab[ i++ ].set( &n, PRINT_USER );
+      uint32_t b = 0;
+      for ( uint8_t path = 0; path < COST_PATH_COUNT; path++ ) {
+        if ( n.bloom_rt[ path ] != NULL &&
+             n.bloom_rt[ path ]->r == fd ) {
+          b |= 1U << path;
+        }
+      }
+      if ( b == 0 )
+        tab[ i++ ].set_null();
+      else
+        tab[ i++ ].set_long( b, PRINT_BITS );
+      if ( u_ptr == list.hd ) {
+        tab[ i++ ].set_int( fd );
+        tab[ i++ ].set( u_ptr->rte.transport.tport,
+                        u_ptr->rte.tport_id, PRINT_ID );
+      }
+      else {
+        tab[ i++ ].set_null();
+        tab[ i++ ].set_null();
+      }
     }
   }
-
-  static const char *hdr[ ncols ] = { "tport", "reachable" };
+  static const char *hdr[ ncols ] = { "user", "path", "fd", "tport" };
   this->print_table( p, hdr, ncols );
 }
 
@@ -4616,6 +4705,9 @@ Console::show_tree( ConsoleOutput *p,  const UserBridge *src,
 
   path_select &= ( COST_PATH_COUNT - 1 );
 
+  printf( "path %u src %s.%u\n", path_select,
+          src_uid == 0 ? "self" : src->peer.user.val,
+          src_uid );
   peer_dist.coverage_init( src_uid, path_select );
   while ( (cost = peer_dist.coverage_step()) != 0 ) {
     UIntBitSet & fwd = peer_dist.fwd;
@@ -4684,6 +4776,58 @@ Console::show_path( ConsoleOutput *p,  uint8_t path_select ) noexcept
 
   static const char *hdr[ ncols ] =
     { "tport", "cost", "path_cost", "dest" };
+  this->print_table( p, hdr, ncols );
+}
+
+void
+Console::show_forward( ConsoleOutput *p,  uint8_t path_select ) noexcept
+{
+  static const uint32_t ncols = 3;
+  TabOut out( this->table, this->tmp, ncols );
+
+  path_select &= ( COST_PATH_COUNT - 1 );
+
+  for ( uint32_t uid = 0; uid < this->user_db.next_uid; uid++ ) {
+    UserBridge * n = NULL;
+    if ( uid != 0 ) {
+      n = this->user_db.bridge_tab[ uid ];
+      if ( n == NULL || ! n->is_set( AUTHENTICATED_STATE ) )
+        continue;
+    }
+    TabPrint * tab = out.add_row_p();
+    uint32_t   i = 0;
+
+    if ( uid == 0 )
+      tab[ i++ ].set( this->user_db.user.user, PRINT_SELF ); /* user */
+    else {
+      out.row( ncols - 1 ).typ |= PRINT_SEP;
+      tab[ i++ ].set( n, PRINT_USER );  /* user */
+    }
+    ForwardCache   & forward = ( uid == 0 ?
+                                 this->user_db.forward_path[ path_select ] :
+                                 n->forward_path[ path_select ] );
+    TransportRoute * rte;
+    uint32_t         tport_id;
+    this->user_db.peer_dist.update_forward_cache( forward, uid, path_select );
+    if ( forward.first( tport_id ) ) {
+      do {
+        rte = this->user_db.transport_tab.ptr[ tport_id ];
+
+        if ( i == ncols ) {
+          tab = out.add_row_p();
+          i = 0;
+          tab[ i++ ].set_null();
+        }
+        tab[ i++ ].set( rte->transport.tport, tport_id, PRINT_ID );
+        tab[ i++ ].set_int( rte->uid_connected.cost[ path_select ] );
+      } while ( forward.next( tport_id ) );
+    }
+    while ( i < ncols )
+      tab[ i++ ].set_null();
+  }
+
+  static const char *hdr[ ncols ] =
+    { "source", "tport", "cost" };
   this->print_table( p, hdr, ncols );
 }
 
@@ -5445,6 +5589,7 @@ ConsolePing::on_data( const SubMsgData &val ) noexcept
 
   reply.uid       = val.src_bridge->uid;
   reply.tid       = val.pub.rte.tport_id;
+  reply.rem_tid   = val.tport_id;
   reply.sent_time = val.stamp;
   reply.recv_time = current_realtime_ns();
 
