@@ -71,7 +71,7 @@ main( int argc, char *argv[] )
   md::MDMsgMem mem;
   ms::StringTab st( mem );
   uint32_t start_uid;
-  bool quiet = ( argc > 1 );
+  bool quiet = ( argc > 2 && ::strcmp( argv[ 2 ], "-q" ) == 0 );
 
   user_db.start_time = kv::current_realtime_ns();
   if ( argc > 1 )
@@ -164,11 +164,11 @@ main( int argc, char *argv[] )
 
     for ( path_sel = 0; path_sel < COST_PATH_COUNT; path_sel++ ) {
       for ( uint32_t src_uid = 0; src_uid < user_db.next_uid; src_uid++ ) {
-        peer_dist.coverage_init( src_uid, path_sel );
+        peer_dist.coverage_init( src_uid );
         cost = 0;
         printf( "[%u] src %s\n", path_sel,
                 peer_dist.uid_name( src_uid, src_buf, sizeof( src_buf ) ) );
-        while ( (cost = peer_dist.coverage_step()) != 0 ) {
+        while ( (cost = peer_dist.coverage_step( path_sel )) != 0 ) {
           uint32_t max = peer_dist.max_uid;
           kv::UIntBitSet & fwd = peer_dist.fwd;
           char next_buf[ 32 ];

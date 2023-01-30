@@ -96,7 +96,7 @@ RvTransportService::timer_cb( uint64_t,  uint64_t kind ) noexcept
   }
   else if ( kind == RV_STOP_TIMER ) {
     if ( this->active_cnt == 0 ) {
-      uint64_t cur_mono = this->rte.poll.timer.current_monotonic_time_ns();
+      uint64_t cur_mono = this->rte.poll.mono_ns;
       if ( this->last_active_mono +
            sec_to_ns( RV_TIMEOUT_SECS - 1 ) <= cur_mono ) {
         this->rte.printf( "no active clients, shutting down\n" );
@@ -436,7 +436,7 @@ RvTransportService::start_host( RvHost &host,  const RvHostNet &hn,
             (int) host.session_ip_len, host.session_ip,
             (int) host.sess_ip_len, host.sess_ip,
             (int) host.network_len, host.network );
-    this->last_active_mono = this->rte.poll.timer.current_monotonic_time_ns();
+    this->last_active_mono = this->rte.poll.mono_ns;
     if ( hr != NULL ) {
       hr->last_active_mono = this->last_active_mono;
       hr->is_active = true;
@@ -454,7 +454,7 @@ RvTransportService::stop_host( RvHost &host ) noexcept
           (int) host.session_ip_len, host.session_ip,
           (int) host.sess_ip_len, host.sess_ip,
           (int) host.network_len, host.network );
-  uint64_t cur_mono = this->rte.poll.timer.current_monotonic_time_ns();
+  uint64_t cur_mono = this->rte.poll.mono_ns;
   RvHostRoute * hr  = this->tab.find( &host );
   if ( hr != NULL ) {
     hr->last_active_mono = cur_mono;

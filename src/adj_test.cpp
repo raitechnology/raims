@@ -296,9 +296,9 @@ UserDB::print_paths( kv::ArrayOutput &out,  uint32_t start_uid ) noexcept
       n->step = 0;
       n->cost = 0;
     }
-    peer_dist.coverage_init( start_uid, path_sel );
+    peer_dist.coverage_init( start_uid );
     uint32_t step = 1, cost;
-    while ( (cost = peer_dist.coverage_step()) != 0 ) {
+    while ( (cost = peer_dist.coverage_step( path_sel )) != 0 ) {
       kv::UIntBitSet & fwd = peer_dist.fwd;
       for ( bool ok = fwd.first( uid, max_uid ); ok;
             ok = fwd.next( uid, max_uid ) ) {

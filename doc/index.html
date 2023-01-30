@@ -3388,11 +3388,11 @@ the message type header indicating whether it is special.</p>
 </tr>
 <tr>
 <td class="tableblock halign-left valign-top"><p class="tableblock">_S.</p></td>
-<td class="tableblock halign-left valign-top"><p class="tableblock">Normal subscription broadcast message</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Normal subscription multicast message</p></td>
 </tr>
 <tr>
 <td class="tableblock halign-left valign-top"><p class="tableblock">_P.</p></td>
-<td class="tableblock halign-left valign-top"><p class="tableblock">Pattern subscription broadcast message</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Pattern subscription multicast message</p></td>
 </tr>
 <tr>
 <td class="tableblock halign-left valign-top"><p class="tableblock">_N.</p></td>
@@ -3401,9 +3401,9 @@ the message type header indicating whether it is special.</p>
 </tbody>
 </table>
 <div class="paragraph">
-<p>A broadcast style forwarding used by _Z, _S, _P subjects is different from
-multicast forwarding.  It will flood the authenticated peers in the network,
-adjusting each peer&#8217;s routing database as it is received.  It uses this type of
+<p>A broadcast style forwarding used by _Z, subjects is different from multicast
+forwarding.  It will flood the authenticated peers in the network, adjusting
+each peer&#8217;s routing database as it is received.  It uses this type of
 forwarding because this kind of update may cause the multicast forwarding to be
 temporarily incomplete until the network converges again.</p>
 </div>
@@ -3553,9 +3553,9 @@ synchronization request is used (_I.[bridge].sync_req) to resync.</p>
 <div class="sect2">
 <h3 id="_subscription_subjects">Subscription Subjects</h3>
 <div class="paragraph">
-<p>These are broadcast flooded to authenticated peers.  They are updates to the
-bloom filter that can be missed and resynchronized with _Z.BLM or a resync
-RPC request.</p>
+<p>These are multicast to authenticated peers.  They are updates to the bloom
+filter that can be missed and resynchronized with _Z.BLM or a resync RPC
+request.</p>
 </div>
 <table class="tableblock frame-all grid-cols stripes-even fit-content">
 <colgroup>
@@ -3593,8 +3593,9 @@ RPC request.</p>
 <p>_S.JOIN and _S.LEAV add and subtract subscriptions to a subject.</p>
 </li>
 <li>
-<p>_P.PSUB and _P.STOP add and subtract pattern subscriptions.  These contain
-a pattern type as well as the pattern string.</p>
+<p>_P.PSUB and _P.STOP add and subtract pattern subscriptions.  These contain a
+pattern type as well as the pattern string.  The pattern types currently
+supported are either a RV style wildcard or a Redis glob style wildcard.</p>
 </li>
 </ul>
 </div>

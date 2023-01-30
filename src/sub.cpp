@@ -155,6 +155,7 @@ SubDB::fwd_sub( SubArgs &ctx ) noexcept
   m.close( e.sz, h, CABA_RTR_ALERT );
   m.sign( s.msg, s.len(), *this->user_db.session_key );
 
+  this->user_db.msg_send_counter[ ctx.is_start ? U_SUB_JOIN : U_SUB_LEAVE ]++;
   if ( ( ctx.flags & CONSOLE_SUB ) != 0 ) {
     rte = this->user_db.ipc_transport;
     if ( rte != NULL ) {
@@ -571,6 +572,7 @@ SubDB::reseed_bloom( void ) noexcept
 {
   BloomBits * b;
   uint32_t seed;
+  this->user_db.msg_send_counter[ U_BLOOM_FILTER ]++;
 
   seed = (uint32_t) this->user_db.rand.next();
   b = this->bloom.bits->reseed( this->bloom.bits, seed );
@@ -662,6 +664,8 @@ SubDB::resize_bloom( void ) noexcept
   }
 
   if ( bloom_resize ) {
+    this->user_db.msg_send_counter[ U_BLOOM_FILTER ]++;
+
     BloomCodec code;
     this->bloom.encode( code );
 

@@ -401,7 +401,8 @@ enum PublishType {
   /* other subject */
   U_INBOX_ANY_RTE   = 40, /* _I.Nonce.any, ipc inbox */
   MCAST_SUBJECT     = 41, /* not _XX subject */
-  UNKNOWN_SUBJECT   = 42  /* init, not resolved */
+  UNKNOWN_SUBJECT   = 42, /* init, not resolved */
+  MAX_PUB_TYPE      = 64
 };
 #ifdef INCLUDE_MSG_CONST
 static const char *publish_type_str[] = {

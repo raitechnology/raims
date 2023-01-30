@@ -169,14 +169,14 @@ There are 7 classes subject prefixes used:
 | _M.     | Generic multicast message
 | _X.     | Heartbeat link presence message
 | _Z.     | Link state broadcast message
-| _S.     | Normal subscription broadcast message
-| _P.     | Pattern subscription broadcast message
+| _S.     | Normal subscription multicast message
+| _P.     | Pattern subscription multicast message
 | _N.     | Peer statistics multicast message
 |==========================================
 
-A broadcast style forwarding used by _Z, _S, _P subjects is different from
-multicast forwarding.  It will flood the authenticated peers in the network,
-adjusting each peer's routing database as it is received.  It uses this type of
+A broadcast style forwarding used by _Z, subjects is different from multicast
+forwarding.  It will flood the authenticated peers in the network, adjusting
+each peer's routing database as it is received.  It uses this type of
 forwarding because this kind of update may cause the multicast forwarding to be
 temporarily incomplete until the network converges again.
 
@@ -262,9 +262,9 @@ These are broadcast flooded to authenticated peers.
 Subscription Subjects
 ~~~~~~~~~~~~~~~~~~~~~
 
-These are broadcast flooded to authenticated peers.  They are updates to the
-bloom filter that can be missed and resynchronized with _Z.BLM or a resync
-RPC request.
+These are multicast to authenticated peers.  They are updates to the bloom
+filter that can be missed and resynchronized with _Z.BLM or a resync RPC
+request.
 
 [%autowidth,options="header",grid="cols",stripes="even"]
 |==========================================
@@ -277,8 +277,9 @@ RPC request.
 
 - _S.JOIN and _S.LEAV add and subtract subscriptions to a subject.
 
-- _P.PSUB and _P.STOP add and subtract pattern subscriptions.  These contain
-a pattern type as well as the pattern string.
+- _P.PSUB and _P.STOP add and subtract pattern subscriptions.  These contain a
+  pattern type as well as the pattern string.  The pattern types currently
+  supported are either a RV style wildcard or a Redis glob style wildcard.
 
 Inbox Subjects
 ~~~~~~~~~~~~~~

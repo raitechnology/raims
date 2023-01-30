@@ -111,17 +111,17 @@ struct UserRoute : public UserStateTest<UserRoute> {
     return this->is_init() && this->hops != NO_HOPS;
   }
   void reset( void ) {
-    this->mcast_fd      = NO_RTE;
-    this->inbox_fd      = NO_RTE;
-    this->hops          = NO_HOPS;
-    this->state         = IS_INIT_STATE;
+    this->mcast_fd   = NO_RTE;
+    this->inbox_fd   = NO_RTE;
+    this->hops       = NO_HOPS;
+    this->state      = IS_INIT_STATE;
     this->ucast_url.zero();
     this->mesh_url.zero();
-    this->url_hash      = 0;
-    this->hb_seqno      = 0;
-    this->bytes_sent    = 0;
-    this->msgs_sent     = 0;
-    this->ucast_src     = NULL;
+    this->url_hash   = 0;
+    this->hb_seqno   = 0;
+    this->bytes_sent = 0;
+    this->msgs_sent  = 0;
+    this->ucast_src  = NULL;
   }
   bool set_ucast( UserDB &user_db,  const void *p,  size_t len,
                   const UserRoute *src ) noexcept;
@@ -135,6 +135,13 @@ struct InboxSeqno {
            send_seqno; /* inbox seqnos for ptp links */
   uint8_t  recv_type[ 32 ],
            send_type[ 32 ];
+  uint32_t * send_counter;
+  void init( uint32_t *ctr ) {
+    this->recv_seqno = this->send_seqno = 0;
+    ::memset( this->recv_type, 0, sizeof( this->recv_type ) );
+    ::memset( this->send_type, 0, sizeof( this->send_type ) );
+    this->send_counter = ctr;
+  }
   void set_recv( uint64_t seqno,  uint8_t pub_type ) {
     this->recv_type[ seqno % 32 ] = pub_type;
     this->recv_seqno = seqno;
@@ -142,7 +149,25 @@ struct InboxSeqno {
   uint64_t next_send( uint8_t pub_type ) {
     uint64_t seqno = ++this->send_seqno;
     this->send_type[ seqno % 32 ] = pub_type;
+    this->send_counter[ pub_type & ( MAX_PUB_TYPE - 1 ) ]++;
     return seqno;
+  }
+};
+
+struct Rtt {
+  uint64_t latency,
+           mono_time;
+};
+struct RttHistory : public kv::ArrayCount< Rtt, 32 > {
+  void append( Rtt &x ) {
+    this->push( x );
+    if ( x.mono_time - this->ptr[ 0 ].mono_time > sec_to_ns( 60 * 60 ) &&
+         this->count > 32 ) {
+      size_t amt = this->count / 4;
+      ::memmove( this->ptr, &this->ptr[ this->count - amt ],
+                 amt * sizeof( this->ptr[ 0 ] ) );
+      this->count -= amt;
+    }
   }
 };
 
@@ -165,7 +190,7 @@ struct UserBridge : public UserStateTest<UserBridge> {
                      uid,                 /* unique id for route */
                      hb_interval,         /* interval of heartbeat */
                      primary_route,       /* route with min hops */
-                     hb_skew_ref,
+                     hb_skew_ref,         /* uid reference for hb skew */
                      skew_upd;            /* if skew updated */
   int64_t            hb_skew,             /* time diff from hb */
                      ping_skew,           /* time diff from ping recv */
@@ -179,8 +204,7 @@ struct UserBridge : public UserStateTest<UserBridge> {
                      link_state_seqno;    /* seqno used for link state db */
   UserRoute        * u_buf[ 24 ];         /* indexes user_route */
   StageAuth          auth[ 2 ];           /* auth handshake state */
-  InboxSeqno         inbox;
-  uint32_t           ping_send_seqno,
+  uint32_t           ping_send_seqno,     /* seqnos for pings */
                      ping_recv_seqno,
                      pong_send_seqno,
                      pong_recv_seqno,
@@ -189,10 +213,12 @@ struct UserBridge : public UserStateTest<UserBridge> {
                      pong_recv_count,
                      ping_fail_count,     /* ping counters */
                      challenge_count,     /* count of challenges */
+                     hb_miss,             /* count of hb missed */
                      unknown_refs,        /* link refs are yet to be resolved */
                      auth_count,          /* number of times authenticated */
                      adj_req_count,       /* throttle the number of requests */
-                     bridge_nonce_int;
+                     bridge_nonce_int;    /* first 4 bytes of bridge_id.nonce */
+  AuthStage          last_auth_type;
   uint64_t           unknown_link_seqno,  /* edge of link_state_seqno */
                      peer_recv_seqno,     /* seqno used for add/del/blm peer */
                      mcast_recv_seqno,    /* recv side mcast seqno */
@@ -202,10 +228,10 @@ struct UserBridge : public UserStateTest<UserBridge> {
                      subs_mono_time,      /* time subs reqeust sent */
                      sub_recv_mono_time,  /* time subscription reqeust recv */
                      adj_mono_time,       /* time adjacency reqeust sent */
-                     ping_mono_time,  
+                     ping_mono_time,      /* time start in ping state */
                      round_trip_time,     /* ping/pong */
-                     min_rtt,
-                     ping_send_time,
+                     min_rtt,             /* ping pong min rt time */
+                     ping_send_time,      /* track ping times */
                      ping_recv_time,
                      pong_recv_time,      /* ping times */
                      stats_seqno,         /* _N.PEER. stats */
@@ -217,15 +243,18 @@ struct UserBridge : public UserStateTest<UserBridge> {
                      msg_loss_count,      /* count mcast msg loss */
                      inbox_msg_loss_time,
                      inbox_msg_loss_count,/* inbox message loss */
-                     name_recv_seqno,
+                     name_recv_seqno,     /* name service seqno/times */
                      name_recv_time,
                      name_recv_mask,
                      last_idl_pub,        /* one loss if many clients subscr */
                      inbound_msg_loss;    /* count of msg loss from subs */
   kv::UIntHashTab  * inbound_svc_loss;    /* service msg loss map */
+  InboxSeqno         inbox;               /* track inbox sent/recv */
+  RttHistory         rtt;
   void * operator new( size_t, void *ptr ) { return ptr; }
 
-  UserBridge( PeerEntry &pentry,  kv::BloomDB &db,  uint32_t seed )
+  UserBridge( PeerEntry &pentry,  kv::BloomDB &db,  uint32_t seed,
+              uint32_t *ctr )
       : peer( pentry ), bloom( seed, pentry.user.val, db ) {
     ::memset( this->bloom_rt, 0, sizeof( this->bloom_rt ) );
     this->peer_key.zero();
@@ -233,8 +262,9 @@ struct UserBridge : public UserStateTest<UserBridge> {
     this->uid_csum.zero();
     this->hb_cnonce.zero();
     this->hb_pubkey.zero();
+    this->inbox.init( ctr );
     ::memset( &this->user_route , 0,
-              (char *) (void *) &this[ 1 ] -
+              (char *) (void *) &this->inbox -
               (char *) (void *) &this->user_route );
     this->hb_interval = HB_DEFAULT_INTERVAL;
   }
@@ -467,7 +497,7 @@ struct UserDB {
 
   /* uid bits */
   kv::BitSpace          uid_authenticated, /* uids authenticated */
-                        uid_rtt;           /* uids with ping rtt pending */
+                        uid_rtt;           /* uids with ping pending */
   /* system subjects after auth */
   kv::BloomRef          peer_bloom;      /* allow after auth (_S.JOIN, _X.HB) */
 
@@ -481,7 +511,8 @@ struct UserDB {
                         uid_hb_count,    /* total hb / distance zero nones */
                         uid_ping_count,
                         next_ping_uid,
-                        bridge_nonce_int;
+                        bridge_nonce_int,
+                        msg_send_counter[ MAX_PUB_TYPE ];
   uint64_t              send_peer_seqno, /* a unique seqno for peer multicast */
                         link_state_seqno,/* seqno of adjacency updates */
                         mcast_send_seqno,/* seqno of mcast subjects */
@@ -523,7 +554,8 @@ struct UserDB {
   }
   UserBridge *make_user_bridge( size_t len,  PeerEntry &peer,
                                 kv::BloomDB &db,  uint32_t seed ) {
-    return new ( this->alloc( len ) ) UserBridge( peer, db, seed );
+    return new ( this->alloc( len ) ) UserBridge( peer, db, seed,
+                                                  this->msg_send_counter );
   }
   PeerEntry *make_peer_entry( size_t len ) {
     return new ( this->alloc( len ) ) PeerEntry();
@@ -672,7 +704,7 @@ struct UserDB {
   void remove_inbox_route( UserBridge &n ) noexcept;
   void add_authenticated( UserBridge &n,  const MsgHdrDecoder &dec,
                           AuthStage stage,  UserBridge *src ) noexcept;
-  void remove_authenticated( UserBridge &n,  ByeReason bye ) noexcept;
+  void remove_authenticated( UserBridge &n,  AuthStage bye ) noexcept;
 
   /* link_state.cpp */
   void save_unauthorized_adjacency( MsgFramePublish &fpub ) noexcept;

@@ -161,7 +161,7 @@ struct EventRec {
           case HB_QUEUE:
             return this->data == 0 ? "neighbor" : "hb";
           case AUTH_REMOVE:
-            return bye_reason_string( (ByeReason) this->data );
+            return auth_stage_string( (AuthStage) this->data );
           case CONVERGE:
             return invalidate_reason_string( (InvalidReason) this->data );
           case ADD_USER_ROUTE:

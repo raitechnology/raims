@@ -214,6 +214,7 @@ struct AdjDistance : public md::MDMsgMem {
   uint32_t     * cache,         /* cache of uid distence via a tport */
                * visit,         /* minimum distance to uid */
                * inc_list;      /* list of uids to be checked for links */
+  uint64_t     * start_time;    /* cumalative start times on path */
   PathSeqno      x[ COST_PATH_COUNT ]; /* x[ path_select ].port[ uid ]*/
   kv::UIntBitSet inc_visit,     /* inconsistent check visit uid map */
                  adj,           /* uid map masked with path for coverage */
@@ -234,10 +235,10 @@ struct AdjDistance : public md::MDMsgMem {
                  inc_run_count, /* count of inc_runs after adjacency change */
                  max_tport_count; /* maximum tports any peer has, for graph */
   uint64_t       last_run_mono, /* timestamp of last adjacency update */
-                 invalid_mono; /* when cache was invalidated */
+                 invalid_mono, /* when cache was invalidated */
+                 min_start_time;
   uint16_t       adjacency_clock; /* label transitions that were taken */
   InvalidReason  invalid_reason; /* why cache was invalidated */
-  uint8_t        coverage_select; /* which path select */
   bool           inc_running,   /* whether incomplete check is running */
                  found_inconsistency; /* if current or last run inconsistent */
 
@@ -249,6 +250,7 @@ struct AdjDistance : public md::MDMsgMem {
     zero_mem( &this->max_uid, &this[ 1 ] );
     this->cache_seqno = 0;
     this->update_seqno = 1;
+    this->min_start_time = 0;
   }
 
   void invalidate( InvalidReason why ) {
@@ -306,9 +308,9 @@ struct AdjDistance : public md::MDMsgMem {
                         uint8_t path_select ) noexcept;
 
   void zero_clocks( void ) noexcept;
-  void coverage_init( uint32_t src_uid,  uint8_t path_select ) noexcept;
+  void coverage_init( uint32_t src_uid ) noexcept;
   void push_link( AdjacencySpace *set ) noexcept;
-  uint32_t coverage_step( void ) noexcept;
+  uint32_t coverage_step( uint8_t path_select ) noexcept;
   AdjacencySpace *coverage_link( uint32_t target_uid ) noexcept;
   uint32_t calc_coverage( uint32_t src_uid,  uint8_t path_select ) noexcept;
 

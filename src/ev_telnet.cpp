@@ -627,7 +627,7 @@ TelnetService::process_naws( const char *ptr,  size_t buflen ) noexcept
                                     (uint8_t) ptr[ 4 ];
     if ( this->naws_cols < 6 || this->naws_cols > 1024 ||
          this->naws_lines < 3 || this->naws_lines > 1024 ) {
-      printf( "invalid terminal size cols=%u lines=%u\n",
+      d_tel( "invalid terminal size cols=%u lines=%u\n",
               this->naws_cols, this->naws_lines );
       this->naws_cols = 80;
       this->naws_cols = 24;

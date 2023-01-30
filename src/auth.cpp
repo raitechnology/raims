@@ -103,7 +103,7 @@ UserDB::on_inbox_auth( const MsgFramePublish &pub,  UserBridge &n,
    * client challenge  -> server auth [stage 2]  server trusts client
    * server trust      -> client      [stage 3]  server notifies trust */
   StageAuth tmp_auth;
-  AuthStage stage = AUTH_UNKNOWN;
+  AuthStage stage = AUTH_NONE;
   uint32_t  stage_num = stage;
 
   if ( ! dec.get_ival<uint32_t>( FID_AUTH_STAGE, stage_num ) )

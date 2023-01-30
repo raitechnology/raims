@@ -474,6 +474,7 @@ UserDB::send_adjacency_change( void ) noexcept
   UserBridge     * n;
   AdjChange      * p = this->adjacency_change.hd;
   
+  this->msg_send_counter[ U_ADJACENCY ]++;
   if ( debug_lnk )
     printf( "send_adj_change\n" );
   MsgEst adj;
@@ -1139,8 +1140,12 @@ UserDB::recv_adjacency_result( const MsgFramePublish &pub,  UserBridge &n,
         return true;
       }
       sync = this->bridge_tab[ uid ];
+      if ( sync == NULL || sync->last_auth_type == BYE_BYE )
+        return true;
       this->add_user_route( *sync, pub.rte, pub.src_route, dec, n.user_route );
       this->add_authenticated( *sync, dec, AUTH_FROM_ADJ_RESULT, &n );
+      if ( ! sync->is_set( AUTHENTICATED_STATE ) )
+        return true;
     }
   }
   else {

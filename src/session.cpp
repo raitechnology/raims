@@ -94,7 +94,7 @@ SessionMgr::SessionMgr( EvPoll &p,  Logger &l,  ConfigTree &c,
   psub_h  = kv_crc_c( P_PSUB, P_PSUB_SZ, seed );
   seed    = p.sub_route.prefix_seed( P_PSTOP_SZ ),
   pstop_h = kv_crc_c( P_PSTOP, P_PSTOP_SZ, seed );
-  ::memset( this->msg_counter, 0, sizeof( this->msg_counter ) );
+  ::memset( this->msg_recv_counter, 0, sizeof( this->msg_recv_counter ) );
 
   md_init_auto_unpack();
   CabaMsg::init_auto_unpack();
@@ -418,8 +418,8 @@ SessionMgr::start( void ) noexcept
                                       ! this->tcp_ipv6 ? "true" : "false" );
   printf( "%s: %s\n", P_TCP_NOENCRYPT, this->tcp_noencrypt ? "true" : "false" );
 
-  uint64_t cur_mono = this->poll.timer.current_monotonic_time_ns(),
-           cur_time = this->poll.timer.current_time_ns();
+  uint64_t cur_mono = this->poll.current_coarse_ns(),
+           cur_time = this->poll.mono_ns;
   this->timer_id             = ++this->next_timer;
   this->timer_mono_time      = cur_mono;
   this->timer_time           = cur_time;
@@ -453,8 +453,10 @@ SessionMgr::start( void ) noexcept
 void
 SessionMgr::name_hb( uint64_t cur_mono ) noexcept
 {
-  if ( cur_mono == 0 )
-    cur_mono = this->poll.timer.current_monotonic_time_ns();
+  if ( cur_mono == 0 ) {
+    this->poll.current_coarse_ns();
+    cur_mono = this->poll.mono_ns;
+  }
   this->name_svc_mono_time = cur_mono + this->user_db.hb_ival_ns;
   for ( size_t i = 0; i < this->unrouteable.count; i++ ) {
     NameSvc *name = this->unrouteable.ptr[ i ].name;
@@ -474,8 +476,8 @@ SessionMgr::stop( void ) noexcept
 bool
 SessionMgr::timer_expire( uint64_t tid,  uint64_t ) noexcept
 {
-  uint64_t cur_mono = this->poll.timer.current_monotonic_time_ns(),
-           cur_time = this->poll.timer.current_time_ns();
+  uint64_t cur_time = this->poll.current_coarse_ns(),
+           cur_mono = this->poll.mono_ns;
   if ( tid != this->timer_id )
     return false;
   this->timer_mono_time = cur_mono;
@@ -679,9 +681,7 @@ SessionMgr::parse_msg_hdr( MsgFramePublish &fpub,  bool is_ipc ) noexcept
     }
   }
   dec.type = type;
-  static const uint8_t mcnt = sizeof( this->msg_counter ) /
-                              sizeof( this->msg_counter[ 0 ] );
-  this->msg_counter[ (uint8_t) type & ( mcnt - 1 ) ]++;
+  this->msg_recv_counter[ type & ( MAX_PUB_TYPE - 1 ) ]++;
 
   fpub.n = this->user_db.lookup_user( fpub, dec );
   /*if ( fpub.status == FRAME_STATUS_MY_MSG )

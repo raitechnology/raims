@@ -48,6 +48,7 @@ UserDB::UserDB( EvPoll &p,  ConfigTree::User &u,  ConfigTree::Service &s,
     ::memcpy( &this->bridge_nonce_int, this->bridge_id.nonce.digest(), 4 );
   } while ( this->bridge_nonce_int == 0 ||
             this->bridge_nonce_int == 0xffffffffU );
+  ::memset( this->msg_send_counter, 0, sizeof( this->msg_send_counter ) );
 }
 
 bool
@@ -607,6 +608,7 @@ UserDB::check_user_timeout( uint64_t current_mono_time,
     if ( current_mono_time < n->hb_timeout() )
       break;
     this->events.hb_timeout( n->uid );
+    n->hb_miss++;
     n->printf( "no heartbeat detected in interval %u (%.1fsecs), dropping\n",
                n->hb_interval,
                (double) ( current_mono_time - n->hb_mono_time ) / SEC_TO_NS );
@@ -1029,8 +1031,9 @@ UserDB::add_user_route( UserBridge &n,  TransportRoute &rte,  uint32_t fd,
     inbox_fd = rte.inbox_fd;
   }
   if ( u_ptr->is_valid() && u_ptr->is_set( IN_ROUTE_LIST_STATE ) ) {
-    n.printe( "add_user_route in route_list fd %u, new_fd %u\n",
-              u_ptr->mcast_fd, fd );
+    if ( u_ptr->mcast_fd != fd )
+      n.printf( "add_user_route in route_list fd %u, new_fd %u\n",
+                u_ptr->mcast_fd, fd );
     this->pop_user_route( n, *u_ptr );
   }
   u_ptr->mcast_fd = fd;
@@ -1440,7 +1443,7 @@ rai::ms::auth_stage_string( AuthStage stage ) noexcept
     return auth_stage[ stage ];
   return auth_stage[ 0 ];
 }
-
+#if 0
 const char *
 rai::ms::bye_reason_string( ByeReason bye ) noexcept
 {
@@ -1448,26 +1451,42 @@ rai::ms::bye_reason_string( ByeReason bye ) noexcept
     return bye_reason[ bye ];
   return bye_reason[ 0 ];
 }
-
+#endif
 void
 UserDB::add_authenticated( UserBridge &n,
                            const MsgHdrDecoder &dec,
                            AuthStage stage,
                            UserBridge *src ) noexcept
 {
-  uint64_t     cur_time = current_monotonic_time_ns();
+  uint64_t     cur_mono = current_monotonic_time_ns();
   const char * from     = auth_stage_string( stage );
   bool         send_add = false;
 
-  this->last_auth_mono = cur_time;
+  this->last_auth_mono = cur_mono;
+  if ( n.is_set( ZOMBIE_STATE ) ) {
+    if ( n.last_auth_type == BYE_BYE ) {
+      n.printf( "refusing to auth bye bye\n" );
+      return;
+    }
+    if ( stage >= AUTH_FROM_ADJ_RESULT ) {
+      if ( cur_mono - n.auth_mono_time < sec_to_ns( n.auth_count ) ) {
+        n.printf( "refusing to auth %s after %s within %u secs\n",
+                  from, auth_stage_string( n.last_auth_type ), n.auth_count );
+        return;
+      }
+    }
+  }
+  if ( stage <= AUTH_TRUST ) /* from key exchange */
+    n.auth_count = 0;
+  n.last_auth_type = stage;
   n.auth_count++;
-  if ( cur_time - n.auth_mono_time > SEC_TO_NS ) {
+  if ( cur_mono - n.auth_mono_time >= sec_to_ns( 1 ) ) {
     n.printn( "add authentication from %s via %s @ %s, state %s, count=%u\n",
       from, ( src == &n ? "challenge" : src->peer.user.val ),
       src->user_route->rte.name,
       ( n.is_set( ZOMBIE_STATE ) != 0 ? "reanimated" : "new" ),
       n.auth_count );
-    n.auth_mono_time = cur_time;
+    n.auth_mono_time = cur_mono;
   }
 
   /*printf( "ha1: " ); n.ha1.print(); printf( "\n" );*/
@@ -1487,13 +1506,13 @@ UserDB::add_authenticated( UserBridge &n,
     if ( dec.test( FID_UPTIME ) ) {
       uint64_t uptime = 0;
       cvt_number<uint64_t>( dec.mref[ FID_UPTIME ], uptime );
-      n.start_mono_time = cur_time - uptime;
+      n.start_mono_time = cur_mono - uptime;
 
       if ( dec.test( FID_INTERVAL ) ) {
         uint32_t ival = 0;
         cvt_number<uint32_t>( dec.mref[ FID_INTERVAL ], ival );
         n.hb_interval = ival;
-        n.hb_mono_time = cur_time;
+        n.hb_mono_time = cur_mono;
         if ( ival != 0 ) {
           uint64_t delta = uptime % ( (uint64_t) ival * SEC_TO_NS );
           n.hb_mono_time -= delta;
@@ -1554,14 +1573,15 @@ UserDB::add_authenticated( UserBridge &n,
 }
 
 void
-UserDB::remove_authenticated( UserBridge &n,  ByeReason bye ) noexcept
+UserDB::remove_authenticated( UserBridge &n,  AuthStage bye ) noexcept
 {
   size_t n_pos;
   bool   send_del = false;
 
   this->last_auth_mono = current_monotonic_time_ns();
+  n.last_auth_type = bye;
   /*if ( debug_usr )*/
-    n.printn( "remove auth %s %s\n", bye_reason_string( bye ),
+    n.printn( "remove auth %s %s\n", auth_stage_string( bye ),
                n.is_set( ZOMBIE_STATE ) ? "zombie" : "" );
   if ( n.test_clear( AUTHENTICATED_STATE ) ) {
     this->events.auth_remove( n.uid, bye );

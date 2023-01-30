@@ -35,17 +35,27 @@ struct StageAuth {
 };
 
 enum AuthStage {
-  AUTH_UNKNOWN          = 0,
+  AUTH_NONE             = 0,
+
   AUTH_FROM_HELLO       = 1, /* recv hello challenge auth stage 1 */
   AUTH_FROM_HANDSHAKE   = 2, /* recv handshake from auth stage 2 */
   AUTH_TRUST            = 3,
-  AUTH_FROM_ADJ_RESULT  = 4, /* recv _I.<n>.adj_rpy, from adj_req */
-  AUTH_FROM_PEER_ADD    = 5, /* recv _Z.ADD on zombie */
-  AUTH_FROM_ADD_ROUTE   = 6, /* recv _I.<n>.add_rte on zombie */
-  AUTH_FROM_SYNC_RESULT = 7, /* recv _I.<n>.sync_rpy, from sync_rpy */
-  MAX_AUTH              = 8
+
+  BYE_HB_TIMEOUT        = 4, /* hb late, missing */
+  BYE_BYE               = 5, /* peer sent _Z.BYE */
+  BYE_ORPHANED          = 6, /* no route to peer */
+  BYE_SOURCE            = 7, /* link for source dropped */
+  BYE_DROPPED           = 8, /* peer sent drop notice */
+  BYE_PING              = 9, /* ping late, missing */
+
+  AUTH_FROM_ADJ_RESULT  = 10, /* recv _I.<n>.adj_rpy, from adj_req */
+  AUTH_FROM_PEER_ADD    = 11, /* recv _Z.ADD on zombie */
+  AUTH_FROM_ADD_ROUTE   = 12, /* recv _I.<n>.add_rte on zombie */
+  AUTH_FROM_SYNC_RESULT = 13, /* recv _I.<n>.sync_rpy, from sync_rpy */
+  MAX_AUTH              = 14
 };
 
+#if 0
 enum ByeReason {
   BYE_NONE       = 0,
   BYE_HB_TIMEOUT = 1,
@@ -56,18 +66,28 @@ enum ByeReason {
   BYE_PING       = 6,
   MAX_BYE        = 7
 };
+#endif
 
 #ifdef INCLUDE_AUTH_CONST
 static const char *auth_stage[] = {
-  "unknown",    /* AUTH_UNKNOWN          not used */
-  "hello",      /* AUTH_FROM_HELLO       _I.<nonce>.auth, challenge stage 1 */
-  "handshake",  /* AUTH_FROM_HANDSHAKE   _I.<nonce>.auth, challenge stage 2 */
-  "trust",      /* AUTH_TRUST            _I.<nonce>.auth, challenge stage 3 */
-  "adj_result", /* AUTH_FROM_ADJ_RESULT  _I.<nonce>.adj_rpy */
-  "peer_add",   /* AUTH_FROM_PEER_ADD    _Z.ADD */
-  "add_route",  /* AUTH_FROM_ADD_ROUTE   _I.<nonce>.add_rte */
-  "sync_result" /* AUTH_FROM_SYNC_RESULT _I.<nonce>.sync_rpy */
+  "unknown",      /* AUTH_NONE             not used */
+  "hello",        /* AUTH_FROM_HELLO       _I.<nonce>.auth, challenge stage 1 */
+  "handshake",    /* AUTH_FROM_HANDSHAKE   _I.<nonce>.auth, challenge stage 2 */
+  "trust",        /* AUTH_TRUST            _I.<nonce>.auth, challenge stage 3 */
+
+  "hb_timeout",   /* BYE_HB_TIMEOUT        _X.HB */
+  "bye",          /* BYE_BYE               _X.BYE */
+  "orphaned",     /* BYE_ORPHANED */
+  "source_close", /* BYE_SOURCE */
+  "dropped",      /* BYE_DROPPED           _Z.DEL */
+  "ping",         /* BYE_PING              _I.<nonce>.pong */
+
+  "adj_result",   /* AUTH_FROM_ADJ_RESULT  _I.<nonce>.adj_rpy */
+  "peer_add",     /* AUTH_FROM_PEER_ADD    _Z.ADD */
+  "add_route",    /* AUTH_FROM_ADD_ROUTE   _I.<nonce>.add_rte */
+  "sync_result"   /* AUTH_FROM_SYNC_RESULT _I.<nonce>.sync_rpy */
 };
+#if 0
 static const char *bye_reason[] = {
   "none",
   "hb_timeout",
@@ -77,13 +97,14 @@ static const char *bye_reason[] = {
   "dropped",
   "ping"
 };
+static_assert( MAX_BYE == ( sizeof( bye_reason ) / sizeof( bye_reason[ 0 ] ) ), "bye_reason" );
+const char *bye_reason_string( ByeReason reason ) noexcept;
+#endif
 #if __cplusplus >= 201103L
 static_assert( MAX_AUTH == ( sizeof( auth_stage ) / sizeof( auth_stage[ 0 ] ) ), "auth_stage" );
-static_assert( MAX_BYE == ( sizeof( bye_reason ) / sizeof( bye_reason[ 0 ] ) ), "bye_reason" );
 #endif
 #endif
 const char *auth_stage_string( AuthStage stage ) noexcept;
-const char *bye_reason_string( ByeReason reason ) noexcept;
 
 }
 }

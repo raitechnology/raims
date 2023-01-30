@@ -104,7 +104,7 @@ UserDB::recv_sync_request( const MsgFramePublish &pub,  UserBridge &n,
   /* XXX zombie state ? */
   if ( this->node_ht->find( b_nonce, n_pos, uid ) ) {
     user_n = this->bridge_tab[ uid ];
-    if ( user_n != NULL ) {
+    if ( user_n != NULL && user_n->is_set( AUTHENTICATED_STATE ) ) {
       MsgCat   m;
       InboxBuf ibx( n.bridge_id, _SYNC_RPY );
       uint32_t hops    = 1;
@@ -120,7 +120,7 @@ UserDB::recv_sync_request( const MsgFramePublish &pub,  UserBridge &n,
       this->make_peer_sync_msg( n, *user_n, ibx.buf, ibx.len(), h, m, hops );
       if ( debug_peer )
         printf(
-            "forward b_nonce: %.*s to %s.%u for %s.%u hops=%u, in_mesh=%u\n",
+            "forward peer: %.*s to %s.%u for %s.%u hops=%u, in_mesh=%u\n",
             (int) ibx.len(), ibx.buf, n.peer.user.val, n.uid,
             user_n->peer.user.val, uid, hops, in_mesh?1:0 );
       return this->forward_to_inbox( n, ibx, h, m.msg, m.len() );
@@ -133,9 +133,11 @@ UserDB::recv_sync_request( const MsgFramePublish &pub,  UserBridge &n,
     this->string_tab.ref_string( user, user_len, user_sv );
   }
   this->events.recv_sync_fail( n.uid, pub.rte.tport_id, user_sv.id );
-  char buf[ NONCE_B64_LEN + 1 ];
-  n.printf( "sync_request(user=%.*s), b_nonce not found: [%s]\n",
-            user_sv.len, user_sv.val, b_nonce.to_base64_str( buf ) );
+  if ( debug_peer ) {
+    char buf[ NONCE_B64_LEN + 1 ];
+    n.printf( "sync_request(user=%.*s), peer not found: [%s]\n",
+              user_sv.len, user_sv.val, b_nonce.to_base64_str( buf ) );
+  }
   return true;
 }
 
@@ -205,6 +207,10 @@ UserDB::decode_peer_msg( UserBridge &from_n,  const MsgHdrDecoder &dec,
     if ( this->node_ht->find( sync_bridge_id.nonce, n_pos, uid ) ||
          this->zombie_ht->find( sync_bridge_id.nonce, n_pos, uid ) ) {
       user_n = this->bridge_tab[ uid ];
+      if ( user_n != NULL && user_n->last_auth_type == BYE_BYE ) {
+        user_n = NULL;
+        return false;
+      }
       if ( user_n == NULL ) {
         if ( uid == MY_UID ) {
           fprintf( stderr, "My uid in peer add\n" );
@@ -327,6 +333,8 @@ UserDB::recv_peer_db( const MsgFramePublish &pub,  UserBridge &n,
       if ( uid == MY_UID )
         continue;
       user_n = this->bridge_tab[ uid ];
+      if ( user_n != NULL && user_n->last_auth_type == BYE_BYE )
+        continue;
     }
     if ( user_n == NULL || ! user_n->is_set( AUTHENTICATED_STATE ) ) {
       StringVal user_sv;
@@ -463,6 +471,8 @@ UserDB::recv_peer_add( const MsgFramePublish &pub,  UserBridge &n,
     if ( uid == MY_UID )
       return true;
     user_n = this->bridge_tab[ uid ];
+    if ( user_n != NULL && user_n->last_auth_type == BYE_BYE )
+      return true;
   }
   if ( dec.test( FID_SESS_KEY ) &&
        ( user_n == NULL || ! user_n->is_set( AUTHENTICATED_STATE ) ) )
@@ -498,8 +508,10 @@ UserDB::recv_peer_add( const MsgFramePublish &pub,  UserBridge &n,
         n.printf( "%.*s start_pending user %s from %s\n",
             (int) pub.subject_len, pub.subject,
             user_n==NULL ? "unknown" : user_n->peer.user.val, n.peer.user.val );
-      return this->start_pending_peer( b_nonce, n, false, user_sv,
-                                       PEER_ADD_SYNC );
+      if ( user_n == NULL || user_n->last_auth_type != BYE_BYE )
+        return this->start_pending_peer( b_nonce, n, false, user_sv,
+                                         PEER_ADD_SYNC );
+      return true;
     }
   }
 
@@ -541,6 +553,7 @@ UserDB::send_peer_add( UserBridge &n,
   size_t count = this->transport_tab.count;
   kv::BitSpace unique;
   unique.add( n.uid );
+  this->msg_send_counter[ U_PEER_ADD ]++;
   for ( size_t i = 0; i < count; i++ ) {
     TransportRoute * rte = this->transport_tab.ptr[ i ];
     if ( rte != except_rte ) {
@@ -595,6 +608,7 @@ UserDB::send_peer_del( UserBridge &n ) noexcept
   size_t count = this->transport_tab.count;
   kv::BitSpace unique;
   unique.add( n.uid );
+  this->msg_send_counter[ U_PEER_DEL ]++;
   for ( size_t i = 0; i < count; i++ ) {
     TransportRoute * rte = this->transport_tab.ptr[ i ];
     if ( rte->connect_count > 0 && ! rte->is_set( TPORT_IS_IPC ) ) {
@@ -609,7 +623,8 @@ UserDB::send_peer_del( UserBridge &n ) noexcept
         e.seqno      ()
          .time       ()
          .sync_bridge()
-         .user       ( n.peer.user.len ); /* for information */
+         .user       ( n.peer.user.len ) /* for information */
+         .auth_stage ();
 
         MsgCat m;
         m.reserve( e.sz );
@@ -617,7 +632,8 @@ UserDB::send_peer_del( UserBridge &n ) noexcept
          .seqno      ( ++this->send_peer_seqno )
          .time       ( n.hb_time )
          .sync_bridge( n.bridge_id.nonce )
-         .user       ( n.peer.user.val, n.peer.user.len );
+         .user       ( n.peer.user.val, n.peer.user.len )
+         .auth_stage ( n.last_auth_type );
 
         m.close( e.sz, del_h, CABA_RTR_ALERT );
         m.sign( Z_DEL, Z_DEL_SZ, *this->session_key );
@@ -638,11 +654,14 @@ UserDB::recv_peer_del( const MsgFramePublish &pub,  UserBridge &n,
 {
   Nonce        b_nonce;
   size_t       n_pos;
+  uint16_t     bye    = BYE_DROPPED;
   UserBridge * user_n = NULL;
   uint32_t     uid    = 0;
   
   if ( ! get_bridge_nonce( b_nonce, dec ) )
     return true;
+  if ( dec.test( FID_AUTH_STAGE ) )
+    cvt_number<uint16_t>( dec.mref[ FID_AUTH_STAGE ], bye );
   if ( this->node_ht->find( b_nonce, n_pos, uid ) ) {
     user_n = this->bridge_tab[ uid ];
     if ( user_n != NULL ) {
@@ -651,13 +670,22 @@ UserDB::recv_peer_del( const MsgFramePublish &pub,  UserBridge &n,
                 dec.seqno, user_n->peer.user.val, n.peer.user.val,
                 pub.rte.transport.tport.val );
       uint32_t refs = this->peer_dist.inbound_refs( user_n->uid );
-      if ( refs == 0 ) {
+      if ( refs == 0 || bye == BYE_BYE ) {
         if ( debug_peer )
           printf( "drop %s\n", user_n->peer.user.val );
-        this->remove_authenticated( *user_n, BYE_DROPPED );
+        this->remove_authenticated( *user_n, (AuthStage) bye );
       }
       else if ( debug_peer ) {
         printf( "still has refs %s: %u\n", user_n->peer.user.val, refs );
+      }
+    }
+  }
+  else if ( bye == BYE_BYE ) {
+    if ( this->zombie_ht->find( b_nonce, n_pos, uid ) ) {
+      user_n = this->bridge_tab[ uid ];
+      if ( user_n != NULL ) {
+        user_n->last_auth_type = BYE_BYE;
+        user_n = NULL;
       }
     }
   }
@@ -1287,10 +1315,27 @@ UserDB::process_pending_peer( uint64_t current_mono_time ) noexcept
       break;
     this->pending_queue.pop();
 
-    if ( p->request_count > UserPendingRoute::MAX_REQUESTS ) {
+    bool     remove_pending = false,
+             is_timeout     = false;
+    size_t   n_pos;
+    uint32_t uid;
+
+    if ( this->zombie_ht->find( p->bridge_nonce, n_pos, uid ) ) {
+      UserBridge *n = this->bridge_tab[ uid ];
+      if ( n != NULL && n->last_auth_type == BYE_BYE )
+        remove_pending = true;
+    }
+    if ( ! remove_pending &&
+         p->request_count > UserPendingRoute::MAX_REQUESTS ) {
+      remove_pending = true;
+      is_timeout = true;
+    }
+
+    if ( remove_pending ) {
       char buf[ NONCE_B64_LEN + 1 ];
       UserBridge * n = this->bridge_tab[ p->ptr->uid ];
-      printf( "timeout pending peer [%s] (%.*s) -> %s (%s)\n",
+      printf( "%s pending peer [%s] (%.*s) -> %s (%s)\n",
+              ( is_timeout ? "timeout" : "bye_bye" ),
               p->bridge_nonce.to_base64_str( buf ), p->user_sv.len,
               p->user_sv.val, n->peer.user.val,
               peer_sync_reason_string( p->reason ) );

@@ -132,6 +132,7 @@ UserDB::hello_hb( void ) noexcept
 {
   size_t count = this->transport_tab.count;
   this->events.send_hello();
+  this->msg_send_counter[ U_SESSION_HELLO ]++;
   for ( size_t i = 0; i < count; i++ ) {
     TransportRoute *rte = this->transport_tab.ptr[ i ];
     if ( rte->connect_count > 0 && ! rte->is_set( TPORT_IS_IPC ) ) {
@@ -175,8 +176,9 @@ UserDB::bye_hb( void ) noexcept
 void
 UserDB::interval_hb( uint64_t cur_mono,  uint64_t cur_time ) noexcept
 {
-  uint64_t ival  = this->hb_ival_ns;
-  size_t   count = this->transport_tab.count;
+  uint64_t ival   = this->hb_ival_ns;
+  size_t   count  = this->transport_tab.count;
+  uint32_t hb_cnt = 0;
   for ( size_t i = 0; i < count; i++ ) {
     TransportRoute *rte = this->transport_tab.ptr[ i ];
     if ( rte->connect_count > 0 && ! rte->is_set( TPORT_IS_IPC ) ) {
@@ -198,9 +200,12 @@ UserDB::interval_hb( uint64_t cur_mono,  uint64_t cur_time ) noexcept
                        rte->sub_route, this->my_src_fd,
                        hb_h, CABA_TYPE_ID, 'p' );
         rte->forward_to_connected( pub );
+        hb_cnt++;
       }
     }
   }
+  if ( hb_cnt > 0 )
+    this->msg_send_counter[ U_SESSION_HB ]++;
 }
 /* _X.HELLO, _X.HB */
 bool
@@ -515,6 +520,7 @@ UserDB::send_ping_request( UserBridge &n ) noexcept
 {
   InboxBuf ibx( n.bridge_id, _PING );
   uint64_t stamp = current_realtime_ns();
+  this->msg_send_counter[ U_INBOX_PING ]++;
   n.ping_send_count++;
   n.ping_send_time = stamp;
 
@@ -633,9 +639,10 @@ UserDB::recv_ping_request( MsgFramePublish &pub,  UserBridge &n,
 
   if ( suf == ret_buf )
     seqno = n.inbox.next_send( U_INBOX_PONG );
-  else
+  else {
+    this->msg_send_counter[ U_INBOX_PONG ]++;
     seqno = ++n.pong_send_seqno;
-
+  }
   m.open( this->bridge_id.nonce, ibx.len() )
    .seqno       ( seqno    )
    .stamp       ( stamp    )
@@ -697,7 +704,8 @@ UserDB::recv_pong_result( MsgFramePublish &pub,  UserBridge &n,
   n.pong_recv_seqno = dec.seqno;
 
   uint64_t stamp = 0, reply_stamp = 0,
-           cur_time = current_realtime_ns();
+           cur_time = current_realtime_ns(),
+           cur_mono = current_monotonic_time_ns();
 
   n.pong_recv_time = cur_time;
   n.pong_recv_count++;
@@ -724,6 +732,10 @@ UserDB::recv_pong_result( MsgFramePublish &pub,  UserBridge &n,
       }
     }
     n.round_trip_time = rtt;
+    Rtt x;
+    x.latency   = rtt;
+    x.mono_time = cur_mono;
+    n.rtt.append( x );
     this->uid_rtt.remove( n.uid );
   }
 

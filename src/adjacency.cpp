@@ -92,6 +92,7 @@ AdjDistance::clear_cache( void ) noexcept
          size = max * sizeof( UidDist ) +    /* stack */
                 max * sizeof( uint32_t ) +   /* visit */
                 max * sizeof( uint32_t ) +   /* inc_list */
+                max * sizeof( uint64_t ) +   /* start_time */
                 max * sizeof( UidSrcPath ) * COST_PATH_COUNT + /* x */
                 isz * sizeof( uint64_t ) +   /* inc_visit */
                 isz * sizeof( uint64_t ) +   /* adj */
@@ -108,6 +109,7 @@ AdjDistance::clear_cache( void ) noexcept
   this->path.ptr      = m; m += isz;
   this->fwd.ptr       = m; m += isz;
   this->reachable.ptr = m; m += isz;
+  this->start_time    = m; m += max;
   this->stack         = (UidDist *) m; m = &m[ max ];
 
   uint32_t *n = (uint32_t *) (void *) m;
@@ -127,6 +129,7 @@ AdjDistance::clear_cache( void ) noexcept
   this->inc_hd              = 0;
   this->inc_tl              = 0;
   this->inc_run_count       = 0;
+  this->min_start_time      = 0;
   this->last_run_mono       = kv::current_monotonic_time_ns();
   this->inc_running         = false;
   this->found_inconsistency = false;
@@ -150,14 +153,6 @@ AdjDistance::adjacency_set( uint32_t uid,  uint32_t i ) const noexcept
   if ( ! this->user_db.uid_authenticated.is_member( uid ) )
     return NULL;
   return this->user_db.bridge_tab.ptr[ uid ]->adjacency.ptr[ i ];
-}
-
-uint64_t
-AdjDistance::adjacency_start( uint32_t uid ) const noexcept
-{
-  if ( uid == 0 )
-    return this->user_db.start_time;
-  return this->user_db.bridge_tab.ptr[ uid ]->start_time;
 }
 
 void
@@ -468,7 +463,7 @@ AdjDistance::zero_clocks( void ) noexcept
 }
 
 void
-AdjDistance::coverage_init( uint32_t src_uid,  uint8_t path_select ) noexcept
+AdjDistance::coverage_init( uint32_t src_uid ) noexcept
 {
   this->path.zero( this->max_uid );
   this->fwd.zero( this->max_uid );
@@ -478,7 +473,29 @@ AdjDistance::coverage_init( uint32_t src_uid,  uint8_t path_select ) noexcept
   }
   this->path.add( src_uid );
   this->visit[ src_uid ] = 0;
-  this->coverage_select = path_select;
+  ::memset( this->start_time, 0,
+            sizeof( this->start_time[ 0 ] ) * this->max_uid );
+  if ( this->min_start_time == 0 ) {
+    this->min_start_time = this->user_db.start_time;
+    for ( uint32_t uid = 1; uid < this->max_uid; uid++ ) {
+      UserBridge *n = this->user_db.bridge_tab.ptr[ uid ];
+      if ( n != NULL && n->start_time < this->min_start_time )
+        this->min_start_time = n->start_time;
+    }
+  }
+  this->start_time[ src_uid ] = this->adjacency_start( src_uid );
+}
+
+uint64_t
+AdjDistance::adjacency_start( uint32_t uid ) const noexcept
+{
+  uint64_t time;
+  if ( uid == 0 )
+    time = this->user_db.start_time;
+  else
+    time = this->user_db.bridge_tab.ptr[ uid ]->start_time;
+  time -= this->min_start_time;
+  return time;
 }
 
 void
@@ -510,8 +527,8 @@ AdjDistance::push_link( AdjacencySpace *set ) noexcept
                 break;
             }
           }
-          else if ( this->adjacency_start( set->uid ) <
-                    this->adjacency_start( set2->uid ) )
+          else if ( this->start_time[ set->uid ] <
+                    this->start_time[ set2->uid ] )
             break;
           ptr = &set2->next_link;
         } while ( set2->next_link != NULL );
@@ -540,13 +557,53 @@ AdjDistance::push_link( AdjacencySpace *set ) noexcept
     this->links.push( set );
 }
 
+static AdjacencySpace *
+order_path_select( AdjacencySpace *set,  uint8_t path_select ) noexcept
+{
+  AdjacencySpace * next, * path_set[ COST_PATH_COUNT ],
+                 * alt_hd = NULL, * alt_tl = NULL;
+  uint8_t j;
+  for ( j = 0; ; ) {
+    path_set[ ( j + path_select ) % COST_PATH_COUNT ] = set;
+    if ( ++j == COST_PATH_COUNT )
+      break;
+    if ( set != NULL ) {
+      next = set->next_link;
+      while ( next != NULL ) {
+        if ( next->uid != set->uid || ! next->equals( *set ) )
+          break;
+        if ( alt_tl == NULL )
+          alt_hd = next;
+        else
+          alt_tl->next_link = next;
+        alt_tl = next;
+        next = next->next_link;
+      }
+      set = next;
+    }
+  }
+  if ( alt_tl != NULL )
+    alt_tl->next_link = NULL;
+  set = path_set[ path_select ];
+  for ( j = 0; ; ) {
+    if ( ++j == COST_PATH_COUNT )
+      set->next_link = NULL;
+    else
+      set->next_link = path_set[ ( j + path_select ) % COST_PATH_COUNT ];
+    if ( set->next_link == NULL ) {
+      set->next_link = alt_hd;
+      break;
+    }
+  }
+  return path_set[ path_select ];
+}
+
 uint32_t
-AdjDistance::coverage_step( void ) noexcept
+AdjDistance::coverage_step( uint8_t path_select ) noexcept
 {
   AdjacencySpace * set;
   uint32_t min_cost = COST_MAXIMUM, count, i, uid;
   bool ok, new_edge = false;
-  uint8_t path_select = this->coverage_select;
 
   this->path.or_bits( this->path, this->max_uid, this->fwd, this->max_uid );
   this->fwd.zero( this->max_uid );
@@ -588,16 +645,17 @@ AdjDistance::coverage_step( void ) noexcept
 
   for ( i = 0; i < this->links.count; i++ ) {
     set = this->links.ptr[ i ];
-#if 0
     /* path_select 0 is oldest, 1 is second oldest, 2 ... */
-    if ( path_select > 0 && set->next_link != NULL ) {
-      for ( uint8_t j = 0; j < path_select; j++ ) {
-        if ( (set = set->next_link) == NULL )
-          set = this->links.ptr[ i ];
-      }
+    if ( set->next_link != NULL ) {
+      set = order_path_select( set, path_select );
       this->links.ptr[ i ] = set;
     }
-#endif
+    for ( ok = set->first( uid ); ok; ok = set->next( uid ) ) {
+      if ( this->start_time[ uid ] == 0 ) {
+        this->start_time[ uid ] = this->adjacency_start( uid ) +
+                                  this->start_time[ set->uid ];
+      }
+    }
     this->fwd.or_bits( this->fwd, this->max_uid, *set );
     set->clock = this->adjacency_clock;
   }
@@ -626,8 +684,9 @@ void
 AdjDistance::calc_forward_cache( ForwardCache &fwd,  uint32_t src_uid,
                                  uint8_t path_select ) noexcept
 {
-  uint32_t tport_id,
-           clk = this->calc_coverage( src_uid, path_select );
+  this->coverage_init( src_uid );
+  while ( this->coverage_step( path_select ) != 0 )
+    ;
 
   fwd.tport_count           = this->user_db.transport_tab.count,
   fwd.adjacency_cache_seqno = this->cache_seqno;
@@ -641,7 +700,10 @@ AdjDistance::calc_forward_cache( ForwardCache &fwd,  uint32_t src_uid,
   }
   fwd.zero( fwd.tport_count );
 
-  for ( tport_id = 0; tport_id < fwd.tport_count; tport_id++ ) {
+  uint32_t clk = this->adjacency_clock;
+  d_adj( "calc_forward_cache src_uid %u, path %u, clk %u\n",
+         src_uid, path_select, clk );
+  for ( uint32_t tport_id = 0; tport_id < fwd.tport_count; tport_id++ ) {
     TransportRoute * rte = this->user_db.transport_tab.ptr[ tport_id ];
     if ( rte->uid_connected.clock == clk ) {
       d_adj( "fwd_cache(%u) path %u -> tport_id %u\n", src_uid,
@@ -664,10 +726,10 @@ AdjDistance::calc_path( ForwardCache &fwd,  uint8_t path_select ) noexcept
   seqno = this->update_seqno;
   path[ 0 ].zero();
   for ( uid = 1; uid < this->max_uid; uid++ ) {
-    this->coverage_init( uid, path_select );
+    this->coverage_init( uid );
     uint32_t cost = 0;
     found = false;
-    while ( (cost = this->coverage_step()) != 0 ) {
+    while ( (cost = this->coverage_step( path_select )) != 0 ) {
       if ( this->fwd.is_member( 0 ) ) {
         AdjacencySpace * set = this->coverage_link( 0 );
         path[ uid ].src_uid = set->uid;
@@ -687,6 +749,7 @@ AdjDistance::calc_path( ForwardCache &fwd,  uint8_t path_select ) noexcept
       path[ uid ].zero();
   }
   this->update_forward_cache( fwd, 0, path_select );
+
   for ( uid = 1; uid < this->max_uid; uid++ ) {
     if ( path[ uid ].cost == 0 )
       continue;
@@ -701,6 +764,11 @@ AdjDistance::calc_path( ForwardCache &fwd,  uint8_t path_select ) noexcept
       TransportRoute * rte = this->user_db.transport_tab.ptr[ tport_id ];
       uint32_t cost = rte->uid_connected.cost[ path_select ];
       if ( rte->uid_connected.is_member( uid_src ) ) {
+        if ( min_cost != COST_MAXIMUM ) {
+          d_adj( "test path select %u uid %u cost %u < %u tport %u src_uid %u is_member %u\n",
+                  path_select, uid, cost, min_cost, tport_id, path[ uid ].src_uid,
+                  fwd.is_member( tport_id ) );
+        }
         if ( fwd.is_member( tport_id ) ) {
           if ( cost < min_cost ) {
             min_cost          = cost;
@@ -763,9 +831,9 @@ AdjDistance::calc_path( ForwardCache &fwd,  uint8_t path_select ) noexcept
 uint32_t
 AdjDistance::calc_coverage( uint32_t src_uid,  uint8_t path_select ) noexcept
 {
-  this->coverage_init( src_uid, path_select );
+  this->coverage_init( src_uid );
   uint32_t cost = 0;
-  while ( (cost = this->coverage_step()) != 0 )
+  while ( (cost = this->coverage_step( path_select )) != 0 )
     ;
   return this->adjacency_clock;
 }

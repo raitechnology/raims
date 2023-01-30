@@ -211,6 +211,7 @@ SubDB::fwd_psub( PatternArgs &ctx ) noexcept
   m.close( e.sz, h, CABA_RTR_ALERT );
   m.sign( s.msg, s.len(), *this->user_db.session_key );
 
+  this->user_db.msg_send_counter[ ctx.is_start ? U_PSUB_START : U_PSUB_STOP ]++;
   if ( ( ctx.flags & CONSOLE_SUB ) != 0 ) {
     rte = this->user_db.ipc_transport;
     if ( rte != NULL ) {

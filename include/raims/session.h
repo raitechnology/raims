@@ -276,7 +276,7 @@ struct SessionMgr : public kv::EvSocket, public kv::BPData {
                         tcp_ipv4,
                         tcp_ipv6,
                         session_started;
-  uint32_t              msg_counter[ 64 ],
+  uint32_t              msg_recv_counter[ MAX_PUB_TYPE ],
                         idle_busy;
 
   SessionMgr( kv::EvPoll &p,  kv::Logger &l,  ConfigTree &c,
