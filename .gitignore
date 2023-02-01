@@ -48,3 +48,5 @@ core.[0-9]?*
 # bear make output
 /compile_commands.json
 /.*history
+# config files
+/*.yaml

@@ -365,7 +365,7 @@ TransportRoute::connected_names( char *buf,  size_t buflen ) noexcept
 {
   return this->user_db.uid_names( this->uid_connected, buf, buflen );
 }
-
+#if 0
 const char *
 TransportRoute::reachable_names( char *buf,  size_t buflen ) noexcept
 {
@@ -374,7 +374,7 @@ TransportRoute::reachable_names( char *buf,  size_t buflen ) noexcept
                                   this->user_db.peer_dist.max_uid,
                                   buf, buflen );
 }
-
+#endif
 size_t
 TransportRoute::port_status( char *buf,  size_t buflen ) noexcept
 {

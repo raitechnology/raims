@@ -2163,12 +2163,14 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
       }
       if ( sub == NULL ) {
         if ( cmd == CMD_SUB_START ) {
+          uint32_t h = kv_crc_c( arg, len, 0 );
           sub = this->create_rpc<ConsoleSubStart>( sub_output, SUB_START );
           sub->set_sub( arg, len );
           sub->start_seqno =
             this->sub_db.console_sub_start( arg, len, sub );
-          this->outf( p, "start(%.*s) seqno = %" PRIu64, (int) sub->sublen,
-            sub->sub, sub->start_seqno );
+          this->outf( p, "start(%.*s,h=0x%x,s=%u) seqno = %" PRIu64,
+                      (int) sub->sublen, sub->sub, h, caba_hash_to_path( h ),
+                      sub->start_seqno );
         }
         else {
           this->outf( p, "start(%.*s) not found", (int) len, arg );

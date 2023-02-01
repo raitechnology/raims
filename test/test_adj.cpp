@@ -105,6 +105,14 @@ main( int argc, char *argv[] )
   }
 
   if ( ! quiet ) {
+    tport_count = user_db.transport_tab.count;
+    for ( tport_id = 0; tport_id < tport_count; tport_id++ ) {
+      TransportRoute * rte = user_db.transport_tab.ptr[ tport_id ];
+      if ( rte->uid_connected.first( uid ) ) {
+        UserBridge * n = user_db.bridge_tab.ptr[ uid ];
+        printf( "tport %u -> %s\n", tport_id, n->peer.user.val );
+      }
+    }
     /* calc forward cost */
     for ( path_sel = 0; path_sel < COST_PATH_COUNT; path_sel++ ) {
       for ( uid = 1; uid < user_db.next_uid; uid++ ) {

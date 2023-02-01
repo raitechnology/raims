@@ -239,7 +239,7 @@ struct TransportRoute : public kv::EvSocket, public kv::EvConnectionNotify,
   void set_peer_name( kv::PeerData &pd,  const char *suff ) noexcept;
   void update_cost( UserBridge &n,  uint32_t cost[ COST_PATH_COUNT ] ) noexcept;
   const char * connected_names( char *buf,  size_t buflen ) noexcept;
-  const char * reachable_names( char *buf,  size_t buflen ) noexcept;
+  /*const char * reachable_names( char *buf,  size_t buflen ) noexcept;*/
   size_t port_status( char *buf, size_t buflen ) noexcept;
   bool check_flow_control( bool b ) {
     if ( ! b && this->bp_in_list() )

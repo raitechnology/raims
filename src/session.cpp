@@ -742,7 +742,7 @@ IpcRoute::on_msg( EvPublish &pub ) noexcept
     /* move from FRAME_STATUS_NO_AUTH -> FRAME_STATUS_OK */
     if ( dec.msg->verify( n.peer_key ) )
       fpub.status = FRAME_STATUS_OK;
-    else if ( debug_sess ) {
+    else if ( n.is_set( AUTHENTICATED_STATE ) || debug_sess ) {
       n.printf( "verify failed %.*s\n", (int) fpub.subject_len, fpub.subject );
       /*printf( "ha1: " ); n.ha1.print(); printf( "\n" );*/
     }
@@ -1101,7 +1101,7 @@ SessionMgr::on_msg( EvPublish &pub ) noexcept
     /* move from FRAME_STATUS_NO_AUTH -> FRAME_STATUS_OK */
     if ( dec.msg->verify( n.peer_key ) )
       fpub.status = FRAME_STATUS_OK;
-    else if ( debug_sess ) {
+    else if ( n.is_set( AUTHENTICATED_STATE ) || debug_sess ) {
       n.printf( "verify failed %.*s\n", (int) fpub.subject_len, fpub.subject );
       /*printf( "ha1: " ); n.ha1.print(); printf( "\n" );*/
     }
@@ -1421,7 +1421,7 @@ SessionMgr::publish( PubMcastData &mc ) noexcept
   if ( fl.get_type() == CABA_MCAST ||
        ( is_mcast_prefix && mc.path < COST_PATH_COUNT ) ) {
     if ( mc.path >= COST_PATH_COUNT )
-      mc.path_select = ( h >> ( 32 - CABA_OPT_MC_BITS ) ) % COST_PATH_COUNT;
+      mc.path_select = caba_hash_to_path( h );
     else
       mc.path_select = mc.path;
     option |= mc.path_select << CABA_OPT_MC_SHIFT;
@@ -1634,8 +1634,7 @@ SessionMgr::forward_ipc( TransportRoute &src_rte,  EvPublish &pub ) noexcept
   size_t frag_sz = 0;
   uint8_t path_select = 0;
   if ( pub.pub_type == 'p' ) {
-    path_select =
-      ( pub.subj_hash >> ( 32 - CABA_OPT_MC_BITS ) ) % COST_PATH_COUNT;
+    path_select = caba_hash_to_path( pub.subj_hash );
     fl.set_opt( path_select << CABA_OPT_MC_SHIFT );
   }
   MsgEst e( pub.subject_len );
@@ -1837,7 +1836,7 @@ SessionMgr::send_ack( const MsgFramePublish &pub,  UserBridge &n,
   m.close( e.sz, h, CABA_INBOX );
   m.sign( ibx.buf, ibx.len(), *this->user_db.session_key );
 
-  this->user_db.forward_to_inbox( n, ibx, h, m.msg, m.len() );
+  this->user_db.forward_to_primary_inbox( n, ibx, h, m.msg, m.len() );
 }
 /* event loop */
 bool

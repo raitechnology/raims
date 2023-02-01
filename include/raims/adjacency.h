@@ -119,6 +119,18 @@ struct ForwardCache : public kv::UIntBitSet {
   ~ForwardCache() {
     this->reset();
   }
+  void init( uint32_t count,  uint64_t seqno ) {
+    uint32_t sz = this->size( count );
+    if ( sz > 1 ) {
+      if ( this->ptr == &this->bits )
+        this->ptr = NULL;
+      this->ptr = (uint64_t *) ::realloc( this->ptr, sz * sizeof( uint64_t ) );
+    }
+    this->tport_count = count;
+    this->fwd_count = 0;
+    this->adjacency_cache_seqno = seqno;
+    this->zero( count );
+  }
   void reset( void ) {
     if ( this->ptr != &this->bits )
       ::free( this->ptr );
@@ -193,13 +205,61 @@ struct AdjacencyTab : public kv::ArrayCount< AdjacencySpace *, 4 > {
   }
 };
 
+struct TmpAdjList {
+  AdjacencySpace * hd, * tl;
+  TmpAdjList() : hd( 0 ), tl( 0 ) {}
+  void push_tl( AdjacencySpace *p ) {
+    if ( p == NULL ) return;
+    if ( this->hd == NULL )
+      this->hd = p;
+    else
+      this->tl->next_link = p;
+    this->tl = p;
+    p->next_link = NULL;
+  }
+  void push_hd( AdjacencySpace *p ) {
+    if ( p == NULL ) return;
+    p->next_link = this->hd;
+    this->hd = p;
+    if ( this->tl == NULL )
+      this->tl = p;
+  }
+};
+
 struct UidSrcPath {
   uint32_t tport,   /* tport index by uid */
            src_uid, /* which uid tport routes to */
            cost;    /* tport cost index by uid */
   UidSrcPath() : tport( 0 ), src_uid( 0 ), cost( 0 ) {}
+  void copy( const UidSrcPath &p ) {
+    this->tport   = p.tport;
+    this->src_uid = p.src_uid;
+    this->cost    = p.cost;
+  }
   void zero( void ) {
     this->tport = this->src_uid = this->cost = 0;
+  }
+};
+
+typedef kv::ArrayCount<UidSrcPath, 4> AltUidSrcPath;
+
+struct AltPath {
+  AltUidSrcPath alt;
+
+  void alternative( UidSrcPath & el ) {
+    if ( this->alt.count > 0 )
+      if ( this->alt.ptr[ 0 ].cost > el.cost )
+        this->alt.count = 0;
+    this->alt.push( el );
+  }
+  void swap( uint32_t i,  UidSrcPath & el ) {
+    UidSrcPath p;
+    p.copy( this->alt.ptr[ i ] );
+    this->alt.ptr[ i ].copy( el );
+    el.copy( p );
+  }
+  void release( void ) {
+    this->alt.clear();
   }
 };
 
@@ -214,7 +274,6 @@ struct AdjDistance : public md::MDMsgMem {
   uint32_t     * cache,         /* cache of uid distence via a tport */
                * visit,         /* minimum distance to uid */
                * inc_list;      /* list of uids to be checked for links */
-  uint64_t     * start_time;    /* cumalative start times on path */
   PathSeqno      x[ COST_PATH_COUNT ]; /* x[ path_select ].port[ uid ]*/
   kv::UIntBitSet inc_visit,     /* inconsistent check visit uid map */
                  adj,           /* uid map masked with path for coverage */
@@ -233,10 +292,10 @@ struct AdjDistance : public md::MDMsgMem {
                  inc_hd,        /* list hd of uids in inc_list[] */
                  inc_tl,        /* list to of uids in inc_list[] */
                  inc_run_count, /* count of inc_runs after adjacency change */
-                 max_tport_count; /* maximum tports any peer has, for graph */
+                 max_tport_count, /* maximum tports any peer has, for graph */
+                 tport_select;  /* select which port to test */
   uint64_t       last_run_mono, /* timestamp of last adjacency update */
-                 invalid_mono, /* when cache was invalidated */
-                 min_start_time;
+                 invalid_mono; /* when cache was invalidated */
   uint16_t       adjacency_clock; /* label transitions that were taken */
   InvalidReason  invalid_reason; /* why cache was invalidated */
   bool           inc_running,   /* whether incomplete check is running */
@@ -250,7 +309,6 @@ struct AdjDistance : public md::MDMsgMem {
     zero_mem( &this->max_uid, &this[ 1 ] );
     this->cache_seqno = 0;
     this->update_seqno = 1;
-    this->min_start_time = 0;
   }
 
   void invalidate( InvalidReason why ) {
@@ -277,10 +335,14 @@ struct AdjDistance : public md::MDMsgMem {
     this->calc_forward_cache( fwd, src_uid, path_select );
   }
   void calc_forward_cache( ForwardCache &fwd,  uint32_t src_uid,
+                           uint32_t midpt_uid,  uint8_t path_select ) noexcept;
+  void calc_forward_cache( ForwardCache &fwd,  uint32_t src_uid,
+                           uint8_t path_select ) noexcept;
+  bool test_forward_midpt( uint32_t midpt_uid,  uint32_t target_uid,
                            uint8_t path_select ) noexcept;
   uint32_t adjacency_count( uint32_t uid ) const noexcept;
   AdjacencySpace * adjacency_set( uint32_t uid,  uint32_t i ) const noexcept;
-  uint64_t adjacency_start( uint32_t uid ) const noexcept;
+  /*uint64_t adjacency_start( uint32_t uid ) const noexcept;*/
   void push_inc_list( uint32_t uid ) noexcept;
   bool find_inconsistent( UserBridge *&from, UserBridge *&to ) noexcept;
   uint32_t uid_refs( uint32_t from,  uint32_t to ) noexcept;
@@ -309,7 +371,10 @@ struct AdjDistance : public md::MDMsgMem {
 
   void zero_clocks( void ) noexcept;
   void coverage_init( uint32_t src_uid ) noexcept;
+  uint64_t get_start_time( uint32_t uid ) noexcept;
   void push_link( AdjacencySpace *set ) noexcept;
+  static AdjacencySpace * order_path_select( AdjacencySpace *set,
+                                             uint8_t path_select ) noexcept;
   uint32_t coverage_step( uint8_t path_select ) noexcept;
   AdjacencySpace *coverage_link( uint32_t target_uid ) noexcept;
   uint32_t calc_coverage( uint32_t src_uid,  uint8_t path_select ) noexcept;
@@ -331,7 +396,7 @@ struct AdjDistance : public md::MDMsgMem {
       return false;
     return true;
   }
-  void calc_reachable( TransportRoute &rte ) noexcept;
+  /*void calc_reachable( TransportRoute &rte ) noexcept;*/
 
   const char * uid_name( uint32_t uid,  char *buf,  size_t buflen ) noexcept;
   const char * uid_name( uint32_t uid,  char *buf,  size_t &off,

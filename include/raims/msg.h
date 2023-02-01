@@ -98,6 +98,11 @@ static const uint16_t CABA_VER_MASK     = ( (uint16_t) 1 << CABA_VER_BITS ) - 1,
                       CABA_OPT_MASK     = ( (uint16_t) 1 << CABA_OPT_BITS ) - 1;
 static const uint32_t CABA_LENGTH_MASK  = ( (uint32_t) 1 << CABA_LENGTH_BITS )-1;
 
+/* this is also true: COST_PATH_COUNT == 1 << CABA_OPT_MC_BITS */
+static inline uint8_t caba_hash_to_path( uint32_t h ) {
+  return (uint8_t) ( h >> ( 32 - CABA_OPT_MC_BITS ) );
+}
+
 static inline const char *caba_type_flag_str( CabaTypeFlag fl ) {
   if ( fl == CABA_INBOX ) return "inbox";
   if ( fl == CABA_RTR_ALERT ) return "rtr_alert";
