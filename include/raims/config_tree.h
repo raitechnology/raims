@@ -30,16 +30,18 @@ struct ConfigFilePrinter : public ConfigPrinter {
 };
 
 enum WhichYaml {
-  PRINT_USERS           = 1,
-  PRINT_SERVICES        = 2,
-  PRINT_TRANSPORTS      = 4,
-  PRINT_GROUPS          = 8,
-  PRINT_PARAMETERS      = 16,
-  PRINT_NORMAL          = 31,
-  PRINT_HDR             = 32,
-  PRINT_STARTUP         = 64,
-  PRINT_EXCLUDE_STARTUP = 128,
-  PRINT_ALL             = 256
+  PRINT_USERS             = 1,
+  PRINT_SERVICES          = 2,
+  PRINT_TRANSPORTS        = 4,
+  PRINT_GROUPS            = 8,
+  PRINT_PARAMETERS        = 16,
+  PRINT_NORMAL            = 31,
+  PRINT_HDR               = 32,
+  PRINT_STARTUP           = 64,
+  PRINT_STARTUP_CONFIG    = 128,
+  PRINT_EXCLUDE_STARTUP   = 256,
+  PRINT_EXCLUDE_TEMPORARY = 512,
+  PRINT_ALL               = 1024
 };
 
 struct ConfigTree {
@@ -53,6 +55,10 @@ struct ConfigTree {
     StringVal    name,    /* route var name */
                  value;   /* route var value */
     StringPair() : next( 0 ) {}
+    StringPair( const StringPair &sp ) : next( 0 ), name( sp.name ),
+      value( sp.value ) {}
+    StringPair( const StringVal &nm,  const StringVal &val ) : next( 0 ),
+      name( nm ), value( val ) {}
     void print_js( ConfigPrinter &p ) const noexcept;
     void print_y( ConfigPrinter &p ) const noexcept;
     const StringPair *print_ylist( ConfigPrinter &p, int i ) const noexcept;
@@ -106,6 +112,7 @@ struct ConfigTree {
     StringList * next;
     StringVal    val;    /* a subject or a user */
     StringList() : next( 0 ) {}
+    StringList( const StringList &sl ) : next( 0 ), val( sl.val ) {}
     void print_js( ConfigPrinter &p ) const noexcept;
     void print_y( ConfigPrinter &p ) const noexcept;
   };
@@ -123,7 +130,10 @@ struct ConfigTree {
               pub;         /* pub base64 */
     uint32_t  user_id;     /* count 0 -> user_cnt */
                    /*entitle_cnt;*/ /* count of entitle[] */
-    User() : next( 0 ), /*service( 0 ),*/ user_id( 0 ) {}
+    User() : next( 0 ), user_id( 0 ) {}
+    User( const User &u ) : next( 0 ), user( u.user ), svc( u.svc ),
+      create( u.create ), expires( u.expires ), revoke( u.revoke ),
+      pri( u.pri ), pub( u.pub ), user_id( u.user_id ) {}
     void print_js( ConfigPrinter &p,  int i,  char c = 0 ) const noexcept;
     void print_y( ConfigPrinter &p,  int i ) const noexcept;
   };
@@ -133,7 +143,7 @@ struct ConfigTree {
     Parameters * next;
     PairList parms;
 
-    Parameters() {}
+    Parameters() : next( 0 ) {}
     void print_js( ConfigPrinter &p,  int i,  char c = 0 ) const noexcept;
     void print_y( ConfigPrinter &p,  int i ) const noexcept;
   };
@@ -148,7 +158,9 @@ struct ConfigTree {
     PairList  users,      /* users signed */
               revoke;     /* users reovked */
     uint32_t  service_id; /* count 0 -> service_cnt */
-    Service() : next( 0 ), /*user( 0 ),*/ service_id( 0 )/*, user_cnt( 0 )*/{}
+    Service() : next( 0 ), service_id( 0 ) {}
+    Service( const Service &s ) : next( 0 ), svc( s.svc ), create( s.create ),
+      pri( s.pri ), pub( s.pub ), service_id( s.service_id ) {}
     void print_js( ConfigPrinter &p,  int i ) const noexcept;
     void print_y( ConfigPrinter &p,  int i ) const noexcept;
   };
@@ -161,6 +173,8 @@ struct ConfigTree {
     uint32_t    tport_id; /* count 0 -> tport_cnt */
     PairList    route;    /* route parameters */
     Transport() : next( 0 ), tport_id( 0 ) {}
+    Transport( const Transport &t ) : next( 0 ), tport( t.tport ),
+      type( t.type ), tport_id( t.tport_id ) {}
     void print_js( ConfigPrinter &p,  int i ) const noexcept;
     void print_y( ConfigPrinter &p,  int i ) const noexcept;
     bool get_route_str( const char *name,  const char *&value ) {
@@ -194,6 +208,8 @@ struct ConfigTree {
     uint32_t  group_id; /* count 0 -> group_cnt */
     StrList   users;    /* list of users belonging to group */
     Group() : next( 0 ), group_id( 0 ) {}
+    Group( const Group &g ) : next( 0 ), group( g.group ),
+      group_id( g.group_id ) {}
     void print_js( ConfigPrinter &p,  int i ) const noexcept;
     void print_y( ConfigPrinter &p,  int i ) const noexcept;
   };
@@ -204,18 +220,26 @@ struct ConfigTree {
   typedef kv::SLinkList< Group >      GroupList;
   typedef kv::SLinkList< Parameters > ParametersList;
 
-  struct TransportArray : public kv::ArrayCount< Transport *, 4 > {
-    void push( Transport *tport ) {
+  struct TransportArray : public kv::ArrayCount< StringVal, 4 > {
+    void push( const StringVal &tport ) {
       (*this)[ this->count ] = tport;
     }
-    void push_unique( Transport *tport ) {
+    void push( const Transport *tport ) {
+      (*this)[ this->count ] = tport->tport;
+    }
+    void push_unique( const Transport *tport ) {
       for ( size_t i = 0; i < this->count; i++ )
-        if ( tport == this->ptr[ i ] )
+        if ( tport->tport.equals( this->ptr[ i ] ) )
+          return;
+      this->push( tport->tport );
+    }
+    void push_unique( const StringVal &tport ) {
+      for ( size_t i = 0; i < this->count; i++ )
+        if ( tport.equals( this->ptr[ i ] ) )
           return;
       this->push( tport );
     }
   };
-
   void * operator new( size_t, void *ptr ) { return ptr; }
 
   UserList       users;         /* users : [ Group array ] */
@@ -228,9 +252,11 @@ struct ConfigTree {
                  service_cnt,   /* count of service[] */
                  transport_cnt, /* count of transport[] */
                  group_cnt;     /* count of group[] */
-  StringVal      dir_name;
+  StringVal      cfg_name;
+  bool           is_dir;
   ConfigTree() : /* user( 0 ), service( 0 ), transport( 0 ), group( 0 ),*/
-         user_cnt( 0 ), service_cnt( 0 ), transport_cnt( 0 ), group_cnt( 0 ) {}
+         user_cnt( 0 ), service_cnt( 0 ), transport_cnt( 0 ), group_cnt( 0 ),
+         is_dir( false ) {}
   int save_tport( const ConfigTree::Transport &tport ) const noexcept;
   int save_parameters( const TransportArray &listen,
                        const TransportArray &connect ) const noexcept;
@@ -272,6 +298,24 @@ struct ConfigTree {
   static bool string_to_secs( const char *s,  uint64_t &secs ) noexcept;
   static bool string_to_nanos( const char *s,  uint64_t &nanos ) noexcept;
   static bool string_to_bool( const char *s,  bool &b ) noexcept;
+};
+
+struct ConfigDB;
+struct ConfigStartup {
+  StringTab  & str;
+  md::MDMsgMem mem;
+  ConfigTree * tree;
+
+  ConfigStartup( StringTab &st ) : str( st ), tree( 0 ) {}
+
+  void copy( ConfigTree &t,  ConfigTree::TransportArray *listen = NULL,
+             ConfigTree::TransportArray *connect = NULL ) noexcept;
+  void copy_pair_list( ConfigDB &db,  const ConfigTree::PairList &list,
+                       ConfigTree::PairList &cp_list ) noexcept;
+  void copy_pair_list2( ConfigDB &db,  const ConfigTree::PairList &list,
+                        ConfigTree::PairList &cp_list ) noexcept;
+  void copy_string_list( ConfigDB &db,  const ConfigTree::StrList &list,
+                         ConfigTree::StrList &cp_list ) noexcept;
 };
 
 }

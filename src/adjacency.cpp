@@ -600,14 +600,17 @@ AdjDistance::coverage_step( uint8_t path_select ) noexcept
   for ( ok = this->path.first( uid, this->max_uid ); ok;
         ok = this->path.next( uid, this->max_uid ) ) {
     count = this->adjacency_count( uid );
+
     for ( i = 0; i < count; i++ ) {
       if ( (set = this->adjacency_set( uid, i )) == NULL )
         continue;
-      this->adj.zero( this->max_uid );
-      this->adj.mask_bits( this->path, this->max_uid, *set );
-      if ( this->adj.is_empty( this->max_uid ) )
-        continue;
+
       if ( this->visit[ uid ] + set->cost[ path_select ] < min_cost ) {
+        this->adj.zero( this->max_uid );
+        this->adj.mask_bits( this->path, this->max_uid, *set );
+        if ( this->adj.is_empty( this->max_uid ) )
+          continue;
+
         min_cost = this->visit[ uid ] + set->cost[ path_select ];
         new_edge = true;
       }
@@ -619,15 +622,20 @@ AdjDistance::coverage_step( uint8_t path_select ) noexcept
   for ( ok = this->path.first( uid, this->max_uid ); ok;
         ok = this->path.next( uid, this->max_uid ) ) {
     count = this->adjacency_count( uid );
+
     for ( i = 0; i < count; i++ ) {
       if ( (set = this->adjacency_set( uid, i )) == NULL )
         continue;
-      this->adj.zero( this->max_uid );
-      this->adj.mask_bits( this->path, this->max_uid, *set );
-      if ( this->adj.is_empty( this->max_uid ) )
-        continue;
-      if ( this->visit[ uid ] + set->cost[ path_select ] == min_cost )
+
+      if ( this->visit[ uid ] + set->cost[ path_select ] == min_cost ) {
+
+        this->adj.zero( this->max_uid );
+        this->adj.mask_bits( this->path, this->max_uid, *set );
+        if ( this->adj.is_empty( this->max_uid ) )
+          continue;
+
         this->push_link( set );
+      }
     }
   }
 

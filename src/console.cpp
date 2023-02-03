@@ -81,7 +81,8 @@ rai::ms::update_tz_stamp( void )
 
 Console::Console( SessionMgr &m ) noexcept
        : MDOutput( MD_OUTPUT_OPAQUE_TO_B64 ), mgr( m ), user_db( m.user_db ),
-         sub_db( m.sub_db ), tree( m.tree ), string_tab( m.user_db.string_tab ),
+         sub_db( m.sub_db ), tree( m.tree ), startup( m.startup ),
+         string_tab( m.user_db.string_tab ),
          cfg_tport( 0 ), fname_fmt( ANSI_GREEN "%-18s" ANSI_NORMAL " : " ),
          type_fmt( ANSI_BLUE "%-10s %3d" ANSI_NORMAL " : " ),
          prompt( 0 ), max_log( 64 * 1024 ), log_index( 0 ), log_ptr( 0 ),
@@ -945,7 +946,7 @@ Console::parse_command( const char *buf,  const char *end,
         cmd = which_show( args[ 1 ], arglen[ 1 ] );
       skip_parse_show:;
         /* show run ... */
-        if ( cmd == CMD_SHOW_RUN ) {
+        if ( cmd == CMD_SHOW_RUN || cmd == CMD_SHOW_START ) {
           if ( argc > j+2 ) {
             cmd = which_run( args[ j+2 ], arglen[ j+2 ] );
             if ( cmd != CMD_BAD && j+3 < argc ) {
@@ -1037,7 +1038,8 @@ console_complete( struct LineCook_s *state,  const char *buf,  size_t off,
              ( argc == (size_t) ( j + 3 ) && trail != ' ' ) )
           type = console_command_type( cmd );
 
-        if ( cmd == CMD_SHOW_RUN && arg_complete > (size_t) ( j + 2 ) ) {
+        if ( ( cmd == CMD_SHOW_RUN || cmd == CMD_SHOW_START ) &&
+             arg_complete > (size_t) ( j + 2 ) ) {
           cmds  = run_cmd;
           ncmds = num_run_cmds;
 
@@ -2065,18 +2067,20 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
     case CMD_SHOW_WINDOWS:   this->show_windows( p );   break;
     case CMD_SHOW_BLOOMS:    this->show_blooms( p, int_arg( arg, len ) ); break;
     case CMD_SHOW_MATCH:     this->show_match( p, arg, len ); break;
-    case CMD_SHOW_RUN:
-      this->show_running( p, PRINT_NORMAL, arg, len ); break;
-    case CMD_SHOW_RUN_TPORTS:
-      this->show_running( p, PRINT_TRANSPORTS | PRINT_HDR, arg, len ); break;
-    case CMD_SHOW_RUN_SVCS:
-      this->show_running( p, PRINT_SERVICES | PRINT_HDR, arg, len ); break;
-    case CMD_SHOW_RUN_USERS:
-      this->show_running( p, PRINT_USERS | PRINT_HDR, arg, len ); break;
-    case CMD_SHOW_RUN_GROUPS:
-      this->show_running( p, PRINT_GROUPS | PRINT_HDR, arg, len ); break;
-    case CMD_SHOW_RUN_PARAM:
-      this->show_running( p, PRINT_PARAMETERS | PRINT_HDR, arg, len ); break;
+
+    case CMD_SHOW_RUN:        case CMD_SHOW_START:
+      this->show_config( p, cmd>=CMD_SHOW_START, PRINT_NORMAL, arg, len ); break;
+    case CMD_SHOW_RUN_TPORTS: case CMD_SHOW_START_TPORTS:
+      this->show_config( p, cmd>=CMD_SHOW_START, PRINT_TRANSPORTS | PRINT_HDR, arg, len ); break;
+    case CMD_SHOW_RUN_SVCS:   case CMD_SHOW_START_SVCS:
+      this->show_config( p, cmd>=CMD_SHOW_START, PRINT_SERVICES | PRINT_HDR, arg, len ); break;
+    case CMD_SHOW_RUN_USERS:  case CMD_SHOW_START_USERS:
+      this->show_config( p, cmd>=CMD_SHOW_START, PRINT_USERS | PRINT_HDR, arg, len ); break;
+    case CMD_SHOW_RUN_GROUPS: case CMD_SHOW_START_GROUPS:
+      this->show_config( p, cmd>=CMD_SHOW_START, PRINT_GROUPS | PRINT_HDR, arg, len ); break;
+    case CMD_SHOW_RUN_PARAM:  case CMD_SHOW_START_PARAM:
+      this->show_config( p, cmd>=CMD_SHOW_START, PRINT_PARAMETERS | PRINT_HDR, arg, len ); break;
+
     case CMD_SHOW_GRAPH:     this->show_graph( p ); break;
     case CMD_SHOW_CACHE:     this->show_cache( p ); break;
     case CMD_SHOW_POLL:      this->show_poll( p ); break;
@@ -2479,15 +2483,33 @@ Console::get_active_tports( ConfigTree::TransportArray &listen,
 }
 
 void
+Console::get_startup_tports( ConfigTree::TransportArray &listen,
+                             ConfigTree::TransportArray &connect ) noexcept
+{
+  const ConfigTree::Parameters *pa = this->startup.tree->parameters.hd;
+  for ( ; pa != NULL; pa = pa->next ) {
+    const ConfigTree::StringPair *sp = pa->parms.hd;
+    for ( ; sp != NULL; sp = sp->next ) {
+      if ( sp->name.equals( R_LISTEN, R_LISTEN_SZ ) )
+        listen.push_unique( sp->value );
+      else if ( sp->name.equals( R_CONNECT, R_CONNECT_SZ ) )
+        connect.push_unique( sp->value );
+    }
+  }
+}
+
+void
 Console::config_save( void ) noexcept
 {
   ConfigChange * c;
   ConfigTree::TransportArray listen, connect;
 
-  for ( c = this->changes.hd; c != NULL; c = c->next ) {
-    if ( c->tport != NULL )
-      if ( this->tree.save_tport( *c->tport ) != 0 )
-        return;
+  if ( this->tree.is_dir ) {
+    for ( c = this->changes.hd; c != NULL; c = c->next ) {
+      if ( c->tport != NULL )
+        if ( this->tree.save_tport( *c->tport ) != 0 )
+          return;
+    }
   }
   this->get_active_tports( listen, connect );
   if ( this->tree.save_parameters( listen, connect ) != 0 )
@@ -2495,6 +2517,7 @@ Console::config_save( void ) noexcept
   if ( this->tree.save_new() ) {
     this->changes.release();
     this->printf( "config saved\n" );
+    this->startup.copy( this->tree, &listen, &connect );
   }
   else {
     this->printf( "failed to save config updates\n" );
@@ -3303,11 +3326,11 @@ Console::show_unknown( ConsoleOutput *p ) noexcept
 
 PortOutput::PortOutput( Console &c,  TabOut &o,  uint32_t t ) noexcept :
     console( c ), mgr( c.mgr ), user_db( c.user_db ), out( o ), tport_id( t ),
-    cur_time( current_realtime_coarse_ns() ), unrouteable( 0 ) {}
+    cur_time( current_realtime_ns() ), unrouteable( 0 ) {}
 
 PortOutput::PortOutput( Console &c,  TabOut &o,  Unrouteable *u ) noexcept :
     console( c ), mgr( c.mgr ), user_db( c.user_db ), out( o ),
-    tport_id( 0xffffffffU ), cur_time( current_realtime_coarse_ns() ),
+    tport_id( 0xffffffffU ), cur_time( current_realtime_ns() ),
     unrouteable( u ) {}
 
 void
@@ -5474,29 +5497,33 @@ Console::show_seqno( ConsoleOutput *p,  const char *arg,
 }
 
 void
-Console::show_running( ConsoleOutput *p,  int which,  const char *name,
-                       size_t namelen ) noexcept
+Console::show_config( ConsoleOutput *p,  bool is_start,  int which,
+                      const char *name,  size_t namelen ) noexcept
 {
   const bool is_html = ( p != NULL && p->is_html ),
              is_json = ( p != NULL && p->is_json );
+  ConfigTree * t = ( is_start ? this->startup.tree : &this->tree );
   if ( is_html )
     this->puts( "<pre>" );
   if ( ( which & PRINT_PARAMETERS ) != 0 ) {
     ConfigTree::TransportArray listen, connect;
-    this->get_active_tports( listen, connect );
-    if ( ! is_json )
-      this->tree.print_parameters_y( *this, which, name, namelen, listen,
-                                     connect );
+    if ( ! is_start )
+      this->get_active_tports( listen, connect );
     else
-      this->tree.print_parameters_js( *this, which, name, namelen, listen,
-                                      connect );
+      this->get_startup_tports( listen, connect );
+    if ( ! is_json )
+      t->print_parameters_y( *this, which, name, namelen, listen,
+                             connect );
+    else
+      t->print_parameters_js( *this, which, name, namelen, listen,
+                              connect );
   }
   else {
     int did_which;
     if ( ! is_json )
-      this->tree.print_y( *this, did_which, which, name, namelen );
+      t->print_y( *this, did_which, which, name, namelen );
     else
-      this->tree.print_js( *this, which, name, namelen );
+      t->print_js( *this, which, name, namelen );
   }
 }
 

@@ -539,6 +539,7 @@ struct Console : public md::MDOutput, public SubOnMsg, public ConfigPrinter,
   UserDB          & user_db;
   SubDB           & sub_db;
   ConfigTree      & tree;
+  ConfigStartup   & startup;
   StringTab       & string_tab;
   ConfigTree::Transport * cfg_tport;
   ConfigChangeList  changes;
@@ -626,6 +627,9 @@ struct Console : public md::MDOutput, public SubOnMsg, public ConfigPrinter,
   void shutdown( const char *arg,  size_t arglen ) noexcept;
   void get_active_tports( ConfigTree::TransportArray &listen, 
                           ConfigTree::TransportArray &connect ) noexcept;
+  void get_startup_tports( ConfigTree::TransportArray &listen,
+                           ConfigTree::TransportArray &connect ) noexcept;
+
   void config_save( void ) noexcept;
   void config_param( const char *param,  size_t plen,
                      const char *value,  size_t vlen ) noexcept;
@@ -681,8 +685,8 @@ struct Console : public md::MDOutput, public SubOnMsg, public ConfigPrinter,
   void show_windows( ConsoleOutput *p ) noexcept;
   void show_blooms( ConsoleOutput *p,  uint8_t path_select ) noexcept;
   void show_match( ConsoleOutput *p,  const char *sub,  size_t len ) noexcept;
-  void show_running( ConsoleOutput *p,  int which,  const char *name,
-                     size_t len ) noexcept;
+  void show_config( ConsoleOutput *p, bool is_start,  int which,  const char *name,
+                    size_t len ) noexcept;
   void show_graph( ConsoleOutput *p ) noexcept;
   void show_cache( ConsoleOutput *p ) noexcept;
   void show_poll( ConsoleOutput *p ) noexcept;
@@ -732,80 +736,86 @@ struct Console : public md::MDOutput, public SubOnMsg, public ConfigPrinter,
 };
 
 enum ConsoleCmd {
-  CMD_BAD              = 0,
-  CMD_EMPTY            = 1,
-  CMD_PING             = 2,  /* ping [U]                   */
-  CMD_TPING            = 3,  /* tping [U]                  */
-  CMD_MPING            = 4,  /* mping [P]                  */
-  CMD_TMPING           = 5,  /* tmping [P]                 */
-  CMD_REMOTE           = 6,  /* remote [U] cmd             */
-  CMD_SHOW             = 7,  /* show ...                   */
-  CMD_SHOW_SUBS        = 8,  /* show subs [U]              */
-  CMD_SHOW_SEQNO       = 9,  /* show seqno                 */
-  CMD_SHOW_ADJACENCY   = 10, /* show adjacency             */
-  CMD_SHOW_PEERS       = 11, /* show peers [sort]          */
-  CMD_SHOW_PORTS       = 12, /* show ports [T]             */
-  CMD_SHOW_COST        = 13, /* show ports [T]             */
-  CMD_SHOW_STATUS      = 14, /* show status [T]            */
-  CMD_SHOW_LINKS       = 15, /* show links                 */
-  CMD_SHOW_NODES       = 16, /* show nodes                 */
-  CMD_SHOW_ROUTES      = 17, /* show routes [P]            */
-  CMD_SHOW_URLS        = 18, /* show urls                  */
-  CMD_SHOW_TPORTS      = 19, /* show tport [T]             */
-  CMD_SHOW_USERS       = 20, /* show user [U]              */
-  CMD_SHOW_EVENTS      = 21, /* show events                */
-  CMD_SHOW_UNKNOWN     = 22, /* show unknown               */
-  CMD_SHOW_LOGS        = 23, /* show logs                  */
-  CMD_SHOW_COUNTERS    = 24, /* show counters              */
-  CMD_SHOW_PUBTYPE     = 25, /* show pubtype               */
-  CMD_SHOW_INBOX       = 26, /* show inbox                 */
-  CMD_SHOW_LOSS        = 27, /* show loss                  */
-  CMD_SHOW_SKEW        = 28, /* show skew                  */
-  CMD_SHOW_REACHABLE   = 29, /* show reachable             */
-  CMD_SHOW_TREE        = 30, /* show tree [U]              */
-  CMD_SHOW_PATH        = 31, /* show path [N]              */
-  CMD_SHOW_FORWARD     = 32, /* show forward [N]           */
-  CMD_SHOW_FDS         = 33, /* show fds                   */
-  CMD_SHOW_BUFFERS     = 34, /* show buffers               */
-  CMD_SHOW_WINDOWS     = 35, /* show windows               */
-  CMD_SHOW_BLOOMS      = 36, /* show blooms [N]            */
-  CMD_SHOW_MATCH       = 37, /* show match  S              */
-  CMD_SHOW_GRAPH       = 38, /* show graph                 */
-  CMD_SHOW_CACHE       = 39, /* show cache                 */
-  CMD_SHOW_POLL        = 40, /* show poll                  */
-  CMD_SHOW_RUN         = 41, /* show running               */
-  CMD_SHOW_RUN_TPORTS  = 42, /* show running transport [T] */
-  CMD_SHOW_RUN_SVCS    = 43, /* show running service [S]   */
-  CMD_SHOW_RUN_USERS   = 44, /* show running user [U]      */
-  CMD_SHOW_RUN_GROUPS  = 45, /* show running group [G]     */
-  CMD_SHOW_RUN_PARAM   = 46, /* show running parameter [P] */
-  CMD_CONNECT          = 47, /* connect [T]                */
-  CMD_LISTEN           = 48, /* listen [T]                 */
-  CMD_SHUTDOWN         = 49, /* shutdown [T]               */
-  CMD_NETWORK          = 50, /* network svc network        */
-  CMD_CONFIGURE        = 51, /* configure                  */
-  CMD_CONFIGURE_TPORT  = 52, /* configure transport T      */
-  CMD_CONFIGURE_PARAM  = 53, /* configure parameter P V    */
-  CMD_SAVE             = 54, /* save                       */
-  CMD_SUB_START        = 55, /* sub subject [file]         */
-  CMD_SUB_STOP         = 56, /* unsub subject [file]       */
-  CMD_PSUB_START       = 57, /* psub rv-wildcard [file]    */
-  CMD_PSUB_STOP        = 58, /* punsub rv-wildcard [file]  */
-  CMD_GSUB_START       = 59, /* gsub glob-wildcard [file]  */
-  CMD_GSUB_STOP        = 60, /* gunsub glob-wildcard [file]*/
-  CMD_PUBLISH          = 61, /* pub subject msg            */
-  CMD_TRACE            = 62, /* trace subject msg          */
-  CMD_PUB_ACK          = 63, /* ack subject msg            */
-  CMD_RPC              = 64, /* rpc subject msg            */
-  CMD_ANY              = 65, /* any subject msg            */
-  CMD_RESEED           = 66, /* reseed bloom filters       */
-  CMD_DEBUG            = 67, /* debug ival                 */
-  CMD_CANCEL           = 68, /* cancel                     */
-  CMD_MUTE_LOG         = 69, /* mute                       */
-  CMD_UNMUTE_LOG       = 70, /* unmute                     */
-  CMD_WEVENTS          = 71, /* write events to file       */
-  CMD_DIE              = 72, /* die, exit 1                */
-  CMD_QUIT             = 73, /* quit/exit                  */
+  CMD_BAD               = 0,
+  CMD_EMPTY             = 1,
+  CMD_PING              = 2,  /* ping [U]                   */
+  CMD_TPING             = 3,  /* tping [U]                  */
+  CMD_MPING             = 4,  /* mping [P]                  */
+  CMD_TMPING            = 5,  /* tmping [P]                 */
+  CMD_REMOTE            = 6,  /* remote [U] cmd             */
+  CMD_SHOW              = 7,  /* show ...                   */
+  CMD_SHOW_SUBS         = 8,  /* show subs [U]              */
+  CMD_SHOW_SEQNO        = 9,  /* show seqno                 */
+  CMD_SHOW_ADJACENCY    = 10, /* show adjacency             */
+  CMD_SHOW_PEERS        = 11, /* show peers [sort]          */
+  CMD_SHOW_PORTS        = 12, /* show ports [T]             */
+  CMD_SHOW_COST         = 13, /* show ports [T]             */
+  CMD_SHOW_STATUS       = 14, /* show status [T]            */
+  CMD_SHOW_LINKS        = 15, /* show links                 */
+  CMD_SHOW_NODES        = 16, /* show nodes                 */
+  CMD_SHOW_ROUTES       = 17, /* show routes [P]            */
+  CMD_SHOW_URLS         = 18, /* show urls                  */
+  CMD_SHOW_TPORTS       = 19, /* show tport [T]             */
+  CMD_SHOW_USERS        = 20, /* show user [U]              */
+  CMD_SHOW_EVENTS       = 21, /* show events                */
+  CMD_SHOW_UNKNOWN      = 22, /* show unknown               */
+  CMD_SHOW_LOGS         = 23, /* show logs                  */
+  CMD_SHOW_COUNTERS     = 24, /* show counters              */
+  CMD_SHOW_PUBTYPE      = 25, /* show pubtype               */
+  CMD_SHOW_INBOX        = 26, /* show inbox                 */
+  CMD_SHOW_LOSS         = 27, /* show loss                  */
+  CMD_SHOW_SKEW         = 28, /* show skew                  */
+  CMD_SHOW_REACHABLE    = 29, /* show reachable             */
+  CMD_SHOW_TREE         = 30, /* show tree [U]              */
+  CMD_SHOW_PATH         = 31, /* show path [N]              */
+  CMD_SHOW_FORWARD      = 32, /* show forward [N]           */
+  CMD_SHOW_FDS          = 33, /* show fds                   */
+  CMD_SHOW_BUFFERS      = 34, /* show buffers               */
+  CMD_SHOW_WINDOWS      = 35, /* show windows               */
+  CMD_SHOW_BLOOMS       = 36, /* show blooms [N]            */
+  CMD_SHOW_MATCH        = 37, /* show match  S              */
+  CMD_SHOW_GRAPH        = 38, /* show graph                 */
+  CMD_SHOW_CACHE        = 39, /* show cache                 */
+  CMD_SHOW_POLL         = 40, /* show poll                  */
+  CMD_SHOW_RUN          = 41, /* show running               */
+  CMD_SHOW_RUN_TPORTS   = 42, /* show running transport [T] */
+  CMD_SHOW_RUN_SVCS     = 43, /* show running service [S]   */
+  CMD_SHOW_RUN_USERS    = 44, /* show running user [U]      */
+  CMD_SHOW_RUN_GROUPS   = 45, /* show running group [G]     */
+  CMD_SHOW_RUN_PARAM    = 46, /* show running parameter [P] */
+  CMD_SHOW_START        = 47, /* show startup               */
+  CMD_SHOW_START_TPORTS = 48, /* show startup transport [T] */
+  CMD_SHOW_START_SVCS   = 49, /* show startup service [S]   */
+  CMD_SHOW_START_USERS  = 50, /* show startup user [U]      */
+  CMD_SHOW_START_GROUPS = 51, /* show startup group [G]     */
+  CMD_SHOW_START_PARAM  = 52, /* show startup parameter [P] */
+  CMD_CONNECT           = 53, /* connect [T]                */
+  CMD_LISTEN            = 54, /* listen [T]                 */
+  CMD_SHUTDOWN          = 55, /* shutdown [T]               */
+  CMD_NETWORK           = 56, /* network svc network        */
+  CMD_CONFIGURE         = 57, /* configure                  */
+  CMD_CONFIGURE_TPORT   = 58, /* configure transport T      */
+  CMD_CONFIGURE_PARAM   = 59, /* configure parameter P V    */
+  CMD_SAVE              = 60, /* save                       */
+  CMD_SUB_START         = 61, /* sub subject [file]         */
+  CMD_SUB_STOP          = 62, /* unsub subject [file]       */
+  CMD_PSUB_START        = 63, /* psub rv-wildcard [file]    */
+  CMD_PSUB_STOP         = 64, /* punsub rv-wildcard [file]  */
+  CMD_GSUB_START        = 65, /* gsub glob-wildcard [file]  */
+  CMD_GSUB_STOP         = 66, /* gunsub glob-wildcard [file]*/
+  CMD_PUBLISH           = 67, /* pub subject msg            */
+  CMD_TRACE             = 68, /* trace subject msg          */
+  CMD_PUB_ACK           = 69, /* ack subject msg            */
+  CMD_RPC               = 70, /* rpc subject msg            */
+  CMD_ANY               = 71, /* any subject msg            */
+  CMD_RESEED            = 72, /* reseed bloom filters       */
+  CMD_DEBUG             = 73, /* debug ival                 */
+  CMD_CANCEL            = 74, /* cancel                     */
+  CMD_MUTE_LOG          = 75, /* mute                       */
+  CMD_UNMUTE_LOG        = 76, /* unmute                     */
+  CMD_WEVENTS           = 77, /* write events to file       */
+  CMD_DIE               = 78, /* die, exit 1                */
+  CMD_QUIT              = 79, /* quit/exit                  */
 
 #define CMD_TPORT_BASE ( (int) CMD_QUIT + 1 )
   CMD_TPORT_ENUM /* config_const.h */
@@ -837,37 +847,42 @@ struct ConsoleCmdType {
 
 #ifdef IMPORT_CONSOLE_CMDS
 static const ConsoleCmdType command_type[] = {
-  { CMD_PING            , PEER_ARG   }, /* ping peers */
-  { CMD_TPING           , PEER_ARG   }, /* tping peers */
-  { CMD_REMOTE          , PEER_ARG   }, /* remote peers <cmd> */
-  { CMD_CONNECT         , TPORT_ARG  }, /* connect <tport> */
-  { CMD_LISTEN          , TPORT_ARG  }, /* listen <tport> */
-  { CMD_SHUTDOWN        , TPORT_ARG  }, /* shutdown <tport> */
-  { CMD_CONFIGURE_TPORT , TPORT_ARG  }, /* configure transport <tport> */
-  { CMD_CONFIGURE_PARAM , PARM_ARG   }, /* configure parameter <parm> */
-  { CMD_SUB_START       , SUB_ARG    }, /* subscribe <subject> [file] */
-  { CMD_SUB_STOP        , SUB_ARG    }, /* unsubscribe <subject> [file] */
-  { CMD_PSUB_START      , SUB_ARG    }, /* psubscribe <rv-pattern> [file] */
-  { CMD_PSUB_STOP       , SUB_ARG    }, /* punsubscribe <rv-pattern> [file] */
-  { CMD_GSUB_START      , SUB_ARG    }, /* gsubscribe <glob-pattern> [file] */
-  { CMD_GSUB_STOP       , SUB_ARG    }, /* gunsubscribe <glob-pattern> [file] */
-  { CMD_PUBLISH         , PUB_ARG    }, /* pub <subject> message */
-  { CMD_TRACE           , PUB_ARG    }, /* trace <subject> message */
-  { CMD_PUB_ACK         , PUB_ARG    }, /* ack <subject> message */
-  { CMD_RPC             , PUB_ARG    }, /* rpc <subject> message */
-  { CMD_ANY             , PUB_ARG    }, /* any <subject> message */
-  { CMD_SHOW_SUBS       , PEER_ARG   }, /* request sub tables */
-  { CMD_SHOW_PORTS      , TPORT_ARG  }, /* show ports tport */
-  { CMD_SHOW_COST       , TPORT_ARG  }, /* show cost tport */
-  { CMD_SHOW_STATUS     , TPORT_ARG  }, /* show status tport */
-  { CMD_SHOW_TPORTS     , TPORT_ARG  }, /* show tport config */
-  { CMD_SHOW_USERS      , PEER_ARG   }, /* show user concig */
-  { CMD_SHOW_TREE       , PEER_ARG   }, /* show tree */
-  { CMD_SHOW_RUN_TPORTS , TPORT_ARG  }, /* show running transport <tport> */
-  { CMD_SHOW_RUN_SVCS   , SVC_ARG    }, /* show running service <svc> */
-  { CMD_SHOW_RUN_USERS  , USER_ARG   }, /* show running user <user> */
-  { CMD_SHOW_RUN_GROUPS , GRP_ARG    }, /* show running group <grp> */
-  { CMD_SHOW_RUN_PARAM  , PARM_ARG   }  /* show running parameter <parm> */
+  { CMD_PING              , PEER_ARG   }, /* ping peers */
+  { CMD_TPING             , PEER_ARG   }, /* tping peers */
+  { CMD_REMOTE            , PEER_ARG   }, /* remote peers <cmd> */
+  { CMD_CONNECT           , TPORT_ARG  }, /* connect <tport> */
+  { CMD_LISTEN            , TPORT_ARG  }, /* listen <tport> */
+  { CMD_SHUTDOWN          , TPORT_ARG  }, /* shutdown <tport> */
+  { CMD_CONFIGURE_TPORT   , TPORT_ARG  }, /* configure transport <tport> */
+  { CMD_CONFIGURE_PARAM   , PARM_ARG   }, /* configure parameter <parm> */
+  { CMD_SUB_START         , SUB_ARG    }, /* subscribe <subject> [file] */
+  { CMD_SUB_STOP          , SUB_ARG    }, /* unsubscribe <subject> [file] */
+  { CMD_PSUB_START        , SUB_ARG    }, /* psubscribe <rv-pattern> [file] */
+  { CMD_PSUB_STOP         , SUB_ARG    }, /* punsubscribe <rv-pattern> [file] */
+  { CMD_GSUB_START        , SUB_ARG    }, /* gsubscribe <glob-pattern> [file] */
+  { CMD_GSUB_STOP         , SUB_ARG    }, /* gunsubscribe <glob-pattern> [file] */
+  { CMD_PUBLISH           , PUB_ARG    }, /* pub <subject> message */
+  { CMD_TRACE             , PUB_ARG    }, /* trace <subject> message */
+  { CMD_PUB_ACK           , PUB_ARG    }, /* ack <subject> message */
+  { CMD_RPC               , PUB_ARG    }, /* rpc <subject> message */
+  { CMD_ANY               , PUB_ARG    }, /* any <subject> message */
+  { CMD_SHOW_SUBS         , PEER_ARG   }, /* request sub tables */
+  { CMD_SHOW_PORTS        , TPORT_ARG  }, /* show ports tport */
+  { CMD_SHOW_COST         , TPORT_ARG  }, /* show cost tport */
+  { CMD_SHOW_STATUS       , TPORT_ARG  }, /* show status tport */
+  { CMD_SHOW_TPORTS       , TPORT_ARG  }, /* show tport config */
+  { CMD_SHOW_USERS        , PEER_ARG   }, /* show user concig */
+  { CMD_SHOW_TREE         , PEER_ARG   }, /* show tree */
+  { CMD_SHOW_RUN_TPORTS   , TPORT_ARG  }, /* show running transport <tport> */
+  { CMD_SHOW_RUN_SVCS     , SVC_ARG    }, /* show running service <svc> */
+  { CMD_SHOW_RUN_USERS    , USER_ARG   }, /* show running user <user> */
+  { CMD_SHOW_RUN_GROUPS   , GRP_ARG    }, /* show running group <grp> */
+  { CMD_SHOW_RUN_PARAM    , PARM_ARG   }, /* show running parameter <parm> */
+  { CMD_SHOW_START_TPORTS , TPORT_ARG  }, /* show startup transport <tport> */
+  { CMD_SHOW_START_SVCS   , SVC_ARG    }, /* show startup service <svc> */
+  { CMD_SHOW_START_USERS  , USER_ARG   }, /* show startup user <user> */
+  { CMD_SHOW_START_GROUPS , GRP_ARG    }, /* show startup group <grp> */
+  { CMD_SHOW_START_PARAM  , PARM_ARG   }  /* show startup parameter <parm> */
 };
 #define ASZ( A ) ( sizeof( A ) / sizeof( A[ 0 ] ) )
 static const size_t num_command_types = ASZ( command_type );
@@ -949,16 +964,17 @@ static const ConsoleCmdString show_cmd[] = {
   { CMD_SHOW_GRAPH     , "graph"         ,0,0}, /* show graph */
   { CMD_SHOW_CACHE     , "cache"         ,0,0}, /* show cache */
   { CMD_SHOW_POLL      , "poll"          ,0,0}, /* show poll */
-  { CMD_SHOW_RUN       , "running"       ,0,0}  /* show running */
+  { CMD_SHOW_RUN       , "running"       ,0,0}, /* show running */
+  { CMD_SHOW_START     , "startup"       ,0,0}  /* show startup */
 };
 static const size_t num_show_cmds = ASZ( show_cmd );
 
 static const ConsoleCmdString run_cmd[] = {
-  { CMD_SHOW_RUN_TPORTS , "transports" ,0,0}, /* config sections */
-  { CMD_SHOW_RUN_SVCS   , "services"   ,0,0},
-  { CMD_SHOW_RUN_USERS  , "users"      ,0,0},
-  { CMD_SHOW_RUN_GROUPS , "groups"     ,0,0},
-  { CMD_SHOW_RUN_PARAM  , "parameters" ,0,0}
+  { CMD_SHOW_RUN_TPORTS   , "transports" ,0,0}, /* config sections */
+  { CMD_SHOW_RUN_SVCS     , "services"   ,0,0},
+  { CMD_SHOW_RUN_USERS    , "users"      ,0,0},
+  { CMD_SHOW_RUN_GROUPS   , "groups"     ,0,0},
+  { CMD_SHOW_RUN_PARAM    , "parameters" ,0,0}
 };
 static const size_t num_run_cmds = ASZ( run_cmd );
 
@@ -1018,6 +1034,12 @@ static const ConsoleCmdString help_cmd[] = {
   { CMD_SHOW_RUN_USERS   , "show running user","[U]",      "Show users running config, U or all"     },
   { CMD_SHOW_RUN_GROUPS  , "show running group","[G]",     "Show groups running config, G or all"    },
   { CMD_SHOW_RUN_PARAM   , "show running parameter","[P]", "Show parameters running config, P or all"},
+  { CMD_SHOW_START       , "show startup", "",   "Show startup config"                               },
+  { CMD_SHOW_START_TPORTS, "show startup transport","[T]", "Show transports startup, T or all"       },
+  { CMD_SHOW_START_SVCS  , "show startup service","[S]",   "Show services startup config, S or all"  },
+  { CMD_SHOW_START_USERS , "show startup user","[U]",      "Show users startup config, U or all"     },
+  { CMD_SHOW_START_GROUPS, "show startup group","[G]",     "Show groups startup config, G or all"    },
+  { CMD_SHOW_START_PARAM , "show startup parameter","[P]", "Show parameters startup config, P or all"},
   { CMD_SUB_START        , "sub","[S] [F]",      "Subscribe subject S, output to file F"             },
   { CMD_SUB_STOP         , "unsub","[S] [F]",    "Unsubscribe subject S, stop output file F"         },
   { CMD_PSUB_START       , "psub","[W] [F]",     "Subscribe rv-wildcard W, output to file F"         },

@@ -51,10 +51,10 @@ ConsoleRoute::ConsoleRoute( EvPoll &p,  SessionMgr &m ) noexcept
 
 SessionMgr::SessionMgr( EvPoll &p,  Logger &l,  ConfigTree &c,
                         ConfigTree::User &u,  ConfigTree::Service &s,
-                        StringTab &st ) noexcept
+                        StringTab &st,  ConfigStartup &start ) noexcept
            : EvSocket( p, p.register_type( "session_mgr" ) ),
              ipc_rt( p, *this ), console_rt( p, *this ),
-             tree( c ), user( u ), svc( s ), timer_id( 0 ),
+             tree( c ), user( u ), svc( s ), startup( start ), timer_id( 0 ),
              timer_mono_time( 0 ), timer_time( 0 ),
              timer_converge_time( 0 ), converge_seqno( 0 ),
              timer_start_mono( 0 ), timer_start( 0 ), timer_ival( 0 ),

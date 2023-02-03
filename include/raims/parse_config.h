@@ -41,14 +41,16 @@ struct ConfigDB {
     return str.id == this->star_id;
   }
 #endif
-  template<class Obj> /* node constructor, puts nodes in mem */
-  Obj *make( void ) {
-    return new ( this->mem.make( sizeof( Obj ) ) ) Obj();
+  template<class Obj, class... Ts> /* node constructor, puts nodes in mem */
+  Obj *make( Ts... args ) {
+    return new ( this->mem.make( sizeof( Obj ) ) ) Obj( args... );
   }
 
-  static ConfigTree * parse_dir( const char *dir_name, StringTab &st,
+  static ConfigTree * parse_tree( const char *cfg_name,  StringTab &st,
+                                  ConfigPrinter &err ) noexcept;
+  static ConfigTree * parse_dir( const char *dir_name,  StringTab &st,
                                  ConfigPrinter &err ) noexcept;
-  static ConfigTree * parse_jsfile( const char *fn, StringTab &st,
+  static ConfigTree * parse_jsfile( const char *fn,  StringTab &st,
                                     ConfigPrinter &err ) noexcept;
   int parse_glob( const char *fn,  uint32_t &match ) noexcept;
   int parse_file( const char *fn ) noexcept;

@@ -240,6 +240,7 @@ struct SessionMgr : public kv::EvSocket, public kv::BPData {
   ConfigTree          & tree;           /* config db */
   ConfigTree::User    & user;           /* my user */
   ConfigTree::Service & svc;            /* this transport */
+  ConfigStartup       & startup;        /* the startup config */
   UScoreTab             u_tab;          /* table of _subscriptions */
   uint64_t              next_timer,     /* session start gets a timer_id */
                         timer_id,       /* timer_id for this session */
@@ -281,7 +282,7 @@ struct SessionMgr : public kv::EvSocket, public kv::BPData {
 
   SessionMgr( kv::EvPoll &p,  kv::Logger &l,  ConfigTree &c,
               ConfigTree::User &u,  ConfigTree::Service &s,
-              StringTab &st ) noexcept;
+              StringTab &st,  ConfigStartup &start ) noexcept;
   int init_sock( void ) noexcept;
   bool init_param( void ) noexcept;
   bool add_transport( ConfigTree::Transport &t,  bool is_listener ) noexcept;

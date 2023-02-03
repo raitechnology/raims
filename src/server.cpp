@@ -38,8 +38,8 @@ struct MySessionMgr : public SessionMgr, public SubOnMsg {
   EvTerminal * term;
   MySessionMgr( EvPoll &p,  Logger &l,  ConfigTree &c,
                 ConfigTree::User &u,  ConfigTree::Service &s,
-                StringTab &st )
-    : SessionMgr( p, l, c, u, s, st ), term( 0 ) {}
+                StringTab &st,  ConfigStartup &sup )
+    : SessionMgr( p, l, c, u, s, st, sup ), term( 0 ) {}
 };
 
 static const char *
@@ -238,16 +238,15 @@ main( int argc, char *argv[] )
   }
   MDMsgMem         mem;
   StringTab        st( mem );
+  ConfigStartup    startup( st );
   ConfigErrPrinter err;
   ConfigTree     * tree;
   CryptPass        pwd;
-  os_stat          stbuf;
   bool             conn;
 
-  if ( os_fstat( cfg, &stbuf ) < 0 || ( stbuf.st_mode & S_IFDIR ) == 0 )
-    tree = ConfigDB::parse_jsfile( cfg, st, err );
-  else
-    tree = ConfigDB::parse_dir( cfg, st, err );
+  tree = ConfigDB::parse_tree( cfg, st, err );
+  if ( tree != NULL )
+    startup.copy( *tree );
   if ( tree == NULL || ! init_pass( tree, pwd, cfg ) )
     return 1;
 
@@ -310,7 +309,7 @@ main( int argc, char *argv[] )
   poll.sub_route.init_shm( shm );
 
   TermCallback cb;
-  MySessionMgr sess( poll, log, *tree, *usr, *svc, st );
+  MySessionMgr sess( poll, log, *tree, *usr, *svc, st, startup );
   EvTerminal   term( poll, cb );
 
   if ( log_file != NULL ) {

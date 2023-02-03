@@ -130,6 +130,24 @@ struct ConfigDB::InodeStack {
 };
 
 ConfigTree *
+ConfigDB::parse_tree( const char *cfg_name,  StringTab &st,
+                      ConfigPrinter &err ) noexcept
+{
+  ConfigTree * tree;
+  os_stat      stbuf;
+  if ( os_fstat( cfg_name, &stbuf ) < 0 || ( stbuf.st_mode & S_IFDIR ) == 0 ) {
+    tree = ConfigDB::parse_jsfile( cfg_name, st, err );
+    if ( tree != NULL ) {
+      st.ref_string( cfg_name, ::strlen( cfg_name ), tree->cfg_name );
+      tree->is_dir = false;
+    }
+  }
+  else
+    tree = ConfigDB::parse_dir( cfg_name, st, err );
+  return tree;
+}
+ 
+ConfigTree *
 ConfigDB::parse_dir( const char *dir_name,  StringTab &st,
                      ConfigPrinter &err ) noexcept
 {
@@ -138,8 +156,10 @@ ConfigDB::parse_dir( const char *dir_name,  StringTab &st,
   n = ::snprintf( path, sizeof( path ), "%s/config.yaml", dir_name );
   if ( n > 0 && (size_t) n < sizeof( path ) ) {
     ConfigTree *tree = parse_jsfile( path, st, err );
-    if ( tree != NULL )
-      st.ref_string( dir_name, ::strlen( dir_name ), tree->dir_name );
+    if ( tree != NULL ) {
+      st.ref_string( dir_name, ::strlen( dir_name ), tree->cfg_name );
+      tree->is_dir = true;
+    }
     return tree;
   }
   fprintf( stderr, "dir_name too long\n" );
@@ -167,6 +187,112 @@ ConfigDB::parse_jsfile( const char *fn,  StringTab &st,
     return NULL;
   }
   return tree;
+}
+
+void
+ConfigStartup::copy( ConfigTree &tree,
+                     ConfigTree::TransportArray *listen,
+                     ConfigTree::TransportArray *connect ) noexcept
+{
+  this->mem.reuse();
+
+  ConfigTree * cp = new ( this->mem.make( sizeof( ConfigTree ) ) ) ConfigTree();
+  ConfigDB     db( *cp, this->mem, NULL, this->str );
+
+  for ( ConfigTree::User *u = tree.users.hd; u != NULL; u = u->next ) {
+    if ( u->user_id < tree.user_cnt ) {
+      ConfigTree::User *u_cp = db.make<ConfigTree::User>( *u );
+      cp->users.push_tl( u_cp );
+    }
+  }
+  for ( ConfigTree::Service *s = tree.services.hd; s != NULL; s = s->next ) {
+    ConfigTree::Service *s_cp = db.make<ConfigTree::Service>( *s );
+    cp->services.push_tl( s_cp );
+    this->copy_pair_list( db, s->users, s_cp->users );
+    this->copy_pair_list( db, s->revoke, s_cp->revoke );
+  }
+  for ( ConfigTree::Transport *t = tree.transports.hd; t != NULL; t = t->next ) {
+    ConfigTree::Transport *t_cp = db.make<ConfigTree::Transport>( *t );
+    cp->transports.push_tl( t_cp );
+    this->copy_pair_list( db, t->route, t_cp->route );
+  }
+  for ( ConfigTree::Group *g = tree.groups.hd; g != NULL; g = g->next ) {
+    ConfigTree::Group *g_cp = db.make<ConfigTree::Group>( *g );
+    cp->groups.push_tl( g_cp );
+    this->copy_string_list( db, g->users, g_cp->users );
+  }
+  for ( ConfigTree::Parameters *p = tree.parameters.hd; p != NULL; p = p->next ) {
+    ConfigTree::Parameters *p_cp = db.make<ConfigTree::Parameters>();
+    if ( listen != NULL || connect != NULL )
+      this->copy_pair_list2( db, p->parms, p_cp->parms );
+    else
+      this->copy_pair_list( db, p->parms, p_cp->parms );
+    if ( p_cp->parms.hd != NULL )
+      cp->parameters.push_tl( p_cp );
+  }
+  if ( listen != NULL || connect != NULL ) {
+    ConfigTree::Parameters *p_cp = db.make<ConfigTree::Parameters>();
+    StringVal listen_sv( R_LISTEN, R_LISTEN_SZ ),
+              connect_sv( R_CONNECT, R_CONNECT_SZ );
+    uint32_t i;
+    cp->parameters.push_tl( p_cp );
+    if ( listen != NULL && listen->count > 0 ) {
+      for ( i = 0; i < listen->count; i++ ) {
+        ConfigTree::StringPair *p =
+          db.make<ConfigTree::StringPair>( listen_sv, listen->ptr[ i ] );
+        p_cp->parms.push_tl( p );
+      }
+    }
+    if ( connect != NULL && connect->count > 0 ) {
+      for ( i = 0; i < connect->count; i++ ) {
+        ConfigTree::StringPair *p =
+          db.make<ConfigTree::StringPair>( connect_sv, connect->ptr[ i ] );
+        p_cp->parms.push_tl( p );
+      }
+    }
+  }
+  cp->user_cnt      = tree.user_cnt;
+  cp->service_cnt   = tree.service_cnt;
+  cp->transport_cnt = tree.transport_cnt;
+  cp->group_cnt     = tree.group_cnt;
+  cp->cfg_name      = tree.cfg_name;
+  cp->is_dir        = tree.is_dir;
+
+  this->tree = cp;
+}
+
+void
+ConfigStartup::copy_pair_list( ConfigDB &db,  const ConfigTree::PairList &list,
+                               ConfigTree::PairList &cp_list ) noexcept
+{
+  for ( const ConfigTree::StringPair *sp = list.hd; sp != NULL; sp = sp->next ) {
+    ConfigTree::StringPair *p = db.make<ConfigTree::StringPair>( *sp );
+    cp_list.push_tl( p );
+  }
+}
+
+void
+ConfigStartup::copy_pair_list2( ConfigDB &db,  const ConfigTree::PairList &list,
+                                ConfigTree::PairList &cp_list ) noexcept
+{
+  for ( const ConfigTree::StringPair *sp = list.hd; sp != NULL; sp = sp->next ) {
+    bool is_startup = ( sp->name.equals( R_LISTEN, R_LISTEN_SZ ) ||
+                        sp->name.equals( R_CONNECT, R_CONNECT_SZ ) );
+    if ( ! is_startup ) {
+      ConfigTree::StringPair *p = db.make<ConfigTree::StringPair>( *sp );
+      cp_list.push_tl( p );
+    }
+  }
+}
+
+void
+ConfigStartup::copy_string_list( ConfigDB &db,  const ConfigTree::StrList &list,
+                                 ConfigTree::StrList &cp_list ) noexcept
+{
+  for ( const ConfigTree::StringList *sl = list.hd; sl != NULL; sl = sl->next ) {
+    ConfigTree::StringList *p = db.make<ConfigTree::StringList>( *sl );
+    cp_list.push_tl( p );
+  }
 }
 
 #ifndef _MSC_VER
@@ -398,12 +524,11 @@ ConfigFilePrinter::~ConfigFilePrinter() noexcept
   this->close();
 }
 
-
-struct ConfigSaver : public ConfigPrinter {
+struct ConfigDirPrinter : public ConfigPrinter {
   const StringVal & dir_name;
   FILE * fp;
-  ConfigSaver( const StringVal &d ) : dir_name( d ), fp( 0 ) {}
-  ~ConfigSaver() {
+  ConfigDirPrinter( const StringVal &d ) : dir_name( d ), fp( 0 ) {}
+  ~ConfigDirPrinter() {
     if ( this->fp != NULL )
       fclose( this->fp );
   }
@@ -412,7 +537,7 @@ struct ConfigSaver : public ConfigPrinter {
 };
 
 int
-ConfigSaver::open( const char *kind,  const StringVal &sv ) noexcept
+ConfigDirPrinter::open( const char *kind,  const StringVal &sv ) noexcept
 {
   const char * sep = "/";
   char path[ 1024 ];
@@ -435,7 +560,7 @@ ConfigSaver::open( const char *kind,  const StringVal &sv ) noexcept
 }
 
 int
-ConfigSaver::printf( const char *fmt,  ... ) noexcept
+ConfigDirPrinter::printf( const char *fmt,  ... ) noexcept
 {
   va_list args;
   va_start( args, fmt );
@@ -447,7 +572,7 @@ ConfigSaver::printf( const char *fmt,  ... ) noexcept
 int
 ConfigTree::save_tport( const ConfigTree::Transport &tport ) const noexcept
 {
-  ConfigSaver out( this->dir_name );
+  ConfigDirPrinter out( this->cfg_name );
   if ( out.open( "tport_", tport.tport ) != 0 )
     return -1;
   tport.print_y( out, 0 );
@@ -458,20 +583,40 @@ int
 ConfigTree::save_parameters( const TransportArray &listen,
                              const TransportArray &connect ) const noexcept
 {
-  ConfigSaver    out( this->dir_name ),
-                 out2( this->dir_name );
-  StringVal      mt;
-  TransportArray mta;
-  int            which;
-  if ( out.open( "param", mt ) != 0 )
-    return -1;
-  which = PRINT_PARAMETERS | PRINT_HDR;
-  this->print_parameters_y( out, which, NULL, 0, mta, mta );
+  if ( this->is_dir ) {
+    ConfigDirPrinter out( this->cfg_name ),
+                     out2( this->cfg_name );
+    StringVal        mt;
+    TransportArray   mta;
+    int              which;
+    if ( out.open( "param", mt ) != 0 )
+      return -1;
+    which = PRINT_PARAMETERS | PRINT_HDR;
+    this->print_parameters_y( out, which, NULL, 0, mta, mta );
 
-  if ( out2.open( "startup", mt ) != 0 )
-    return -1;
-  which = PRINT_STARTUP | PRINT_HDR;
-  this->print_parameters_y( out2, which, NULL, 0, listen, connect );
+    if ( out2.open( "startup", mt ) != 0 )
+      return -1;
+    which = PRINT_STARTUP | PRINT_HDR;
+    this->print_parameters_y( out2, which, NULL, 0, listen, connect );
+  }
+  else {
+    ConfigFilePrinter out;
+    char path_buf[ 1024 ];
+    int which = 0;
+    int n = ::snprintf( path_buf, sizeof( path_buf ), "%.*s.new",
+                        (int) this->cfg_name.len, this->cfg_name.val );
+    if ( n < 0 || (size_t) n >= sizeof( path_buf ) ) {
+      fprintf( stderr, "path too big\n" );
+      return -1;
+    }
+    if ( out.open( path_buf ) != 0 )
+      return -1;
+    this->print_y( out, which, PRINT_ALL | PRINT_EXCLUDE_TEMPORARY |
+                               PRINT_EXCLUDE_STARTUP );
+    which = PRINT_STARTUP | PRINT_HDR;
+    this->print_parameters_y( out, which, NULL, 0, listen, connect );
+    out.close();
+  }
   return 0;
 }
 
@@ -483,7 +628,7 @@ ConfigTree::print_parameters_y( ConfigPrinter &p, int which,
 {
   size_t n;
   int i = ( ( which & PRINT_HDR ) != 0 ? 2 : 0 );
-  int did_which;
+  int did_which = 0;
   this->print_y( p, did_which, which & ~PRINT_STARTUP, name, namelen );
   if ( ( did_which & PRINT_PARAMETERS ) == 0 ) {
     if ( listen.count > 0 || connect.count > 0 )
@@ -495,7 +640,7 @@ ConfigTree::print_parameters_y( ConfigPrinter &p, int which,
       p.printf( "%*slisten:\n", i, "" );
       for ( n = 0; n < listen.count; n++ ) {
         p.printf( "  %*s- ", i, "" );
-        listen.ptr[ n ]->tport.print_y( p );
+        listen.ptr[ n ].print_y( p );
         p.printf( "\n" );
       }
     }
@@ -506,7 +651,7 @@ ConfigTree::print_parameters_y( ConfigPrinter &p, int which,
       p.printf( "%*sconnect:\n", i, "" );
       for ( n = 0; n < connect.count; n++ ) {
         p.printf( "  %*s- ", i, "" );
-        connect.ptr[ n ]->tport.print_y( p );
+        connect.ptr[ n ].print_y( p );
         p.printf( "\n" );
       }
     }
@@ -516,42 +661,55 @@ ConfigTree::print_parameters_y( ConfigPrinter &p, int which,
 bool
 ConfigTree::save_new( void ) const noexcept
 {
-  const char * sep = "/";
-  char path_new[ 1024 ];
   GenFileList ops;
+  char path_buf[ 1024 ];
+  if ( this->is_dir ) {
+    const char * sep = "/";
 
-  if ( this->dir_name.len == 0 )
-    sep = "";
-  int n = ::snprintf( path_new, sizeof( path_new ), "%.*s%s*.yaml.new",
-                      (int) this->dir_name.len, this->dir_name.val, sep );
-  if ( n < 0 || (size_t) n >= sizeof( path_new ) ) {
-    fprintf( stderr, "dir path too big\n" );
-    return false;
+    if ( this->cfg_name.len == 0 )
+      sep = "";
+    int n = ::snprintf( path_buf, sizeof( path_buf ), "%.*s%s*.yaml.new",
+                        (int) this->cfg_name.len, this->cfg_name.val, sep );
+    if ( n < 0 || (size_t) n >= sizeof( path_buf ) ) {
+      fprintf( stderr, "dir path too big\n" );
+      return false;
+    }
+
+    Glob g( path_buf );
+    const char *path;
+    if ( (path = g.first() ) == NULL )
+      return false;
+
+    do {
+      static const char run_file[] = "startup.yaml.new";
+      static const char param_file[] = "param.yaml.new";
+      static size_t run_file_size = sizeof( run_file ) - 1;
+      static size_t param_file_size = sizeof( param_file ) - 1;
+      const char * descr;
+      GenFileTrans * t =
+        GenFileTrans::create_file_path( GEN_CREATE_FILE, path );
+      if ( t->len >= run_file_size &&
+           ::strcmp( &t->path[ t->len - run_file_size ], run_file ) == 0 )
+        descr = "startup config";
+      else if ( t->len >= param_file_size &&
+           ::strcmp( &t->path[ t->len - param_file_size ], param_file ) == 0 )
+        descr = "parameter config";
+      else
+        descr = "transport";
+      GenFileTrans::trans_if_neq( t, descr, ops );
+    } while ( (path = g.next()) != NULL );
   }
-
-  Glob g( path_new );
-  const char *path;
-  if ( (path = g.first() ) == NULL )
-    return false;
-
-  do {
-    static const char run_file[] = "startup.yaml.new";
-    static const char param_file[] = "param.yaml.new";
-    static size_t run_file_size = sizeof( run_file ) - 1;
-    static size_t param_file_size = sizeof( param_file ) - 1;
-    const char * descr;
-    GenFileTrans * t = GenFileTrans::create_file_path( GEN_CREATE_FILE, path );
-    if ( t->len >= run_file_size &&
-         ::strcmp( &t->path[ t->len - run_file_size ], run_file ) == 0 )
-      descr = "startup config";
-    else if ( t->len >= param_file_size &&
-         ::strcmp( &t->path[ t->len - param_file_size ], param_file ) == 0 )
-      descr = "parameter config";
-    else
-      descr = "transport";
-    GenFileTrans::trans_if_neq( t, descr, ops );
-  } while ( (path = g.next()) != NULL );
-
+  else {
+    int n = ::snprintf( path_buf, sizeof( path_buf ), "%.*s.new",
+                        (int) this->cfg_name.len, this->cfg_name.val );
+    if ( n < 0 || (size_t) n >= sizeof( path_buf ) ) {
+      fprintf( stderr, "path too big\n" );
+      return false;
+    }
+    GenFileTrans * t =
+      GenFileTrans::create_file_path( GEN_OVERWRITE_FILE, path_buf );
+    GenFileTrans::trans_if_neq( t, "config file", ops );
+  }
   ops.print_files();
   if ( ops.commit_phase1() ) {
     ops.commit_phase2();
@@ -1542,17 +1700,17 @@ ConfigTree::print_parameters_js( ConfigPrinter &p, int which,
         size_t i;
         if ( listen.count != 0 ) {
           p.printf( "%s    \"listen\" : [\n", nl );
-          p.printf( "      \"%s\"", listen.ptr[ 0 ]->tport.val );
+          p.printf( "      \"%s\"", listen.ptr[ 0 ].val );
           for ( i = 1; i < listen.count; i++ )
-            p.printf( ",\n      \"%s\"", listen.ptr[ i ]->tport.val );
+            p.printf( ",\n      \"%s\"", listen.ptr[ i ].val );
           p.printf( "\n    ]" );
           nl = ",\n";
         }
         if ( connect.count != 0 ) {
           p.printf( "%s    \"connect\" : [\n", nl );
-          p.printf( "      \"%s\"", connect.ptr[ 0 ]->tport.val );
+          p.printf( "      \"%s\"", connect.ptr[ 0 ].val );
           for ( i = 1; i < connect.count; i++ )
-            p.printf( ",\n      \"%s\"", connect.ptr[ i ]->tport.val );
+            p.printf( ",\n      \"%s\"", connect.ptr[ i ].val );
           p.printf( "\n    ]" );
           nl = ",\n";
         }
@@ -1605,12 +1763,18 @@ ConfigTree::print_y( ConfigPrinter &p,  int &did_which,  int which,
   int x = 0;
   if ( ( which & ( PRINT_USERS | PRINT_ALL ) ) != 0 ) {
     const User *u = this->users.hd;
+    const bool exclude_gen_user = ( which & PRINT_EXCLUDE_TEMPORARY ) != 0;
+    if ( exclude_gen_user && u != NULL && u->user_id == this->user_cnt )
+      u = u->next;
     if ( u != NULL || ( which & PRINT_HDR ) ) {
       p.printf( "users:\n" );
       x |= PRINT_USERS;
-      for ( ; u != NULL; u = u->next )
-        if ( namelen == 0 || u->user.equals( name, namelen ) )
-          u->print_y( p, 4 );
+      for ( ; u != NULL; u = u->next ) {
+        if ( namelen == 0 || u->user.equals( name, namelen ) ) {
+          if ( ! exclude_gen_user || u->user_id < this->user_cnt )
+            u->print_y( p, 4 );
+        }
+      }
     }
   }
   if ( ( which & ( PRINT_SERVICES | PRINT_ALL ) ) != 0 ) {
@@ -1679,7 +1843,14 @@ ConfigTree::print_y( ConfigPrinter &p,  int &did_which,  int which,
       for ( ; pa != NULL; pa = pa->next ) {
         const StringPair *sp = pa->parms.hd;
         for ( ; sp != NULL; ) {
-          sp = sp->print_ylist( p, 2 );
+          bool is_startup = ( sp->name.equals( R_LISTEN, R_LISTEN_SZ ) ||
+                              sp->name.equals( R_CONNECT, R_CONNECT_SZ ) );
+          bool matched    = ( ! is_startup ||
+                              ( which & PRINT_EXCLUDE_STARTUP ) == 0 );
+          if ( matched )
+            sp = sp->print_ylist( p, 2 );
+          else
+            sp = sp->next;
         }
       }
     }
