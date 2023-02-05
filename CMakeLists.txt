@@ -157,6 +157,7 @@ link_libraries (raims raids raikv raimd natsmd sassrv decnumber rdbparser lineco
 add_definitions(-DMS_VER=1.19.0-76)
 add_executable (ms_server src/server.cpp)
 add_executable (ms_gen_key src/gen_key.cpp)
+add_executable (ms_test_adj )
 add_executable (kdftest test/kdftest.cpp)
 add_executable (mactest test/mactest.cpp)
 add_executable (polytest test/polytest.cpp)

@@ -474,16 +474,16 @@ $(bind)/aestest: $(aestest_objs) $(aestest_libs) $(lnk_dep)
 all_exes    += $(bind)/aestest
 all_depends += $(aestest_deps)
 
-test_adj_files := test_adj
-test_adj_objs  := $(addprefix $(objd)/, $(addsuffix .o, $(test_adj_files)))
-test_adj_deps  := $(addprefix $(dependd)/, $(addsuffix .d, $(test_adj_files)))
-test_adj_libs  :=
-test_adj_lnk   := $(lnk_lib)
+ms_test_adj_files := test_adj
+ms_test_adj_objs  := $(addprefix $(objd)/, $(addsuffix .o, $(ms_test_adj_files)))
+ms_test_adj_deps  := $(addprefix $(dependd)/, $(addsuffix .d, $(ms_test_adj_files)))
+ms_test_adj_libs  :=
+ms_test_adj_lnk   := $(lnk_lib)
 
-$(bind)/test_adj: $(test_adj_objs) $(test_adj_libs) $(lnk_dep)
+$(bind)/ms_test_adj: $(ms_test_adj_objs) $(ms_test_adj_libs) $(lnk_dep)
 
-all_exes    += $(bind)/test_adj
-all_depends += $(test_adj_deps)
+all_exes    += $(bind)/ms_test_adj
+all_depends += $(ms_test_adj_deps)
 
 parse_config_files := parse_config
 parse_config_cfile := test/parse_config.cpp
@@ -722,6 +722,7 @@ CMakeLists.txt: .copr/Makefile
 	add_definitions(-DMS_VER=$(ver_build))
 	add_executable (ms_server $(ms_server_cfile))
 	add_executable (ms_gen_key $(ms_gen_key_cfile))
+	add_executable (ms_test_adj $(ms_test_adj_cfile))
 	add_executable (kdftest $(kdftest_cfile))
 	add_executable (mactest $(mactest_cfile))
 	add_executable (polytest $(polytest_cfile))
@@ -781,10 +782,11 @@ endif
 endif
 
 .PHONY: dist_bins
-dist_bins: $(all_libs) $(bind)/ms_server $(bind)/ms_gen_key
+dist_bins: $(all_libs) $(bind)/ms_server $(bind)/ms_gen_key $(bind)/ms_test_adj
 	$(remove_rpath) $(libd)/libraims.so
 	$(remove_rpath) $(bind)/ms_server
 	$(remove_rpath) $(bind)/ms_gen_key
+	$(remove_rpath) $(bind)/ms_test_adj
 
 .PHONY: dist_rpm
 dist_rpm: srpm

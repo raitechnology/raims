@@ -7,6 +7,7 @@
 #include <inttypes.h>
 #include <stdarg.h>
 #include <raims/user_db.h>
+#include <raims/user.h>
 #include <raims/debug.h>
 
 using namespace rai;
@@ -595,49 +596,35 @@ AdjDistance::coverage_step( uint8_t path_select ) noexcept
 
   this->path.or_bits( this->path, this->max_uid, this->fwd, this->max_uid );
   this->fwd.zero( this->max_uid );
-  this->links.zero();
+  this->links.count = 0;
 
   for ( ok = this->path.first( uid, this->max_uid ); ok;
         ok = this->path.next( uid, this->max_uid ) ) {
     count = this->adjacency_count( uid );
 
     for ( i = 0; i < count; i++ ) {
-      if ( (set = this->adjacency_set( uid, i )) == NULL )
+      if ( (set = this->adjacency_set( uid, i )) == NULL ||
+           set->clock == this->adjacency_clock )
         continue;
 
-      if ( this->visit[ uid ] + set->cost[ path_select ] < min_cost ) {
+      uint32_t cost = this->visit[ uid ] + set->cost[ path_select ];
+      if ( cost <= min_cost ) {
         this->adj.zero( this->max_uid );
         this->adj.mask_bits( this->path, this->max_uid, *set );
         if ( this->adj.is_empty( this->max_uid ) )
           continue;
 
-        min_cost = this->visit[ uid ] + set->cost[ path_select ];
-        new_edge = true;
+        if ( cost < min_cost ) {
+          this->links.count = 0;
+          min_cost = cost;
+          new_edge = true;
+        }
+        this->push_link( set );
       }
     }
   }
   if ( ! new_edge )
     return 0;
-
-  for ( ok = this->path.first( uid, this->max_uid ); ok;
-        ok = this->path.next( uid, this->max_uid ) ) {
-    count = this->adjacency_count( uid );
-
-    for ( i = 0; i < count; i++ ) {
-      if ( (set = this->adjacency_set( uid, i )) == NULL )
-        continue;
-
-      if ( this->visit[ uid ] + set->cost[ path_select ] == min_cost ) {
-
-        this->adj.zero( this->max_uid );
-        this->adj.mask_bits( this->path, this->max_uid, *set );
-        if ( this->adj.is_empty( this->max_uid ) )
-          continue;
-
-        this->push_link( set );
-      }
-    }
-  }
 
   for ( i = 0; i < this->links.count; i++ ) {
     set = this->links.ptr[ i ];
@@ -860,13 +847,16 @@ AdjDistance::calc_coverage( uint32_t src_uid,  uint8_t path_select ) noexcept
 /* the following describe the network as a text description with the "graph"
  * command */
 bool
-AdjDistance::find_peer_conn( const char *type,  uint32_t uid, uint32_t peer_uid,
+AdjDistance::find_peer_conn( AdjacencySpace &set,  uint32_t uid,
+                             uint32_t peer_uid,
                              uint32_t &peer_conn_id ) noexcept
 {
-  AdjacencySpace * peer_set;
+  AdjacencySpace * peer_set/*,
+                 * weak_equals = NULL*/;
   uint32_t         peer_count,
                    peer_tport_id,
-                   peer_base_id;
+                   peer_base_id/*,
+                   weak_peer_conn_id = 0*/;
 
   peer_count   = this->adjacency_count( peer_uid );
   peer_base_id = peer_uid * this->max_tport_count;
@@ -876,10 +866,23 @@ AdjDistance::find_peer_conn( const char *type,  uint32_t uid, uint32_t peer_uid,
       peer_set = this->adjacency_set( peer_uid, peer_tport_id );
       if ( peer_set == NULL )
         continue;
-      if ( peer_set->tport_type.equals( type ) && peer_set->is_member( uid ) )
-        return true;
+      if ( peer_set->tport_type.equals( set.tport_type ) &&
+           peer_set->is_member( uid ) ) {
+        if ( peer_set->tport.equals( set.tport ) )
+          return true;
+        /* if ports are named differently, use at last resort since we
+         * know the two peers are adjacent
+        if ( weak_equals == NULL ) {
+          weak_equals = peer_set;
+          weak_peer_conn_id = peer_conn_id;
+        } */
+      }
     }
   }
+  /*if ( weak_equals != NULL ) {
+    peer_conn_id = weak_peer_conn_id;
+    return true;
+  }*/
   return false;
 }
 
@@ -915,38 +918,6 @@ AdjDistance::find_peer_set( const char *type,  uint32_t uid,
   return false;
 }
 
-static void
-print_cost( kv::ArrayOutput &out,  AdjacencySpace *set ) noexcept
-{
-  uint8_t i;
-
-  for ( i = 0; i < COST_PATH_COUNT; i++ ) {
-    if ( set->cost[ i ] != COST_DEFAULT )
-      break;
-  }
-  if ( i == COST_PATH_COUNT )
-    return;
-  for ( i = 1; i < COST_PATH_COUNT; i++ ) {
-    if ( set->cost[ i ] != set->cost[ 0 ] )
-      break;
-  }
-  out.s( " : " ).i( set->cost[ 0 ] );
-  if ( i == COST_PATH_COUNT )
-    return;
-
-  for ( i = 2; i < COST_PATH_COUNT; i += 2 ) {
-    if ( set->cost[ i ] != set->cost[ 0 ] ||
-         set->cost[ i+1 ] != set->cost[ 1 ] )
-      break;
-  }
-  out.s( " " ).i( set->cost[ 1 ] );
-  if ( i == COST_PATH_COUNT )
-    return;
-  for ( i = 2; i < COST_PATH_COUNT; i++ ) {
-    out.s( " " ).i( set->cost[ i ] );
-  }
-}
-
 namespace {
 struct UidSort {
   UserBridge * n;
@@ -957,6 +928,123 @@ struct UidSort {
     return x->start_time > y->start_time;
   }
 };
+
+#define T_TCP     "tcp"
+#define T_TCP_SZ  3
+#define T_MESH    "mesh"
+#define T_MESH_SZ 4
+#define T_PGM     "pgm"
+#define T_PGM_SZ  3
+
+static const uint32_t LISTEN = 1, CONNECT = 2;
+struct GraphUserArgs : public kv::ArrayCount<uint32_t, 16> {
+  void add( uint32_t type,  uint32_t uid,  uint32_t off,  uint32_t len ) {
+    this->push( type ); this->push( uid ); this->push( off ); this->push( len );
+  }
+};
+
+struct GraphDescription {
+  kv::ArrayOutput & out;
+  AdjDistance     & dist;
+  GraphUserArgs     args;
+  uint32_t          off, len,
+                    tport_counter;
+  bool              is_cfg;
+
+  GraphDescription( kv::ArrayOutput &o,  AdjDistance & d,  bool cfg )
+    : out( o ), dist( d ), tport_counter( 0 ), is_cfg( cfg ) {}
+  void describe( void ) noexcept;
+
+  void output_tport( AdjacencySpace *set,  const char *kind ) noexcept;
+
+  void print_cost( AdjacencySpace *set ) noexcept;
+
+  void output_uid( uint32_t action,  uint32_t uid ) noexcept;
+};
+}
+
+void
+AdjDistance::message_graph_config( kv::ArrayOutput &out,
+                                   const char *cfg_name ) noexcept
+{
+  char g_name[ 256 ];
+  GraphDescription descr( out, *this, true );
+
+  if ( cfg_name == NULL )
+    ::strcpy( g_name, "graph" );
+  else {
+    const char *start, *end;
+    if ( (start = ::strrchr( cfg_name, '/' )) == NULL )
+      start = cfg_name;
+    else
+      start++;
+    if ( (end = ::strrchr( cfg_name, '.' )) == NULL )
+      end = &cfg_name[ ::strlen( cfg_name ) ];
+    size_t len = end - start;
+    if ( len > sizeof( g_name ) )
+      len = sizeof( g_name ) - 1;
+    ::memcpy( g_name, start, len );
+    g_name[ len ] = '\0';
+  }
+
+  rai::ms::CryptPass  pass;
+  rai::ms::ServiceBuf svc;
+  void * salt;
+  size_t salt_len;
+  salt = pass.gen_salt( salt_len );
+  rai::ms::init_kdf( salt, salt_len );
+  pass.gen_pass();
+  svc.gen_key( g_name, ::strlen( g_name ), pass );
+  out.s( "services:\n"
+         "  - svc: " ).s( g_name ).s( "\n" )
+     .s( "    create: " ).s( svc.create ).s( "\n" )
+     .s( "    pri: " ).s( svc.pri ).s( "\n" )
+     .s( "    pub: " ).s( svc.pub ).s( "\n" )
+     .s( "parameters:\n" )
+     .s( "  salt_data: " ).s( (char *) salt ).s( "\n" )
+     .s( "  pass_data: " ).s( (char *) pass.pass ).s( "\n" )
+     .s( "transports:\n" );
+  descr.describe();
+
+  for ( uint32_t current_uid = 0; current_uid < this->max_uid; current_uid++ ) {
+    for ( uint32_t i = 0; i < descr.args.count; i += 4 ) {
+      uint32_t uid  = descr.args.ptr[ i + 1 ];
+      if ( uid != current_uid )
+        continue;
+      uint32_t type = descr.args.ptr[ i ],
+               off  = descr.args.ptr[ i + 2 ],
+               len  = descr.args.ptr[ i + 3 ];
+      char name[ 256 ];
+      if ( len >= sizeof( name ) )
+        len = sizeof( name ) - 1;
+      ::memcpy( name, &out.ptr[ off ], len );
+      name[ len ] = '\0';
+      const char * user = descr.dist.uid_user( uid );
+
+      out.s( "# ms_server -d " ).s( g_name ).s( ".yaml -u " ).s( user )
+         .s( " -t " ).s( name ).s( "." )
+         .s( type == CONNECT ? "connect" : "listen" );
+
+      for ( uint32_t j = 0; j < descr.args.count; j += 4 ) {
+        if ( i == j )
+          continue;
+        uint32_t next_uid  = descr.args.ptr[ j + 1 ];
+        if ( next_uid != uid )
+          continue;
+        type = descr.args.ptr[ j ],
+        off  = descr.args.ptr[ j + 2 ],
+        len  = descr.args.ptr[ j + 3 ];
+        if ( len >= sizeof( name ) )
+          len = sizeof( name ) - 1;
+        ::memcpy( name, &out.ptr[ off ], len );
+        name[ len ] = '\0';
+        out.s( " " ).s( name ).s( "." )
+           .s( type == CONNECT ? "connect" : "listen" );
+      }
+      out.s( "\n" );
+      break;
+    }
+  }
 }
 
 void
@@ -964,24 +1052,12 @@ AdjDistance::message_graph_description( kv::ArrayOutput &out ) noexcept
 {
   kv::ArrayCount<UidSort, 16> uid_start;
   kv::PrioQueue<UidSort *, UidSort::is_older> uid_sort;
-  kv::ArrayCount<uint32_t, 16> peer_conn;
-  UserBridge     * n;
-  AdjacencySpace * set;
-  uint32_t         count,
-                   tport_id,
-                   conn_id,
-                   peer_conn_id,
-                   uid,
-                   peer_uid,
-                   mesh_uid;
-  bool             ok;
-
-  this->clear_cache_if_dirty();
+  UserBridge * n;
 
   out.s( "start " ).s( this->user_db.user.user.val ).s( "\n" );
 
   uid_start.push( UidSort( NULL, this->user_db.start_time ) );
-  for ( uid = 1; uid < this->max_uid; uid++ ) {
+  for ( uint32_t uid = 1; uid < this->max_uid; uid++ ) {
     n = this->user_db.bridge_tab.ptr[ uid ];
     if ( n == NULL || ! n->is_set( AUTHENTICATED_STATE ) )
       continue;
@@ -1003,108 +1079,214 @@ AdjDistance::message_graph_description( kv::ArrayOutput &out ) noexcept
     out.s( " " );
     if ( n == NULL )
       out.s( this->user_db.user.user.val );
-    else {
-      count = this->adjacency_count( n->uid );
-      if ( count > this->max_tport_count )
-        this->max_tport_count = count;
+    else
       out.s( n->peer.user.val );
-    }
   }
   out.s( "\n" );
 
-  this->graph_used.zero();
-  for ( uid = 0; uid < this->max_uid; uid++ ) {
-    count = this->adjacency_count( uid );
+  GraphDescription descr( out, *this, false );
+  descr.describe();
+}
+
+void
+GraphDescription::output_tport( AdjacencySpace *set,  const char *kind ) noexcept
+{
+  if ( this->is_cfg ) {
+    this->out.s( "  - tport: " );
+    this->off = this->out.count;
+    uint32_t kind_len = ::strlen( kind );
+    if ( set->tport.len != 0 && ( kind_len != set->tport.len ||
+         ::memcmp( set->tport.val, kind, kind_len ) != 0 ) ) {
+      this->out.s( set->tport.val );
+    }
+    else {
+      this->out.s( kind ).s("_").u( this->tport_counter );
+    }
+    this->tport_counter++;
+    this->len = this->out.count - this->off;
+    this->out.s( "\n    type: " ).s( kind ).s( "\n" ).s(
+                   "    route:\n"
+                   "      device: 127.0.0.1\n" );
+  }
+  else {
+    if ( set->tport.len != 0 )
+      out.s( kind ).s( "_" ).s( set->tport.val );
+    else
+      out.s( kind );
+  }
+}
+
+void
+GraphDescription::print_cost( AdjacencySpace *set ) noexcept
+{
+  uint8_t i;
+  /* output : cost cost cost cost, when graph == true
+   * output    cost: [cost, cost, cost, cost], when graph == false */
+  for ( i = 0; i < COST_PATH_COUNT; i++ ) {
+    if ( set->cost[ i ] != COST_DEFAULT )
+      break;
+  }
+  if ( i == COST_PATH_COUNT ) { /* no cost */
+    if ( ! this->is_cfg )
+      this->out.s( "\n" );
+    return;
+  }
+  for ( i = 1; i < COST_PATH_COUNT; i++ ) {
+    if ( set->cost[ i ] != set->cost[ 0 ] )
+      break;
+  }
+  const char * prefix = "      cost: [ ";
+  bool has_one_cost = false;
+  if ( i == COST_PATH_COUNT ) {
+    prefix = "      cost: ";
+    has_one_cost = true;
+  }
+  this->out.s( this->is_cfg ? prefix : " : " ).i( set->cost[ 0 ] );
+  if ( i == COST_PATH_COUNT )
+    goto done;
+  for ( i = 2; i < COST_PATH_COUNT; i += 2 ) {
+    if ( set->cost[ i ] != set->cost[ 0 ] ||
+         set->cost[ i+1 ] != set->cost[ 1 ] )
+      break;
+  }
+  this->out.s( this->is_cfg ? ", " : " " ).i( set->cost[ 1 ] );
+  if ( i == COST_PATH_COUNT )
+    goto done;
+  for ( i = 2; i < COST_PATH_COUNT; i++ ) {
+    this->out.s( this->is_cfg ? ", " : " " ).i( set->cost[ i ] );
+  }
+done:;
+  if ( this->is_cfg && ! has_one_cost )
+    this->out.s( " ]" );
+  this->out.s( "\n" );
+  return;
+}
+
+void
+GraphDescription::output_uid( uint32_t action,  uint32_t uid ) noexcept
+{
+  if ( this->is_cfg )
+    this->args.add( action, uid, this->off, this->len );
+  else
+    this->out.s( " " ).s( this->dist.uid_user( uid ) );
+}
+
+void
+GraphDescription::describe( void ) noexcept
+{
+  kv::ArrayCount<uint32_t, 16> peer_conn;
+  UserBridge     * n;
+  AdjacencySpace * set;
+  uint32_t         count,
+                   tport_id,
+                   conn_id,
+                   peer_conn_id,
+                   uid,
+                   peer_uid,
+                   mesh_uid,
+                   max_uid;
+  bool             ok;
+
+  this->dist.clear_cache_if_dirty();
+  this->dist.max_tport_count = this->dist.adjacency_count( 0 );
+  max_uid = this->dist.max_uid;
+
+  for ( uid = 1; uid < max_uid; uid++ ) {
+    n = this->dist.user_db.bridge_tab.ptr[ uid ];
+    if ( n == NULL || ! n->is_set( AUTHENTICATED_STATE ) )
+      continue;
+    count = this->dist.adjacency_count( n->uid );
+    if ( count > this->dist.max_tport_count )
+      this->dist.max_tport_count = count;
+  }
+
+  kv::BitSpace & graph_used = this->dist.graph_used;
+  kv::BitSpace & graph_mesh = this->dist.graph_mesh;
+  graph_used.zero();
+  for ( uid = 0; uid < max_uid; uid++ ) {
+    count = this->dist.adjacency_count( uid );
     for ( tport_id = 0; tport_id < count; tport_id++ ) {
-      set = this->adjacency_set( uid, tport_id );
+      set = this->dist.adjacency_set( uid, tport_id );
       if ( set == NULL )
         continue;
 
-      conn_id = uid * this->max_tport_count + tport_id;
-      if ( this->graph_used.test_set( conn_id ) )
+      conn_id = uid * this->dist.max_tport_count + tport_id;
+      if ( graph_used.test_set( conn_id ) )
         continue;
-#define T_TCP "tcp"
-#define T_TCP_SZ 3
+
       if ( set->tport_type.equals( T_TCP, T_TCP_SZ ) ) {
         if ( set->first( peer_uid ) ) {
-          if ( this->find_peer_conn( T_TCP, uid, peer_uid, peer_conn_id ) ) {
-            this->graph_used.add( peer_conn_id );
+          if ( this->dist.find_peer_conn( *set, uid, peer_uid, peer_conn_id ) ) {
+            uint32_t t_uid;
+            graph_used.add( peer_conn_id );
 
-            if ( set->tport.len != 0 )
-              out.s( T_TCP ).s( "_" ).s( set->tport.val ).s( " " );
+            if ( this->dist.get_start_time( uid ) < 
+                 this->dist.get_start_time( peer_uid ) )
+              t_uid = LISTEN;
             else
-              out.s( T_TCP ).s( " " );
-            out.s( this->uid_user( uid ) )
-               .s( " " )
-               .s( this->uid_user( peer_uid ) );
-            print_cost( out, set );
-            out.s( "\n" );
+              t_uid = CONNECT;
+            this->output_tport( set, T_TCP );
+            this->output_uid( t_uid, uid );
+            this->output_uid( t_uid == CONNECT ? LISTEN : CONNECT, peer_uid );
+            this->print_cost( set );
           }
         }
         continue;
       }
-#define T_MESH "mesh"
-#define T_MESH_SZ 4
+
       if ( set->tport_type.equals( T_MESH, T_MESH_SZ ) ) {
         if ( set->first( peer_uid ) ) {
-          if ( this->find_peer_conn( T_MESH, uid, peer_uid, peer_conn_id ) ) {
-            this->graph_used.add( peer_conn_id );
-            this->graph_mesh.zero();
-            this->graph_mesh.add( uid );
-            this->graph_mesh.add( peer_uid );
-            for ( peer_uid = 0; peer_uid < this->max_uid; peer_uid++ ) {
-              if ( ! this->graph_mesh.is_member( peer_uid ) ) {
+          if ( this->dist.find_peer_conn( *set, uid, peer_uid, peer_conn_id ) ) {
+            graph_used.add( peer_conn_id );
+            graph_mesh.zero();
+            graph_mesh.add( uid );
+            graph_mesh.add( peer_uid );
+            for ( peer_uid = 0; peer_uid < max_uid; peer_uid++ ) {
+              if ( ! graph_mesh.is_member( peer_uid ) ) {
                 peer_conn.count = 0;
-                for ( ok = this->graph_mesh.first( mesh_uid ); ok;
-                      ok = this->graph_mesh.next( mesh_uid ) ) {
-                  if ( ! this->find_peer_conn( T_MESH, mesh_uid, peer_uid,
-                                               peer_conn_id ) )
+                for ( ok = graph_mesh.first( mesh_uid ); ok;
+                      ok = graph_mesh.next( mesh_uid ) ) {
+                  if ( ! this->dist.find_peer_conn( *set, mesh_uid, peer_uid,
+                                                    peer_conn_id ) )
                     goto not_mesh_a_member;
                   peer_conn.push( peer_conn_id );
                 }
-                for ( ok = this->graph_mesh.first( mesh_uid ); ok;
-                      ok = this->graph_mesh.next( mesh_uid ) ) {
-                  if ( this->find_peer_conn( T_MESH, peer_uid, mesh_uid,
-                                              peer_conn_id ) )
+                for ( ok = graph_mesh.first( mesh_uid ); ok;
+                      ok = graph_mesh.next( mesh_uid ) ) {
+                  if ( this->dist.find_peer_conn( *set, peer_uid, mesh_uid,
+                                                  peer_conn_id ) )
                     peer_conn.push( peer_conn_id );
                 }
-                this->graph_mesh.add( peer_uid );
-                this->graph_used.add( peer_conn.ptr, peer_conn.count );
+                graph_mesh.add( peer_uid );
+                graph_used.add( peer_conn.ptr, peer_conn.count );
               }
             not_mesh_a_member:;
             }
-            if ( set->tport.len != 0 )
-              out.s( T_MESH ).s( "_" ).s( set->tport.val );
-            else
-              out.s( T_MESH );
-            for ( ok = this->graph_mesh.first( peer_uid ); ok;
-                  ok = this->graph_mesh.next( peer_uid ) ) {
-              out.s( " " ).s( this->uid_user( peer_uid ) );
+            this->output_tport( set, T_MESH );
+
+            for ( ok = graph_mesh.first( peer_uid ); ok;
+                  ok = graph_mesh.next( peer_uid ) ) {
+              this->output_uid( CONNECT, peer_uid );
             }
-            print_cost( out, set );
-            out.s( "\n" );
+            this->print_cost( set );
           }
         }
         continue;
       }
-#define T_PGM "pgm"
-#define T_PGM_SZ 3
+
       if ( set->tport_type.equals( T_PGM, T_PGM_SZ ) ) {
-        if ( set->tport.len != 0 )
-          out.s( T_PGM ).s( "_" ).s( set->tport.val );
-        else
-          out.s( T_PGM );
-        out.s( " " ).s( this->uid_user( uid ) );
-        for ( ok = set->first( peer_uid ); ok; ok = set->next( peer_uid ) ) {
-          out.s( " " ).s( this->uid_user( peer_uid ) );
-        }
-        print_cost( out, set );
-        out.s( "\n" );
+        this->output_tport( set, T_PGM );
+        this->output_uid( CONNECT, uid );
 
         for ( ok = set->first( peer_uid ); ok; ok = set->next( peer_uid ) ) {
-          if ( this->find_peer_set( T_PGM, uid, *set, peer_uid,
-                                    peer_conn_id ) )
-            this->graph_used.add( peer_conn_id );
+          this->output_uid( CONNECT, peer_uid );
+        }
+        this->print_cost( set );
+
+        for ( ok = set->first( peer_uid ); ok; ok = set->next( peer_uid ) ) {
+          if ( this->dist.find_peer_set( T_PGM, uid, *set, peer_uid,
+                                         peer_conn_id ) )
+            graph_used.add( peer_conn_id );
         }
       }
       continue;

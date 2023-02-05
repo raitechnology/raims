@@ -9,6 +9,7 @@
 #include <raikv/os_file.h>
 #include <raikv/prio_queue.h>
 #include <raims/string_tab.h>
+#include <raims/user.h>
 
 #define MS_NAMESPACE test_ms
 #define NO_MS_HEADERS

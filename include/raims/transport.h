@@ -225,6 +225,7 @@ struct TransportRoute : public kv::EvSocket, public kv::EvConnectionNotify,
                   uint32_t f ) noexcept;
 
   bool is_listen( void ) const { return this->is_set( TPORT_IS_LISTEN ) != 0; }
+  bool is_connect( void )const { return this->is_set( TPORT_IS_CONNECT ) != 0; }
   bool is_mcast( void )  const { return this->is_set( TPORT_IS_MCAST ) != 0; }
   bool is_mesh( void )   const { return this->is_set( TPORT_IS_MESH ) != 0; }
   bool is_edge( void )   const { return this->is_set( TPORT_IS_EDGE ) != 0; }
