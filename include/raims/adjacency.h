@@ -404,14 +404,9 @@ struct AdjDistance : public md::MDMsgMem {
   const char * uid_user( uint32_t uid ) noexcept;
   const char * uid_set_names( kv::UIntBitSet &set,  char *buf,
                               size_t buflen ) noexcept;
-  bool find_peer_conn( AdjacencySpace &set,  uint32_t uid,
-                       uint32_t peer_uid,  uint32_t &peer_conn_id ) noexcept;
-  bool find_peer_set( const char *type,  uint32_t uid,
-                      const AdjacencySpace &set,  uint32_t peer_uid,
-                      uint32_t &peer_conn_id ) noexcept;
   void message_graph_description( kv::ArrayOutput &out ) noexcept;
   void message_graph_config( kv::ArrayOutput &out,
-                             const char *cfg_name ) noexcept;
+                             const char *cfg_name,  bool use_loop ) noexcept;
 };
 
 #ifdef INCLUDE_DUMMY_DEFS

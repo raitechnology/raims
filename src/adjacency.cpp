@@ -846,78 +846,6 @@ AdjDistance::calc_coverage( uint32_t src_uid,  uint8_t path_select ) noexcept
 
 /* the following describe the network as a text description with the "graph"
  * command */
-bool
-AdjDistance::find_peer_conn( AdjacencySpace &set,  uint32_t uid,
-                             uint32_t peer_uid,
-                             uint32_t &peer_conn_id ) noexcept
-{
-  AdjacencySpace * peer_set/*,
-                 * weak_equals = NULL*/;
-  uint32_t         peer_count,
-                   peer_tport_id,
-                   peer_base_id/*,
-                   weak_peer_conn_id = 0*/;
-
-  peer_count   = this->adjacency_count( peer_uid );
-  peer_base_id = peer_uid * this->max_tport_count;
-  for ( peer_tport_id = 0; peer_tport_id < peer_count; peer_tport_id++ ) {
-    peer_conn_id = peer_base_id + peer_tport_id;
-    if ( ! this->graph_used.is_member( peer_conn_id ) ) {
-      peer_set = this->adjacency_set( peer_uid, peer_tport_id );
-      if ( peer_set == NULL )
-        continue;
-      if ( peer_set->tport_type.equals( set.tport_type ) &&
-           peer_set->is_member( uid ) ) {
-        if ( peer_set->tport.equals( set.tport ) )
-          return true;
-        /* if ports are named differently, use at last resort since we
-         * know the two peers are adjacent
-        if ( weak_equals == NULL ) {
-          weak_equals = peer_set;
-          weak_peer_conn_id = peer_conn_id;
-        } */
-      }
-    }
-  }
-  /*if ( weak_equals != NULL ) {
-    peer_conn_id = weak_peer_conn_id;
-    return true;
-  }*/
-  return false;
-}
-
-bool
-AdjDistance::find_peer_set( const char *type,  uint32_t uid,
-                            const AdjacencySpace &set,  uint32_t peer_uid,
-                            uint32_t &peer_conn_id ) noexcept
-{
-  AdjacencySpace * peer_set;
-  kv::BitSpace     set2;
-  uint32_t         peer_count,
-                   peer_tport_id,
-                   peer_base_id;
-
-  peer_count   = this->adjacency_count( peer_uid );
-  peer_base_id = peer_uid * this->max_tport_count;
-  for ( peer_tport_id = 0; peer_tport_id < peer_count; peer_tport_id++ ) {
-    peer_conn_id = peer_base_id + peer_tport_id;
-    if ( ! this->graph_used.is_member( peer_conn_id ) ) {
-      peer_set = this->adjacency_set( peer_uid, peer_tport_id );
-      if ( peer_set == NULL )
-        continue;
-      if ( peer_set->tport_type.equals( type ) ) {
-        set2.zero();
-        set2.or_bits( set, set2 );
-        set2.add( uid );
-        set2.remove( peer_uid );
-        if ( peer_set->equals( set2 ) )
-          return true;
-      }
-    }
-  }
-  return false;
-}
-
 namespace {
 struct UidSort {
   UserBridge * n;
@@ -949,26 +877,38 @@ struct GraphDescription {
   GraphUserArgs     args;
   uint32_t          off, len,
                     tport_counter;
-  bool              is_cfg;
+  bool              is_cfg,
+                    use_ports;
 
-  GraphDescription( kv::ArrayOutput &o,  AdjDistance & d,  bool cfg )
-    : out( o ), dist( d ), tport_counter( 0 ), is_cfg( cfg ) {}
-  void describe( void ) noexcept;
-
-  void output_tport( AdjacencySpace *set,  const char *kind ) noexcept;
-
+  GraphDescription( kv::ArrayOutput &o,  AdjDistance & d,  bool cfg,
+                    bool ports )
+    : out( o ), dist( d ), tport_counter( 0 ), is_cfg( cfg ),
+      use_ports( ports ) {}
+  void output_tport( AdjacencySpace *set, uint32_t listen_uid ) noexcept;
   void print_cost( AdjacencySpace *set ) noexcept;
-
   void output_uid( uint32_t action,  uint32_t uid ) noexcept;
+  void describe( void ) noexcept;
+  /* tcp listen , connect star */
+  bool find_peer_star( uint32_t uid,  AdjacencySpace *set,
+                       uint32_t &listen_uid ) noexcept;
+  /* mesh all to all connect */
+  bool find_peer_mesh( uint32_t uid,  AdjacencySpace *set ) noexcept;
+  /* pgm all to all sets */
+  bool find_peer_set( uint32_t uid,  AdjacencySpace *set,
+                      uint32_t peer_uid,  uint32_t &peer_conn_id ) noexcept;
+  /* a connect between endpoints */
+  bool find_peer_conn( AdjacencySpace &set,  uint32_t uid,  uint32_t peer_uid,
+                       uint32_t &peer_conn_id ) noexcept;
 };
 }
 
 void
 AdjDistance::message_graph_config( kv::ArrayOutput &out,
-                                   const char *cfg_name ) noexcept
+                                   const char *cfg_name,
+                                   bool use_loop ) noexcept
 {
   char g_name[ 256 ];
-  GraphDescription descr( out, *this, true );
+  GraphDescription descr( out, *this, true, ! use_loop );
 
   if ( cfg_name == NULL )
     ::strcpy( g_name, "graph" );
@@ -1084,29 +1024,64 @@ AdjDistance::message_graph_description( kv::ArrayOutput &out ) noexcept
   }
   out.s( "\n" );
 
-  GraphDescription descr( out, *this, false );
+  GraphDescription descr( out, *this, false, false );
   descr.describe();
 }
 
 void
-GraphDescription::output_tport( AdjacencySpace *set,  const char *kind ) noexcept
+GraphDescription::output_tport( AdjacencySpace *set,
+                                uint32_t listen_uid ) noexcept
 {
+  const char * kind = set->tport_type.val;
+  uint32_t kind_len = set->tport_type.len;
   if ( this->is_cfg ) {
     this->out.s( "  - tport: " );
     this->off = this->out.count;
-    uint32_t kind_len = ::strlen( kind );
-    if ( set->tport.len != 0 && ( kind_len != set->tport.len ||
-         ::memcmp( set->tport.val, kind, kind_len ) != 0 ) ) {
+    if ( set->tport.len != 0 &&
+         ( kind_len != set->tport.len ||
+           ::memcmp( set->tport.val, kind, kind_len ) != 0 ) ) {
       this->out.s( set->tport.val );
     }
     else {
       this->out.s( kind ).s("_").u( this->tport_counter );
     }
-    this->tport_counter++;
     this->len = this->out.count - this->off;
     this->out.s( "\n    type: " ).s( kind ).s( "\n" ).s(
-                   "    route:\n"
-                   "      device: 127.0.0.1\n" );
+                   "    route:\n" );
+    if ( this->use_ports ) {
+      this->out.s( "      port: " ).i( this->tport_counter + 5000 ).s( "\n" );
+      if ( set->tport_type.equals( T_TCP, T_TCP_SZ ) ) {
+        this->out.s( "      listen: *\n" )
+                 .s( "      connect: " )
+                 .s( this->dist.uid_user( listen_uid ) ).s( "\n" );
+      }
+      else if ( set->tport_type.equals( T_MESH, T_MESH_SZ ) ) {
+        this->out.s( "      listen: *\n" )
+                 .s( "      connect: [ " );
+        kv::BitSpace & graph_mesh = this->dist.graph_mesh;
+        uint32_t peer_uid;
+        bool sep = false;
+        for ( bool ok = graph_mesh.first( peer_uid ); ok;
+              ok = graph_mesh.next( peer_uid ) ) {
+          if ( sep )
+            this->out.s( ", " );
+          this->out.s( this->dist.uid_user( peer_uid ) );
+          sep = true;
+        }
+        this->out.s( " ]\n" );
+      }
+    }
+    if ( set->tport_type.equals( T_PGM, T_PGM_SZ ) ) {
+      uint32_t x = ( 100 + this->tport_counter ) % 256,
+               y = ( 200 + this->tport_counter ) % 256,
+               z = ( 1   + this->tport_counter ) % 256;
+      this->out.s( "      connect: ;238." )
+               .i( x ).s( "." ).i( y ).s( "." ).i( z ).s( "\n" );
+    }
+    else if ( ! this->use_ports ) {
+      this->out.s( "      device: 127.0.0.1\n" );
+    }
+    this->tport_counter++;
   }
   else {
     if ( set->tport.len != 0 )
@@ -1174,7 +1149,6 @@ GraphDescription::output_uid( uint32_t action,  uint32_t uid ) noexcept
 void
 GraphDescription::describe( void ) noexcept
 {
-  kv::ArrayCount<uint32_t, 16> peer_conn;
   UserBridge     * n;
   AdjacencySpace * set;
   uint32_t         count,
@@ -1183,7 +1157,7 @@ GraphDescription::describe( void ) noexcept
                    peer_conn_id,
                    uid,
                    peer_uid,
-                   mesh_uid,
+                   listen_uid,
                    max_uid;
   bool             ok;
 
@@ -1215,82 +1189,208 @@ GraphDescription::describe( void ) noexcept
         continue;
 
       if ( set->tport_type.equals( T_TCP, T_TCP_SZ ) ) {
-        if ( set->first( peer_uid ) ) {
-          if ( this->dist.find_peer_conn( *set, uid, peer_uid, peer_conn_id ) ) {
-            uint32_t t_uid;
-            graph_used.add( peer_conn_id );
+        if ( this->find_peer_star( uid, set, listen_uid ) ) {
+          this->output_tport( set, listen_uid );
 
-            if ( this->dist.get_start_time( uid ) < 
-                 this->dist.get_start_time( peer_uid ) )
-              t_uid = LISTEN;
-            else
-              t_uid = CONNECT;
-            this->output_tport( set, T_TCP );
-            this->output_uid( t_uid, uid );
-            this->output_uid( t_uid == CONNECT ? LISTEN : CONNECT, peer_uid );
-            this->print_cost( set );
+          this->output_uid( LISTEN, listen_uid );
+          for ( ok = graph_mesh.first( peer_uid ); ok;
+                ok = graph_mesh.next( peer_uid ) ) {
+            if ( peer_uid != listen_uid )
+              this->output_uid( CONNECT, peer_uid );
           }
+          this->print_cost( set );
         }
         continue;
       }
 
       if ( set->tport_type.equals( T_MESH, T_MESH_SZ ) ) {
-        if ( set->first( peer_uid ) ) {
-          if ( this->dist.find_peer_conn( *set, uid, peer_uid, peer_conn_id ) ) {
-            graph_used.add( peer_conn_id );
-            graph_mesh.zero();
-            graph_mesh.add( uid );
-            graph_mesh.add( peer_uid );
-            for ( peer_uid = 0; peer_uid < max_uid; peer_uid++ ) {
-              if ( ! graph_mesh.is_member( peer_uid ) ) {
-                peer_conn.count = 0;
-                for ( ok = graph_mesh.first( mesh_uid ); ok;
-                      ok = graph_mesh.next( mesh_uid ) ) {
-                  if ( ! this->dist.find_peer_conn( *set, mesh_uid, peer_uid,
-                                                    peer_conn_id ) )
-                    goto not_mesh_a_member;
-                  peer_conn.push( peer_conn_id );
-                }
-                for ( ok = graph_mesh.first( mesh_uid ); ok;
-                      ok = graph_mesh.next( mesh_uid ) ) {
-                  if ( this->dist.find_peer_conn( *set, peer_uid, mesh_uid,
-                                                  peer_conn_id ) )
-                    peer_conn.push( peer_conn_id );
-                }
-                graph_mesh.add( peer_uid );
-                graph_used.add( peer_conn.ptr, peer_conn.count );
-              }
-            not_mesh_a_member:;
-            }
-            this->output_tport( set, T_MESH );
+        if ( this->find_peer_mesh( uid, set ) ) {
+          this->output_tport( set, 0 );
 
-            for ( ok = graph_mesh.first( peer_uid ); ok;
-                  ok = graph_mesh.next( peer_uid ) ) {
-              this->output_uid( CONNECT, peer_uid );
-            }
-            this->print_cost( set );
+          for ( ok = graph_mesh.first( peer_uid ); ok;
+                ok = graph_mesh.next( peer_uid ) ) {
+            this->output_uid( CONNECT, peer_uid );
           }
+          this->print_cost( set );
         }
         continue;
       }
 
       if ( set->tport_type.equals( T_PGM, T_PGM_SZ ) ) {
-        this->output_tport( set, T_PGM );
+        this->output_tport( set, 0 );
         this->output_uid( CONNECT, uid );
 
-        for ( ok = set->first( peer_uid ); ok; ok = set->next( peer_uid ) ) {
+        for ( ok = set->first( peer_uid ); ok; ok = set->next( peer_uid ) )
           this->output_uid( CONNECT, peer_uid );
-        }
         this->print_cost( set );
 
         for ( ok = set->first( peer_uid ); ok; ok = set->next( peer_uid ) ) {
-          if ( this->dist.find_peer_set( T_PGM, uid, *set, peer_uid,
-                                         peer_conn_id ) )
+          if ( this->find_peer_set( uid, set, peer_uid, peer_conn_id ) )
             graph_used.add( peer_conn_id );
         }
       }
       continue;
     }
   }
+}
+
+bool
+GraphDescription::find_peer_star( uint32_t uid,  AdjacencySpace *set,
+                                  uint32_t &listen_uid ) noexcept
+{
+  kv::BitSpace & graph_mesh = this->dist.graph_mesh;
+  kv::BitSpace & graph_used = this->dist.graph_used;
+  uint32_t peer_uid, conn_id, star_uid, max_uid;
+
+  if ( ! set->first( peer_uid ) )
+    return false;
+  if ( ! this->find_peer_conn( *set, uid, peer_uid, conn_id ) )
+    return false;
+
+  max_uid = this->dist.max_uid;
+  graph_mesh.zero();
+  graph_mesh.add( uid );
+  graph_mesh.add( peer_uid );
+  graph_used.add( conn_id );
+
+  if ( this->dist.get_start_time( uid ) <
+       this->dist.get_start_time( peer_uid ) )
+    listen_uid = uid;
+  else
+    listen_uid = peer_uid;
+
+  for ( star_uid = 0; star_uid < max_uid; star_uid++ ) {
+    if ( graph_mesh.is_member( star_uid ) )
+      continue;
+    if ( this->find_peer_conn( *set, uid, star_uid, conn_id ) )
+      listen_uid = uid;
+    else if ( this->find_peer_conn( *set, peer_uid, star_uid, conn_id ) )
+      listen_uid = peer_uid;
+    else
+      continue;
+    graph_mesh.add( star_uid );
+    graph_used.add( conn_id );
+    break;
+  }
+  if ( star_uid < max_uid ) {
+    for ( star_uid = 0; star_uid < max_uid; star_uid++ ) {
+      if ( graph_mesh.is_member( star_uid ) )
+        continue;
+      if ( this->find_peer_conn( *set, listen_uid, star_uid, conn_id ) ) {
+        graph_mesh.add( star_uid );
+        graph_used.add( conn_id );
+      }
+    }
+  }
+  return true;
+}
+
+bool
+GraphDescription::find_peer_mesh( uint32_t uid,  AdjacencySpace *set ) noexcept
+{
+  kv::ArrayCount<uint32_t, 16> peer_conn;
+  kv::BitSpace & graph_used = this->dist.graph_used;
+  kv::BitSpace & graph_mesh = this->dist.graph_mesh;
+  uint32_t peer_uid, conn_id, mesh_uid, max_uid;
+  bool ok;
+
+  if ( ! set->first( peer_uid ) )
+    return false;
+  if ( ! this->find_peer_conn( *set, uid, peer_uid, conn_id ) )
+    return false;
+
+  max_uid = this->dist.max_uid;
+  graph_mesh.zero();
+  graph_mesh.add( uid );
+  graph_mesh.add( peer_uid );
+  graph_used.add( conn_id );
+  for ( peer_uid = 0; peer_uid < max_uid; peer_uid++ ) {
+    if ( graph_mesh.is_member( peer_uid ) )
+      continue;
+    /* all peers should be connected */
+    peer_conn.count = 0;
+    for ( ok = graph_mesh.first( mesh_uid ); ok;
+          ok = graph_mesh.next( mesh_uid ) ) {
+      if ( ! this->find_peer_conn( *set, mesh_uid, peer_uid, conn_id ) )
+        goto not_mesh_a_member;
+      peer_conn.push( conn_id );
+    }
+    graph_mesh.add( peer_uid );
+    graph_used.add( peer_conn.ptr, peer_conn.count );
+  not_mesh_a_member:;
+  }
+  return true;
+}
+
+bool
+GraphDescription::find_peer_set( uint32_t uid,  AdjacencySpace *set,
+                                 uint32_t peer_uid,
+                                 uint32_t &peer_conn_id ) noexcept
+{
+  kv::BitSpace   & graph_used = this->dist.graph_used;
+  AdjacencySpace * peer_set;
+  kv::BitSpace     set2;
+  uint32_t         peer_count, peer_tport_id, peer_base_id;
+
+  peer_count   = this->dist.adjacency_count( peer_uid );
+  peer_base_id = peer_uid * this->dist.max_tport_count;
+  for ( peer_tport_id = 0; peer_tport_id < peer_count; peer_tport_id++ ) {
+    peer_conn_id = peer_base_id + peer_tport_id;
+    if ( ! graph_used.is_member( peer_conn_id ) ) {
+      peer_set = this->dist.adjacency_set( peer_uid, peer_tport_id );
+      if ( peer_set == NULL )
+        continue;
+      if ( peer_set->tport_type.equals( set->tport_type ) ) {
+        set2.zero();
+        set2.or_bits( *set, set2 );
+        set2.add( uid );
+        set2.remove( peer_uid );
+        if ( peer_set->equals( set2 ) )
+          return true;
+      }
+    }
+  }
+  return false;
+}
+
+bool
+GraphDescription::find_peer_conn( AdjacencySpace &set,  uint32_t uid,
+                                  uint32_t peer_uid,
+                                  uint32_t &peer_conn_id ) noexcept
+{
+  kv::BitSpace   & graph_used = this->dist.graph_used;
+  AdjacencySpace * peer_set/*,
+                 * weak_equals = NULL*/;
+  uint32_t         peer_count,
+                   peer_tport_id,
+                   peer_base_id/*,
+                   weak_peer_conn_id = 0*/;
+
+  peer_count   = this->dist.adjacency_count( peer_uid );
+  peer_base_id = peer_uid * this->dist.max_tport_count;
+  for ( peer_tport_id = 0; peer_tport_id < peer_count; peer_tport_id++ ) {
+    peer_conn_id = peer_base_id + peer_tport_id;
+    if ( ! graph_used.is_member( peer_conn_id ) ) {
+      peer_set = this->dist.adjacency_set( peer_uid, peer_tport_id );
+      if ( peer_set == NULL )
+        continue;
+      if ( peer_set->tport_type.equals( set.tport_type ) &&
+           peer_set->is_member( uid ) ) {
+        if ( peer_set->tport.equals( set.tport ) )
+          return true;
+        /* if ports are named differently, use at last resort since we
+         * know the two peers are adjacent
+        if ( weak_equals == NULL ) {
+          weak_equals = peer_set;
+          weak_peer_conn_id = peer_conn_id;
+        } */
+      }
+    }
+  }
+  /*if ( weak_equals != NULL ) {
+    peer_conn_id = weak_peer_conn_id;
+    return true;
+  }*/
+  return false;
 }
 

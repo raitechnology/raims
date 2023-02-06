@@ -362,7 +362,7 @@ main( int argc, char *argv[] )
   if ( status == 0 && nets != NULL ) {
     const char * p = ::strchr( nets, '.' );
     if ( p == NULL ) {
-      fprintf( stderr, "expecting svc.network (%s)\n", nets );
+      fprintf( stderr, "Expecting svc.network (%s)\n", nets );
       status = -1;
     }
     for ( int i = 2; status == 0; i++ ) {
@@ -373,7 +373,7 @@ main( int argc, char *argv[] )
         break;
       p = ::strchr( nets, '.' );
       if ( p == NULL ) {
-        fprintf( stderr, "expecting svc.network (%s)\n", nets );
+        fprintf( stderr, "Expecting svc.network (%s)\n", nets );
         status = -1;
       }
     }
@@ -381,7 +381,7 @@ main( int argc, char *argv[] )
   if ( status == 0 && tports != NULL ) {
     tport = tree->find_transport( tports, ::strlen( tports ), &conn );
     if ( tport == NULL ) {
-      fprintf( stderr, "transport %s not found\n", tports );
+      fprintf( stderr, "Transport %s not found\n", tports );
       status = -1;
     }
     for ( int i = 2; status == 0; i++ ) {
@@ -394,7 +394,7 @@ main( int argc, char *argv[] )
         break;
       tport = tree->find_transport( tports, ::strlen( tports ), &conn );
       if ( tport == NULL ) {
-        fprintf( stderr, "transport %s not found\n", tports );
+        fprintf( stderr, "Transport %s not found\n", tports );
         status = -1;
       }
     }

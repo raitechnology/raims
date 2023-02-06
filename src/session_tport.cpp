@@ -55,14 +55,14 @@ SessionMgr::add_startup_transports( const char *name,  size_t name_sz,
         if ( rte != NULL ) {
           if ( ! rte->is_set( TPORT_IS_SHUTDOWN ) ) {
             fprintf( stderr,
-                     "startup %.*s transport \"%.*s\" already running\n",
+                     "Startup %.*s transport \"%.*s\" already running\n",
                      (int) name_sz, name,
                      (int) len, sp->value.val );
             return true;
           }
         }
         if ( tport == NULL ) {
-          fprintf( stderr, "startup %.*s transport \"%.*s\" not found\n",
+          fprintf( stderr, "Startup %.*s transport \"%.*s\" not found\n",
                    (int) name_sz, name,
                    (int) len, sp->value.val );
           return false;
@@ -330,6 +330,11 @@ SessionMgr::add_transport2( ConfigTree::Transport &t,
     if ( this->init_sock() != 0 )
       return false;
   }
+  rte = this->user_db.transport_tab.find_transport( &t );
+  if ( rte != NULL ) {
+    fprintf( stderr, "Transport %s already added\n", t.tport.val );
+    return false;
+  }
   if ( t.type.equals( T_TELNET, T_TELNET_SZ ) )
     return this->create_telnet( t );
   if ( t.type.equals( T_WEB, T_WEB_SZ ) )
@@ -439,8 +444,12 @@ SessionMgr::start_transport( TransportRoute &rte,
     }
     else {
       rte.clear( TPORT_IS_SHUTDOWN );
-      if ( rte.connect_ctx != NULL )
-        rte.connect_ctx->reconnect();
+      if ( rte.connect_ctx != NULL ) {
+        EvTcpTransportParameters parm;
+        parm.parse_tport( rte.transport, PARAM_NB_CONNECT, *this );
+        rte.connect_ctx->connect( parm.host[ 0 ], parm.port[ 0 ], parm.opts,
+                                  parm.timeout );
+      }
     }
     if ( rte.is_set( TPORT_IS_DEVICE ) )
       this->name_hb( 0 );

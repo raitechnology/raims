@@ -1469,7 +1469,7 @@ UserDB::add_authenticated( UserBridge &n,
       return;
     }
     if ( stage >= AUTH_FROM_ADJ_RESULT ) {
-      if ( cur_mono - n.auth_mono_time < sec_to_ns( n.auth_count ) ) {
+      if ( cur_mono - n.auth_mono_time < sec_to_ns( n.auth_count * 2 ) ) {
         n.printf( "refusing to auth %s after %s within %u secs\n",
                   from, auth_stage_string( n.last_auth_type ), n.auth_count );
         return;

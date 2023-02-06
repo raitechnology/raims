@@ -1426,25 +1426,40 @@ ConfigErrPrinter::printf( const char *fmt,  ... ) noexcept
 bool
 ConfigDB::check_strings( ConfigPrinter &p ) noexcept
 {
-  bool b = true;
+  BitSpace                 bits;
+  ConfigTree::User       * u;
+  ConfigTree::Service    * s;
+  ConfigTree::Transport  * t;
+  ConfigTree::Group      * g;
+  ConfigTree::Parameters * pa;
+  bool                     b = true;
 
-  for ( ConfigTree::User *u = this->cfg.users.hd; u != NULL; u = u->next )
+  for ( u = this->cfg.users.hd; u != NULL; u = u->next ) {
     b &= this->check_strings( *u, this->str, p );
-
-  for ( ConfigTree::Service *s = this->cfg.services.hd; s != NULL; s = s->next )
+    if ( u->user.id != 0 && bits.test_set( u->user.id ) )
+      fprintf( stderr, "User %s redefined, second instance ignored\n", u->user.val );
+  }
+  bits.zero();
+  for ( s = this->cfg.services.hd; s != NULL; s = s->next ) {
     b &= this->check_strings( *s, this->str, p );
-
-  for ( ConfigTree::Transport *t = this->cfg.transports.hd; t != NULL;
-        t = t->next ) {
+    if ( s->svc.id != 0 && bits.test_set( s->svc.id ) )
+      fprintf( stderr, "Service %s redefined, second instance ignored\n", s->svc.val );
+  }
+  bits.zero();
+  for ( t = this->cfg.transports.hd; t != NULL; t = t->next ) {
     this->check_null( t->route );
     b &= this->check_strings( *t, this->str, p );
+    if ( t->tport.id != 0 && bits.test_set( t->tport.id ) )
+      fprintf( stderr, "Transport %s redefined, second instance ignored\n", t->tport.val );
   }
-  for ( ConfigTree::Group *g = this->cfg.groups.hd; g != NULL; g = g->next ) {
+  bits.zero();
+  for ( g = this->cfg.groups.hd; g != NULL; g = g->next ) {
     this->check_null( g->users );
     b &= this->check_strings( *g, this->str, p );
+    if ( g->group.id != 0 && bits.test_set( g->group.id ) )
+      fprintf( stderr, "Group %s redefined, second instance ignored\n", g->group.val );
   }
-  for ( ConfigTree::Parameters *pa = this->cfg.parameters.hd; pa != NULL;
-        pa = pa->next )
+  for ( pa = this->cfg.parameters.hd; pa != NULL; pa = pa->next )
     b &= this->check_strings( *pa, this->str, p );
 
   return b;

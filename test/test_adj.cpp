@@ -133,12 +133,14 @@ main( int argc, const char *argv[] )
              * do_tree  = get_arg( x, argc, argv, 0, "-t", "-tree", NULL ),
              * do_graph = get_arg( x, argc, argv, 0, "-g", "-graph", NULL ),
              * do_web   = get_arg( x, argc, argv, 0, "-w", "-web", NULL ),
+             * do_loop  = get_arg( x, argc, argv, 0, "-l", "-loopback", NULL ),
              * help     = get_arg( x, argc, argv, 0, "-h", "-help", NULL );
   bool show_path_cost        = ( do_cost != NULL || do_debug != NULL ),
        show_forward_cache    = ( do_fwd != NULL || do_debug != NULL ),
        show_multicast_tree   = ( do_tree != NULL || do_debug != NULL ),
        show_text_description = ( do_graph != NULL || do_debug != NULL ),
        show_web_graph        = ( do_web != NULL || do_debug != NULL ),
+       use_loop              = ( do_loop != NULL ),
        generate_config       = ! ( show_path_cost ||
                                    show_forward_cache ||
                                    show_multicast_tree ||
@@ -147,13 +149,14 @@ main( int argc, const char *argv[] )
 
   if ( help != NULL ) {
     fprintf( stderr,
-             "%s [-d] [-g] [-f] [-t] [-g] [-w] file\n"
+             "%s [-d] [-g] [-f] [-t] [-g] [-w] [-l] file\n"
              "  -d   = same as -c,-f,-t,-g,-w\n"
              "  -c   = show path cost\n"
              "  -f   = show forward cache\n"
              "  -t   = show multicast tree\n"
              "  -g   = show text network description\n"
              "  -w   = show web json network\n"
+             "  -l   = use device in config file\n"
              "  file = network text description\n"
              "if no option, then generate yaml config file\n"
              "if no input file, then use included test\n",
@@ -174,6 +177,10 @@ main( int argc, const char *argv[] )
     user_db.load_users( input_file, st, start_uid );
   else
     user_db.load_users( test, sizeof( test ) - 1, st, start_uid );
+  if ( user_db.next_uid == 1 ) {
+    fprintf( stderr, "No network found input file\n" );
+    return 1;
+  }
 
   AdjDistance & peer_dist = user_db.peer_dist;
   UserBridge *b, *c;
@@ -327,7 +334,9 @@ main( int argc, const char *argv[] )
     peer_dist.message_graph_description( out );
   }
   else if ( generate_config ) {
-    peer_dist.message_graph_config( out, input_file ? input_file : "test" );
+    if ( input_file == NULL )
+      input_file = "test";
+    peer_dist.message_graph_config( out, input_file, use_loop );
   }
   if ( out.count > 0 )
     fwrite( out.ptr, 1, out.count, stdout );

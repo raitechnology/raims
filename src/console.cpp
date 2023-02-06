@@ -2348,7 +2348,7 @@ Console::find_tport( const char *name,  size_t len,
         tport_id = rte->tport_id;
         if ( rte->is_set( TPORT_IS_SHUTDOWN ) )
           return T_IS_DOWN;
-        this->printf( "transport (%.*s) is running tport %u\n",
+        this->printf( "Transport (%.*s) is running tport %u\n",
                       (int) len, name, tport_id );
         return T_IS_RUNNING;
       }
@@ -2357,7 +2357,7 @@ Console::find_tport( const char *name,  size_t len,
       return T_CFG_EXISTS;
     }
   }
-  this->printf( "transport (%.*s) not found\n", (int) len, name );
+  this->printf( "Transport (%.*s) not found\n", (int) len, name );
   return T_NO_EXIST;
 }
 
@@ -2384,9 +2384,9 @@ Console::connect( const char *name,  size_t len ) noexcept
     b = this->mgr.add_transport( *tree_idx, false );
   }
   if ( b )
-    this->printf( "transport (%.*s) started connecting\n", (int) len, name );
+    this->printf( "Transport (%.*s) started connecting\n", (int) len, name );
   else
-    this->printf( "transport (%.*s) connect failed\n", (int) len, name );
+    this->printf( "Transport (%.*s) connect failed\n", (int) len, name );
 }
 
 void
@@ -2406,9 +2406,9 @@ Console::listen( const char *name,  size_t len ) noexcept
     b = this->mgr.add_transport( *tree_idx, true );
   }
   if ( b )
-    this->printf( "transport (%.*s) started listening\n", (int) len, name );
+    this->printf( "Transport (%.*s) started listening\n", (int) len, name );
   else
-    this->printf( "transport (%.*s) listen failed\n", (int) len, name );
+    this->printf( "Transport (%.*s) listen failed\n", (int) len, name );
 }
 
 void
@@ -2420,15 +2420,15 @@ Console::shutdown( const char *name,  size_t len ) noexcept
   if ( res == T_NO_EXIST )
     return;
   /*if ( res != T_IS_RUNNING ) {
-    this->printf( "transport (%.*s) not running\n", (int) len, name );
+    this->printf( "Transport (%.*s) not running\n", (int) len, name );
     return;
   }*/
   uint32_t count = this->mgr.shutdown_transport( *tree_idx );
   if ( count > 0 )
-    this->printf( "transport (%.*s) shutdown (%u instances down)\n",
+    this->printf( "Transport (%.*s) shutdown (%u instances down)\n",
                   (int) len, name, count );
   else
-    this->printf( "no transport (%.*s) running\n", (int) len, name );
+    this->printf( "No transport (%.*s) running\n", (int) len, name );
 }
 
 void
@@ -2516,11 +2516,11 @@ Console::config_save( void ) noexcept
     return;
   if ( this->tree.save_new() ) {
     this->changes.release();
-    this->printf( "config saved\n" );
+    this->printf( "Config saved\n" );
     this->startup.copy( this->tree, &listen, &connect );
   }
   else {
-    this->printf( "failed to save config updates\n" );
+    this->printf( "Failed to save config updates\n" );
   }
 }
 
@@ -2543,7 +2543,7 @@ Console::config_param( const char *param, size_t plen,
     }
   }
   if ( vlen == 0 ) {
-    this->printf( "notfound: %.*s\n", (int) plen, param );
+    this->printf( "Not found: %.*s\n", (int) plen, param );
   }
   else {
     p  = this->string_tab.make<ConfigTree::Parameters>();
@@ -2586,7 +2586,7 @@ Console::config_transport( const char *args[],  size_t *arglen,
       int cmd = this->shift_command( shift, args, arglen, argc );
       if ( cmd == CMD_BAD || cmd == CMD_EMPTY ) {
         if ( cmd == CMD_BAD )
-          this->printf( "bad cmd: %.*s\n", (int) arglen[ 0 ], args[ 0 ] );
+          this->printf( "Bad cmd: %.*s\n", (int) arglen[ 0 ], args[ 0 ] );
         break;
       }
       if ( ! this->config_transport_param( cmd, args, arglen, argc ) )
@@ -2594,6 +2594,7 @@ Console::config_transport( const char *args[],  size_t *arglen,
       shift = 2;
     }
     this->changes.add( this->cfg_tport );
+    this->printf( "Transport (%s) updated\n", this->cfg_tport->tport.val );
     this->cfg_tport = NULL;
   }
   else {
@@ -2642,7 +2643,7 @@ Console::config_transport_route( const char *param, size_t plen,
 
   if ( sp == NULL ) {
     if ( vlen == 0 ) {
-      this->printf( "notfound: %.*s\n", (int) plen, param );
+      this->printf( "Not found: %.*s\n", (int) plen, param );
       return;
     }
   }
@@ -3063,6 +3064,10 @@ Console::print_json_table( ConsoleOutput *p,  const void * data,
   uint32_t      i = 0, j;
   bool          b;
 
+  const char *dp = (const char *) data;
+  if ( datalen > 0 &&
+    ( dp[ 0 ] != '[' && dp[ 0 ] != '{' && dp[ 0 ] != '\"' && dp[ 0 ] != '\'' ) )
+    return false;
   if ( ctx.parse( (void *) data, 0, datalen, NULL, &mem, false ) != 0 )
     return false;
   if ( ctx.msg->get_reference( aref ) != 0 )
@@ -3174,8 +3179,10 @@ Console::on_remote( ConsoleRemote &remote ) noexcept
         else
           this->printf( "%.*sfrom uid %u%.*s:\n", cz, cc, rep.uid, nz, nc );
 
-        if ( ! this->print_json_table( p, data, datalen ) )
-          this->outf( p, "unable to parse" );
+        if ( ! this->print_json_table( p, data, datalen ) ) {
+          this->printf( "%.*s", (int) datalen, (char *) data );
+          /*this->outf( p, "unable to parse" );*/
+        }
       }
       else if ( remote.reply.count == 1 ) {
         p->on_output( data, datalen );
