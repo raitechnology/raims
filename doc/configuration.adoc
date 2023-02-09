@@ -84,6 +84,7 @@ startup and network configuration.
 The master config will also work, so just copying it to the peers will allow
 them to run if this type of security is unnecessary.
 
+[[parameters]]
 Parameters
 ~~~~~~~~~~
 

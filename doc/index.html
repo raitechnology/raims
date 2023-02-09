@@ -458,7 +458,7 @@ body.book #toc,body.book #preamble,body.book h1.sect0,body.book .sect1>h2{page-b
 <li><a href="#config">Configuration</a>
 <ul class="sectlevel2">
 <li><a href="#_key_configuration">Key Configuration</a></li>
-<li><a href="#_parameters">Parameters</a></li>
+<li><a href="#parameters">Parameters</a></li>
 </ul>
 </li>
 <li><a href="#authentication">Authentication</a>
@@ -489,8 +489,8 @@ body.book #toc,body.book #preamble,body.book h1.sect0,body.book .sect1>h2{page-b
 <li><a href="#_tib_rv">Tib RV</a></li>
 <li><a href="#_nats">NATS</a></li>
 <li><a href="#_redis">Redis</a></li>
-<li><a href="#_telnet">Telnet</a></li>
-<li><a href="#_web">Web</a></li>
+<li><a href="#telnet">Telnet</a></li>
+<li><a href="#web">Web</a></li>
 </ul>
 </li>
 <li><a href="#linkstate">Link State</a>
@@ -524,11 +524,26 @@ body.book #toc,body.book #preamble,body.book h1.sect0,body.book .sect1>h2{page-b
 <li><a href="#_rvd_arguments">rvd Arguments</a></li>
 <li><a href="#_service_key_configuration">Service Key Configuration</a></li>
 <li><a href="#_starting_in_rvd_compatibility_mode">Starting in rvd Compatibility Mode</a></li>
-<li><a href="#_connecting_to_networks">Connecting to Networks</a></li>
+<li><a href="#network_spec">Connecting to Networks</a></li>
 <li><a href="#_the_peer_names">The Peer Names</a></li>
 </ul>
 </li>
-<li><a href="#console">Console</a></li>
+<li><a href="#console">Console</a>
+<ul class="sectlevel2">
+<li><a href="#_description_of_console">Description of Console</a></li>
+<li><a href="#_help_screen">Help Screen</a></li>
+<li><a href="#ping">Testing Connectivity with Ping</a></li>
+<li><a href="#remote">Remote Command Execution</a></li>
+<li><a href="#conf_tran">Update and Show the Configuration</a></li>
+<li><a href="#conn_listen">Transport Start and Stop</a></li>
+<li><a href="#_the_show_commands">The Show Commands</a></li>
+<li><a href="#_test_pub_sub">Test Pub Sub</a></li>
+<li><a href="#_mute_the_loggging">Mute the Loggging</a></li>
+<li><a href="#_turn_onoff_debug_logging">Turn On/Off Debug Logging</a></li>
+<li><a href="#_write_events_to_file">Write Events to File</a></li>
+<li><a href="#_stop_the_server">Stop the Server</a></li>
+</ul>
+</li>
 <li><a href="#_monitoring">Monitoring</a></li>
 </ul>
 </div>
@@ -1016,7 +1031,7 @@ them to run if this type of security is unnecessary.</p>
 </div>
 </div>
 <div class="sect2">
-<h3 id="_parameters">Parameters</h3>
+<h3 id="parameters">Parameters</h3>
 <div class="paragraph">
 <p>The parameters section of the configuration is used to lookup values that can
 alter the behavior of the server.  These fields can be set anywhere in the
@@ -2445,7 +2460,7 @@ the network.  A network format is as described in <a href="#service_and_networks
 </div>
 </div>
 <div class="sect2">
-<h3 id="_telnet">Telnet</h3>
+<h3 id="telnet">Telnet</h3>
 <div class="paragraph">
 <p>Telnet is a way to get a console prompt, but it doesn&#8217;t start by default.  It
 uses the same transport config as the pub/sub protocols.  It also can be used
@@ -2493,7 +2508,7 @@ command line editing.</p>
 </table>
 </div>
 <div class="sect2">
-<h3 id="_web">Web</h3>
+<h3 id="web">Web</h3>
 <div class="paragraph">
 <p>Web handles http requests and websocket endpoints and integrates an web
 application that can be used to graph activity and show internal tables.  The
@@ -4209,7 +4224,7 @@ exit:</p>
 </div>
 </div>
 <div class="sect2">
-<h3 id="_connecting_to_networks">Connecting to Networks</h3>
+<h3 id="network_spec">Connecting to Networks</h3>
 <div class="paragraph">
 <p>The network parameter that the client specifies controls which network that
 the <code>ms_server</code> joins.  It can specify a multicast address, TCP connections, or
@@ -4328,8 +4343,1785 @@ daemon instances.</p>
 <div class="sect1">
 <h2 id="console">Console</h2>
 <div class="sectionbody">
+<div class="sect2">
+<h3 id="_description_of_console">Description of Console</h3>
 <div class="paragraph">
-<p>Console.</p>
+<p>The console of <code>ms_server</code> is available when the -c option is used or when a
+<a href="#telnet">Telnet</a> protocol is defined.  It offers command line editing and
+completions.  It can be used to define, start, or stop connections between
+instances and also modify which IPC protocols are running for clients to use.
+It also has many ways to examine and debug the network.</p>
+</div>
+<div class="paragraph">
+<p>The output is usually colorized if the terminal supports it, with green and red
+used for log messages (normal and error) and white used for cli command
+execution results.  Printing messages received are also coloized, green for
+field name, blue for field type, white for field values.</p>
+</div>
+<div class="paragraph">
+<p>The user names and the transport names usually have an integer number appended
+to them, for example <code>lex_a2.3</code> is the user <code>lex_a2</code> that has a <code>uid</code> of 3.
+This indicates either the <code>uid</code> or the <code>tport_id</code> of the identifier.  The
+string identifiers of users and transports can contain duplicates, since they
+are identified using the bridge id.  The bridge id is a unique random 128 bit
+nonce, the strings attached to the users and transports are tags which usually
+are unique, but not necessarily.  The users and transports are kept in their
+respective a tables and the <code>uid</code> and <code>tport_id</code> are indexes into these tables.
+The <code>*</code> is often used for uid 0 so that it stands out, since it is the peer
+that the console is attached to.  The <code>tport_id</code> of 0 is also special, that is
+where the client protocols are attached through local IPC, for example, a tcp
+connection to 127.0.0.1:7500.</p>
+</div>
+<div class="paragraph">
+<p>The command string entered into the cli will excute if it has enough characters
+to distinguish it from the prefixes of other commands.  If the string <em>pi</em> is
+entered, then the command <code>ping</code> will run, since <em>pi</em> is a unique prefix of
+<code>ping</code>.  The <code>show</code> prefix is optional when the command matches the second part
+of the <code>show</code> command, so <em>pe</em> will match and run the <code>show peers</code> command.
+The <em>run t test</em> will match and run the <code>show running transport test</code> command.</p>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_help_screen">Help Screen</h3>
+<div class="paragraph">
+<p>The following is the help screen, displayed when "help" is entered at the cli.</p>
+</div>
+<table class="tableblock frame-all grid-cols stripes-even fit-content">
+<colgroup>
+<col>
+<col>
+</colgroup>
+<thead>
+<tr>
+<th class="tableblock halign-left valign-top">Command</th>
+<th class="tableblock halign-left valign-top">Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="#ping">ping</a> [U]</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Ping peers and display latency of return</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="#ping">tping</a> [U]</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Ping peers with route trace flag</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="#ping">mping</a> [P]</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Multicast ping all peers using path P</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="#remote">remote</a> [U] [C]</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Run remote command on peer</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="#conn_listen">connect</a> T</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Start tport connect</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="#conn_listen">listen</a> T</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Start tport listener</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="#conn_listen">shutdown</a> T</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Shutdown tport</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="#conn_listen">network</a> S N</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Configure service and join network</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="#conf_tran">configure transport</a> T</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Configure tport T</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="#conf_tran">configure parameter</a> P V</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Configure parameter P = V</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="#conf_tran">save</a></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Save current config as startup</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="#show_subs">show subs</a> [U] [W]</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Show subscriptions of peers</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="#show_seqno">show seqno</a> [W]</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Show subject seqno values for pub and sub</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="#show_adjacency">show adjacency</a></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Show the adjacency links</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="#show_peers">show peers</a></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Show active peers</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="#show_ports">show ports</a> [T]</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Show the active ports</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="#show_cost">show cost</a> [T]</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Show the port costs</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="#show_status">show status</a> [T]</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Show the port status with any errors</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="#show_routes">show routes</a> [P]</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Show the route for each peer for path P (0-3)</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="#show_urls">show urls</a></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Show urls of connected peers</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="#show_tport">show tport</a> [T]</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Show the configured tports</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="#show_user">show user</a> [U]</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Show the configured users</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="#show_events">show events</a></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Show event recorder</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="#show_logs">show logs</a></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Show current log buffer</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="#show_counters">show counters</a></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Show system seqno and time values</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="#show_pubtype">show pubtype</a></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Show system publish type recvd</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="#show_inbox">show inbox</a> [U]</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Show inbox sequences</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="#show_loss">show loss</a></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Show message loss counters and time</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="#show_skew">show skew</a></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Show peer system clock skews</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="#show_reachable">show reachable</a></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Show reachable peers through active tports</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="#show_tree">show tree</a> [U]</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Show multicast tree from me or U</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="#show_path">show path</a> [P]</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Show multicast path P (0&#8594;3)</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="#show_forward">show forward</a> [P]</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Show forwarding P (0&#8594;3)</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="#show_fds">show fds</a></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Show fd statistics</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="#show_buffers">show buffers</a></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Show fd buffer mem usage</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="#show_windows">show windows</a></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Show pub and sub window mem usage</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="#show_blooms">show blooms</a> [P]</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Show bloom centric routes for path P (0-3)</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="#show_match">show match</a> S</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Show users which have a bloom that match sub</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="#show_graph">show graph</a></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Show network description for node graph</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="#show_cache">show cache</a></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Show routing cache geom, hits and misses</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="#show_poll">show poll</a></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Show poll dispatch latency</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="#conf_tran">show running</a></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Show current config running</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="#conf_tran">show running transport</a> T</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Show transports running, T or all</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="#conf_tran">show running service</a> S</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Show services running config, S or all</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="#conf_tran">show running user</a> U</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Show users running config, U or all</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="#conf_tran">show running group</a> G</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Show groups running config, G or all</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="#conf_tran">show running parameter</a> P</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Show parameters running config, P or all</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="#conf_tran">show startup</a></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Show startup config</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="#conf_tran">show startup transport</a> T</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Show transports startup, T or all</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="#conf_tran">show startup service</a> S</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Show services startup config, S or all</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="#conf_tran">show startup user</a> U</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Show users startup config, U or all</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="#conf_tran">show startup group</a> G</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Show groups startup config, G or all</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="#conf_tran">show startup parameter</a> P</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Show parameters startup config, P or all</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">sub [S] [F]</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Subscribe subject S, output to file F</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">unsub [S] [F]</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Unsubscribe subject S, stop output file F</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">psub [W] [F]</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Subscribe rv-wildcard W, output to file F</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">punsub [W] [F]</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Unsubscribe rv-wildcard W, stop output file F</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">gsub [W] [F]</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Subscribe glob-wildcard W, output to file F</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">gunsub [W] [F]</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Unsubscribe glob-wildcard W, stop output file F</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">pub [S] [M]</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Publish msg string M to subject S</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">trace [S] [M]</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Publish msg string M to subject S, with reply</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">ack [S] [M]</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Publish msg string M to subject S, with ack</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">rpc [S] [M]</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Publish msg string M to subject S, with return</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">any [S] [M]</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Publish msg string M to any subscriber of S</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">cancel</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Cancel and show incomplete (ping, show subs)</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">mute</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Mute the log output</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">unmute</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Unmute the log output</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">reseed</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Reseed bloom filter</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">debug [I]</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Set debug flags to ival I</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">wevents [F]</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Write events to file</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">die [I]</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Exit without cleanup, with status 1 or I</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">quit/exit</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Exit console</p></td>
+</tr>
+</tbody>
+</table>
+<div class="paragraph">
+<p>The arguments in square brackets are optional, the letters used above are:</p>
+</div>
+<div class="ulist">
+<ul>
+<li>
+<p>U&#8201;&#8212;&#8201;User, the name of an <code>ms_server</code> instance, which is often the hostname
+of the machine.</p>
+</li>
+<li>
+<p>P&#8201;&#8212;&#8201;Path, a multicast path, numbered 0 to 3.  This selects a precomputed
+path that all <code>ms_server</code> instances use to forward messages.  It will only
+be different when there are redundant links with a cost that is less or equal
+to the primary path 0.</p>
+</li>
+<li>
+<p>T&#8201;&#8212;&#8201;Transport, the name of a connection endpoint that messages are routed
+through.</p>
+</li>
+<li>
+<p>S&#8201;&#8212;&#8201;Service or Subject depending context.  The name or number of a service,
+for example 7500 is the default RV service.  A subject is any string of
+characters.</p>
+</li>
+<li>
+<p>N&#8201;&#8212;&#8201;Network, formated described in <a href="#network_spec">Connecting to Networks</a>.</p>
+</li>
+<li>
+<p>G&#8201;&#8212;&#8201;Group, defines a group of users, not currently used.</p>
+</li>
+<li>
+<p>F&#8201;&#8212;&#8201;File, a path in the filesystem.</p>
+</li>
+<li>
+<p>M&#8201;&#8212;&#8201;Message, a string of characters, as the console is limited to message
+formats that can be typed into the cli (string and json).</p>
+</li>
+<li>
+<p>I&#8201;&#8212;&#8201;Integer</p>
+</li>
+</ul>
+</div>
+</div>
+<div class="sect2">
+<h3 id="ping">Testing Connectivity with Ping</h3>
+<div class="ulist">
+<ul>
+<li>
+<p>ping [U]</p>
+</li>
+<li>
+<p>tping [U]</p>
+</li>
+<li>
+<p>mping [P]</p>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p>These commands send a message to a peer and display the message returned.  The
+<code>tping</code> command also sets the trace flag in the message sent so that all peers
+along the path will also send a message back.  This is useful in the way that
+<code>traceroute</code> is useful, to find an unusual latency report or dropped messages.</p>
+</div>
+<div class="paragraph">
+<p>The <code>ping</code> and <code>tping</code> optionally have an argument that specifies the name of
+the peer to send the message.  If no argument is used, then every peer
+currently active will be sent a message.  These messages are sent over the link
+that is handling the inbox point to point messages.  The subject of a <code>ping</code>
+message uses the inbox format <code>_I.&lt;nonce&gt;.ping</code>, where the nonce identifies the
+destination peer.  The return uses the <code>_I.&lt;nonce&gt;.N</code> inbox subject, where
+nonce identifies the peer of the sending console.  The N part of the subject is
+setup by the console to identify what the sending operation was and is used in
+the reply field of the original message.</p>
+</div>
+<div class="paragraph">
+<p>The <code>mping</code> use a multicast path instead of an inbox path.  The multicast path
+is numbered and is added to the message header so that all peers which receive
+and route this message will use the same path.  All peers tht receive it will
+send an inbox reply message, similar to <code>ping</code>.  The subject used by the sender
+is <code>_M.ping</code>, which all peers are subscribed to.  The multicast paths are
+numbered 0 to 3, so <code>mping 0</code> will use the first path, and <code>mping 3</code> will use
+the last path.  Using different paths can be useful to check that all redundant
+links in use are active and forwarding.  The reply also includes which port the
+message was received on, which will match the path 3 network path.  The path 0
+is often the same as the inbox path, except in the case of PGM, where inbox is
+a UDP point to point protocol.</p>
+</div>
+<div class="paragraph">
+<p>Example <code>ping</code>.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight nowrap"><code>pic_a1.rvd[CrmPtIc8B3ZedgdVTW7XOQ]@pic_a1[0]&gt; ping
+   user   | cost |   lat |     tport   |  peer_tport
+----------+------+-------+-------------+-------------
+ pic_a2.1 | 1000 | 189us | pic_amesh.2 |  pic_amesh.2
+ pic_a4.3 | 1000 | 184us | pic_amesh.4 |  pic_amesh.4
+ pic_a3.2 | 1000 | 214us | pic_amesh.3 |  pic_amesh.3
+  pic_a.4 | 1000 | 219us | pic_amesh.5 |  pic_amesh.6
+ lex_a.29 | 2000 | 296us | pic_amesh.5 |   fo_mesh.12
+ lee_a.26 | 2000 | 340us | pic_amesh.5 |   fo_mesh.12
+lex_a4.17 | 3000 | 389us | pic_amesh.5 |  lex_amesh.5
+...</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>Example <code>mping</code>.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight nowrap"><code>pic_a1.rvd[CrmPtIc8B3ZedgdVTW7XOQ]@pic_a1[1]&gt; mping 1
+   user   | cost |   lat  |     tport   |  peer_tport
+----------+------+--------+-------------+-------------
+  pic_a.4 | 1000 |  146us | pic_amesh.5 |  pic_amesh.6
+ pic_a2.1 | 1000 |  158us | pic_amesh.2 |  pic_amesh.2
+ pic_a4.3 | 1000 |  199us | pic_amesh.4 |  pic_amesh.4
+ pic_a3.2 | 1000 |  245us | pic_amesh.3 |  pic_amesh.3
+  edo_a.9 | 2000 |  265us | pic_amesh.5 |   fo_mesh.12
+ lex_a.29 | 2000 |  278us | pic_amesh.5 |   fo_mesh.12
+ lee_a.26 | 2000 |  279us | pic_amesh.5 |   fo_mesh.12
+...</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>The <code>tport</code> field is where the reply inbox message was received, the
+<code>peer_tport</code> is where the <code>ping</code> message was received at the peer.</p>
+</div>
+</div>
+<div class="sect2">
+<h3 id="remote">Remote Command Execution</h3>
+<div class="ulist">
+<ul>
+<li>
+<p>remote [U] [C]</p>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p><code>Remote</code> will message a command to another peer, run it in it&#8217;s console and
+return the result.  This is useful because most often, a peer will not have a
+console, a web interface, or a telnet protocol active.  Without <code>remote</code>, the
+peer would need to be restarted in order to change the configuration or start a
+console.  With <code>remote</code>, you could connect a peer with authentication, encryption
+and a console to the network temporarily, make a change, then disconnect the
+peer.</p>
+</div>
+<div class="paragraph">
+<p>Example of <code>remote</code>.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight nowrap"><code>pic_a1.rvd[CrmPtIc8B3ZedgdVTW7XOQ]@pic_a1[4]&gt; rem lee_a1 show pubtype
+from lee_a1.19:
+      type       | recv_count | send_count
+-----------------+------------+-----------
+ u_session_hello |          0 |          1
+    u_session_hb |      16217 |      16218
+      u_peer_add |        113 |         31
+  u_bloom_filter |         39 |          3
+     u_adjacency |         67 |          4
+...</code></pre>
+</div>
+</div>
+</div>
+<div class="sect2">
+<h3 id="conf_tran">Update and Show the Configuration</h3>
+<div class="ulist">
+<ul>
+<li>
+<p>configure transport T</p>
+</li>
+<li>
+<p>configure parameter P V</p>
+</li>
+<li>
+<p>save</p>
+</li>
+<li>
+<p>show running</p>
+</li>
+<li>
+<p>show running transport [T]</p>
+</li>
+<li>
+<p>show running service [S]</p>
+</li>
+<li>
+<p>show running user [U]</p>
+</li>
+<li>
+<p>show running group [G]</p>
+</li>
+<li>
+<p>show running parameter [P]</p>
+</li>
+<li>
+<p>show startup</p>
+</li>
+<li>
+<p>show startup transport [T]</p>
+</li>
+<li>
+<p>show startup service [S]</p>
+</li>
+<li>
+<p>show startup user [U]</p>
+</li>
+<li>
+<p>show startup group [G]</p>
+</li>
+<li>
+<p>show startup parameter [P]</p>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p>These commands show and modify the running configuration.  The <code>save</code> command
+write the running config to the startup config, when the directory and files
+are writable.</p>
+</div>
+<div class="paragraph">
+<p>The <code>show running</code> and <code>show startup</code> will print the config tree in yaml
+to the console.  The running configuration may have some dynamicly created
+users and protocols which are created as a result of the startup config.  A
+dynamically created user that is not preconfigured is one of these.  These
+will show in <code>running</code>, but will not save to <code>startup</code>.</p>
+</div>
+<div class="paragraph">
+<p>Using the <code>configure transprot</code> command is the most often used command of
+these.  It will update the currently running transports as well as add new
+ones.  If it is used to modify an existing transport that is already running,
+the new settings won&#8217;t change the active transport until it is restarted
+with <code>shutdown</code> and <code>connect</code> or <code>listen</code>.  The configuration details of
+transports are described in <a href="#network">Networking</a>, and the details of the parameters
+are described in <a href="#parameters">Parameters</a>.  Most of the parameters are only applied
+at startup, so changing them will have an effect only when saved and the
+process restarted.</p>
+</div>
+<div class="paragraph">
+<p>Example of <code>configure transport</code> and <code>show running transport</code>.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight nowrap"><code>chex.rvd[LQ9YfNwX/KtuiniQNvVkQg]@chex[110]&gt; configure transport mesh
+chex.rvd[LQ9YfNwX/KtuiniQNvVkQg]@chex[111](mesh)&gt; type mesh
+chex.rvd[LQ9YfNwX/KtuiniQNvVkQg]@chex[112](mesh)&gt; port 9000
+chex.rvd[LQ9YfNwX/KtuiniQNvVkQg]@chex[113](mesh)&gt; connect host1
+chex.rvd[LQ9YfNwX/KtuiniQNvVkQg]@chex[114](mesh)&gt; connect2 host2
+chex.rvd[LQ9YfNwX/KtuiniQNvVkQg]@chex[115](mesh)&gt; listen *
+chex.rvd[LQ9YfNwX/KtuiniQNvVkQg]@chex[116](mesh)&gt; q
+chex.rvd[LQ9YfNwX/KtuiniQNvVkQg]@chex[117]&gt; show running transports mesh
+transports:
+  - tport: mesh
+    type: mesh
+    route:
+      port: 9000
+      connect: host1
+      connect2: host2
+      listen: "*"
+chex.rvd[LQ9YfNwX/KtuiniQNvVkQg]@chex[123]&gt; configure transport test type tcp port 9000 connect host1
+Transport (test) updated
+chex.rvd[LQ9YfNwX/KtuiniQNvVkQg]@chex[124]&gt; show running transports test
+transports:
+  - tport: test
+    type: tcp
+    route:
+      port: 9000
+      connect: host1</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>The first config command enters into a cli sub command mode where only the
+fields of the transport can be entered.  The second config command sets all
+of the fields on one line.</p>
+</div>
+<div class="paragraph">
+<p>The commands <code>show service</code> and <code>show group</code> have limited usefulness at in the
+current implementation, since only one service is used per <code>ms_server</code> instance
+and groups do not have operational functionality yet, eventually they will be
+used for access control lists.</p>
+</div>
+</div>
+<div class="sect2">
+<h3 id="conn_listen">Transport Start and Stop</h3>
+<div class="ulist">
+<ul>
+<li>
+<p>connect [T]</p>
+</li>
+<li>
+<p>listen [T]</p>
+</li>
+<li>
+<p>shutdown [T]</p>
+</li>
+<li>
+<p>network [S] [N]</p>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p>The transport T is defined before using the <code>connect</code>, <code>listen</code>, <code>shutdown</code>
+commands.  The <code>network</code> command configures the transport if not already
+configured, runs it, and also attaches a service to it.  The configuration of
+the transports is described in <a href="#network">Networking</a>.</p>
+</div>
+<div class="paragraph">
+<p>Example of <code>connect</code>, <code>listen</code>, <code>shutdown</code>.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight nowrap"><code>chex.rvd[L+jUn266ADoL2fBschoqUg]@chex[108]&gt; configure transport test type tcp port 9000 connect lexx.rai
+Transport (test) updated
+chex.rvd[L+jUn266ADoL2fBschoqUg]@chex[109]&gt; connect test
+Transport (test) started connecting
+chex.rvd[L+jUn266ADoL2fBschoqUg]@chex[110]&gt; shutdown test
+Transport (test) is running tport 1
+Transport (test) shutdown (1 instances down)</code></pre>
+</div>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_the_show_commands">The Show Commands</h3>
+<div id="show_subs" class="ulist">
+<ul>
+<li>
+<p>show subs [U] [W]</p>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p>Show the subscriptions active for user or for all users.  The <code>W</code> is a substring
+for partial matches.  This command uses inbox RPC calls to <code>_I.&lt;nonce&gt;.subs</code>
+for all users which <code>U</code> specifies.  The <code>*</code> user matches all users, so the <code>W</code>
+arg can be specified.</p>
+</div>
+<div class="paragraph">
+<p>Example, show all subscriptons for every user:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight nowrap"><code>pic_a1.rvd[CrmPtIc8B3ZedgdVTW7XOQ]@pic_a1[38]&gt; show subs
+   user   |                               subject
+----------+-------------------------------------------------------------------
+ pic_a1.* |                                       _7603._INBOX.0AB98FB4.DAEMON
+          |                       (p) _7603._INBOX.0AB98FB4.763E17AA51E2DEF0.&gt;
+          |                                                               test
+----------+-------------------------------------------------------------------
+ pic_a2.1 |                                       _7606._INBOX.173D29A5.DAEMON
+          |                       (p) _7606._INBOX.173D29A5.763E17AA5271FEF0.&gt;
+----------+-------------------------------------------------------------------
+ pic_a3.2 |                                       _7500._INBOX.0072DD0A.DAEMON
+          |                       (p) _7500._INBOX.0072DD0A.663E17AA514B7DD0.&gt;
+          |                                               _7500.RSF3.REC.MOT.B
+----------+-------------------------------------------------------------------
+ pic_a4.3 |                                       _7500._INBOX.68AD2F1B.DAEMON
+          |                       (p) _7500._INBOX.68AD2F1B.763E17AA50777DD0.&gt;
+          |                                            _7500.RSF4.REC.DEM=.NaE
+          |                                             _7500.RSF4.REC.NAI.NaE
+...</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>The <code>(p)</code> strings before the subject indicates that the subject was subscribed
+as a pattern.</p>
+</div>
+<div class="paragraph">
+<p>Example, show all subscriptions which have the substring DAEMON:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight nowrap"><code>pic_a1.rvd[CrmPtIc8B3ZedgdVTW7XOQ]@pic_a1[41]&gt; show subs * DAEMON
+   user   |            subject
+----------+-----------------------------
+ pic_a1.* | _7603._INBOX.0AB98FB4.DAEMON
+----------+-----------------------------
+ pic_a2.1 | _7606._INBOX.173D29A5.DAEMON
+----------+-----------------------------
+ pic_a3.2 | _7500._INBOX.0072DD0A.DAEMON
+----------+-----------------------------
+ pic_a4.3 | _7500._INBOX.68AD2F1B.DAEMON
+...</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>Example, show subscriptions active at user edo_a3:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight nowrap"><code>pic_a1.rvd[CrmPtIc8B3ZedgdVTW7XOQ]@pic_a1[44]&gt; show subs edo_a3
+   user   |                    subject
+----------+---------------------------------------------
+edo_a3.13 |                 _7500._INBOX.C6AD7566.DAEMON
+          | (p) _7500._INBOX.C6AD7566.763E17AA40C28DD0.&gt;
+          |                          _7500.RSF5.REC.DD.N
+          |                         _7500.RSF5.REC.BBN.N
+...</code></pre>
+</div>
+</div>
+<div id="show_seqno" class="ulist">
+<ul>
+<li>
+<p>show seqno [W]</p>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p>Show the seqnos of the subjects received and published.  The peers with IPC or
+console subscribers or publishers track the sequences the subjscts to ensure
+the stream is completely serialized and notify of a dataloss error when it is
+not in sequence.  The details of how this works is described in
+<a href="#message_loss">Message Loss</a>.  This command only operates on the local sequence windows,
+the <a href="#show_windows">show windows</a> command shows the memory usage of these.</p>
+</div>
+<div class="paragraph">
+<p>The W is a substring that matches the subject so that the subjects in the
+window can be filtered.  Without <code>W</code>, all of the subjects are printed.</p>
+</div>
+<div class="paragraph">
+<p>Examle, show the seqnos of the subjects which contain ORCL:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight nowrap"><code>lex_a1.rvd[L0MOCmhQpwX2JqsBjYBypA]@lex_a1[4]&gt; seqno ORCL
+  source   |  seqno |        start      |        time       |         subject
+-----------+--------+-------------------+-------------------+---------------------------
+       ipc |  52581 | 0207 10:16:16.108 | 0207 23:51:11.441 |      _7500.RSF4.REC.ORCL.O
+       ipc | 145911 | 0207 10:20:50.986 | 0208 00:07:24.401 |      _7500.RSF9.REC.ORCL.O
+       ipc | 128244 | 0207 10:25:25.864 | 0208 00:17:18.041 |      _7500.RSF7.REC.ORCL.O
+ dex_a2.21 | 542769 | 0207 10:03:05.834 | 0208 00:22:42.401 | _7605._TIC.RSF5.REC.ORCL.O
+ dex_a1.20 | 542769 | 0207 10:03:05.834 | 0208 00:22:42.281 | _7602._TIC.RSF2.REC.ORCL.O
+ ...</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>The source is the publisher, so IPC indicates that the client attached to the
+lex_a1 has published these messages, and dex_a2, dex_a1 indicate that these
+messages were received from clients attached to those peers (or the console).
+The start is the first time in the a timeframe that the subject was seen, the
+time is the last time it was seen.  New timeframes occur when the network link
+state database changes, since the sequence number timeframe reference jump
+between old and new timeframes and the seqno base is linear.</p>
+</div>
+<div id="show_adjacency" class="ulist">
+<ul>
+<li>
+<p>show adjacency</p>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p>Show the adjacency tables.  This command dumps the current link state database.
+It shows which peer has a link to another peer through which tport and the cost
+of the link (of path 0).</p>
+</div>
+<div class="paragraph">
+<p>Example:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight nowrap"><code>chex.rvd[LQ9YfNwX/KtuiniQNvVkQg]@chex[127]&gt; show adj
+   user    |     adj    |     tport    | type | cost
+-----------+------------+--------------+------+-----
+    chex.* |            |        ipc.0 |  ipc | 1000
+           |    lex_a.1 |       test.1 |  tcp | 1000
+-----------+------------+--------------+------+-----
+   lex_a.1 |    edo_a.2 |    fo_mesh.4 | mesh | 1000
+           |   lex_a2.3 |  lex_amesh.5 | mesh | 1000
+           |   lex_a1.4 |  lex_amesh.6 | mesh | 1000
+           |   lex_a3.5 |  lex_amesh.7 | mesh | 1000
+           |   lex_a4.6 |  lex_amesh.8 | mesh | 1000
+           |   robo_a.7 |    fo_mesh.9 | mesh | 1000
+           |   lee_a.16 |   fo_mesh.10 | mesh | 1000
+           |   dex_a.21 |   fo_mesh.11 | mesh | 1000
+           |   pic_a.26 |   fo_mesh.12 | mesh | 1000
+           |     chex.* |   lex_tcp.13 |  tcp | 1000
+-----------+------------+--------------+------+-----
+   edo_a.2 |   edo_a4.8 |  edo_amesh.4 | mesh | 1000
+           |   edo_a3.9 |  edo_amesh.5 | mesh | 1000
+...</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>The <code>user</code> is the peer that is maintaining the links that follow.  It sends a
+link state update messages when a link is added, dropped or cost is changed.</p>
+</div>
+<div class="paragraph">
+<p>The <code>adj</code> field is the peer which is directly attached to <code>user</code> through the
+<code>tport</code>.  The <code>tport</code> is the name that <code>user</code> is labeling this link.  The
+<code>tport_id</code> number that follows the name (<code>fo_mesh</code> + .4) is the index into the
+user&#8217;s transport table.  The <code>type</code> and <code>cost</code> fields are also sent by <code>user</code>
+in the link state update.</p>
+</div>
+<div id="show_peers" class="ulist">
+<ul>
+<li>
+<p>show peers</p>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p>Shows info about the peers in the network that are active.</p>
+</div>
+<div class="paragraph">
+<p>Example:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight nowrap"><code>chex.rvd[LQ9YfNwX/KtuiniQNvVkQg]@chex[129]&gt; show peers
+   user    |         bridge         | sub |   seq | link |   lat  |   max  |   avg  |  tport | cost |               address
+-----------+------------------------+-----+-------+------+--------+--------+--------+--------+------+-----------------------------------
+    chex.* | LQ9YfNwX/KtuiniQNvVkQg |   2 |     0 |    1 |        |        |        |        |      |
+   lex_a.1 | itdZ1mlWSlXyT9BcLI9bhg |   2 |     0 |    9 | 21.9ms |   22ms | 21.9ms | test.1 | 1000 |         tcp://209.237.252.105:9000
+   edo_a.2 | 7LdF5BgMITq0f+7UZKdBqg |   2 |     0 |    5 | 22.1ms | 22.7ms | 22.2ms | test.1 | 2000 | lex_a.1@tcp://209.237.252.105:9000
+  lex_a2.3 | G26tiXX/uqnA3PwDb4j60A |  74 | 21608 |    4 |   22ms | 22.5ms |   22ms | test.1 | 2000 | lex_a.1@tcp://209.237.252.105:9000
+  lex_a1.4 | L0MOCmhQpwX2JqsBjYBypA | 115 |   113 |    4 |   22ms | 22.1ms | 21.9ms | test.1 | 2000 | lex_a.1@tcp://209.237.252.105:9000</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>The <code>bridge</code> is the 128 bit random nonce created on startup by each peer.  It
+uniquely identifies the peer instance.</p>
+</div>
+<div class="paragraph">
+<p>The <code>sub</code> field are the number of subscriptions that are active.  This number is
+a counter in the bloom filter that is updated by the peer when subjects and
+patterns are added or removed.  It always contains at least 2 entries, one for
+the <code>_I.&lt;nonce&gt;.&gt;</code> inbox pattern and one for the <code>_M.&gt;</code> multicast pattern.</p>
+</div>
+<div class="paragraph">
+<p>The <code>seq</code> field is the sequence number for each subscription operation.  It is
+serialized so that all subscriptions happen in the same order as the peer.</p>
+</div>
+<div class="paragraph">
+<p>The <code>link</code> field is the sequence number for each link state update.  It is also
+serialized so that adjacency table modifications occur in order.</p>
+</div>
+<div class="paragraph">
+<p>The <code>lat</code>, <code>max</code>, <code>avg</code> are ping round trip times that are sent 1.5x the
+heartbeat interval to a random peer.  They are tracked for at least an hour
+before being rotated.</p>
+</div>
+<div class="paragraph">
+<p>The <code>tport</code>, <code>cost</code>, and <code>address</code> reference the inbox route to peer.</p>
+</div>
+<div id="show_ports" class="ulist">
+<ul>
+<li>
+<p>show ports [T]</p>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p>Show info about tranports that are active on the network.</p>
+</div>
+<div class="paragraph">
+<p>Example:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight nowrap"><code>pic_a1.rvd[CrmPtIc8B3ZedgdVTW7XOQ]@pic_a1[47]&gt; show ports
+    tport   |  type  | cost | fd |      bs     |    br    |     ms    |   mr   |   lat |  idle  |  fl  |                   address
+------------+--------+------+----+-------------+----------+-----------+--------+-------+--------+------+-------------------------------------------
+       rv.0 |     rv |      | 12 |             |          |           |        |       | 27.8hr |   LI |                        rv://127.0.0.1:7500
+pic_amesh.1 |   mesh | 1000 | 18 |             |          |           |        |       | 27.8hr | LXCD |                    mesh://172.18.0.2:34344
+pic_amesh.2 |   mesh | 1000 | 19 |     3250008 |  3248028 |     10747 |  10747 | 173us | 1.99se |    X |           pic_a2.1@mesh://172.18.0.3:39340
+pic_amesh.3 |   mesh | 1000 | 21 |     3248424 |  5785922 |     10733 |  32929 | 240us | 1.39se |    X |           pic_a3.2@mesh://172.18.0.4:41320
+pic_amesh.4 |   mesh | 1000 | 23 |     3355474 |  5801830 |     10822 |  33084 | 225us |  835ms |    X |           pic_a4.3@mesh://172.18.0.5:43846
+pic_amesh.5 |   mesh | 1000 | 25 | 36957142584 | 29991114 | 100159342 | 245786 | 166us | 1.06ms |    X |            pic_a.4@mesh://172.18.0.1:57204</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>The <code>tport</code>, <code>type</code> are configured, and the <code>cost</code> is either configured or
+advertised by the peer in it&#8217;s link state message.  If a transport is internal,
+like an IPC transport, then it doesn&#8217;t have a cost associated with it.</p>
+</div>
+<div class="paragraph">
+<p>The <code>fd</code> field is the endpoint for the transport, usually a listener or a <code>fd</code>
+assigned to the transport.  There are usually one or more fds within the
+transport that carry out the reading and writing of data to a network endpoint.</p>
+</div>
+<div class="paragraph">
+<p>The fields <code>bs</code>, <code>br</code>, <code>ms</code>, and <code>mr</code> fields are bytes, messages sent and
+received, which are collected from all the fds within the transport.</p>
+</div>
+<div class="paragraph">
+<p>The <code>idle</code> is the last time a message event occured.</p>
+</div>
+<div class="paragraph">
+<p>The <code>fl</code> field are flags that are set on the transport.  Each character is a
+different flag:</p>
+</div>
+<div class="ulist">
+<ul>
+<li>
+<p><code>L</code>&#8201;&#8212;&#8201;has a TCP listener</p>
+</li>
+<li>
+<p><code>M</code>&#8201;&#8212;&#8201;is a PGM multicast transport</p>
+</li>
+<li>
+<p><code>X</code>&#8201;&#8212;&#8201;is a mesh transport</p>
+</li>
+<li>
+<p><code>C</code>&#8201;&#8212;&#8201;is or was actively connecting the link</p>
+</li>
+<li>
+<p><code>T</code>&#8201;&#8212;&#8201;was accepted from a TCP listener</p>
+</li>
+<li>
+<p><code>E</code>&#8201;&#8212;&#8201;is marked as an edge link, there is no routing on the other side</p>
+</li>
+<li>
+<p><code>I</code>&#8201;&#8212;&#8201;is an IPC transport, which is are client endpoints</p>
+</li>
+<li>
+<p><code>D</code>&#8201;&#8212;&#8201;resolves the link using a multicast device</p>
+</li>
+<li>
+<p><code>-</code>&#8201;&#8212;&#8201;is shutdown</p>
+</li>
+<li>
+<p><code>*</code>&#8201;&#8212;&#8201;connecting in progress</p>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p>The <code>address</code> field is the address at the peer when TCP is used and the
+multicast address when PGM is used.</p>
+</div>
+<div id="show_cost" class="ulist">
+<ul>
+<li>
+<p>show cost [T]</p>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p>This is similar to <a href="#show_ports">show ports</a> except that all 4 costs are
+printed for each transport.</p>
+</div>
+<div class="paragraph">
+<p>Example:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight nowrap"><code>pic_a1.rvd[CrmPtIc8B3ZedgdVTW7XOQ]@pic_a1[49]&gt; show cost pic_amesh
+    tport   |  type  | cost | cost2 | cost3 | cost4 | fd |  fl  |                   address
+------------+--------+------+-------+-------+-------+----+------+-------------------------------------------
+pic_amesh.1 |   mesh | 1000 |  1000 |  1000 |  1000 | 18 | LXCD |                    mesh://172.18.0.2:34344
+pic_amesh.2 |   mesh | 1000 |  1000 |  1000 |  1000 | 19 |    X |           pic_a2.1@mesh://172.18.0.3:39340
+pic_amesh.3 |   mesh | 1000 |  1000 |  1000 |  1000 | 21 |    X |           pic_a3.2@mesh://172.18.0.4:41320
+pic_amesh.4 |   mesh | 1000 |  1000 |  1000 |  1000 | 23 |    X |           pic_a4.3@mesh://172.18.0.5:43846
+pic_amesh.5 |   mesh | 1000 |  1000 |  1000 |  1000 | 25 |    X |            pic_a.4@mesh://172.18.0.1:57204
+...</code></pre>
+</div>
+</div>
+<div id="show_status" class="ulist">
+<ul>
+<li>
+<p>show status [T]</p>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p>Similar to <a href="#show_ports">show ports</a> with a status errno if the system
+reported an error on a link.  When everything is normal, the address is printed
+instead.</p>
+</div>
+<div class="paragraph">
+<p>Example:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre>pic_a1.rvd[CrmPtIc8B3ZedgdVTW7XOQ]@pic_a1[50]&gt; show status pic_amesh
+    tport   | type | fd |  fl  |              status
+------------+------+----+------+---------------------------------
+pic_amesh.1 | mesh | 18 | LXCD | mesh://172.18.0.2:34344
+pic_amesh.2 | mesh | 19 |    X | pic_a2.1@mesh://172.18.0.3:39340
+pic_amesh.3 | mesh | 21 |    X | pic_a3.2@mesh://172.18.0.4:41320
+pic_amesh.4 | mesh | 23 |    X | pic_a4.3@mesh://172.18.0.5:43846
+pic_amesh.5 | mesh | 25 |    X | pic_a.4@mesh://172.18.0.1:57204
+...</pre>
+</div>
+</div>
+<div id="show_routes" class="ulist">
+<ul>
+<li>
+<p>show routes [P]</p>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p>Show the routes.  This shows how all the peers are connected and which port
+would be used to send and receive message from the peer.  It also displays
+which transports have been used in order to reach the peer.</p>
+</div>
+<div class="paragraph">
+<p>Example:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight nowrap"><code>pic_a1.rvd[CrmPtIc8B3ZedgdVTW7XOQ]@pic_a1[52]&gt; show routes
+   user   |     tport   |      state    | cost |   path  |   lat  | fd |               route
+----------+-------------+---------------+------+---------+--------+----+---------------------------------
+ pic_a2.1 | pic_amesh.2 | inbox,mesh,hb | 1000 | 0,1,2,3 |  143us | 19 | pic_a2.1@mesh://172.18.0.3:39340
+          | pic_amesh.3 |               | 2000 |         |        | 21 | pic_a3.2@mesh://172.18.0.4:41320
+          | pic_amesh.4 |               | 2000 |         |        | 23 | pic_a4.3@mesh://172.18.0.5:43846
+          | pic_amesh.5 |               | 2000 |         |        | 25 |  pic_a.4@mesh://172.18.0.1:57204
+...</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>This shows that user <code>pic_a2</code> messages have been received or sent through these
+transports.  The secondary transports are often used on startup when the other
+links are not yet active or when a link fails.</p>
+</div>
+<div class="paragraph">
+<p>The <code>state</code> of the transport has these values:</p>
+</div>
+<div class="ulist">
+<ul>
+<li>
+<p><code>inbox</code>&#8201;&#8212;&#8201;transport is the path for the inbox route</p>
+</li>
+<li>
+<p><code>mesh</code>&#8201;&#8212;&#8201;transport is part of a mesh</p>
+</li>
+<li>
+<p><code>hb</code>&#8201;&#8212;&#8201;transport is directly connected and has a heartbeat</p>
+</li>
+<li>
+<p><code>ucast</code>&#8201;&#8212;&#8201;transport has a point to point UDP protocol</p>
+</li>
+<li>
+<p><code>usrc</code>&#8201;&#8212;&#8201;transport uses a point to point UDP protocol to reach another peer</p>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p>The <code>cost</code> is the link cost of the path P argument, or 0 when not specified.</p>
+</div>
+<div class="paragraph">
+<p>The <code>path</code> field enumerates which transport is used to reach peer for each path.</p>
+</div>
+<div class="paragraph">
+<p>The <code>lat</code>, <code>fd</code> are the same as <a href="#show_ports">show ports</a>.</p>
+</div>
+<div class="paragraph">
+<p>The <code>route</code> is the directly connected peer address that a message is sent or
+received.</p>
+</div>
+<div id="show_urls" class="ulist">
+<ul>
+<li>
+<p>show urls</p>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p>Show the local and peer addresses as well as the url used to resolve the
+address of the peer.  This is useful for mesh and multicast type networks since
+the endpoints are sometimes resolved through exchanging messages with the
+network.   In the case of a mesh transport, a mesh url database is exchanged
+and links are established with all the peers that are in the mesh.  The
+multicast PGM transport exchanges the unicast UDP endpoints for all the peers
+that are on the transport.</p>
+</div>
+<div class="paragraph">
+<p>Example:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight nowrap"><code>pic_a1.rvd[CrmPtIc8B3ZedgdVTW7XOQ]@pic_a1[54]&gt; show urls
+   user   |     tport   |      state    | cost |    mesh   | fd |            url          |           local         |          remote
+----------+-------------+---------------+------+-----------+----+-------------------------+-------------------------+------------------------
+          |       ipc.0 |            LI |      |           | 11 |                         |    ipc://127.0.0.1:7500 |   ipc://127.0.0.1:43992
+          | pic_amesh.1 |          LXCD |      | pic_amesh | 17 | mesh://172.18.0.2:34344 |                         |
+ pic_a2.1 | pic_amesh.2 |             X |      | pic_amesh | 20 | mesh://172.18.0.3:44108 | mesh://172.18.0.2:34344 | mesh://172.18.0.3:39340
+ pic_a3.2 | pic_amesh.3 |             X |      | pic_amesh | 22 | mesh://172.18.0.4:42851 | mesh://172.18.0.2:34344 | mesh://172.18.0.4:41320
+ pic_a4.3 | pic_amesh.4 |             X |      | pic_amesh | 24 | mesh://172.18.0.5:45836 | mesh://172.18.0.2:34344 | mesh://172.18.0.5:43846
+  pic_a.4 | pic_amesh.5 |             X |      | pic_amesh | 26 | mesh://172.18.0.1:36262 | mesh://172.18.0.2:34344 | mesh://172.18.0.1:57204
+----------+-------------+---------------+------+-----------+----+-------------------------+-------------------------+------------------------
+ pic_a2.1 | pic_amesh.2 | inbox,mesh,hb | 1000 | pic_amesh | 19 | mesh://172.18.0.3:44108 | mesh://172.18.0.2:34344 | mesh://172.18.0.3:39340
+          | pic_amesh.3 |               | 2000 | pic_amesh | 21 |                         |                         |
+          | pic_amesh.4 |               | 2000 | pic_amesh | 23 |                         |                         |
+          | pic_amesh.5 |               | 2000 | pic_amesh | 25 |                         |                         |</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>The top section is similar to <a href="#show_ports">show ports</a> with addtion of the
+urls.</p>
+</div>
+<div class="paragraph">
+<p>The following sections is similar to <a href="#show_routes">show routes</a> with the
+addition of the urls for each user.</p>
+</div>
+<div class="paragraph">
+<p>The <code>url</code> field is resolved by exchanging messages.  The <code>local</code> and <code>remote</code>
+are addresses assigned to the connection.  Since a mesh may be actively
+connected by either peer, since all peers passive listeners and some have
+active connections.  The newer peers will usually have the active connections
+and the older peers will have accepted connections.  The local and remote
+addresses will reflect that, since the accepted peers are assigned an address
+by the system and the connecting peers use the <code>url</code> address to connect.</p>
+</div>
+<div id="show_tport" class="ulist">
+<ul>
+<li>
+<p>show tport [T]</p>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p>Show the state of the transports.  This prints the configured transport and
+whether it is active or not.  The other transport <code>show</code> commands will only
+show the active transports.  This will show the ones configured but not active
+as well.</p>
+</div>
+<div class="paragraph">
+<p>Example:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight nowrap"><code>pic_a1.rvd[CrmPtIc8B3ZedgdVTW7XOQ]@pic_a1[55]&gt; show tport
+   tport  |  type  |    state  |        listen       |             connect            |    device
+----------+--------+-----------+---------------------+--------------------------------+------------
+pic_amesh |   mesh | accepting |                     |                                | mesh://eth0
+       rv |     rv | accepting | rv://127.0.0.1:7500 |                                |
+      tel | telnet | accepting |     telnet://*:2222 |                                |
+      ipc |    ipc |       ipc |                     |                                |
+  rvd.ipc |    ipc |         - |                     |                                |
+     eth0 |   name |         - |                     | name://eth0;239.23.22.217:8327 |
+     test |    tcp |         - |                     |        tcp://robotron.rai:9000 |</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>The <code>listen</code>, <code>connect</code>, and <code>device</code> fields show how the transport is
+configured to resolve the connections.</p>
+</div>
+<div id="show_user" class="ulist">
+<ul>
+<li>
+<p>show user [U]</p>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p>Show the users configured.</p>
+</div>
+<div class="paragraph">
+<p>Example:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight nowrap"><code>chex.test[OsGpIaCbYCJbhnUVEp19Uw]@chex[135]&gt; show users
+uid | user |  svc |        create        | expires
+----+------+------+----------------------+--------
+  0 | chex | test | 1675847381.440084399 |
+    | dyna | test | 1675847381.440129724 |
+    | ruby | test | 1675847381.440176492 |
+    | zero | test | 1675847419.072423168 |</code></pre>
+</div>
+</div>
+<div id="show_events" class="ulist">
+<ul>
+<li>
+<p>show events</p>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p>The system tracks the authentication and transport and link state events in a
+buffer that rotates every 4096 entries.  This is a compact table that has 6
+integer fields that map to a timestamp, uids, transports and enumerated values
+depending on event type.  These events are useful for resolving what happened
+to the network after something went wrong.</p>
+</div>
+<div class="paragraph">
+<p>Example of an event log:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight nowrap"><code>pic_a1.rvd[CrmPtIc8B3ZedgdVTW7XOQ]@pic_a1[59]&gt; show events
+       stamp      |     tport   |    user   |    peer   |       event     |         data
+------------------+-------------+-----------+-----------+-----------------+--------------------
+0206 22:09:22.606 |             |  pic_a1.* |           |         startup |
+0206 22:09:22.607 |       ipc.0 |  pic_a1.* |           |      on_connect |              listen
+0206 22:09:22.607 | pic_amesh.1 |  pic_a1.* |     (aes) |      on_connect |              listen
+0206 22:09:22.607 |     (mcast) |  pic_a1.* |           |      send_hello |
+0206 22:09:23.301 | pic_amesh.2 |  pic_a1.* |     (aes) |      on_connect |         mesh_accept
+0206 22:09:23.327 |             |  pic_a1.* |           |        converge |           add_tport
+0206 22:09:23.340 | pic_amesh.2 |  pic_a2.1 |  pic_a1.* |  add_user_route |            neighbor
+0206 22:09:23.340 | pic_amesh.2 |  pic_a1.* |  pic_a2.1 |  send_challenge |               hello
+0206 22:09:23.342 | pic_amesh.2 |  pic_a2.1 |           |  recv_challenge |           handshake
+0206 22:09:23.342 |             |  pic_a2.1 |    (ecdh) |        auth_add |           handshake
+0206 22:09:23.342 |     (mcast) |  pic_a1.* |  pic_a2.1 | send_adj_change |                 add
+0206 22:09:23.342 | pic_amesh.2 |  pic_a2.1 |           |      send_trust |             in_mesh
+0206 22:09:23.342 | pic_amesh.2 |  pic_a2.1 |           |    recv_peer_db |           add_route
+0206 22:09:23.342 | pic_amesh.2 |  pic_a2.1 |  pic_a1.* | recv_adj_change |          update_adj
+0206 22:09:23.367 |             |  pic_a1.* |           |        converge |          adj_change
+0206 22:09:23.889 | pic_amesh.3 |  pic_a1.* |     (aes) |      on_connect |         mesh_accept
+0206 22:09:23.927 |             |  pic_a1.* |           |        converge |           add_tport
+0206 22:09:23.928 | pic_amesh.3 |  pic_a3.2 |  pic_a1.* |  add_user_route |            neighbor</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>The events that are logged are:</p>
+</div>
+<table class="tableblock frame-all grid-cols stripes-even fit-content">
+<colgroup>
+<col>
+<col>
+</colgroup>
+<thead>
+<tr>
+<th class="tableblock halign-left valign-top">Event</th>
+<th class="tableblock halign-left valign-top">Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">startup</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Initial event, time of start</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">on_connect</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Transport listen, connect, or accept occured</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">on_shutdown</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Transport connection was closed or shutdown</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">on_timeout</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Transport connection timed out</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">auth_add</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Peer was authenticated and is now trusted</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">auth_remove</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Peer authentication is dropped</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">send_challenge</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">An authentication challenge is sent to peer</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">recv_challenge</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">An authentication challenge is received from peer</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">send_trust</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Authentication was successful, sent trust message</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">recv_trust</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Peer notified that my node is now authenticated</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">add_user_route</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Route to peer is found and the transport is labeled</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">hb_queue</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Peer is added to the heartbeat timeout queue</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">hb_timeout</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Peer heartbeat was not received within it&#8217;s interval</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">send_hello</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Transport is initialized by sending a hello message</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">recv_bye</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Peer intends to leave the network and sends a bye message</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">recv_add_route</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Received a message that a peer was added to the network</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">recv_peer_db</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">All the peers that are known are exchanged with a new peer</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">send_add_route</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Send a message when a peer is added to the network</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">send_peer_del</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Send a message when peer is removed from the network</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">sync_result</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Peer sync message was received, initialize peer state</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">send_sync_req</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Request a peer sync after new peer is notitified</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">recv_sync_req</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Receive a sync request for my node or another peer</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">recv_sync_fail</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Receive a sync request for an unknown peer</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">send_adj_change</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Send a link state update message, add or remove link</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">recv_adj_change</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Recveived a link state update message</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">send_adj_req</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Link state for peer is stale, request the current link state</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">recv_adj_req</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Receive a request for the current link state</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">send_adj</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Send the current link state to a peer</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">recv_adj_result</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Receive the current link state from a peer</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">resize_bloom</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Resize my peers bloom filter and sent it to the network</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">recv_bloom</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Received a peers bloom filter</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">converge</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">The network has no missing link states and is completely connected</p></td>
+</tr>
+</tbody>
+</table>
+<div id="show_logs" class="ulist">
+<ul>
+<li>
+<p>show logs</p>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p>The last log 64K bytes of the log is buffered in the process.  This command
+shows the this buffer.</p>
+</div>
+<div id="show_counters" class="ulist">
+<ul>
+<li>
+<p>show counters</p>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p>Show the counters of heartbeat, inbox, and ping subjects.</p>
+</div>
+<div class="paragraph">
+<p>Example:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight nowrap"><code>pic_a1.rvd[CrmPtIc8B3ZedgdVTW7XOQ]@pic_a1[60]&gt; show counters
+   user   |        start      | hb seqno |       hb time     | snd ibx | rcv ibx | ping snd |     ping stime    | pong rcv | ping rcv
+----------+-------------------+----------+-------------------+---------+---------+----------+-------------------+----------+---------
+ pic_a1.* | 0206 22:09:22.606 |          |                   |         |         |          |                   |          |
+ pic_a2.1 | 0206 22:09:23.219 |    17021 | 0208 20:52:00.940 |      19 |      23 |      454 | 0208 20:50:22.608 |      454 |      442
+ pic_a3.2 | 0206 22:09:23.806 |    17021 | 0208 20:51:51.687 |      18 |     149 |      438 | 0208 20:50:43.808 |      438 |      444
+ pic_a4.3 | 0206 22:09:24.401 |    17020 | 0208 20:51:52.241 |      29 |     125 |      427 | 0208 20:51:00.008 |      427 |      438
+  pic_a.4 | 0206 22:09:24.433 |    17020 | 0208 20:51:52.275 |      35 |      37 |      422 | 0208 20:51:21.608 |      422 |      426
+robo_a3.5 | 0206 22:09:06.260 |        0 |                   |      11 |      98 |      427 | 0208 20:51:40.528 |      427 |      421
+robo_a2.6 | 0206 22:09:05.371 |        0 |                   |      11 |      15 |      424 | 0208 20:51:50.168 |      424 |      423
+robo_a4.7 | 0206 22:09:07.183 |        0 |                   |      11 |      95 |      420 | 0208 20:41:30.568 |      420 |      418
+robo_a1.8 | 0206 22:09:04.452 |        0 |                   |      11 |      15 |      423 | 0208 20:41:48.848 |      423 |      424
+  edo_a.9 | 0206 22:09:12.993 |        0 |                   |       2 |      20 |      422 | 0208 20:42:05.808 |      422 |      419</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>The <code>start</code> field is when the process started.  The <code>hb seqno</code> and <code>hb time</code>
+track the last heartbeat received from the peer when it is directly connected.
+The <code>snd ibx</code>, <code>rcv ibx</code> are counters for many of the <code>_I.&lt;nonce&gt;.</code> subjects
+which guard against repeats.  These are point to point messages, the peer has
+the same counters which should match these.  The <a href="#show_inbox">show inbox</a>
+command will show the last 32 of these sequences.  The <code>ping</code> and <code>pong</code>
+sequences have their own counters, since these are used to check connectivity
+between peers and are expected to have loss when the network is unstable.</p>
+</div>
+<div id="show_pubtype" class="ulist">
+<ul>
+<li>
+<p>show pubtype</p>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p>When a message header is created or unpacked, a counter of the subject class is
+incremented.  This shows these counters.  These are only messages that are
+processed by the network, it is possible that two clients within the IPC
+transport are exchanging messages, these are not counted.</p>
+</div>
+<div class="paragraph">
+<p>Example:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight nowrap"><code>lex_a1.rvd[L0MOCmhQpwX2JqsBjYBypA]@lex_a1[7]&gt; show pubtype
+      type       | recv_count | send_count
+-----------------+------------+-----------
+ u_session_hello |          0 |          1
+    u_session_hb |      68761 |      68765
+      u_peer_add |        134 |         35
+      u_peer_del |         16 |          4
+  u_bloom_filter |         39 |          3
+     u_adjacency |        115 |          4
+      u_sub_join |     224621 |         24
+     u_sub_leave |     223689 |          0
+    u_psub_start |        110 |         89
+    u_inbox_auth |          4 |          8
+    u_inbox_subs |         10 |          0
+    u_inbox_ping |      12476 |      12529
+    u_inbox_pong |      12529 |      12481
+     u_inbox_rem |          1 |          0
+   u_inbox_resub |          0 |        202
+ u_inbox_add_rte |          4 |          4
+u_inbox_sync_req |          2 |         30
+u_inbox_sync_rpy |         29 |          0
+ u_inbox_adj_req |          3 |         10
+ u_inbox_adj_rpy |         21 |          6
+     u_inbox_ack |          0 |          1
+     u_inbox_any |          0 |     224476
+         u_inbox |          0 |          1
+    u_mcast_ping |          5 |          0
+ u_inbox_any_rte |         80 |          0
+   mcast_subject | 1528812397 |          0</code></pre>
+</div>
+</div>
+<div id="show_inbox" class="ulist">
+<ul>
+<li>
+<p>show inbox [U]</p>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p>Show the types of the last 32 system RPC messages sent and received for each
+peer.  Some peers may not have any of these if they are not directly connected.</p>
+</div>
+<div class="paragraph">
+<p>This is an example of a the peer attached to the console connecting to a larger
+network:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight nowrap"><code>chex.rvd[xpO5ODZvoOcUMJ60QVaSBg]@chex[139]&gt; inbox
+  user  | send seqno |     send type    | recv seqno |     recv type
+--------+------------+------------------+------------+-----------------
+lex_a.1 |          1 |     u_inbox_auth |          1 | u_inbox_sync_rpy
+        |          2 |  u_inbox_add_rte |          2 |     u_inbox_auth
+        |          3 |  u_inbox_adj_req |          3 |  u_inbox_add_rte
+        |          4 | u_inbox_sync_req |          4 |  u_inbox_adj_rpy
+        |          5 | u_inbox_sync_req |          5 | u_inbox_sync_rpy
+        |          6 | u_inbox_sync_req |          6 | u_inbox_sync_rpy
+        |          7 | u_inbox_sync_req |          7 | u_inbox_sync_rpy
+        |          8 | u_inbox_sync_req |          8 | u_inbox_sync_rpy
+...</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>The first 3 sequences are the result of authentication, which causes both peers
+to exchange all their known peers.  The following <code>u_inbox_sync_req</code> and
+<code>u_inbox_sync_rpy</code> pairs are used to request the peers which are not yet
+authenticated.  In this case, the connecting peer has no peers and the peer
+attached to the network has lots of peers that need synchronizing.</p>
+</div>
+<div id="show_loss" class="ulist">
+<ul>
+<li>
+<p>show loss</p>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p>Show the counters of repeated messages (duplicated), messages not subscribed,
+have message loss, or have inbox loss.  When a message is repeated or not
+subscribed, a counter is incremented and the message is tossed.  These types
+of events can occur through normal operation, but usually they are a very small
+amount of traffic.  The repeated messages can occur during network instability
+and not subscribed messages can occur because an unsubscribe has not yet
+reached the publisher or because the bloom filter did not filter the subject.</p>
+</div>
+<div class="paragraph">
+<p>The</p>
+</div>
+<div id="show_skew" class="ulist">
+<ul>
+<li>
+<p>show skew</p>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p>Show the system time skew between peers.</p>
+</div>
+<div id="show_reachable" class="ulist">
+<ul>
+<li>
+<p>show reachable</p>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p>Show which transports can be used to reach a peer.</p>
+</div>
+<div id="show_tree" class="ulist">
+<ul>
+<li>
+<p>show tree [U]</p>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p>Show the multicast tree for a user or self.</p>
+</div>
+<div id="show_path" class="ulist">
+<ul>
+<li>
+<p>show path [P]</p>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p>Show the path a multicast message would take.</p>
+</div>
+<div id="show_forward" class="ulist">
+<ul>
+<li>
+<p>show forward [P]</p>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p>Show the forwarding table for a message received from peers.</p>
+</div>
+<div id="show_fds" class="ulist">
+<ul>
+<li>
+<p>show fds</p>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p>Show what each fd is used for.</p>
+</div>
+<div id="show_buffers" class="ulist">
+<ul>
+<li>
+<p>show buffers</p>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p>Show the buffer usage of each fd.</p>
+</div>
+<div id="show_windows" class="ulist">
+<ul>
+<li>
+<p>show windows</p>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p>Show the size and counts of the subject publish and subscribe windows.</p>
+</div>
+<div id="show_blooms" class="ulist">
+<ul>
+<li>
+<p>show blooms [P]</p>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p>Show where the bloom filters are used for a path.</p>
+</div>
+<div id="show_match" class="ulist">
+<ul>
+<li>
+<p>show match S</p>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p>Show which bloom filters match a subject.</p>
+</div>
+<div id="show_graph" class="ulist">
+<ul>
+<li>
+<p>show graph</p>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p>Show the graph description of the network.</p>
+</div>
+<div id="show_cache" class="ulist">
+<ul>
+<li>
+<p>show cache</p>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p>Show the route cache hit and miss statistics.</p>
+</div>
+<div id="show_poll" class="ulist">
+<ul>
+<li>
+<p>show poll</p>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p>Show the latency of poll states, the average time used for processing timers,
+read, write, and routing events.</p>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_test_pub_sub">Test Pub Sub</h3>
+<div class="ulist">
+<ul>
+<li>
+<p>sub [S] [F]</p>
+</li>
+<li>
+<p>unsub [S] [F]</p>
+</li>
+<li>
+<p>psub [W] [F]</p>
+</li>
+<li>
+<p>punsub [W] [F]</p>
+</li>
+<li>
+<p>gsub [W] [F]</p>
+</li>
+<li>
+<p>gunsub [W] [F]</p>
+</li>
+<li>
+<p>pub [S] [M]</p>
+</li>
+<li>
+<p>trace [S] [M]</p>
+</li>
+<li>
+<p>ack [S] [M]</p>
+</li>
+<li>
+<p>rpc [S] [M]</p>
+</li>
+<li>
+<p>any [S] [M]</p>
+</li>
+<li>
+<p>cancel</p>
+</li>
+<li>
+<p>reseed</p>
+</li>
+</ul>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_mute_the_loggging">Mute the Loggging</h3>
+<div class="ulist">
+<ul>
+<li>
+<p>mute</p>
+</li>
+<li>
+<p>unmute</p>
+</li>
+</ul>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_turn_onoff_debug_logging">Turn On/Off Debug Logging</h3>
+<div class="ulist">
+<ul>
+<li>
+<p>debug [I]
+tcp, pgm, ibx, transport, user, link_state, peer, auth,
+session, hb, sub, msg_recv, msg_hex, telnet, name, repeat,
+not_sub, loss, adj, conn, dist,  kvpub,  kvps,  rv</p>
+</li>
+</ul>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_write_events_to_file">Write Events to File</h3>
+<div class="ulist">
+<ul>
+<li>
+<p>wevents [F]</p>
+</li>
+</ul>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_stop_the_server">Stop the Server</h3>
+<div class="ulist">
+<ul>
+<li>
+<p>die [I]</p>
+</li>
+<li>
+<p>quit/exit</p>
+</li>
+</ul>
+</div>
 </div>
 </div>
 </div>
@@ -4344,7 +6136,7 @@ daemon instances.</p>
 </div>
 <div id="footer">
 <div id="footer-text">
-Last updated 2023-01-10 04:37:59 -0800
+Last updated 2023-02-08 22:40:57 -0800
 </div>
 </div>
 </body>

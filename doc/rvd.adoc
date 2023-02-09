@@ -109,6 +109,7 @@ A HUP signal will cause it to exit:
 $ killall -HUP rvd
 ----
 
+[[network_spec]]
 Connecting to Networks
 ~~~~~~~~~~~~~~~~~~~~~~
 

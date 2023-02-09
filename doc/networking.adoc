@@ -498,6 +498,7 @@ defined as a value in the config files (example: map: "sysv:raikv.shm").
 If the network is specified, then starting the Redis service will also join
 the network.  A network format is as described in <<service_and_networks>>.
 
+[[telnet]]
 Telnet
 ~~~~~~
 
@@ -524,6 +525,7 @@ Example `tport_mytelnet.yaml`:
 | port       | random       | Listener port     
 |======================================================
 
+[[web]]
 Web
 ~~~
 
