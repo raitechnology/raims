@@ -2,8 +2,8 @@
 Console
 -------
 
-Description of Console
-~~~~~~~~~~~~~~~~~~~~~~
+Description of the Console
+~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The console of `ms_server` is available when the -c option is used or when a
 <<telnet>> protocol is defined.  It offers command line editing and
@@ -13,7 +13,7 @@ It also has many ways to examine and debug the network.
 
 The output is usually colorized if the terminal supports it, with green and red
 used for log messages (normal and error) and white used for cli command
-execution results.  Printing messages received are also coloized, green for
+execution results.  Printing messages received are also colorized, green for
 field name, blue for field type, white for field values.
 
 The user names and the transport names usually have an integer number appended
@@ -26,15 +26,16 @@ are unique, but not necessarily.  The users and transports are kept in their
 respective a tables and the `uid` and `tport_id` are indexes into these tables.
 The `*` is often used for uid 0 so that it stands out, since it is the peer
 that the console is attached to.  The `tport_id` of 0 is also special, that is
-where the client protocols are attached through local IPC, for example, a tcp
+where the client protocols are attached through local IPC, for example, a TCP
 connection to 127.0.0.1:7500.
 
-The command string entered into the cli will excute if it has enough characters
+The command string entered into the cli will execute if it has enough characters
 to distinguish it from the prefixes of other commands.  If the string 'pi' is
 entered, then the command `ping` will run, since 'pi' is a unique prefix of
 `ping`.  The `show` prefix is optional when the command matches the second part
 of the `show` command, so 'pe' will match and run the `show peers` command.
-The 'run t test' will match and run the `show running transport test` command.
+The shortened command `run t test` will match and run the `show running
+transport test` command.
 
 Help Screen
 ~~~~~~~~~~~
@@ -47,7 +48,7 @@ The following is the help screen, displayed when "help" is entered at the cli.
 | link:#ping[ping] [U]                   | Ping peers and display latency of return
 | link:#ping[tping] [U]                  | Ping peers with route trace flag
 | link:#ping[mping] [P]                  | Multicast ping all peers using path P
-| link:#remote[remote] [U] [C]           | Run remote command on peer
+| link:#remote[remote] U C               | Run command C remotely on peer U
 | link:#conn_listen[connect] T           | Start tport connect
 | link:#conn_listen[listen] T            | Start tport listener
 | link:#conn_listen[shutdown] T          | Shutdown tport
@@ -69,7 +70,7 @@ The following is the help screen, displayed when "help" is entered at the cli.
 | link:#show_events[show events]         | Show event recorder
 | link:#show_logs[show logs]             | Show current log buffer
 | link:#show_counters[show counters]     | Show system seqno and time values
-| link:#show_pubtype[show pubtype]       | Show system publish type recvd
+| link:#show_pubtype[show pubtype]       | Show system publish type received
 | link:#show_inbox[show inbox] [U]       | Show inbox sequences
 | link:#show_loss[show loss]             | Show message loss counters and time
 | link:#show_skew[show skew]             | Show peer system clock skews
@@ -78,8 +79,8 @@ The following is the help screen, displayed when "help" is entered at the cli.
 | link:#show_path[show path] [P]         | Show multicast path P (0->3)
 | link:#show_forward[show forward] [P]   | Show forwarding P (0->3)
 | link:#show_fds[show fds]               | Show fd statistics
-| link:#show_buffers[show buffers]       | Show fd buffer mem usage
-| link:#show_windows[show windows]       | Show pub and sub window mem usage
+| link:#show_buffers[show buffers]       | Show fd buffer memory usage
+| link:#show_windows[show windows]       | Show pub and sub window memory usage
 | link:#show_blooms[show blooms] [P]     | Show bloom centric routes for path P (0-3)
 | link:#show_match[show match] S         | Show users which have a bloom that match sub
 | link:#show_graph[show graph]           | Show network description for node graph
@@ -97,25 +98,25 @@ The following is the help screen, displayed when "help" is entered at the cli.
 | link:#conf_tran[show startup user] U      | Show users startup config, U or all
 | link:#conf_tran[show startup group] G     | Show groups startup config, G or all
 | link:#conf_tran[show startup parameter] P | Show parameters startup config, P or all
-| sub [S] [F]                  | Subscribe subject S, output to file F
-| unsub [S] [F]                | Unsubscribe subject S, stop output file F
-| psub [W] [F]                 | Subscribe rv-wildcard W, output to file F
-| punsub [W] [F]               | Unsubscribe rv-wildcard W, stop output file F
-| gsub [W] [F]                 | Subscribe glob-wildcard W, output to file F
-| gunsub [W] [F]               | Unsubscribe glob-wildcard W, stop output file F
-| pub [S] [M]                  | Publish msg string M to subject S
-| trace [S] [M]                | Publish msg string M to subject S, with reply
-| ack [S] [M]                  | Publish msg string M to subject S, with ack
-| rpc [S] [M]                  | Publish msg string M to subject S, with return
-| any [S] [M]                  | Publish msg string M to any subscriber of S
-| cancel                       | Cancel and show incomplete (ping, show subs)
-| mute                         | Mute the log output
-| unmute                       | Unmute the log output
-| reseed                       | Reseed bloom filter
-| debug [I]                    | Set debug flags to ival I
-| wevents [F]                  | Write events to file
-| die [I]                      | Exit without cleanup, with status 1 or I
-| quit/exit                    | Exit console
+| link:#test_sub[sub] S [F]       | Subscribe subject S, output to file F
+| link:#test_unsub[unsub] S [F]   | Unsubscribe subject S, stop output file F
+| link:#test_psub[psub] W [F]     | Subscribe rv-wildcard W, output to file F
+| link:#test_punsub[punsub] W [F] | Unsubscribe rv-wildcard W, stop output file F
+| link:#test_gsub[gsub] W [F]     | Subscribe glob-wildcard W, output to file F
+| link:#test_gunsub[gunsub] W [F] | Unsubscribe glob-wildcard W, stop output file F
+| link:#test_pub[pub] S M       | Publish msg string M to subject S
+| link:#test_trace[trace] S M   | Publish msg string M to subject S, with reply
+| link:#test_ack[ack] S M       | Publish msg string M to subject S, with ack
+| link:#test_rpc[rpc] S M       | Publish msg string M to subject S, with return
+| link:#test_any[any] S M       | Publish msg string M to any subscriber of S
+| link:#test_cancel[cancel]     | Cancel and show incomplete (ping, show subs)
+| link:#log_mute[mute]          | Mute the log output
+| link:#log_unmute[unmute]      | Unmute the log output
+| link:#test_reseed[reseed]     | Reseed bloom filter
+| link:#debug_log[debug] I      | Set debug flags to ival I
+| link:#write_events[wevents] F | Write events to file
+| link:#stop_die[die] [I]       | Exit without cleanup, with status 1 or I
+| link:#stop_quit[quit/exit]    | Exit console
 |=============================================
 
 The arguments in square brackets are optional, the letters used above are:
@@ -135,11 +136,11 @@ The arguments in square brackets are optional, the letters used above are:
   for example 7500 is the default RV service.  A subject is any string of
   characters.
 
-- N -- Network, formated described in <<network_spec>>.
+- N -- Network, formatted described in <<network_spec>>.
 
 - G -- Group, defines a group of users, not currently used.
 
-- F -- File, a path in the filesystem.
+- F -- File, a path in the file system.
 
 - M -- Message, a string of characters, as the console is limited to message
   formats that can be typed into the cli (string and json).
@@ -157,7 +158,7 @@ Testing Connectivity with Ping
 These commands send a message to a peer and display the message returned.  The
 `tping` command also sets the trace flag in the message sent so that all peers
 along the path will also send a message back.  This is useful in the way that
-`traceroute` is useful, to find an unusual latency report or dropped messages.
+traceroute is useful, to find an unusual latency report or dropped messages.
 
 The `ping` and `tping` optionally have an argument that specifies the name of
 the peer to send the message.  If no argument is used, then every peer
@@ -171,7 +172,7 @@ the reply field of the original message.
 
 The `mping` use a multicast path instead of an inbox path.  The multicast path
 is numbered and is added to the message header so that all peers which receive
-and route this message will use the same path.  All peers tht receive it will
+and route this message will use the same path.  All peers that receive it will
 send an inbox reply message, similar to `ping`.  The subject used by the sender
 is `_M.ping`, which all peers are subscribed to.  The multicast paths are
 numbered 0 to 3, so `mping 0` will use the first path, and `mping 3` will use
@@ -180,6 +181,13 @@ links in use are active and forwarding.  The reply also includes which port the
 message was received on, which will match the path 3 network path.  The path 0
 is often the same as the inbox path, except in the case of PGM, where inbox is
 a UDP point to point protocol.
+
+If the network is not yet stable, sometimes a ping operation will not complete.
+When this occurs, use the `cancel` command to show the completed and the
+incomplete values.  When a ping operation is started, the console estimates
+the number of replies that are expected and waits for these to complete before
+displaying the results.   The `tping` will display the acks of the message
+as they are received but wait for the final results.
 
 Example `ping`.
 
@@ -222,7 +230,7 @@ The `tport` field is where the reply inbox message was received, the
 Remote Command Execution
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
-- remote [U] [C]
+- remote U C
 
 `Remote` will message a command to another peer, run it in it's console and
 return the result.  This is useful because most often, a peer will not have a
@@ -256,29 +264,29 @@ Update and Show the Configuration
 - configure parameter P V
 - save
 - show running
-- show running transport [T]
-- show running service [S]
-- show running user [U]
-- show running group [G]
-- show running parameter [P]
+- show running transport T
+- show running service S
+- show running user U
+- show running group G
+- show running parameter P
 - show startup
-- show startup transport [T]
-- show startup service [S]
-- show startup user [U]
-- show startup group [G]
-- show startup parameter [P]
+- show startup transport T
+- show startup service S
+- show startup user U
+- show startup group G
+- show startup parameter P
 
 These commands show and modify the running configuration.  The `save` command
 write the running config to the startup config, when the directory and files
 are writable.
 
 The `show running` and `show startup` will print the config tree in yaml
-to the console.  The running configuration may have some dynamicly created
+to the console.  The running configuration may have some dynamically created
 users and protocols which are created as a result of the startup config.  A
 dynamically created user that is not preconfigured is one of these.  These
 will show in `running`, but will not save to `startup`.
 
-Using the `configure transprot` command is the most often used command of
+Using the `configure transport` command is the most often used command of
 these.  It will update the currently running transports as well as add new
 ones.  If it is used to modify an existing transport that is already running,
 the new settings won't change the active transport until it is restarted
@@ -319,9 +327,9 @@ transports:
       connect: host1
 ----
 
-The first config command enters into a cli sub command mode where only the
-fields of the transport can be entered.  The second config command sets all
-of the fields on one line.
+The first `configure` command enters into a cli sub command mode where only the
+fields of the transport can be entered.  The second `configure` command sets
+all of the fields on one line.
 
 The commands `show service` and `show group` have limited usefulness at in the
 current implementation, since only one service is used per `ms_server` instance
@@ -332,10 +340,10 @@ used for access control lists.
 Transport Start and Stop
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
-- connect [T]
-- listen [T]
-- shutdown [T]
-- network [S] [N]
+- connect T
+- listen T
+- shutdown T
+- network S N
 
 The transport T is defined before using the `connect`, `listen`, `shutdown`
 commands.  The `network` command configures the transport if not already
@@ -364,9 +372,9 @@ The Show Commands
 Show the subscriptions active for user or for all users.  The `W` is a substring
 for partial matches.  This command uses inbox RPC calls to `_I.<nonce>.subs`
 for all users which `U` specifies.  The `*` user matches all users, so the `W`
-arg can be specified.
+argument can be specified.
 
-Example, show all subscriptons for every user:
+Example, show all subscriptions for every user:
 
 [source%nowrap]
 ----
@@ -429,9 +437,9 @@ edo_a3.13 |                 _7500._INBOX.C6AD7566.DAEMON
 [[show_seqno]]
 - show seqno [W]
 
-Show the seqnos of the subjects received and published.  The peers with IPC or
-console subscribers or publishers track the sequences the subjscts to ensure
-the stream is completely serialized and notify of a dataloss error when it is
+Show the sequences of the subjects received and published.  The peers with IPC
+or console subscribers or publishers track the sequences the subjects to ensure
+the stream is completely serialized and notify of a data loss error when it is
 not in sequence.  The details of how this works is described in
 <<message_loss>>.  This command only operates on the local sequence windows,
 the link:#show_windows[show windows] command shows the memory usage of these.
@@ -439,11 +447,11 @@ the link:#show_windows[show windows] command shows the memory usage of these.
 The W is a substring that matches the subject so that the subjects in the
 window can be filtered.  Without `W`, all of the subjects are printed.
 
-Examle, show the seqnos of the subjects which contain ORCL:
+Example, show the sequences of the subjects which contain ORCL:
 
 [source%nowrap]
 ----
-lex_a1.rvd[L0MOCmhQpwX2JqsBjYBypA]@lex_a1[4]> seqno ORCL
+lex_a1.rvd[L0MOCmhQpwX2JqsBjYBypA]@lex_a1[4]> show seqno ORCL
   source   |  seqno |        start      |        time       |         subject
 -----------+--------+-------------------+-------------------+---------------------------
        ipc |  52581 | 0207 10:16:16.108 | 0207 23:51:11.441 |      _7500.RSF4.REC.ORCL.O
@@ -457,10 +465,10 @@ lex_a1.rvd[L0MOCmhQpwX2JqsBjYBypA]@lex_a1[4]> seqno ORCL
 The source is the publisher, so IPC indicates that the client attached to the
 lex_a1 has published these messages, and dex_a2, dex_a1 indicate that these
 messages were received from clients attached to those peers (or the console).
-The start is the first time in the a timeframe that the subject was seen, the
-time is the last time it was seen.  New timeframes occur when the network link
-state database changes, since the sequence number timeframe reference jump
-between old and new timeframes and the seqno base is linear.
+The start is the first time in the time frame that the subject was seen, the
+time is the last time it was seen.  New time frames occur when the network link
+state database changes, since the sequence number time frame reference jump
+between old and new time frames and the seqno base is linear.
 
 [[show_adjacency]]
 - show adjacency
@@ -546,7 +554,7 @@ The `tport`, `cost`, and `address` reference the inbox route to peer.
 [[show_ports]]
 - show ports [T]
 
-Show info about tranports that are active on the network.
+Show info about transports that are active on the network.
 
 Example:
 
@@ -574,7 +582,7 @@ transport that carry out the reading and writing of data to a network endpoint.
 The fields `bs`, `br`, `ms`, and `mr` fields are bytes, messages sent and
 received, which are collected from all the fds within the transport.
 
-The `idle` is the last time a message event occured.
+The `idle` is the last time a message event occurred.
 
 The `fl` field are flags that are set on the transport.  Each character is a
 different flag:
@@ -639,7 +647,7 @@ pic_amesh.5 | mesh | 25 |    X | pic_a.4@mesh://172.18.0.1:57204
 - show routes [P]
 
 Show the routes.  This shows how all the peers are connected and which port
-would be used to send and receive message from the peer.  It also displays
+would be used to send and receive messages to/from the peer.  It also displays
 which transports have been used in order to reach the peer.
 
 Example:
@@ -708,7 +716,7 @@ pic_a1.rvd[CrmPtIc8B3ZedgdVTW7XOQ]@pic_a1[54]> show urls
           | pic_amesh.5 |               | 2000 | pic_amesh | 25 |                         |                         |
 ----
 
-The top section is similar to link:#show_ports[show ports] with addtion of the
+The top section is similar to link:#show_ports[show ports] with addition of the
 urls.
 
 The following sections is similar to link:#show_routes[show routes] with the
@@ -772,7 +780,7 @@ uid | user |  svc |        create        | expires
 
 The system tracks the authentication and transport and link state events in a
 buffer that rotates every 4096 entries.  This is a compact table that has 6
-integer fields that map to a timestamp, uids, transports and enumerated values
+integer fields that map to a time stamp, uids, transports and enumerated values
 depending on event type.  These events are useful for resolving what happened
 to the network after something went wrong.
 
@@ -809,7 +817,7 @@ The events that are logged are:
 |=============================================
 | Event | Description
 | startup | Initial event, time of start
-| on_connect | Transport listen, connect, or accept occured
+| on_connect | Transport listen, connect, or accept occurred
 | on_shutdown | Transport connection was closed or shutdown
 | on_timeout | Transport connection timed out
 | auth_add | Peer was authenticated and is now trusted
@@ -828,11 +836,11 @@ The events that are logged are:
 | send_add_route | Send a message when a peer is added to the network
 | send_peer_del | Send a message when peer is removed from the network
 | sync_result | Peer sync message was received, initialize peer state
-| send_sync_req | Request a peer sync after new peer is notitified
+| send_sync_req | Request a peer sync after new peer is notified
 | recv_sync_req | Receive a sync request for my node or another peer
 | recv_sync_fail | Receive a sync request for an unknown peer
 | send_adj_change | Send a link state update message, add or remove link
-| recv_adj_change | Recveived a link state update message
+| recv_adj_change | Received a link state update message
 | send_adj_req | Link state for peer is stale, request the current link state
 | recv_adj_req | Receive a request for the current link state
 | send_adj | Send the current link state to a peer
@@ -930,7 +938,7 @@ u_inbox_sync_rpy |         29 |          0
 Show the types of the last 32 system RPC messages sent and received for each
 peer.  Some peers may not have any of these if they are not directly connected.
 
-This is an example of a the peer attached to the console connecting to a larger
+This is an example of a peer attached to the console connecting to a larger
 network:
 
 [source%nowrap]
@@ -958,75 +966,514 @@ attached to the network has lots of peers that need synchronizing.
 [[show_loss]]
 - show loss
 
-Show the counters of repeated messages (duplicated), messages not subscribed,
-have message loss, or have inbox loss.  When a message is repeated or not
-subscribed, a counter is incremented and the message is tossed.  These types
-of events can occur through normal operation, but usually they are a very small
-amount of traffic.  The repeated messages can occur during network instability
-and not subscribed messages can occur because an unsubscribe has not yet
-reached the publisher or because the bloom filter did not filter the subject.
+Show the counters of repeated messages (old message sequences), messages not
+subscribed, have message loss, or have inbox loss.
 
-The 
+When a message is repeated or not subscribed, a counter is incremented and the
+message is tossed.  These types of events can occur through normal operation
+and don't have an impact on clients.
+
+The repeated messages can occur during network instability and not subscribed
+messages can occur because an unsubscribe has not yet reached the publisher or
+because the bloom filter did not filter the subject.
+
+The message loss counters are more critical to correct behavior, since this
+indicates that messages did not reach all subscriptions.  The inbox message
+loss can occur normally since these are used to synchronize peers during
+network instability, they are used to stabilize the network.
+
+The point to point messages using the `_INBOX` prefix will also use the inbox
+sequences, but even these are not as critical since clients will have timeouts
+and retry the operation that uses an `_INBOX`
+
+Example:
+
+[source%nowrap]
+----
+lex_a1.rvd[L0MOCmhQpwX2JqsBjYBypA]@lex_a1[11]> show loss
+   user    | repeat | rep time | not sub | not time | msg loss |      loss time    | ibx loss |      ibx time
+-----------+--------+----------+---------+----------+----------+-------------------+----------+------------------
+  lex_a2.1 |      0 |          |       0 |          |        0 |                   |        0 |
+  lex_a3.2 |      0 |          |       0 |          |        0 |                   |        0 |
+  lex_a4.3 |      0 |          |       0 |          |        0 |                   |        0 |
+   edo_a.5 |      0 |          |       0 |          |        0 |                   |        0 |
+  robo_a.6 |      0 |          |       0 |          |        0 |                   |        0 |
+  edo_a4.7 |      0 |          |       0 |          |        0 |                   |        1 | 0209 08:22:25.120
+  edo_a3.8 |      0 |          |       0 |          |        0 |                   |        1 | 0209 08:22:25.120
+  edo_a1.9 |      0 |          |       0 |          |      640 | 0209 08:24:31.960 |        0 |
+ edo_a2.10 |      0 |          |       0 |          |      655 | 0209 08:24:32.080 |        0 |
+robo_a3.11 |      0 |          |       0 |          |        0 |                   |        1 | 0209 08:22:25.120
+robo_a2.12 |      0 |          |       0 |          |      630 | 0209 08:24:31.761 |        0 |
+robo_a4.13 |      0 |          |       0 |          |        0 |                   |        1 | 0209 08:22:25.120
+robo_a1.14 |      0 |          |       0 |          |      647 | 0209 08:24:23.841 |        0 |
+ lee_a1.15 |      0 |          |       0 |          |        1 | 0209 08:22:27.841 |        0 |
+...
+----
+
+The `user` is the sender of the message.  The `repeat`, `rep time` is the count
+and time stamp of the last instance.  The `not sub`, `not time` are for the
+not subscribed messages.  The `msg loss`, `loss time` are for the multicast
+message loss.  The `ibx loss`, `ibx time` are for the point to point inbox
+message loss.
 
 [[show_skew]]
 - show skew
 
-Show the system time skew between peers.
+Show the system time skew between peers.  There are several messages that
+include a time stamp which can be used to estimate the system clock skew between
+peers.  This is useful to guard against message replays.  If a peer message
+arrives and the time + skew is older than the subscription window, then it is
+treated as a repeated message.  When the time is within the subscription window,
+then a sequence will be associated with the last message received from peer.
+The subscription window rotate time is configurable, described in
+<<parameters>> of the config section.  This details of the loss calculation is
+described in <<msg_loss>>.
+
+Example:
+
+[source%nowrap]
+----
+lex_a1.rvd[L0MOCmhQpwX2JqsBjYBypA]@lex_a1[11]> show skew
+   user    |   lat |    hb   | ref |   ping   |   pong  |        time
+-----------+-------+---------+-----+----------+---------+------------------
+  lex_a2.1 | 241us |  63.5us |   0 |   33.7us | -32.5us | 0209 08:47:48.395
+  lex_a3.2 | 119us |  76.9us |   0 |   31.4us | -7.15us | 0209 08:47:48.395
+  lex_a4.3 | 157us |   236us |   0 |   32.7us | -15.1us | 0209 08:47:48.395
+   edo_a.5 | 302us |  -483us |   4 | -0.161us | -26.1us | 0209 08:47:48.395
+  robo_a.6 | 291us | -1.09ms |   4 |  0.154us | -1.41ms | 0209 08:47:48.397
+  edo_a4.7 | 521us |   282us |   4 |   31.6us |  -131us | 0209 08:47:48.395
+  edo_a3.8 | 512us |   250us |   4 |   -5.1us | -14.7us | 0209 08:47:48.395
+  edo_a1.9 | 308us |  1.26ms |   4 |  -12.8us |  72.8us | 0209 08:47:48.395
+ edo_a2.10 | 452us |  1.02ms |   4 |  -13.2us |  -222us | 0209 08:47:48.395
+robo_a3.11 | 528us |   314us |   4 |     28us | -1.44ms | 0209 08:47:48.397
+robo_a2.12 | 468us |   477us |   4 |  -3.79us | -1.47ms | 0209 08:47:48.397
+robo_a4.13 | 633us |   571us |   4 |   -8.7us |  -1.5ms | 0209 08:47:48.397
+...
+----
+
+The first message a peer will see when connecting is the heartbeat message and
+authentication messages.  These have a time attached to them and this is the
+first time skew calculation that a peer will have.  The `hb` contains this
+value and the `ref` is the uid of the peer that is attached and calculated
+the skew.  The `ping` and `pong` values are calculated later when a ping 
+pong sequence of messages are exchange.  These are more accurate because there
+is a larger sample size as the uptime increases.  The `time` is the last time
+a skew was calculated.
 
 [[show_reachable]]
 - show reachable
 
-Show which transports can be used to reach a peer.
+Show which transport links can be used to reach a peer.  This table associates
+a connection `fd` with a list of peers that are using it.  If this connection
+is lost, then these are peers that may be affected by this event.
+
+Example:
+
+[source%nowrap]
+----
+lex_a1.rvd[L0MOCmhQpwX2JqsBjYBypA]@lex_a1[12]> show reachable
+   user    |   path  | fd |     tport
+-----------+---------+----+------------
+  lex_a2.1 | 0,1,2,3 | 19 | lex_amesh.2
+  lex_a3.2 |         |    |
+  lex_a4.3 |         |    |
+  dex_a.24 |         |    |
+  pic_a.29 |         |    |
+  lee_a.18 |         |    |
+  robo_a.6 |         |    |
+   edo_a.5 |         |    |
+-----------+---------+----+------------
+  lex_a3.2 | 0,1,2,3 | 21 | lex_amesh.3
+  lex_a2.1 |         |    |
+  lex_a4.3 |         |    |
+  dex_a.24 |         |    |
+  pic_a.29 |         |    |
+  robo_a.6 |         |    |
+   edo_a.5 |         |    |
+...
+----
+
+The `user` is the peer, the `path` is a list of paths used with the connection
+`fd`, and the `tport` is the transport that contains the connection.
 
 [[show_tree]]
 - show tree [U]
 
-Show the multicast tree for a user or self.
+Show the multicast tree for a user or self.  This iterates through the
+adjacency tables by cost and shows the which peers will be reached after
+each step.  The cost increases until all the peers are exhausted.  If
+a `U` argument is present, then the multicast tree starts from that peer
+instead of the peer attached to the console.
+
+Example:
+
+[source%nowrap]
+----
+lex_a1.rvd[L0MOCmhQpwX2JqsBjYBypA]@lex_a1[14]> show tree
+cost | set | alt |  source  |     tport    |   dest
+-----+-----+-----+----------+--------------+--------
+1000 |   0 |   0 | lex_a1.* |  lex_amesh.2 |  lex_a2
+1000 |   1 |   0 | lex_a1.* |  lex_amesh.3 |  lex_a3
+1000 |   2 |   0 | lex_a1.* |  lex_amesh.4 |  lex_a4
+1000 |   3 |   0 | lex_a1.* |  lex_amesh.5 |   lex_a
+-----+-----+-----+----------+--------------+--------
+2000 |   0 |   0 | lex_a.33 |    fo_mesh.7 |   edo_a
+2000 |   2 |   0 | lex_a.33 |    fo_mesh.9 |  robo_a
+2000 |   1 |   0 | lex_a.33 |    fo_mesh.8 |   lee_a
+2000 |   4 |   0 | lex_a.33 |   fo_mesh.11 |   dex_a
+2000 |   3 |   0 | lex_a.33 |   fo_mesh.10 |   pic_a
+-----+-----+-----+----------+--------------+--------
+3000 |   0 |   0 |  edo_a.5 |  edo_amesh.4 |  edo_a4
+3000 |   1 |   0 |  edo_a.5 |  edo_amesh.5 |  edo_a3
+3000 |   2 |   0 |  edo_a.5 |  edo_amesh.6 |  edo_a1
+3000 |   3 |   0 |  edo_a.5 |  edo_amesh.7 |  edo_a2
+3000 |   4 |   0 | robo_a.6 | robo_amesh.4 | robo_a3
+3000 |   5 |   0 | robo_a.6 | robo_amesh.5 | robo_a2
+...
+----
+
+The `set` is an index into the table used for the next hop, this is calculated
+by transitioning across the transport links.  Since the uids are displayed in
+order, the `set` may jump back and forth through the table.  The `alt` counter
+is an alternate path counter.  Only the 0 `alt` path is used, but the others
+are displayed.
+
+The `source` is the forwarding peer that sends the message, the `tport` is the
+transport local to the `source`, and `dest` is the receiver.
 
 [[show_path]]
 - show path [P]
 
-Show the path a multicast message would take.
+Show the transports used to reach a peer for a path.  This is the forwarding
+table that is used to send a message from the local peer to other peers.
+
+Example:
+
+[source%nowrap]
+----
+lex_a1.rvd[L0MOCmhQpwX2JqsBjYBypA]@lex_a1[15]> show path
+    tport   | cost | path_cost |    dest
+------------+------+-----------+----------
+lex_amesh.2 | 1000 |      1000 |  lex_a2.1
+lex_amesh.3 | 1000 |      1000 |  lex_a3.2
+lex_amesh.4 | 1000 |      1000 |  lex_a4.3
+lex_amesh.5 | 1000 |      2000 |   edo_a.5
+lex_amesh.5 | 1000 |      3000 |  edo_a4.7
+lex_amesh.5 | 1000 |      3000 |  edo_a3.8
+...
+----
+
+The `tport` is used for sending a message to `dest`.  The `cost` is the
+first hop cost, the `path_cost` is the total cost through all hops.
 
 [[show_forward]]
 - show forward [P]
 
-Show the forwarding table for a message received from peers.
+Show the forwarding table for a message received from each of the peers.
+When a message is received from a peer, it may need to be forwarded to
+other peers to completely cover the network.  This shows the forwarding tables
+for each peer.
+
+Example:
+
+[source%nowrap]
+----
+lex_a1.rvd[L0MOCmhQpwX2JqsBjYBypA]@lex_a1[16]> show forward
+  source  |     tport   | cost
+----------+-------------+-----
+ lex_a1.* | lex_amesh.2 | 1000
+          | lex_amesh.3 | 1000
+          | lex_amesh.4 | 1000
+          | lex_amesh.5 | 1000
+----------+-------------+-----
+ lex_a2.1 |             |
+----------+-------------+-----
+ lex_a3.2 |             |
+...
+----
+
+The `source` is index the forwarding table used, the `tport` is the transport
+used to forward the message.
 
 [[show_fds]]
 - show fds
 
-Show what each fd is used for.
+Show what each fd is used for.  This iterates the `fd` tables and shows what
+each `fd` is doing.
+
+Example:
+
+[source%nowrap]
+----
+lex_a1.rvd[L0MOCmhQpwX2JqsBjYBypA]@lex_a1[17]> show fds
+fd | rid |      bs     |      br      |     ms    |     mr     | ac | rq | wq | fl |         type        |      kind     |           name           |           address
+---+-----+-------------+--------------+-----------+------------+----+----+----+----+---------------------+---------------+--------------------------+--------------------------
+ 3 |  -1 |           0 |        15321 |         0 |          0 |    |  0 |  0 |    |              logger |        stdout |                          |
+ 5 |  -1 |             |              |           |            |    |    |    |    |         timer_queue |         timer |                          |
+ 7 |  -1 |           0 | 717092458452 |         0 | 1943883309 |    |    |    |    |           ipc_route |           ipc |                  rvd.ipc |
+ 8 |  -1 |           0 |         4235 |         0 |          0 |    |  0 |  0 |    |              logger |        stderr |                          |
+ 9 |  -1 |             |              |           |            |    |    |    |    |       console_route |       console |              rvd.console |
+10 |  -1 |           0 |     99146804 |         0 |     690776 |    |    |    |    |         session_mgr |       session |              rvd.session |
+11 |   0 |           0 |  64848767199 |         0 |  261901166 |    |    |    |    |     transport_route |         tport |          rvd.ipc.tport.0 |
+12 |   0 |             |              |           |            | 12 |    |    |    |           rv_listen |     rv_listen |        rvd.ipc.rv.list.0 |            127.0.0.1:7500
+13 |  -1 |             |              |           |            |  1 |    |    |    |       telnet_listen | telnet_listen |               telnet.tel |              0.0.0.0:2222
+14 |  -1 |         210 |            0 |         1 |          0 |    |    |    |    |        name_connect |    mcast_send |           name.eth0.send |        239.23.22.217:8327
+15 |  -1 |        1000 |         1260 |         5 |          6 |    |    |    |    |         name_listen |    mcast_recv |           name.eth0.recv |        239.23.22.217:8327
+16 |  -1 |             |              |           |            |    |    |    |    |         name_listen |    ucast_recv |          name.eth0.inbox |          172.18.0.2:33643
+17 |   1 |             |              |           |            |    |    |    |    |     transport_route |         tport |    rvd.lex_amesh.tport.1 |
+18 |   1 |             |              |           |            |  5 |    |    |    | ev_tcp_tport_listen |    tcp_listen | rvd.lex_amesh.tcp_list.1 |          172.18.0.2:42341
+19 |   2 |  9458891878 |     28871168 |  27427393 |     121986 |    |  0 |  0 |    |        ev_tcp_tport |    tcp_accept |  rvd.lex_amesh.tcp_acc.1 | lex_a2.1@172.18.0.3:41708
+20 |   2 |           0 |     16338022 |         0 |      50587 |    |    |    |    |     transport_route |         tport |    rvd.lex_amesh.tport.2 |
+21 |   3 |  9548489486 |     28505122 |  27617221 |     120205 |    |  0 |  0 |    |        ev_tcp_tport |    tcp_accept |  rvd.lex_amesh.tcp_acc.1 | lex_a3.2@172.18.0.4:44630
+...
+----
+
+The fields are:
+
+[%autowidth,options="header",grid="cols",stripes="even"]
+|=============================================
+| Field | Description
+| fd | File descriptor
+| rid | Transport id that fd belongs to
+| bs | Bytes sent
+| br | Bytes received
+| ms | Messages sent
+| mr | Message received
+| ac | Listener accept count
+| rq | Bytes in the receive queue
+| wq | Bytes in the send queue
+| fl | Socket flags, R,r,<: reading, W,w,>: writing, +: processing.
+| type | What type of fd
+| kind | What class of fd
+| name | The name associated with fd
+| address | The local address
+|=============================================
 
 [[show_buffers]]
 - show buffers
 
-Show the buffer usage of each fd.
+Show the buffer usage of each connection.  These buffers expand to contain
+an entire message, since there is no streaming of large messages.
+
+Example:
+
+[source%nowrap]
+----
+lex_a1.rvd[L0MOCmhQpwX2JqsBjYBypA]@lex_a1[18]> show buffers
+fd |   wr  |  wmax |   rd  |  rmax | zref |    send   |    recv   | mall | pall |           name
+---+-------+-------+-------+-------+------+-----------+-----------+------+------+------------------------
+ 3 | 32768 | 32768 | 16384 | 16384 |    0 |         0 |       124 |    0 |    0 |
+ 8 | 32768 | 32768 | 16384 | 16384 |    0 |         0 |        74 |    0 |    0 |
+19 | 32768 | 32768 | 16384 | 16384 |    0 |  27189290 |     67973 |    0 |    0 | rvd.lex_amesh.tcp_acc.1
+21 | 32768 | 32768 | 16384 | 16384 |    0 |  27224765 |     66485 |    0 |    0 | rvd.lex_amesh.tcp_acc.1
+23 | 32768 | 32768 | 16384 | 16384 |    0 |  30118303 |     68727 |    0 |    0 | rvd.lex_amesh.tcp_acc.1
+25 | 32768 | 32768 | 16384 | 16384 |    0 |   5498186 |  38629165 |    0 |    0 | rvd.lex_amesh.tcp_acc.1
+...
+----
+
+The fields are:
+
+[%autowidth,options="header",grid="cols",stripes="even"]
+|=============================================
+| Field | Description
+| fd | File descriptor
+| wr | Write buffer size
+| wmax | The largest write buffer used
+| rd | Read buffer size
+| rmax | The largest read buffer used
+| zref | Counter incremented after of zero copy sends
+| send | Bytes sent
+| recv | Bytes received
+| mall | Counter incremented when malloc() is used to make a buffer
+| pall | Counter incremented when a buffer is borrowed from the buffer pool
+| name | Name associated with fd
+|=============================================
 
 [[show_windows]]
 - show windows
 
-Show the size and counts of the subject publish and subscribe windows.
+Show the size and counts of the subject publish and subscribe windows as
+well as the size of subscription tables and bloom filters.
+
+Example:
+
+[source%nowrap]
+----
+lex_a1.rvd[L0MOCmhQpwX2JqsBjYBypA]@lex_a1[19]> show windows
+   tab  | count |   size  | win_size | max_size |     rotate_time   | interval
+--------+-------+---------+----------+----------+-------------------+---------
+    sub | 22515 | 5534080 |  8388608 |  5534080 | 0208 13:23:11.393 |       10
+sub_old |     0 |       0 |          |          | 0208 13:23:01.393 |
+    pub |  3737 |  344112 |  4194304 |   344112 | 0208 13:23:11.393 |       10
+pub_old |     0 |       0 |          |          | 0208 13:23:01.393 |
+  inbox |  2724 |  817824 |          |          | 0209 09:52:42.761 |
+  route |   137 |   58848 |          |          |                   |
+  bloom |  1135 |   18392 |          |          |                   |
+     rv |   102 | 1290420 |          |          |                   |
+----
+
+The first two are the subscription and publish windows.  These tables are
+rotated to old when they get to `win_size` with at least `interval` seconds.
+The `max_size` is the largest size of this window.
+
+The `inbox` entry is a route cache for subjects that have a `_INBOX` prefix.
+The `route` entry is a cache for routes, indexed by subject hash.  The `bloom`
+entry is the sum of the size of bloom filters for every peer in the network.
+The `rv` entry is the subscription table for RV clients attached.
 
 [[show_blooms]]
 - show blooms [P]
 
-Show where the bloom filters are used for a path.
+Show where the bloom filters are used for a path.  The forwarding table has
+only one transport entry for each peer, path combination.  If a message is
+forwarded on more than one transport, it is because there are multiple peers
+that are subscribed across multiple transports for the path.  The receiving side
+also filters the messages through the bloom filters by calculating the ports
+that are needed for the path to completely cover the network.  There may be
+redundant transports that are inactive for each path either because the cost
+is more or the path selection prefers one transport over the other.
+
+Example:
+[source%nowrap]
+----
+lex_a1.rvd[L0MOCmhQpwX2JqsBjYBypA]@lex_a1[20]> show blooms
+fd |   dest   |     tport   |                                     bloom                                   |       prefix       | detail | subs | total
+---+----------+-------------+-----------------------------------------------------------------------------+--------------------+--------+------+------
+ 9 |  console |       ipc.0 |                                                                   (console) |                  0 |      0 |    0 |     0
+11 |    route |       ipc.0 |                                                                 (all-peers) |                  0 |      0 |    0 |     0
+---+----------+-------------+-----------------------------------------------------------------------------+--------------------+--------+------+------
+ 7 |      ipc | lex_amesh.1 |                                                                       (ipc) | 0x000061DF00C38000 |      0 |   24 |   113
+10 |  session | lex_amesh.1 |                                                            (console), (sys) |         0x04000108 |      0 |    7 |    15
+17 |    route | lex_amesh.1 |                                                                 (all-peers) |                  0 |      0 |    0 |     0
+---+----------+-------------+-----------------------------------------------------------------------------+--------------------+--------+------+------
+ 7 |      ipc | lex_amesh.2 |                                                                       (ipc) | 0x000061DF00C38000 |      0 |   24 |   113
+10 |  session | lex_amesh.2 |                                                            (console), (sys) |         0x04000108 |      0 |    7 |    15
+19 | lex_a2.1 | lex_amesh.2 |                                                              (peer), lex_a2 | 0x0000008004000108 |      0 |   84 |    91
+20 |    route | lex_amesh.2 |                                                                 (all-peers) |                  0 |      0 |    0 |     0
+---+----------+-------------+-----------------------------------------------------------------------------+--------------------+--------+------+------
+ 7 |      ipc | lex_amesh.3 |                                                                       (ipc) | 0x000061DF00C38000 |      0 |   24 |   113
+10 |  session | lex_amesh.3 |                                                            (console), (sys) |         0x04000108 |      0 |    7 |    15
+21 | lex_a3.2 | lex_amesh.3 |                                                              (peer), lex_a3 | 0x0000008004000108 |      0 |   98 |   105
+22 |    route | lex_amesh.3 |                                                                 (all-peers) |                  0 |      0 |    0 |     0
+---+----------+-------------+-----------------------------------------------------------------------------+--------------------+--------+------+------
+ 7 |      ipc | lex_amesh.4 |                                                                       (ipc) | 0x000061DF00C38000 |      0 |   24 |   113
+10 |  session | lex_amesh.4 |                                                            (console), (sys) |         0x04000108 |      0 |    7 |    15
+23 | lex_a4.3 | lex_amesh.4 |                                                              (peer), lex_a4 | 0x0000008004000108 |      0 |   89 |    96
+24 |    route | lex_amesh.4 |                                                                 (all-peers) |                  0 |      0 |    0 |     0
+---+----------+-------------+-----------------------------------------------------------------------------+--------------------+--------+------+------
+ 7 |      ipc | lex_amesh.5 |                                                                       (ipc) | 0x000061DF00C38000 |      0 |   24 |   113
+10 |  session | lex_amesh.5 |                                                            (console), (sys) |         0x04000108 |      0 |    7 |    15
+25 | lex_a.33 | lex_amesh.5 | (peer), lex_a, pic_a, edo_a, lee_a4, lee_a3, lee_a1, lee_a2, edo_a4, edo_a2 | 0x000061DF04C38108 |      0 |  482 |   636
+   |          |             |      edo_a1, edo_a3, dex_a1, dex_a2, dex_a3, dex_a4, pic_a4, pic_a1, pic_a2 |                    |        |      |
+   |          |             |                                                        pic_a3, lee_a, dex_a |                    |        |      |
+26 |    route | lex_amesh.5 |                                                                 (all-peers) |                  0 |      0 |    0 |     0
+----
+
+Every peer has a bloom filter associated with it.  The `console`, `ipc`, and
+`sys` filters are the local bloom filters which are combined into one filter in
+another peer.  They are split in the local peer so that the traffic destination
+can be split to the separate processing functions.  The `sys` filter only match
+the subjects that are used for the system, namely, the `_I.<nonce>.>` subject
+and the `_M.>` subject.  The `console` are the subjects subscribed by the
+console.  The `ipc` are the subjects subscribed by clients.  The `all-peers`
+are the combination of all the peers subscriptions, this is used for receiving
+messages.  The individual peer bloom filters are for forwarding messages.
+
+The fields are:
+
+[%autowidth,options="header",grid="cols",stripes="even"]
+|=============================================
+| Field | Description
+| fd | File descriptor for the connection
+| dest | Where the message would go
+| tport | The transport that is used
+| bloom | The bloom filters
+| prefix | A bit mask of the prefix match length
+| detail | A bit mask of the prefix when a suffix is matched or sharded
+| subs | The subscription count, not including the patterns
+| total | The subscription count including the patterns
+|=============================================
 
 [[show_match]]
 - show match S
 
-Show which bloom filters match a subject.
+Show which peer bloom filters match a subject.  If a message was published
+with subject `S`, this shows which peer's bloom filter would match it.  This
+doesn't match against the local filters.
+
+Example:
+[source%nowrap]
+----
+lex_a1.rvd[L0MOCmhQpwX2JqsBjYBypA]@lex_a1[33]> show match _7500.RSF.REC.AVP.N
+   user
+---------
+lee_a2.16
+----
 
 [[show_graph]]
 - show graph
 
-Show the graph description of the network.
+Show the graph description of the network.  This creates a description of the
+network by matching the names of the transports with the names that the peers
+use.  This doesn't use any network probing, it uses the link state database to
+calculate the network connectivity.  The link state database doesn't have
+connection IP addresses associated with it, but it does have a link name and
+link type.  The name/types are enough to describe the network, but doesn't
+show how the links are connected to the host with IP addresses.
+
+Example:
+[source%nowrap]
+----
+lex_a1.rvd[L0MOCmhQpwX2JqsBjYBypA]@lex_a1[34]> show graph
+start lex_a1
+node edo_a1 edo_a2 edo_a3 lex_a1 lex_a2 edo_a4 edo_a lex_a3 lex_a4 lee_a1 lee_a2 lee_a3 dex_a1 lee_a4 lee_a dex_a2 dex_a3 dex_a4 dex_a pic_a1 pic_a2 pic_a3 pic_a4 pic_a lex_a
+mesh_lex_amesh lex_a1 lex_a2 lex_a3 lex_a4 lex_a
+mesh_edo_amesh edo_a edo_a4 edo_a3 edo_a1 edo_a2
+mesh_fo_mesh edo_a lee_a dex_a pic_a lex_a
+mesh_lee_amesh lee_a1 lee_a2 lee_a4 lee_a lee_a3
+mesh_dex_amesh dex_a1 dex_a2 dex_a3 dex_a4 dex_a
+mesh_pic_amesh pic_a3 pic_a4 pic_a1 pic_a2 pic_a
+----
+
+The `start` is the peer attached to the console.  The `node` is the list of
+peers in the network ordered by age.  The following lines have a prefix which
+is the type of transport used, which is either `mesh`, `tcp`, or `pgm`.  The
+suffix of the type is the name of the transport.  Following the "type_name" are
+the peers which are connected using this transport.  If the cost is not the
+default of 1000, then there will be a ':' followed by the cost of the
+transport.
 
 [[show_cache]]
 - show cache
 
-Show the route cache hit and miss statistics.
+Show the route cache hit and miss statistics.  To reduce the number of bloom
+filters and hash tables that a message must flow through to match the subject,
+the route for the subject is cached.  This cache needs to be updated when a
+subscription operation occurs, so this purges the entries which are affected by
+these operations, reducing the cache effectiveness.  When a new subject
+published will also cause a miss.  The cache size has a maximum of 256K
+entries, and when this is hit, the cache is purged and recreated.
+
+Example:
+[source%nowrap]
+----
+lex_a1.rvd[L0MOCmhQpwX2JqsBjYBypA]@lex_a1[35]> show cache
+         tport        | hit_pct |      hit    |    miss    | max_cnt | max_size
+----------------------+---------+-------------+------------+---------+---------
+      rvd.ipc.tport.0 |   86.70 | 14600408979 | 2239005394 |   24576 |      130
+rvd.lex_amesh.tport.1 |    0.00 |           0 |          0 |       0 |        0
+rvd.lex_amesh.tport.2 |   84.16 |  1513720684 |  284704081 |    1536 |      447
+rvd.lex_amesh.tport.3 |   84.17 |  1513725449 |  284673772 |    1536 |      453
+rvd.lex_amesh.tport.4 |   84.16 |  1513723831 |  284727847 |    1536 |      444
+rvd.lex_amesh.tport.5 |   88.06 | 16786195897 | 2275244513 |   24576 |      209
+----
+
+Each `tport` has a route cache.  The `hit_pct` is a percentage, hit * 100 /
+total.  The `hit` is how many times an entry was present in the cache, a `miss`
+is not present.  The `max_cnt` is the maximum number of cache entries that have
+occurred since the transport was created.  The `max_size` is the max data size
+of the entries, which are fds.  Some of the entries will have zero size, when
+there is no route for the subject.
 
 [[show_poll]]
 - show poll
@@ -1034,44 +1481,199 @@ Show the route cache hit and miss statistics.
 Show the latency of poll states, the average time used for processing timers,
 read, write, and routing events.
 
+Example:
+[source%nowrap]
+----
+lex_a1.rvd[L0MOCmhQpwX2JqsBjYBypA]@lex_a1[36]> show poll
+timer_lat | timer_cnt | read_lat |  read_cnt  |    rd_lo   | route_lat |  route_cnt | write_lat |  write_cnt | wr_poll | wr_hi
+----------+-----------+----------+------------+------------+-----------+------------+-----------+------------+---------+------
+   2.52us |   5548967 |   4.77us | 4936398767 | 2053110538 |    11.4us | 1434068849 |    15.1us | 2053110184 |       0 |    66
+----
+
+In a busy router, the read, route, write operations will process multiple
+messages at a time, depending on how many fit inside of a read buffer.  A read
+buffer is 16KB and is resized only when a large message requires more memory.
+The sum of these is close to the average latency used by the router per
+message, even if the time used per message is a fraction of that, since the
+messages are processed in batches.
+
+The `read_cnt` is the sum of the counts in the `rd_lo` and `read` states, the
+`write_cnt` is the sum of the counts in the `write`, `wr_hi`, `wr_poll` states.
+The difference between `rd_lo` and `read` is that the `rd_lo` state occurs after
+the read buffer is full or the fd has no more data to read.  The `wr_hi` are
+the number of times that the write buffer is full.  The `wr_poll` state is the
+number of times that the fd is part of the poll set because there is back
+pressure on the connection.
+
 Test Pub Sub
 ~~~~~~~~~~~~
 
-- sub [S] [F]
-- unsub [S] [F]
-- psub [W] [F]
-- punsub [W] [F]
-- gsub [W] [F]
-- gunsub [W] [F]
-- pub [S] [M]
-- trace [S] [M]
-- ack [S] [M]
-- rpc [S] [M]
-- any [S] [M]
+These commands do pub/sub through the console.  The messages have a format
+attached to them, which is an integer value mapped to decoding methods.  If
+the format is matched with a decoder, then it is decoded to field/value
+pairs and printed.  If a method is not matched, then the value is an opaque
+string of bytes and that displayed.
+
+[[test_sub]]
+- sub S [F]
+
+Subscribe to subject `S`.  If a file is present, then the publishes are sent to
+the file instead of printed to the console.
+
+[[test_unsub]]
+- unsub S [F]
+
+Unsubscribe to subject `S`.  If a file is present, then stop the publishes sent
+to the file.
+
+[[test_psub]]
+- psub W [F]
+
+Subscribe to RV style wildcard `W`.  If a file is present, then the publishes
+are sent to the file instead of printed to the console.
+
+[[test_punsub]]
+- punsub W [F]
+
+Unsubscribe to RV style wildcard `W`.  If a file is present, then stop the
+publishes sent to the file.
+
+[[test_gsub]]
+- gsub W [F]
+
+Subscribe to glob style wildcard `W`.  If a file is present, then the publishes
+are sent to the file instead of printed to the console.
+
+[[test_gunsub]]
+- gunsub W [F]
+
+Unsubscribe to glob style wildcard `W`.  If a file is present, then stop the
+publishes sent to the file.
+
+[[test_pub]]
+- pub S M
+
+Send a message `M` so subscriptions `S`.
+
+[[test_trace]]
+- trace S M
+
+Send a message `M` to subscriptions `S` with the trace flag set, which causes
+any of the intermediate hops as well as the final destination to send an ack
+reply.
+
+[[test_ack]]
+- ack S M
+
+Send a message `M` to subscription `S` with the ack flag set, which causes
+the destinations to send an ack reply.
+
+[[test_rpc]]
+- rpc S M
+
+Send a message `M` to subscription `S` with a return inbox.
+
+[[test_any]]
+- any S M
+
+Randomly choose a subscription match for `S` and forward message `M` to that
+endpoint.  This would include both wildcard subscriptions and normal ones.
+
+[[test_cancel]]
 - cancel
+
+A `cancel` command stops any console subscription or RPC, such as `ping`.  This
+marks the endpoint as canceled, so if results are returned after a `cancel`,
+they will be discarded.
+
+[[test_reseed]]
 - reseed
 
-Mute the Loggging
-~~~~~~~~~~~~~~~~~
+This alters the local bloom filter to use a different seed.  Changing the bloom
+filter seed will alter the bits in the hash such that collisions occur at
+different positions.  If a low rate subscription has a collision with a high
+rate subscription, this would cause unnecessary traffic that can be avoided by
+altering the bloom filter seed.  This doesn't solve when the 32 bit hashes have
+collisions, but these are much less likely than a bloom filter collision.
+
+Mute the Logging
+~~~~~~~~~~~~~~~~
+[[log_mute]]
 - mute
+
+The log messages are normally printed to the console, this mutes them.  The log
+is still present, using the link:#show_log:[log] command will show them and the
+log file if active, will still be appended.  If messages to the console are
+being printed too fast for the terminal to display them, this will
+automatically turn on.
+
+[[log_unmute]]
 - unmute
+
+This removes the `mute` for printing log messages to the console.
 
 Turn On/Off Debug Logging
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
-- debug [I]
-tcp, pgm, ibx, transport, user, link_state, peer, auth,
-session, hb, sub, msg_recv, msg_hex, telnet, name, repeat,
-not_sub, loss, adj, conn, dist,  kvpub,  kvps,  rv
+[[debug_log]]
+- debug I
+
+The integer value is either a mask or a list of strings that turn the debug
+logging on or off.  When `debug 0` is used, this turns of the debug messages.
+
+[%autowidth,options="header",grid="cols",stripes="even"]
+|=============================================
+| Name      | Value   | Description
+| tcp       | 0x1     | Print the subjects as they are sent or received on a TCP connection
+| pgm       | 0x2     | Print the subjects as they are sent or received on a PGM connection
+| ibx       | 0x4     | The inbox UDP protocol debugging
+| transport | 0x8     | Show the message route forwarding
+| user      | 0x10    | User updates debugging, when changes are made to a user state
+| link_state| 0x20    | Link state message updates are printed
+| peer      | 0x40    | Peer synchronization messages are printed
+| auth      | 0x80    | Authentication messages are printed
+| session   | 0x100   | System message dispatching, IPC message forwarding
+| hb        | 0x200   | Heartbeat and ping messages
+| sub       | 0x400   | Subscription starts and stops
+| msg_recv  | 0x800   | Print system messages when they are received
+| msg_hex   | 0x1000  | Dump the system messages in hex when they are received
+| telnet    | 0x2000  | Show the telnet protocol states
+| name      | 0x4000  | Display name transport update messages
+| repeat    | 0x8000  | Print when the repeated subjects are received
+| not_sub   | 0x10000 | Print when not subscribed subjects are received
+| loss      | 0x20000 | Print debugging when message loss occurs
+| adj       | 0x40000 | Print debugging when the link state Dijkstra algo runs
+| conn      | 0x80000 | Show debugging about connections, when establish or dropped or timers expire
+| dist      |         | This causes the Dijkstra algo to run once
+| kvpub     |         | Turns on debugging when any message is processed
+| kvps      |         | Turns on debugging when kv pubsub messages are processed
+| rv        |         | Turns on debugging when rv message is processed
+|=============================================
+
+The last 4 don't have an integer mask because they use different debug
+variables that the others.
 
 Write Events to File
 ~~~~~~~~~~~~~~~~~~~~
 
-- wevents [F]
+[[write_events]]
+- wevents F
+
+Dumps the current events to a log file for examining later.  Useful when a
+networking problem occurs and is hard to reproduce.
 
 Stop the Server
 ~~~~~~~~~~~~~~~
 
+[[stop_die]]
 - die [I]
+
+Exit the process without shutting down existing connections and sending bye
+messages to the network.
+
+[[stop_quit]]
 - quit/exit
+
+Normal shutdown.  Existing connections will stop reading new messages send bye
+messages to connected peers and flush the data in the write queues.
 
