@@ -96,7 +96,7 @@ The peer that publishes a message may use a sub-optimal forwarding path to the
 recipients until they are notified that better paths are available with link
 state exchanges.
 
-<<pub_window>>
+[[pub_window]]
 Publish sequence window
 ~~~~~~~~~~~~~~~~~~~~~~~
 

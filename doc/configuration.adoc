@@ -17,18 +17,18 @@ Initially, the config directory is empty.  Initialize with some users and a
 service name.
 
 ----
-  $ ms_gen_key -u A B C -s test
-  create dir  config                          -- the configure directory
-  create file config/.salt                    -- generate new salt
-  create file config/.pass                    -- generated a new password
-  create file config/config.yaml              -- base include file
-  create file config/param.yaml               -- parameters file
-  create file config/svc_test.yaml            -- defines the service and signs users
-  create file config/user_A_svc_test.yaml     -- defines the user
-  create file config/user_B_svc_test.yaml     -- defines the user
-  create file config/user_C_svc_test.yaml     -- defines the user
-  OK? y
-  done
+$ ms_gen_key -u A B C -s test
+create dir  config                          -- the configure directory
+create file config/.salt                    -- generate new salt
+create file config/.pass                    -- generated a new password
+create file config/config.yaml              -- base include file
+create file config/param.yaml               -- parameters file
+create file config/svc_test.yaml            -- defines the service and signs users
+create file config/user_A_svc_test.yaml     -- defines the user
+create file config/user_B_svc_test.yaml     -- defines the user
+create file config/user_C_svc_test.yaml     -- defines the user
+OK? y
+done
 ----
 
 Exporting the keys for each of the nodes causes the `.pass` file the change and
@@ -37,38 +37,38 @@ is for the peer.  This trimmed configuration allows the peer to run, but not
 generate new peers because the private key of the service is not present.
 
 ----
-  $ ms_gen_key -x A B C -s test
-  - Loading service "test"               
-  - Signatures ok                        
-  create dir  A                          -- exported configure directory
-  create file A/.salt                    -- a copy of salt
-  create file A/.pass                    -- generated a new password
-  create file A/param.yaml               -- a copy of param
-  create file A/config.yaml              -- base include file
-  create file A/svc_test.yaml            -- defines the service and signs users
-  create file A/user_A_svc_test.yaml     -- defines the user
-  create file A/user_B_svc_test.yaml     -- defines the user
-  create file A/user_C_svc_test.yaml     -- defines the user
-  create dir  B                          -- exported configure directory
-  create file B/.salt                    -- a copy of salt
-  create file B/.pass                    -- generated a new password
-  create file B/param.yaml               -- a copy of param
-  create file B/config.yaml              -- base include file
-  create file B/svc_test.yaml            -- defines the service and signs users
-  create file B/user_A_svc_test.yaml     -- defines the user
-  create file B/user_B_svc_test.yaml     -- defines the user
-  create file B/user_C_svc_test.yaml     -- defines the user
-  create dir  C                          -- exported configure directory
-  create file C/.salt                    -- a copy of salt
-  create file C/.pass                    -- generated a new password
-  create file C/param.yaml               -- a copy of param
-  create file C/config.yaml              -- base include file
-  create file C/svc_test.yaml            -- defines the service and signs users
-  create file C/user_A_svc_test.yaml     -- defines the user
-  create file C/user_B_svc_test.yaml     -- defines the user
-  create file C/user_C_svc_test.yaml     -- defines the user
-  OK? y
-  done
+$ ms_gen_key -x A B C -s test
+- Loading service "test"               
+- Signatures ok                        
+create dir  A                          -- exported configure directory
+create file A/.salt                    -- a copy of salt
+create file A/.pass                    -- generated a new password
+create file A/param.yaml               -- a copy of param
+create file A/config.yaml              -- base include file
+create file A/svc_test.yaml            -- defines the service and signs users
+create file A/user_A_svc_test.yaml     -- defines the user
+create file A/user_B_svc_test.yaml     -- defines the user
+create file A/user_C_svc_test.yaml     -- defines the user
+create dir  B                          -- exported configure directory
+create file B/.salt                    -- a copy of salt
+create file B/.pass                    -- generated a new password
+create file B/param.yaml               -- a copy of param
+create file B/config.yaml              -- base include file
+create file B/svc_test.yaml            -- defines the service and signs users
+create file B/user_A_svc_test.yaml     -- defines the user
+create file B/user_B_svc_test.yaml     -- defines the user
+create file B/user_C_svc_test.yaml     -- defines the user
+create dir  C                          -- exported configure directory
+create file C/.salt                    -- a copy of salt
+create file C/.pass                    -- generated a new password
+create file C/param.yaml               -- a copy of param
+create file C/config.yaml              -- base include file
+create file C/svc_test.yaml            -- defines the service and signs users
+create file C/user_A_svc_test.yaml     -- defines the user
+create file C/user_B_svc_test.yaml     -- defines the user
+create file C/user_C_svc_test.yaml     -- defines the user
+OK? y
+done
 ----
 
 Copy the A config to the A node/config, the B config directory to the B
@@ -83,6 +83,104 @@ startup and network configuration.
 
 The master config will also work, so just copying it to the peers will allow
 them to run if this type of security is unnecessary.
+
+Single File Configuration
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The `ms_gen_key` option `-o` will concatenate the configuration into a single
+file:
+
+----
+$ ms_gen_key -s test -o test.yaml
+create dir  config                   -- the configure directory
+create file config/.salt             -- generate new salt
+create file config/.pass             -- generated a new password
+create file config/config.yaml       -- base include file
+create file config/param.yaml        -- parameters file
+create file config/svc_test.yaml     -- defines the service and signs users
+OK? y
+done
+- Output config to "test.yaml"
+----
+
+Running `ms_server -d config` configuration from a directory and running
+`ms_server -d test.yaml` will load the configuration from a file.  In both
+cases, the configuration loaded will be the same.
+
+A test network can be set up using only the loopback interface by describing
+the network using a format output by the link:#show_graph[show_graph] command.
+The format of this is:
+
+----
+node A B C D
+tcp_link_ab A B : 200
+tcp_link_bc B C : 100
+tcp_link_ac A C : 200
+tcp_link_bd B D : 200
+tcp_link_dc D C : 300
+----
+
+The `node` line declares all of the users.  The `tcp_` lines describe how the
+users are connected.  The number following the ':' is the cost of the
+transport.
+
+Running the `ms_test_adj` program with this description will generate a
+configuration, saved in a file called "graph.txt" and output to "graph.yaml":
+
+----
+$ ms_test_adj -l graph.txt > graph.yaml
+----
+
+The `-l` option causes the links to be resolved by exchanging messages over the
+loopback interface.  At the bottom of the "graph.yaml" created, there will be
+commands in comments to run this configuration.   Running these will create 4
+users in a network describe by the graph.  The following uses those commands
+with the first three running in the background and the last with a console
+attached to it, but you could run each in a different terminal with consoles
+attached in order to test with the link:#test_sub[sub] and
+link:#test_trace[trace] commands to test how messages would be routed through
+the network.
+
+[source%nowrap]
+----
+$ ms_server -d graph.yaml -u A -t link_ab.listen link_ac.listen &
+$ ms_server -d graph.yaml -u B -t link_ab.connect link_bc.listen link_bd.listen &
+$ ms_server -d graph.yaml -u C -t link_ac.connect link_bc.connect link_dc.listen &
+$ ms_server -d graph.yaml -u D -t link_bd.connect link_dc.connect -c
+----
+
+In addition to "tcp" type links, you could also define "mesh" and "pgm" types,
+but the pgm would require non-loopback interface that has multicast, like a
+Linux bridge.
+
+----
+node A B C D
+mesh_link_abcd A B C D : 100 1000 100 1000
+mesh_link_abcd2 A B C D : 1000 100 1000 100
+----
+
+The above graph would create two meshes, with different costs for some of the
+paths.  This would route messages over both meshes by sharding the subject
+space and using one mesh for half of the subject space and the other mesh for
+the other half.
+
+There is a graphical interface to view the network using the
+https://js.cytoscape.org/[cytoscape] package.
+
+[source%nowrap]
+----
+$ ms_server -c
+chex.test[0vEvE73U78HkGZUgBK94mQ]@chex[10]> configure transport web type web port 8080 listen 127.0.0.1
+Transport (web) updated
+chex.test[0vEvE73U78HkGZUgBK94mQ]@chex[11]> listen web
+Transport (web) started listening
+0209 22:54:25.382  web: web start listening on 127.0.0.1:8080
+0209 22:54:25.382  http_url http://127.0.0.1:8080
+----
+
+Connect to the url http://127.0.0.1:8080/graph_nodes.html with a web browser
+and paste the graph text into the text box after erasing the existing text,
+then click "show graph".
 
 [[parameters]]
 Parameters

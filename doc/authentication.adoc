@@ -179,10 +179,10 @@ System Compromise
 If a host is compromised and the KDF pre-shared key and service ECDSA_pub key
 are discovered along with a user ECDSA_pri key, then an unauthorized party
 could masquerade as that user.  One way to prevent this is to remove the
-pre-shared 640 salt file after starting a server and a unique password file
-used to encrypt the ECDSA keys in the configuration files.  The attacker would
-need to extract these from the process space of the server and design a system
-that uses this data.
+pre-shared 640 byte salt file after starting a server and a unique password
+file used to encrypt the ECDSA keys in the configuration files.  The attacker
+would need to extract these from the process space of the server and design a
+system that uses this data.
 
 The user ECDSA_pri key is needed to authenticate new peers, so it remains in
 memory for the duration of the process.  A design that drops the private key
