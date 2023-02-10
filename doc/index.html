@@ -458,6 +458,7 @@ body.book #toc,body.book #preamble,body.book h1.sect0,body.book .sect1>h2{page-b
 <li><a href="#config">Configuration</a>
 <ul class="sectlevel2">
 <li><a href="#_key_configuration">Key Configuration</a></li>
+<li><a href="#_single_file_configuration">Single File Configuration</a></li>
 <li><a href="#parameters">Parameters</a></li>
 </ul>
 </li>
@@ -501,6 +502,7 @@ body.book #toc,body.book #preamble,body.book h1.sect0,body.book .sect1>h2{page-b
 <li><a href="#message_loss">Message Loss</a>
 <ul class="sectlevel2">
 <li><a href="#_multicast_sequence_numbers">Multicast sequence numbers</a></li>
+<li><a href="#pub_window">Publish sequence window</a></li>
 <li><a href="#_subscription_sequence_window">Subscription sequence window</a></li>
 <li><a href="#_configuration_for_sequence_windows">Configuration for sequence windows</a></li>
 <li><a href="#_show_loss">Show loss</a></li>
@@ -957,18 +959,18 @@ service name.</p>
 </div>
 <div class="listingblock">
 <div class="content">
-<pre>  $ ms_gen_key -u A B C -s test
-  create dir  config                          -- the configure directory
-  create file config/.salt                    -- generate new salt
-  create file config/.pass                    -- generated a new password
-  create file config/config.yaml              -- base include file
-  create file config/param.yaml               -- parameters file
-  create file config/svc_test.yaml            -- defines the service and signs users
-  create file config/user_A_svc_test.yaml     -- defines the user
-  create file config/user_B_svc_test.yaml     -- defines the user
-  create file config/user_C_svc_test.yaml     -- defines the user
-  OK? y
-  done</pre>
+<pre>$ ms_gen_key -u A B C -s test
+create dir  config                          -- the configure directory
+create file config/.salt                    -- generate new salt
+create file config/.pass                    -- generated a new password
+create file config/config.yaml              -- base include file
+create file config/param.yaml               -- parameters file
+create file config/svc_test.yaml            -- defines the service and signs users
+create file config/user_A_svc_test.yaml     -- defines the user
+create file config/user_B_svc_test.yaml     -- defines the user
+create file config/user_C_svc_test.yaml     -- defines the user
+OK? y
+done</pre>
 </div>
 </div>
 <div class="paragraph">
@@ -979,38 +981,38 @@ generate new peers because the private key of the service is not present.</p>
 </div>
 <div class="listingblock">
 <div class="content">
-<pre>  $ ms_gen_key -x A B C -s test
-  - Loading service "test"
-  - Signatures ok
-  create dir  A                          -- exported configure directory
-  create file A/.salt                    -- a copy of salt
-  create file A/.pass                    -- generated a new password
-  create file A/param.yaml               -- a copy of param
-  create file A/config.yaml              -- base include file
-  create file A/svc_test.yaml            -- defines the service and signs users
-  create file A/user_A_svc_test.yaml     -- defines the user
-  create file A/user_B_svc_test.yaml     -- defines the user
-  create file A/user_C_svc_test.yaml     -- defines the user
-  create dir  B                          -- exported configure directory
-  create file B/.salt                    -- a copy of salt
-  create file B/.pass                    -- generated a new password
-  create file B/param.yaml               -- a copy of param
-  create file B/config.yaml              -- base include file
-  create file B/svc_test.yaml            -- defines the service and signs users
-  create file B/user_A_svc_test.yaml     -- defines the user
-  create file B/user_B_svc_test.yaml     -- defines the user
-  create file B/user_C_svc_test.yaml     -- defines the user
-  create dir  C                          -- exported configure directory
-  create file C/.salt                    -- a copy of salt
-  create file C/.pass                    -- generated a new password
-  create file C/param.yaml               -- a copy of param
-  create file C/config.yaml              -- base include file
-  create file C/svc_test.yaml            -- defines the service and signs users
-  create file C/user_A_svc_test.yaml     -- defines the user
-  create file C/user_B_svc_test.yaml     -- defines the user
-  create file C/user_C_svc_test.yaml     -- defines the user
-  OK? y
-  done</pre>
+<pre>$ ms_gen_key -x A B C -s test
+- Loading service "test"
+- Signatures ok
+create dir  A                          -- exported configure directory
+create file A/.salt                    -- a copy of salt
+create file A/.pass                    -- generated a new password
+create file A/param.yaml               -- a copy of param
+create file A/config.yaml              -- base include file
+create file A/svc_test.yaml            -- defines the service and signs users
+create file A/user_A_svc_test.yaml     -- defines the user
+create file A/user_B_svc_test.yaml     -- defines the user
+create file A/user_C_svc_test.yaml     -- defines the user
+create dir  B                          -- exported configure directory
+create file B/.salt                    -- a copy of salt
+create file B/.pass                    -- generated a new password
+create file B/param.yaml               -- a copy of param
+create file B/config.yaml              -- base include file
+create file B/svc_test.yaml            -- defines the service and signs users
+create file B/user_A_svc_test.yaml     -- defines the user
+create file B/user_B_svc_test.yaml     -- defines the user
+create file B/user_C_svc_test.yaml     -- defines the user
+create dir  C                          -- exported configure directory
+create file C/.salt                    -- a copy of salt
+create file C/.pass                    -- generated a new password
+create file C/param.yaml               -- a copy of param
+create file C/config.yaml              -- base include file
+create file C/svc_test.yaml            -- defines the service and signs users
+create file C/user_A_svc_test.yaml     -- defines the user
+create file C/user_B_svc_test.yaml     -- defines the user
+create file C/user_C_svc_test.yaml     -- defines the user
+OK? y
+done</pre>
 </div>
 </div>
 <div class="paragraph">
@@ -1028,6 +1030,118 @@ startup and network configuration.</p>
 <div class="paragraph">
 <p>The master config will also work, so just copying it to the peers will allow
 them to run if this type of security is unnecessary.</p>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_single_file_configuration">Single File Configuration</h3>
+<div class="paragraph">
+<p>The <code>ms_gen_key</code> option <code>-o</code> will concatenate the configuration into a single
+file:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre>$ ms_gen_key -s test -o test.yaml
+create dir  config                   -- the configure directory
+create file config/.salt             -- generate new salt
+create file config/.pass             -- generated a new password
+create file config/config.yaml       -- base include file
+create file config/param.yaml        -- parameters file
+create file config/svc_test.yaml     -- defines the service and signs users
+OK? y
+done
+- Output config to "test.yaml"</pre>
+</div>
+</div>
+<div class="paragraph">
+<p>Running <code>ms_server -d config</code> configuration from a directory and running
+<code>ms_server -d test.yaml</code> will load the configuration from a file.  In both
+cases, the configuration loaded will be the same.</p>
+</div>
+<div class="paragraph">
+<p>A test network can be set up using only the loopback interface by describing
+the network using a format output by the <a href="#show_graph">show_graph</a> command.
+The format of this is:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre>node A B C D
+tcp_link_ab A B : 200
+tcp_link_bc B C : 100
+tcp_link_ac A C : 200
+tcp_link_bd B D : 200
+tcp_link_dc D C : 300</pre>
+</div>
+</div>
+<div class="paragraph">
+<p>The <code>node</code> line declares all of the users.  The <code>tcp_</code> lines describe how the
+users are connected.  The number following the <em>:</em> is the cost of the
+transport.</p>
+</div>
+<div class="paragraph">
+<p>Running the <code>ms_test_adj</code> program with this description will generate a
+configuration, saved in a file called "graph.txt" and output to "graph.yaml":</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre>$ ms_test_adj -l graph.txt &gt; graph.yaml</pre>
+</div>
+</div>
+<div class="paragraph">
+<p>The <code>-l</code> option causes the links to be resolved by exchanging messages over the
+loopback interface.  At the bottom of the "graph.yaml" created, there will be
+commands in comments to run this configuration.   Running these will create 4
+users in a network describe by the graph.  The following uses those commands
+with the first three running in the background and the last with a console
+attached to it, but you could run each in a different terminal with consoles
+attached in order to test with the <a href="#test_sub">sub</a> and
+<a href="#test_trace">trace</a> commands to test how messages would be routed through
+the network.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight nowrap"><code>$ ms_server -d graph.yaml -u A -t link_ab.listen link_ac.listen &amp;
+$ ms_server -d graph.yaml -u B -t link_ab.connect link_bc.listen link_bd.listen &amp;
+$ ms_server -d graph.yaml -u C -t link_ac.connect link_bc.connect link_dc.listen &amp;
+$ ms_server -d graph.yaml -u D -t link_bd.connect link_dc.connect -c</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>In addition to "tcp" type links, you could also define "mesh" and "pgm" types,
+but the pgm would require non-loopback interface that has multicast, like a
+Linux bridge.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre>node A B C D
+mesh_link_abcd A B C D : 100 1000 100 1000
+mesh_link_abcd2 A B C D : 1000 100 1000 100</pre>
+</div>
+</div>
+<div class="paragraph">
+<p>The above graph would create two meshes, with different costs for some of the
+paths.  This would route messages over both meshes by sharding the subject
+space and using one mesh for half of the subject space and the other mesh for
+the other half.</p>
+</div>
+<div class="paragraph">
+<p>There is a graphical interface to view the network using the
+<a href="https://js.cytoscape.org/">cytoscape</a> package.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight nowrap"><code>$ ms_server -c
+chex.test[0vEvE73U78HkGZUgBK94mQ]@chex[10]&gt; configure transport web type web port 8080 listen 127.0.0.1
+Transport (web) updated
+chex.test[0vEvE73U78HkGZUgBK94mQ]@chex[11]&gt; listen web
+Transport (web) started listening
+0209 22:54:25.382  web: web start listening on 127.0.0.1:8080
+0209 22:54:25.382  http_url http://127.0.0.1:8080</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>Connect to the url <a href="http://127.0.0.1:8080/graph_nodes.html" class="bare">http://127.0.0.1:8080/graph_nodes.html</a> with a web browser
+and paste the graph text into the text box after erasing the existing text,
+then click "show graph".</p>
 </div>
 </div>
 <div class="sect2">
@@ -1240,7 +1354,7 @@ failure will not cause an exit, since it retries.</p>
 <li>
 <p>pub_window_size, sub_window_size, pub_window_time, sub_window_time&#8201;&#8212;&#8201;These
 track the sequence numbers of messages sent and received.  They are described
-in <a href="#pub_window">[pub_window]</a>.</p>
+in <a href="#pub_window">Publish sequence window</a>.</p>
 </li>
 <li>
 <p>heartbeat&#8201;&#8212;&#8201;The interval which heartbeats are published to directly
@@ -1507,10 +1621,10 @@ trust ruby.</p>
 <p>If a host is compromised and the KDF pre-shared key and service ECDSA_pub key
 are discovered along with a user ECDSA_pri key, then an unauthorized party
 could masquerade as that user.  One way to prevent this is to remove the
-pre-shared 640 salt file after starting a server and a unique password file
-used to encrypt the ECDSA keys in the configuration files.  The attacker would
-need to extract these from the process space of the server and design a system
-that uses this data.</p>
+pre-shared 640 byte salt file after starting a server and a unique password
+file used to encrypt the ECDSA keys in the configuration files.  The attacker
+would need to extract these from the process space of the server and design a
+system that uses this data.</p>
 </div>
 <div class="paragraph">
 <p>The user ECDSA_pri key is needed to authenticate new peers, so it remains in
@@ -2859,11 +2973,9 @@ The peer that publishes a message may use a sub-optimal forwarding path to the
 recipients until they are notified that better paths are available with link
 state exchanges.</p>
 </div>
-<div class="paragraph">
-<p><a href="#pub_window">[pub_window]</a>
-Publish sequence window
-<sub>~</sub><sub>~</sub><sub>~</sub><sub>~</sub><sub>~</sub><sub>~</sub><sub>~</sub>~~</p>
 </div>
+<div class="sect2">
+<h3 id="pub_window">Publish sequence window</h3>
 <div class="paragraph">
 <p>A map of subject to sequence numbers for published multicast messages is
 maintained by each peer.  This map rotates when a configured memory limit is

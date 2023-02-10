@@ -38,8 +38,8 @@ generate new peers because the private key of the service is not present.
 
 ----
 $ ms_gen_key -x A B C -s test
-- Loading service "test"               
-- Signatures ok                        
+- Loading service "test"
+- Signatures ok
 create dir  A                          -- exported configure directory
 create file A/.salt                    -- a copy of salt
 create file A/.pass                    -- generated a new password
