@@ -91,13 +91,14 @@ function on_disconnect() {
 
 function on_menu_click( cmd, args, ws ) {
   let val = cmd;
-  if ( args == "[P]" )
+  if ( args == "[P]" || args == "P" )
     val += " 0";
-  else if ( args == "[U] [W]" ) {
+  else if ( args == "[U] [W]" || args == "U W" ) {
     update_table( cmd, "select user and subject match, then click " + cmd );
     return;
   }
-  else if ( args == "[W]" ) {
+  else if ( args == "[W]" || args == "W" ||
+            args == "[S]" || args == "S" ) {
     update_table( cmd, "select subject match, then click " + cmd );
     return;
   }

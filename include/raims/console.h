@@ -560,7 +560,7 @@ struct Console : public md::MDOutput, public SubOnMsg, public ConfigPrinter,
                     log_max_rotate;
   uint64_t          log_rotate_time,
                     log_max_size;
-  char            * log_filename;
+  const char      * log_filename;
   int               log_fd;
   uint32_t          next_rotate;
   int               log_status;
@@ -569,6 +569,11 @@ struct Console : public md::MDOutput, public SubOnMsg, public ConfigPrinter,
   bool              mute_log;
   LastTimeStamp     log_ts,
                     stamp_ts;
+  static const uint32_t LOG_RATE_PERIOD = 64;
+  uint64_t          log_rate[ LOG_RATE_PERIOD ],
+                    log_time[ LOG_RATE_PERIOD ],
+                    log_rate_total;
+  uint32_t          last_rate;
 
   static const size_t TS_ERR_OFF = LastTimeStamp::TS_LEN,
                       TS_HDR_LEN = LastTimeStamp::TS_LEN + 2;
@@ -582,6 +587,8 @@ struct Console : public md::MDOutput, public SubOnMsg, public ConfigPrinter,
   size_t make_prompt( const char *where = NULL,  size_t wsz = 0 ) noexcept;
   void update_prompt( const char *where = NULL,  size_t wsz = 0 ) noexcept;
   void change_prompt( const char *where = NULL,  size_t wsz = 0 ) noexcept;
+  void throttle_rate( uint64_t stamp,  size_t len ) noexcept;
+  uint64_t throttle_total( uint64_t &period ) noexcept;
   bool on_log( kv::Logger &log ) noexcept;
   void flush_log( kv::Logger &log ) noexcept;
   bool colorize_log( ConsoleOutput *p,  const char *buf,  size_t len ) noexcept;
@@ -741,81 +748,80 @@ enum ConsoleCmd {
   CMD_PING              = 2,  /* ping [U]                   */
   CMD_TPING             = 3,  /* tping [U]                  */
   CMD_MPING             = 4,  /* mping [P]                  */
-  CMD_TMPING            = 5,  /* tmping [P]                 */
-  CMD_REMOTE            = 6,  /* remote [U] cmd             */
-  CMD_SHOW              = 7,  /* show ...                   */
-  CMD_SHOW_SUBS         = 8,  /* show subs [U]              */
-  CMD_SHOW_SEQNO        = 9,  /* show seqno                 */
-  CMD_SHOW_ADJACENCY    = 10, /* show adjacency             */
-  CMD_SHOW_PEERS        = 11, /* show peers [sort]          */
-  CMD_SHOW_PORTS        = 12, /* show ports [T]             */
-  CMD_SHOW_COST         = 13, /* show ports [T]             */
-  CMD_SHOW_STATUS       = 14, /* show status [T]            */
-  CMD_SHOW_LINKS        = 15, /* show links                 */
-  CMD_SHOW_NODES        = 16, /* show nodes                 */
-  CMD_SHOW_ROUTES       = 17, /* show routes [P]            */
-  CMD_SHOW_URLS         = 18, /* show urls                  */
-  CMD_SHOW_TPORTS       = 19, /* show tport [T]             */
-  CMD_SHOW_USERS        = 20, /* show user [U]              */
-  CMD_SHOW_EVENTS       = 21, /* show events                */
-  CMD_SHOW_UNKNOWN      = 22, /* show unknown               */
-  CMD_SHOW_LOGS         = 23, /* show logs                  */
-  CMD_SHOW_COUNTERS     = 24, /* show counters              */
-  CMD_SHOW_PUBTYPE      = 25, /* show pubtype               */
-  CMD_SHOW_INBOX        = 26, /* show inbox                 */
-  CMD_SHOW_LOSS         = 27, /* show loss                  */
-  CMD_SHOW_SKEW         = 28, /* show skew                  */
-  CMD_SHOW_REACHABLE    = 29, /* show reachable             */
-  CMD_SHOW_TREE         = 30, /* show tree [U]              */
-  CMD_SHOW_PATH         = 31, /* show path [N]              */
-  CMD_SHOW_FORWARD      = 32, /* show forward [N]           */
-  CMD_SHOW_FDS          = 33, /* show fds                   */
-  CMD_SHOW_BUFFERS      = 34, /* show buffers               */
-  CMD_SHOW_WINDOWS      = 35, /* show windows               */
-  CMD_SHOW_BLOOMS       = 36, /* show blooms [N]            */
-  CMD_SHOW_MATCH        = 37, /* show match  S              */
-  CMD_SHOW_GRAPH        = 38, /* show graph                 */
-  CMD_SHOW_CACHE        = 39, /* show cache                 */
-  CMD_SHOW_POLL         = 40, /* show poll                  */
-  CMD_SHOW_RUN          = 41, /* show running               */
-  CMD_SHOW_RUN_TPORTS   = 42, /* show running transport [T] */
-  CMD_SHOW_RUN_SVCS     = 43, /* show running service [S]   */
-  CMD_SHOW_RUN_USERS    = 44, /* show running user [U]      */
-  CMD_SHOW_RUN_GROUPS   = 45, /* show running group [G]     */
-  CMD_SHOW_RUN_PARAM    = 46, /* show running parameter [P] */
-  CMD_SHOW_START        = 47, /* show startup               */
-  CMD_SHOW_START_TPORTS = 48, /* show startup transport [T] */
-  CMD_SHOW_START_SVCS   = 49, /* show startup service [S]   */
-  CMD_SHOW_START_USERS  = 50, /* show startup user [U]      */
-  CMD_SHOW_START_GROUPS = 51, /* show startup group [G]     */
-  CMD_SHOW_START_PARAM  = 52, /* show startup parameter [P] */
-  CMD_CONNECT           = 53, /* connect [T]                */
-  CMD_LISTEN            = 54, /* listen [T]                 */
-  CMD_SHUTDOWN          = 55, /* shutdown [T]               */
-  CMD_NETWORK           = 56, /* network svc network        */
-  CMD_CONFIGURE         = 57, /* configure                  */
-  CMD_CONFIGURE_TPORT   = 58, /* configure transport T      */
-  CMD_CONFIGURE_PARAM   = 59, /* configure parameter P V    */
-  CMD_SAVE              = 60, /* save                       */
-  CMD_SUB_START         = 61, /* sub subject [file]         */
-  CMD_SUB_STOP          = 62, /* unsub subject [file]       */
-  CMD_PSUB_START        = 63, /* psub rv-wildcard [file]    */
-  CMD_PSUB_STOP         = 64, /* punsub rv-wildcard [file]  */
-  CMD_GSUB_START        = 65, /* gsub glob-wildcard [file]  */
-  CMD_GSUB_STOP         = 66, /* gunsub glob-wildcard [file]*/
-  CMD_PUBLISH           = 67, /* pub subject msg            */
-  CMD_TRACE             = 68, /* trace subject msg          */
-  CMD_PUB_ACK           = 69, /* ack subject msg            */
-  CMD_RPC               = 70, /* rpc subject msg            */
-  CMD_ANY               = 71, /* any subject msg            */
-  CMD_RESEED            = 72, /* reseed bloom filters       */
-  CMD_DEBUG             = 73, /* debug ival                 */
-  CMD_CANCEL            = 74, /* cancel                     */
-  CMD_MUTE_LOG          = 75, /* mute                       */
-  CMD_UNMUTE_LOG        = 76, /* unmute                     */
-  CMD_WEVENTS           = 77, /* write events to file       */
-  CMD_DIE               = 78, /* die, exit 1                */
-  CMD_QUIT              = 79, /* quit/exit                  */
+  CMD_REMOTE            = 5,  /* remote [U] cmd             */
+  CMD_SHOW              = 6,  /* show ...                   */
+  CMD_SHOW_SUBS         = 7,  /* show subs [U]              */
+  CMD_SHOW_SEQNO        = 8,  /* show seqno                 */
+  CMD_SHOW_ADJACENCY    = 9,  /* show adjacency             */
+  CMD_SHOW_PEERS        = 10, /* show peers [sort]          */
+  CMD_SHOW_PORTS        = 11, /* show ports [T]             */
+  CMD_SHOW_COST         = 12, /* show ports [T]             */
+  CMD_SHOW_STATUS       = 13, /* show status [T]            */
+  CMD_SHOW_LINKS        = 14, /* show links                 */
+  CMD_SHOW_NODES        = 15, /* show nodes                 */
+  CMD_SHOW_ROUTES       = 16, /* show routes [P]            */
+  CMD_SHOW_URLS         = 17, /* show urls                  */
+  CMD_SHOW_TPORTS       = 18, /* show tport [T]             */
+  CMD_SHOW_USERS        = 19, /* show user [U]              */
+  CMD_SHOW_EVENTS       = 20, /* show events                */
+  CMD_SHOW_UNKNOWN      = 21, /* show unknown               */
+  CMD_SHOW_LOGS         = 22, /* show logs                  */
+  CMD_SHOW_COUNTERS     = 23, /* show counters              */
+  CMD_SHOW_PUBTYPE      = 24, /* show pubtype               */
+  CMD_SHOW_INBOX        = 25, /* show inbox                 */
+  CMD_SHOW_LOSS         = 26, /* show loss                  */
+  CMD_SHOW_SKEW         = 27, /* show skew                  */
+  CMD_SHOW_REACHABLE    = 28, /* show reachable             */
+  CMD_SHOW_TREE         = 29, /* show tree [U]              */
+  CMD_SHOW_PATH         = 30, /* show path [N]              */
+  CMD_SHOW_FORWARD      = 31, /* show forward [P]           */
+  CMD_SHOW_FDS          = 32, /* show fds                   */
+  CMD_SHOW_BUFFERS      = 33, /* show buffers               */
+  CMD_SHOW_WINDOWS      = 34, /* show windows               */
+  CMD_SHOW_BLOOMS       = 35, /* show blooms [P]            */
+  CMD_SHOW_MATCH        = 36, /* show match  S              */
+  CMD_SHOW_GRAPH        = 37, /* show graph                 */
+  CMD_SHOW_CACHE        = 38, /* show cache                 */
+  CMD_SHOW_POLL         = 39, /* show poll                  */
+  CMD_SHOW_RUN          = 40, /* show running               */
+  CMD_SHOW_RUN_TPORTS   = 41, /* show running transport [T] */
+  CMD_SHOW_RUN_SVCS     = 42, /* show running service [S]   */
+  CMD_SHOW_RUN_USERS    = 43, /* show running user [U]      */
+  CMD_SHOW_RUN_GROUPS   = 44, /* show running group [G]     */
+  CMD_SHOW_RUN_PARAM    = 45, /* show running parameter [P] */
+  CMD_SHOW_START        = 46, /* show startup               */
+  CMD_SHOW_START_TPORTS = 47, /* show startup transport [T] */
+  CMD_SHOW_START_SVCS   = 48, /* show startup service [S]   */
+  CMD_SHOW_START_USERS  = 49, /* show startup user [U]      */
+  CMD_SHOW_START_GROUPS = 50, /* show startup group [G]     */
+  CMD_SHOW_START_PARAM  = 51, /* show startup parameter [P] */
+  CMD_CONNECT           = 52, /* connect [T]                */
+  CMD_LISTEN            = 53, /* listen [T]                 */
+  CMD_SHUTDOWN          = 54, /* shutdown [T]               */
+  CMD_NETWORK           = 55, /* network svc network        */
+  CMD_CONFIGURE         = 56, /* configure                  */
+  CMD_CONFIGURE_TPORT   = 57, /* configure transport T      */
+  CMD_CONFIGURE_PARAM   = 58, /* configure parameter P V    */
+  CMD_SAVE              = 59, /* save                       */
+  CMD_SUB_START         = 60, /* sub subject [file]         */
+  CMD_SUB_STOP          = 61, /* unsub subject [file]       */
+  CMD_PSUB_START        = 62, /* psub rv-wildcard [file]    */
+  CMD_PSUB_STOP         = 63, /* punsub rv-wildcard [file]  */
+  CMD_GSUB_START        = 64, /* gsub glob-wildcard [file]  */
+  CMD_GSUB_STOP         = 65, /* gunsub glob-wildcard [file]*/
+  CMD_PUBLISH           = 66, /* pub subject msg            */
+  CMD_TRACE             = 67, /* trace subject msg          */
+  CMD_PUB_ACK           = 68, /* ack subject msg            */
+  CMD_RPC               = 69, /* rpc subject msg            */
+  CMD_ANY               = 70, /* any subject msg            */
+  CMD_RESEED            = 71, /* reseed bloom filters       */
+  CMD_DEBUG             = 72, /* debug ival                 */
+  CMD_CANCEL            = 73, /* cancel                     */
+  CMD_MUTE_LOG          = 74, /* mute                       */
+  CMD_UNMUTE_LOG        = 75, /* unmute                     */
+  CMD_WEVENTS           = 76, /* write events to file       */
+  CMD_DIE               = 77, /* die, exit 1                */
+  CMD_QUIT              = 78, /* quit/exit                  */
 
 #define CMD_TPORT_BASE ( (int) CMD_QUIT + 1 )
   CMD_TPORT_ENUM /* config_const.h */
@@ -898,7 +904,6 @@ static const ConsoleCmdString console_cmd[] = {
   { CMD_PING       , "ping"         ,0,0}, /* ping peers */
   { CMD_TPING      , "tping"        ,0,0}, /* trace ping peers */
   { CMD_MPING      , "mping"        ,0,0}, /* multicast ping peers */
-  { CMD_TMPING     , "tmping"       ,0,0}, /* trace multicast ping peers */
   { CMD_REMOTE     , "remote"       ,0,0}, /* remote peer <cmd> */
   { CMD_SHOW       , "show"         ,0,0}, /* show <subcmd> */
   { CMD_CONNECT    , "connect"      ,0,0}, /* connect <tport> */
@@ -988,12 +993,11 @@ static const ConsoleCmdString help_cmd[] = {
   { CMD_PING             , "ping", "[U]",        "Ping peers and display latency of return"          },
   { CMD_TPING            , "tping", "[U]",       "Ping peers with route trace flag"                  },
   { CMD_MPING            , "mping", "[P]",       "Multicast ping all peers using path P"             },
-  { CMD_TMPING           , "tmping", "[P]",      "Multicast ping using path P with route trace"      },
-  { CMD_REMOTE           , "remote", "[U] [C]",  "Run remote command on peer"                        },
-  { CMD_CONNECT          , "connect", "[T]",     "Start tport connect"                               },
-  { CMD_LISTEN           , "listen", "[T]",      "Start tport listener"                              },
-  { CMD_SHUTDOWN         , "shutdown", "[T]",    "Shutdown tport"                                    },
-  { CMD_NETWORK          , "network", "[S] [N]", "Configure service and join network"                },
+  { CMD_REMOTE           , "remote", "U C",      "Run remote command on peer"                        },
+  { CMD_CONNECT          , "connect", "T",       "Start tport connect"                               },
+  { CMD_LISTEN           , "listen", "T",        "Start tport listener"                              },
+  { CMD_SHUTDOWN         , "shutdown", "T",      "Shutdown tport"                                    },
+  { CMD_NETWORK          , "network", "S N",     "Configure service and join network"                },
   { CMD_CONFIGURE        , "configure", "",      "Configure ..."                                     },
   { CMD_CONFIGURE_TPORT  , "configure transport", "T",  "Configure tport T"                          },
   { CMD_CONFIGURE_PARAM  , "configure parameter", "P V", "Configure parameter P = V"                 },
@@ -1040,24 +1044,24 @@ static const ConsoleCmdString help_cmd[] = {
   { CMD_SHOW_START_USERS , "show startup user","[U]",      "Show users startup config, U or all"     },
   { CMD_SHOW_START_GROUPS, "show startup group","[G]",     "Show groups startup config, G or all"    },
   { CMD_SHOW_START_PARAM , "show startup parameter","[P]", "Show parameters startup config, P or all"},
-  { CMD_SUB_START        , "sub","[S] [F]",      "Subscribe subject S, output to file F"             },
-  { CMD_SUB_STOP         , "unsub","[S] [F]",    "Unsubscribe subject S, stop output file F"         },
-  { CMD_PSUB_START       , "psub","[W] [F]",     "Subscribe rv-wildcard W, output to file F"         },
-  { CMD_PSUB_STOP        , "punsub","[W] [F]",   "Unsubscribe rv-wildcard W, stop output file F"     },
-  { CMD_GSUB_START       , "gsub","[W] [F]",     "Subscribe glob-wildcard W, output to file F"       },
-  { CMD_GSUB_STOP        , "gunsub","[W] [F]",   "Unsubscribe glob-wildcard W, stop output file F"   },
-  { CMD_PUBLISH          , "pub","[S] [M]",      "Publish msg string M to subject S"                 },
-  { CMD_TRACE            , "trace","[S] [M]",    "Publish msg string M to subject S, with reply"     },
-  { CMD_PUB_ACK          , "ack","[S] [M]",      "Publish msg string M to subject S, with ack"       },
-  { CMD_RPC              , "rpc","[S] [M]",      "Publish msg string M to subject S, with return"    },
-  { CMD_ANY              , "any","[S] [M]",      "Publish msg string M to any subscriber of S"       },
+  { CMD_SUB_START        , "sub","S [F]",        "Subscribe subject S, output to file F"             },
+  { CMD_SUB_STOP         , "unsub","S [F]",      "Unsubscribe subject S, stop output file F"         },
+  { CMD_PSUB_START       , "psub","W [F]",       "Subscribe rv-wildcard W, output to file F"         },
+  { CMD_PSUB_STOP        , "punsub","W [F]",     "Unsubscribe rv-wildcard W, stop output file F"     },
+  { CMD_GSUB_START       , "gsub","W [F]",       "Subscribe glob-wildcard W, output to file F"       },
+  { CMD_GSUB_STOP        , "gunsub","W [F]",     "Unsubscribe glob-wildcard W, stop output file F"   },
+  { CMD_PUBLISH          , "pub","S M",          "Publish msg string M to subject S"                 },
+  { CMD_TRACE            , "trace","S M",        "Publish msg string M to subject S, with reply"     },
+  { CMD_PUB_ACK          , "ack","S M",          "Publish msg string M to subject S, with ack"       },
+  { CMD_RPC              , "rpc","S M",          "Publish msg string M to subject S, with return"    },
+  { CMD_ANY              , "any","S M",          "Publish msg string M to any subscriber of S"       },
   { CMD_CANCEL           , "cancel","",          "Cancel and show incomplete (ping, show subs)"      },
   { CMD_MUTE_LOG         , "mute","",            "Mute the log output"                               },
   { CMD_UNMUTE_LOG       , "unmute","",          "Unmute the log output"                             },
   { CMD_RESEED           , "reseed","",          "Reseed bloom filter"                               },
-  { CMD_DEBUG            , "debug","[I]",        "Set debug flags to ival I, a comination of:\n"
+  { CMD_DEBUG            , "debug","I",          "Set debug flags to ival I, a comination of:\n"
                            DEBUG_STRING_LIST ", dist,  kvpub,  kvps,  rv"                            },
-  { CMD_WEVENTS          , "wevents","[F]",      "Write events to file"                              },
+  { CMD_WEVENTS          , "wevents","F",        "Write events to file"                              },
   { CMD_DIE              , "die","[I]",          "Exit without cleanup, with status 1 or I"          },
   { CMD_QUIT             , "quit/exit","",       "Exit console"                                      }
 };

@@ -89,12 +89,15 @@ Console::Console( SessionMgr &m ) noexcept
          inbox_num( 0 ), log_max_rotate( 0 ), log_rotate_time( 0 ),
          log_max_size( 0 ), log_filename( 0 ), log_fd( -1 ), next_rotate( 1 ),
          log_status( 0 ), last_log_hash( 0 ), last_log_repeat_count( 0 ),
-         mute_log( false )
+         mute_log( false ), log_rate_total( 0 )
 {
   time_t t = update_tz_offset();
   t += 24 * 60 * 60;
   this->log_rotate_time = (uint64_t) t * 1000000000;
   this->make_prompt();
+  ::memset( this->log_rate, 0, sizeof( this->log_rate ) );
+  ::memset( this->log_time, 0, sizeof( this->log_time ) );
+  this->last_rate = 0;
 }
 
 static const char *nc = ANSI_NORMAL;
@@ -120,6 +123,10 @@ static int         html_nz   = sizeof( html_nc ) - 1;
 bool
 Console::open_log( const char *fn,  bool add_hdr ) noexcept
 {
+  if ( this->log_fd >= 0 ) {
+    os_close( this->log_fd );
+    this->log_fd = -1;
+  }
   this->log_fd = os_open( fn, O_APPEND | O_WRONLY | O_CREAT, 0666 );
   if ( this->log_fd < 0 ) {
     ::perror( fn );
@@ -131,10 +138,7 @@ Console::open_log( const char *fn,  bool add_hdr ) noexcept
     this->log_fd = -1;
     return false;
   }
-  if ( fn != this->log_filename ) {
-    this->log_filename = (char *) ::malloc( ::strlen( fn ) * 2 + 24 );
-    ::strcpy( this->log_filename, fn );
-  }
+  this->log_filename = fn;
   return true;
 }
 
@@ -188,7 +192,9 @@ Console::rotate_log( void ) noexcept
     this->log_fd = -1;
 
     size_t len = ::strlen( this->log_filename );
-    char * newpath = &this->log_filename[ len + 1 ];
+    char   newpath[ 1024 ];
+    if ( len > sizeof( newpath ) - 24 )
+      len = sizeof( newpath ) - 24;
     ::memcpy( newpath, this->log_filename, len );
     newpath[ len ] = '.';
     for ( uint32_t i = this->next_rotate; ; i++ ) {
@@ -570,6 +576,47 @@ Console::flush_output( ConsoleOutput *p ) noexcept
   return b;
 }
 
+void
+Console::throttle_rate( uint64_t stamp,  size_t len ) noexcept
+{
+  uint32_t i = (uint32_t) ( stamp >> 30 ) & ( LOG_RATE_PERIOD - 1 );
+  if ( this->log_time[ i ] != 0 ) {
+    uint32_t j = (uint32_t) ( this->log_time[ i ] >> 30 ) &
+                            ( LOG_RATE_PERIOD - 1 );
+    if ( i != j ) {
+      this->log_rate_total -= this->log_rate[ j ];
+      this->log_rate[ j ] = 0;
+    }
+  }
+  this->log_rate[ i ]  += len;
+  this->log_time[ i ]   = stamp;
+  this->log_rate_total += len;
+  this->last_rate       = i;
+}
+
+uint64_t
+Console::throttle_total( uint64_t &period ) noexcept
+{
+  uint32_t k = this->last_rate,
+           i = k;
+  uint64_t head_time = this->log_time[ i ],
+           tail_time = head_time;
+  for ( uint32_t j = 0; j < LOG_RATE_PERIOD - 1; j++ ) {
+    k = ( k > 0 ? k - 1 : LOG_RATE_PERIOD - 1 );
+    if ( this->log_time[ k ] == 0 )
+      continue;
+    if ( ( ( head_time - this->log_time[ k ] ) >> 30 ) > j + 2 ) {
+      this->log_rate_total -= this->log_rate[ k ];
+      this->log_rate[ k ] = 0;
+      this->log_time[ k ] = 0;
+    }
+    if ( this->log_time[ k ] < tail_time )
+      tail_time = this->log_time[ k ];
+  }
+  period = head_time - tail_time;
+  return this->log_rate_total;
+}
+
 bool
 Console::on_log( Logger &log ) noexcept
 {
@@ -590,11 +637,15 @@ Console::on_log( Logger &log ) noexcept
       out_stamp = log.read_stdout( out, out_len );
       if ( out_stamp == 0 )
         out_done = true;
+      else if ( ! this->mute_log && this->term_list.hd != NULL )
+        this->throttle_rate( out_stamp, out_len );
     }
     if ( ! err_done && err_stamp == 0 ) {
       err_stamp = log.read_stderr( err, err_len );
       if ( err_stamp == 0 )
         err_done = true;
+      else if ( ! this->mute_log && this->term_list.hd != NULL )
+        this->throttle_rate( err_stamp, err_len );
     }
     bool do_out = ! out_done, do_err = ! err_done;
     if ( do_out && do_err ) {
@@ -616,8 +667,20 @@ Console::on_log( Logger &log ) noexcept
       b = true;
     }
   }
-  if ( b )
+  if ( b ) {
+    uint64_t period;
+    if ( this->log_rate_total > 100 * 1024 &&
+         this->throttle_total( period ) > 100 * 1024 ) {
+      this->printf( "log muted, %lu bytes logged in %.3f seconds\n",
+                    this->log_rate_total, (double) period / 1000000000.0 );
+      ::memset( this->log_rate, 0, sizeof( this->log_rate ) );
+      ::memset( this->log_time, 0, sizeof( this->log_time ) );
+      this->log_rate_total = 0;
+      this->change_prompt( "mute", 4 );
+      this->mute_log = true;
+    }
     this->flush_output( NULL );
+  }
   return b;
 }
 
@@ -2015,7 +2078,10 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
     case CMD_TPORT_QUIT:
       this->changes.add( this->cfg_tport );
       this->cfg_tport = NULL;
-      this->change_prompt( NULL, 0 );
+      if ( this->mute_log )
+        this->change_prompt( "mute", 4 );
+      else
+        this->change_prompt( NULL, 0 );
       break;
 
     case CMD_CONFIGURE_PARAM:
@@ -2025,9 +2091,11 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
       break;
     case CMD_MUTE_LOG:
       this->mute_log = true;
+      this->change_prompt( "mute", 4 );
       break;
     case CMD_UNMUTE_LOG:
       this->mute_log = false;
+      this->change_prompt( NULL, 0 );
       break;
 
     case CMD_SHOW_PEERS:     this->show_peers( p, arg, len ); break;
@@ -2153,7 +2221,6 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
     case CMD_PING:      this->ping_peer( p, arg, len, false ); break;
     case CMD_TPING:     this->ping_peer( p, arg, len, true ); break;
     case CMD_MPING:     this->mcast_ping( p, int_arg( arg, len ), false ); break;
-    case CMD_TMPING:    this->mcast_ping( p, int_arg( arg, len ), true ); break;
 
     case CMD_SUB_START: /* sub */
     case CMD_SUB_STOP: {/* unsub */
@@ -2538,8 +2605,10 @@ Console::config_param( const char *param, size_t plen,
       else {
         p->parms.unlink( sp );
         this->tree.free_pairs.push_tl( sp );
+        sp = NULL;
+        return;
       }
-      return;
+      goto check_logfile;
     }
   }
   if ( vlen == 0 ) {
@@ -2552,6 +2621,17 @@ Console::config_param( const char *param, size_t plen,
     this->string_tab.ref_string( value, vlen, sp->value );
     p->parms.push_tl( sp );
     this->tree.parameters.push_tl( p );
+  }
+check_logfile:;
+  if ( sp->name.equals( "log_file" ) ) {
+    if ( this->log_filename == NULL ||
+         ! sp->value.equals( this->log_filename ) ) {
+      bool b = this->open_log( sp->value.val, true );
+      this->printf( "%s new log file: \"%s\"\n",
+                     b ? "Opened" : "Failed to open", this->log_filename );
+      if ( b )
+        this->next_rotate = 1;
+    }
   }
 }
 

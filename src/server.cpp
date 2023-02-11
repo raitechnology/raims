@@ -113,6 +113,7 @@ main( int argc, char *argv[] )
              * pid_file    = NULL,
              * reliability = NULL,
              * get_help    = NULL;
+  bool         log_hdr     = true;
   static const char cfg_dir[] = "config";
   const char *program = ::strrchr( argv[ 0 ], '/' );
   program = ( program != NULL ? program + 1 : argv[ 0 ] );
@@ -231,6 +232,7 @@ main( int argc, char *argv[] )
     }
     ::setvbuf( stderr, NULL, _IOLBF, 1024 );
     Console::log_header( STDERR_FILENO );
+    log_hdr = false;
   }
   if ( debug != NULL ) {
     int dbg_dist = 0; /* dummy arg, can't set this yet */
@@ -250,6 +252,10 @@ main( int argc, char *argv[] )
   if ( tree == NULL || ! init_pass( tree, pwd, cfg ) )
     return 1;
 
+  if ( log_file != NULL )
+    tree->set_parameter( st, P_LOG_FILE, log_file );
+  else
+    tree->find_parameter( P_LOG_FILE, log_file, NULL );
   if ( map_file != NULL )
     tree->set_parameter( st, P_MAP_FILE, map_file );
   if ( db_num != NULL )
@@ -313,7 +319,7 @@ main( int argc, char *argv[] )
   EvTerminal   term( poll, cb );
 
   if ( log_file != NULL ) {
-    sess.console.open_log( log_file, false );
+    sess.console.open_log( log_file, log_hdr );
     if ( log_rotate != NULL )
       sess.console.log_max_size = strtol( log_rotate, NULL, 0 );
     if ( log_max_rot != NULL )
