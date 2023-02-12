@@ -753,16 +753,6 @@ IpcRoute::on_msg( EvPublish &pub ) noexcept
     this->mgr.ignore_msg( fpub );
     return true;
   }
-  if ( ( fpub.flags & MSG_FRAME_ACK_CONTROL ) == 0 ) {
-    uint16_t opt = dec.msg->caba.get_opt();
-    fpub.flags |= MSG_FRAME_ACK_CONTROL;
-    if ( opt != CABA_OPT_NONE ) {
-      if ( ( opt & CABA_OPT_ACK ) != 0 )
-        this->mgr.send_ack( fpub, n, dec, _ACK );
-      if ( ( opt & CABA_OPT_TRACE ) != 0 )
-        this->mgr.send_ack( fpub, n, dec, _TRACE );
-    }
-  }
   void * data     = NULL,
        * reply    = NULL;
   size_t datalen  = 0,
@@ -776,13 +766,29 @@ IpcRoute::on_msg( EvPublish &pub ) noexcept
     replylen = dec.mref[ FID_REPLY ].fsize;
   }
   SeqnoArgs seq( this->mgr.timer_time );
-  uint32_t  fmt;
+  uint32_t  fmt = 0;
 
   dec.get_ival<uint64_t>( FID_CHAIN_SEQNO, seq.chain_seqno );
   dec.get_ival<uint64_t>( FID_TIME, seq.time );
   dec.get_ival<uint32_t>( FID_FMT, fmt );
   SeqnoStatus status = this->sub_db.match_seqno( fpub, seq );
 
+  uint16_t opt = dec.msg->caba.get_opt();
+  if ( ( fpub.flags & MSG_FRAME_ACK_CONTROL ) == 0 ) {
+    fpub.flags |= MSG_FRAME_ACK_CONTROL;
+    if ( opt != CABA_OPT_NONE ) {
+      if ( ( opt & CABA_OPT_ACK ) != 0 )
+        this->mgr.send_ack( fpub, n, dec, _ACK );
+      if ( ( opt & CABA_OPT_TRACE ) != 0 )
+        this->mgr.send_ack( fpub, n, dec, _TRACE );
+    }
+  }
+  if ( ( opt & CABA_OPT_TRACE ) != 0 ) {
+    if ( datalen == 0 && replylen == 0 && fmt == 0 ) {
+      if ( status <= SEQNO_UID_NEXT )
+        return true;
+    }
+  }
   d_sess( "-> ipc_rte: %.*s seqno %lu.%lu (%s) reply %.*s "
           "(len=%u, from %s, fd %d, msg_enc %x)\n",
           (int) fpub.subject_len, fpub.subject,
