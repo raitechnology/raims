@@ -451,7 +451,6 @@ static const uint32_t MAX_MSG_LOSS   = kv::EV_MAX_LOSS,
                       MSG_FRAME_LOSS = kv::EV_PUB_RESTART;
 
 struct SeqnoArgs {
-  const MsgFramePublish & pub;
   uint64_t   time,        /* message time */
              last_seqno,  /* last message seqno */
              last_time,   /* last message time */
@@ -462,9 +461,9 @@ struct SeqnoArgs {
   uint32_t   tport_mask;  /* tports matched */
   uint16_t   msg_loss;
 
-  SeqnoArgs( const MsgFramePublish &p,  uint64_t time )
-    : pub( p ), time( 0 ), last_seqno( 0 ), last_time( 0 ), start_seqno( 0 ),
-      stamp( time ), chain_seqno( 0 ), cb( 0 ), tport_mask( 0 ), msg_loss( 0 ){}
+  SeqnoArgs( uint64_t time )
+    : time( 0 ), last_seqno( 0 ), last_time( 0 ), start_seqno( 0 ),
+     stamp( time ), chain_seqno( 0 ), cb( 0 ), tport_mask( 0 ), msg_loss( 0 ) {}
 };
 
 struct SubSeqno {
@@ -741,8 +740,8 @@ struct SubDB {
   /* start a new pattern sub ipc tport */
   uint64_t ipc_psub_start( kv::NotifyPattern &pat, uint32_t tport_id ) noexcept;
   uint64_t ipc_psub_stop( kv::NotifyPattern &pat, uint32_t tport_id ) noexcept;
-  SeqnoStatus match_seqno( SeqnoArgs &ctx ) noexcept;
-  bool match_subscription( SeqnoArgs &ctx ) noexcept;
+  SeqnoStatus match_seqno( const MsgFramePublish &pub,SeqnoArgs &ctx ) noexcept;
+  bool match_subscription( const kv::EvPublish &pub,  SeqnoArgs &ctx ) noexcept;
 
   void resize_bloom( void ) noexcept;
   void reseed_bloom( void ) noexcept;

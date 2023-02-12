@@ -1623,31 +1623,32 @@ logging on or off.  When `debug 0` is used, this turns of the debug messages.
 
 [%autowidth,options="header",grid="cols",stripes="even"]
 |=============================================
-| Name      | Value   | Description
-| tcp       | 0x1     | Print the subjects as they are sent or received on a TCP connection
-| pgm       | 0x2     | Print the subjects as they are sent or received on a PGM connection
-| ibx       | 0x4     | The inbox UDP protocol debugging
-| transport | 0x8     | Show the message route forwarding
-| user      | 0x10    | User updates debugging, when changes are made to a user state
-| link_state| 0x20    | Link state message updates are printed
-| peer      | 0x40    | Peer synchronization messages are printed
-| auth      | 0x80    | Authentication messages are printed
-| session   | 0x100   | System message dispatching, IPC message forwarding
-| hb        | 0x200   | Heartbeat and ping messages
-| sub       | 0x400   | Subscription starts and stops
-| msg_recv  | 0x800   | Print system messages when they are received
-| msg_hex   | 0x1000  | Dump the system messages in hex when they are received
-| telnet    | 0x2000  | Show the telnet protocol states
-| name      | 0x4000  | Display name transport update messages
-| repeat    | 0x8000  | Print when the repeated subjects are received
-| not_sub   | 0x10000 | Print when not subscribed subjects are received
-| loss      | 0x20000 | Print debugging when message loss occurs
-| adj       | 0x40000 | Print debugging when the link state Dijkstra algo runs
-| conn      | 0x80000 | Show debugging about connections, when establish or dropped or timers expire
-| dist      |         | This causes the Dijkstra algo to run once
-| kvpub     |         | Turns on debugging when any message is processed
-| kvps      |         | Turns on debugging when kv pubsub messages are processed
-| rv        |         | Turns on debugging when rv message is processed
+| Name      | Value    | Description
+| tcp       | 0x1      | Print the subjects as they are sent or received on a TCP connection
+| pgm       | 0x2      | Print the subjects as they are sent or received on a PGM connection
+| ibx       | 0x4      | The inbox UDP protocol debugging
+| transport | 0x8      | Show the message route forwarding
+| user      | 0x10     | User updates debugging, when changes are made to a user state
+| link_state| 0x20     | Link state message updates are printed
+| peer      | 0x40     | Peer synchronization messages are printed
+| auth      | 0x80     | Authentication messages are printed
+| session   | 0x100    | System message dispatching, IPC message forwarding
+| hb        | 0x200    | Heartbeat and ping messages
+| sub       | 0x400    | Subscription starts and stops
+| msg_recv  | 0x800    | Print system messages when they are received
+| msg_hex   | 0x1000   | Dump the system messages in hex when they are received
+| telnet    | 0x2000   | Show the telnet protocol states
+| name      | 0x4000   | Display name transport update messages
+| repeat    | 0x8000   | Print when the repeated subjects are received
+| not_sub   | 0x10000  | Print when not subscribed subjects are received
+| loss      | 0x20000  | Print debugging when message loss occurs
+| adj       | 0x40000  | Print debugging when the link state Dijkstra algo runs
+| conn      | 0x80000  | Show debugging about connections, when establish or dropped or timers expire
+| stats     | 0x100000 | Print when forwarding a stats, when have subs to _N.> subjects
+| dist      |          | This causes the Dijkstra algo to run once
+| kvpub     |          | Turns on debugging when any message is processed
+| kvps      |          | Turns on debugging when kv pubsub messages are processed
+| rv        |          | Turns on debugging when rv message is processed
 |=============================================
 
 The last 4 don't have an integer mask because they use different debug

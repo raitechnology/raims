@@ -354,8 +354,8 @@ static inline uint32_t fid_size( FldTypeClass cl ) {
 /* type masks that a field can be */
 enum FldTypeBit {
   BOOL_1       = 1 << BOOL_CLASS,         /* bool 1 byte */
-  U_SHORT      = 1 << U_SHORT_CLASS,      /* uint8_t */
-  U_INT        = 1 << U_INT_CLASS,        /* uint16_t */
+  U_SHORT      = 1 << U_SHORT_CLASS,      /* uint16_t */
+  U_INT        = 1 << U_INT_CLASS,        /* uint32_t */
   U_LONG       = 1 << U_LONG_CLASS,       /* uint64_t */
   OPAQUE_16    = 1 << OPAQUE_16_CLASS,    /* 16 byte opaque */
   OPAQUE_32    = 1 << OPAQUE_32_CLASS,    /* 32 byte opaque */
@@ -631,10 +631,12 @@ struct MsgFramePublish : public kv::EvPublish {
     n( 0 ), rte( r ), status( FRAME_STATUS_UNKNOWN ), flags( 0 ), dec( m ) {}
 
   MsgFramePublish( kv::EvPublish &pub,  CabaMsg *m, TransportRoute &r ) :
-    EvPublish( pub ),
-    n( 0 ), rte( r ), status( FRAME_STATUS_OK ), flags( 0 ), dec( m ) {
-    this->msg        = &((uint8_t *) m->msg_buf)[ m->msg_off ];
-    this->msg_len    = m->msg_end - m->msg_off;
+      EvPublish( pub ), n( 0 ), rte( r ), status( FRAME_STATUS_OK ),
+      flags( 0 ), dec( m ) {
+    if ( m != NULL ) {
+      this->msg     = &((uint8_t *) m->msg_buf)[ m->msg_off ];
+      this->msg_len = m->msg_end - m->msg_off;
+    }
     this->pub_type   = 'X';
     this->hash       = pub.hash;
     this->prefix     = pub.prefix;

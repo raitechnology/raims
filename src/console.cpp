@@ -89,7 +89,8 @@ Console::Console( SessionMgr &m ) noexcept
          inbox_num( 0 ), log_max_rotate( 0 ), log_rotate_time( 0 ),
          log_max_size( 0 ), log_filename( 0 ), log_fd( -1 ), next_rotate( 1 ),
          log_status( 0 ), last_log_hash( 0 ), last_log_repeat_count( 0 ),
-         mute_log( false ), log_rate_total( 0 )
+         mute_log( false ), log_rate_total( 0 ),
+         max_terminal_log_rate( 100 * 1024 )
 {
   time_t t = update_tz_offset();
   t += 24 * 60 * 60;
@@ -669,8 +670,8 @@ Console::on_log( Logger &log ) noexcept
   }
   if ( b ) {
     uint64_t period;
-    if ( this->log_rate_total > 100 * 1024 &&
-         this->throttle_total( period ) > 100 * 1024 ) {
+    if ( this->log_rate_total > this->max_terminal_log_rate &&
+         this->throttle_total( period ) > this->max_terminal_log_rate ) {
       this->printf( "log muted, %lu bytes logged in %.3f seconds\n",
                     this->log_rate_total, (double) period / 1000000000.0 );
       ::memset( this->log_rate, 0, sizeof( this->log_rate ) );
@@ -2345,13 +2346,14 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
         data++;
         datalen -= 2;
       }
-      if ( datalen == 0 )
-        goto help;
       if ( cmd == CMD_REMOTE ) {
+        if ( datalen == 0 )
+          goto help;
         this->send_remote_request( p, arg, len, data, datalen );
         break;
       }
-      PubMcastData mc( arg, len, data, datalen, MD_STRING );
+      PubMcastData mc( arg, len, data, datalen,
+                       datalen > 0 ? MD_STRING : MD_NODATA );
       if ( cmd != CMD_PUBLISH ) {
         if ( this->inbox_num == 0 )
           this->inbox_num = this->sub_db.inbox_start( 0, this );
@@ -4136,7 +4138,7 @@ Console::output_user_route( TabPrint &ptp,  UserRoute &u_rte ) noexcept
 void
 Console::show_adjacency( ConsoleOutput *p ) noexcept
 {
-  static const size_t ncols = 5;
+  static const size_t ncols = 8;
   TabOut     out( this->table, this->tmp, ncols );
   TabPrint * tab = NULL;
   size_t     count, i = 0, sep;
@@ -4169,6 +4171,9 @@ Console::show_adjacency( ConsoleOutput *p ) noexcept
         tab[ i++ ].set_null();
       }
       tab[ i++ ].set_int( rte->uid_connected.cost[ 0 ] );
+      tab[ i++ ].set_int( rte->uid_connected.cost[ 1 ] );
+      tab[ i++ ].set_int( rte->uid_connected.cost[ 2 ] );
+      tab[ i++ ].set_int( rte->uid_connected.cost[ 3 ] );
       last_user  = 0;
       last_tport = (uint32_t) t;
     }
@@ -4183,6 +4188,9 @@ Console::show_adjacency( ConsoleOutput *p ) noexcept
       tab[ i++ ].set( rte->transport.tport, (uint32_t) t, PRINT_ID );
       tab[ i++ ].set( rte->transport.type );
       tab[ i++ ].set_int( rte->uid_connected.cost[ 0 ] );
+      tab[ i++ ].set_int( rte->uid_connected.cost[ 1 ] );
+      tab[ i++ ].set_int( rte->uid_connected.cost[ 2 ] );
+      tab[ i++ ].set_int( rte->uid_connected.cost[ 3 ] );
       last_user  = 0;
       last_tport = (uint32_t) t;
     }
@@ -4234,6 +4242,9 @@ Console::show_adjacency( ConsoleOutput *p ) noexcept
             tab[ i++ ].set_null();
           }
           tab[ i++ ].set_int( set->cost[ 0 ] );
+          tab[ i++ ].set_int( set->cost[ 1 ] );
+          tab[ i++ ].set_int( set->cost[ 2 ] );
+          tab[ i++ ].set_int( set->cost[ 3 ] );
           last_user  = uid;
           last_tport = j;
         }
@@ -4244,7 +4255,7 @@ Console::show_adjacency( ConsoleOutput *p ) noexcept
       sep = i;
     }
   }
-  const char *hdr[ ncols ] = { "user", "adj", "tport", "type", "cost" };
+  const char *hdr[ ncols ] = { "user", "adj", "tport", "type", "cost", "cost2", "cost3", "cost4" };
   this->print_table( p, hdr, ncols );
 
   if ( ! is_json ) {
@@ -4969,16 +4980,16 @@ Console::show_path( ConsoleOutput *p,  uint8_t path_select ) noexcept
   uint32_t count = peer_dist.max_uid;
   for ( uint32_t uid = 1; uid < count; uid++ ) {
     UidSrcPath path  = peer_dist.x[ path_select ].path[ uid ];
-    uint32_t path_cost = peer_dist.calc_transport_cache( uid, path.tport,
-                                                         path_select );
+    /*uint32_t path_cost = peer_dist.calc_transport_cache( uid, path.tport,
+                                                         path_select );*/
     if ( path.cost != 0 ) {
       UserBridge * n = this->user_db.bridge_tab.ptr[ uid ];
       TransportRoute * rte = this->user_db.transport_tab.ptr[ path.tport ];
 
       out.add_row()
          .set( rte->transport.tport, path.tport, PRINT_ID )
-         .set_int( path.cost )  /* cost */
-         .set_int( path_cost )  /* path_cost */
+         .set_int( rte->uid_connected.cost[ path_select ] )  /* cost */
+         .set_int( path.cost )  /* path_cost */
          .set( n, PRINT_USER ); /* user */
     }
   }

@@ -337,8 +337,8 @@ SessionMgr::fwd_stat_msg( SubjectVar &s,  MsgCat &m,  uint32_t h,
     TransportRoute * fwd = this->user_db.transport_tab.ptr[ j ];
     EvPublish pub( s.msg, s.len(), NULL, 0, m.msg, m.len(),
                    fwd->sub_route, this->fd, h, CABA_TYPE_ID, 'p' );
+    uint32_t k = 0;
     if ( ! fwd->is_set( TPORT_IS_IPC ) ) {
-      uint32_t k;
       fwd->sub_route.forward_set_with_cnt( pub, fwd->connected_auth, k );
       rcount += k;
     }
@@ -351,8 +351,11 @@ SessionMgr::fwd_stat_msg( SubjectVar &s,  MsgCat &m,  uint32_t h,
       pub.hash       = phash;
       pub.prefix     = prefix;
       pub.prefix_cnt = n;
-      ipc_count += this->console_rt.fwd_console( pub, true );
+      k = this->console_rt.fwd_console( pub, true );
+      ipc_count += k;
     }
+    if ( debug_stat && k > 0 )
+      fwd->printf( "fwd_stat(%.*s) k=%u\n", (int) s.len(), s.msg, k );
   }
 }
 

@@ -569,10 +569,11 @@ struct Console : public md::MDOutput, public SubOnMsg, public ConfigPrinter,
   bool              mute_log;
   LastTimeStamp     log_ts,
                     stamp_ts;
-  static const uint32_t LOG_RATE_PERIOD = 64;
+  static const uint32_t LOG_RATE_PERIOD = 64; /* a bit more that 60 seconds */
   uint64_t          log_rate[ LOG_RATE_PERIOD ],
                     log_time[ LOG_RATE_PERIOD ],
-                    log_rate_total;
+                    log_rate_total,
+                    max_terminal_log_rate;
   uint32_t          last_rate;
 
   static const size_t TS_ERR_OFF = LastTimeStamp::TS_LEN,

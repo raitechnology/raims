@@ -753,9 +753,8 @@ rai::ms::seqno_status_string( SeqnoStatus status ) noexcept
 }
 
 SeqnoStatus
-SubDB::match_seqno( SeqnoArgs &ctx ) noexcept
+SubDB::match_seqno( const MsgFramePublish &pub,  SeqnoArgs &ctx ) noexcept
 {
-  const MsgFramePublish &pub = ctx.pub;
   const uint32_t uid = ( pub.n == NULL ? 0 : pub.n->uid );
   if ( uid != 0 ) {
     int64_t skew = this->user_db.min_skew( *pub.n );
@@ -782,7 +781,7 @@ SubDB::match_seqno( SeqnoArgs &ctx ) noexcept
     return SEQNO_ERROR;
   /* starting a new uid/seqno/time triplet */
   if ( loc.is_new ) {
-    if ( ! this->match_subscription( ctx ) ) {
+    if ( ! this->match_subscription( pub, ctx ) ) {
       this->seqno_tab.remove( loc, loc2, is_old );
       return SEQNO_NOT_SUBSCR;
     }
@@ -792,7 +791,7 @@ SubDB::match_seqno( SeqnoArgs &ctx ) noexcept
   /* check if subscription modified */
   const uint64_t old_start_seqno = seq->start_seqno;
   if ( seq->update_seqno != this->update_seqno ){
-    if ( this->match_subscription( ctx ) ) {
+    if ( this->match_subscription( pub, ctx ) ) {
       seq->start_seqno  = ctx.start_seqno;
       seq->update_seqno = this->update_seqno;
       seq->on_data      = ctx.cb;
@@ -889,9 +888,8 @@ SubDB::match_seqno( SeqnoArgs &ctx ) noexcept
 }
 
 bool
-SubDB::match_subscription( SeqnoArgs &ctx ) noexcept
+SubDB::match_subscription( const kv::EvPublish &pub,  SeqnoArgs &ctx ) noexcept
 {
-  const MsgFramePublish &pub = ctx.pub;
   bool matched = false;
   for ( uint8_t cnt = 0; cnt < pub.prefix_cnt; cnt++ ) {
     if ( pub.subj_hash == pub.hash[ cnt ] ) {
