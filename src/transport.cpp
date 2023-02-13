@@ -53,15 +53,15 @@ TransportRoute::TransportRoute( kv::EvPoll &p,  SessionMgr &m,
   for ( i = 0; i < COST_PATH_COUNT; i++ )
     this->router_rt[ i ] = NULL;
   /* parse config that has cost, cost2 ... */
-  ConfigTree::StringPair * el[ COST_PATH_COUNT ];
-  t.get_route_pairs( R_COST, el, COST_PATH_COUNT );
+  ConfigTree::StringPairArray el;
+  t.get_route_pairs( R_COST, el );
   /* parse config that uses array of cost */
-  if ( el[ 0 ] != NULL ) {
+  if ( el.count > 0 )
     this->uid_connected.is_advertised = true;
-  }
+
   int cost, j = 0;
   for ( i = 0; i < COST_PATH_COUNT; i++ ) {
-    if ( el[ i ] == NULL || ! el[ i ]->value.get_int( cost ) || cost <= 0 )
+    if ( i >= el.count || ! el[ i ]->value.get_int( cost ) || cost <= 0 )
       cost = ( i == 0 ? COST_DEFAULT : this->uid_connected.cost[ j++ ] );
     this->uid_connected.cost[ i ] = cost;
   }
@@ -559,12 +559,12 @@ TransportRoute::start_listener( EvTcpListen *l,
     ((EvTcpTransportListen *) l)->encrypt = ! parm.noencrypt;
     encrypt = ! parm.noencrypt;
   }
-  int status = l->listen( parm.host[ 0 ], parm.port[ 0 ], parm.opts );
+  int status = l->listen( parm.host( 0 ), parm.port( 0 ), parm.opts );
   if ( status != 0 ) {
     fprintf( stderr, "%s.%u listen %s:%u failed\n", tport.tport.val,
              this->tport_id,
-             ConfigTree::Transport::is_wildcard( parm.host[ 0 ] ) ? "*" :
-             parm.host[ 0 ], parm.port[ 0 ] );
+             ConfigTree::Transport::is_wildcard( parm.host( 0 ) ) ? "*" :
+             parm.host( 0 ), parm.port( 0 ) );
     this->mgr.events.on_shutdown( this->tport_id, false );
     this->set( TPORT_IS_LISTEN | TPORT_IS_SHUTDOWN );
     return false;
@@ -754,9 +754,9 @@ TransportRoute::create_tcp_connect( ConfigTree::Transport &tport ) noexcept
 
     this->printf( "create_tcp_connect timeout=%u encrypt=%s host=%s port=%d\n",
                   parm.timeout, parm.noencrypt ? "false" : "true",
-                  parm.host[ 0 ] ? parm.host[ 0 ] : "*", parm.port[ 0 ] );
+                  parm.host( 0 ) ? parm.host( 0 ) : "*", parm.port( 0 ) );
 
-    this->connect_ctx->connect( parm.host[ 0 ], parm.port[ 0 ], parm.opts,
+    this->connect_ctx->connect( parm.host( 0 ), parm.port( 0 ), parm.opts,
                                 parm.timeout );
   }
   return true;

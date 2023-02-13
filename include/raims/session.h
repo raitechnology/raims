@@ -234,6 +234,8 @@ struct UnrouteableList : public kv::ArrayCount<Unrouteable, 4> {
   }
 };
 
+struct NameSvcArray : public kv::ArrayCount< NameSvc *, 2 > {};
+
 struct SessionMgr : public kv::EvSocket, public kv::BPData {
   IpcRoute              ipc_rt;         /* network -> rv sub, ds sub, etc */
   ConsoleRoute          console_rt;     /* rv pub, ds pub -> console sub */
@@ -366,8 +368,8 @@ struct SessionMgr : public kv::EvSocket, public kv::BPData {
   bool create_telnet( ConfigTree::Transport &tport ) noexcept;
   bool create_web( ConfigTree::Transport &tport ) noexcept;
   bool create_name( ConfigTree::Transport &tport ) noexcept;
-  uint32_t start_name_services( ConfigTree::Transport &tport,
-                                NameSvc **name_svc ) noexcept;
+  bool start_name_services( ConfigTree::Transport &tport,
+                            NameSvcArray &name_svc ) noexcept;
   uint32_t shutdown_telnet( ConfigTree::Transport &tport ) noexcept;
   uint32_t shutdown_web( ConfigTree::Transport &tport ) noexcept;
   uint32_t shutdown_name( ConfigTree::Transport &tport ) noexcept;

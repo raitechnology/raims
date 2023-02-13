@@ -12,7 +12,7 @@ using namespace kv;
 using namespace md;
 
 int rai::ms::no_tcp_aes;
-
+#if 0
 size_t
 EvTcpTransportParameters::copy_string( char buf[ MAX_TCP_HOST_LEN ], size_t off,
                                        const char * str,  size_t len ) noexcept
@@ -30,7 +30,7 @@ EvTcpTransportParameters::copy_host_buf( char buf[ MAX_TCP_HOST_LEN ],
 {
   return copy_string( buf, off, host, ::strlen( host ) );
 }
-
+#endif
 
 void
 EvTcpTransportOpts::parse( ConfigTree::Transport &tport,
@@ -69,36 +69,36 @@ void
 EvTcpTransportParameters::parse_tport( ConfigTree::Transport &tport,
                                        int ptype,  SessionMgr &mgr ) noexcept
 {
-  char         tmp[ MAX_TCP_HOSTS ][ MAX_TCP_HOST_LEN ];
-  size_t       len[ MAX_TCP_HOSTS ];
-  const char * host[ MAX_TCP_HOSTS ];
-  int          port[ MAX_TCP_HOSTS ], port2 = 0;
-  bool         is_device = false;
+  char tmp[ MAX_TCP_HOST_LEN ];
+  int  port2 = 0;
+  bool is_device = false;
 
-  ConfigTree::StringPair * el[ MAX_TCP_HOSTS ];
+  ConfigTree::StringPairArray el;
   if ( ( ptype & PARAM_LISTEN ) == 0 )
-    tport.get_route_pairs( R_CONNECT, el, MAX_TCP_HOSTS );
+    tport.get_route_pairs( R_CONNECT, el );
   else {
-    tport.get_route_pairs( R_LISTEN, el, MAX_TCP_HOSTS );
-    if ( el[ 0 ] == NULL ) {
-      tport.get_route_pairs( R_DEVICE, el, MAX_TCP_HOSTS );
+    tport.get_route_pairs( R_LISTEN, el );
+    if ( el.count == 0 ) {
+      tport.get_route_pairs( R_DEVICE, el );
       is_device = true;
     }
   }
   tport.get_route_int( R_PORT, port2 );
-  for ( size_t i = 0; i < MAX_TCP_HOSTS; i++ ) {
-    host[ i ] = ( el[ i ] == NULL ? NULL : el[ i ]->value.val );
-    tmp[ i ][ 0 ] = '\0';
-    len[ i ] = sizeof( tmp[ i ] );
-    port[ i ] = tport.get_host_port( host[ i ], tmp[ i ], len[ i ] );
-    if ( port[ i ] == 0 )
-      port[ i ] = port2;
-    if ( tport.is_wildcard( tmp[ i ] ) ) {
-      host[ i ] = NULL;
-      tmp[ i ][ 0 ] = '\0';
-    }
+  for ( size_t i = 0; i < el.count; i++ ) {
+    const char * hostp;
+    if ( i < el.count )
+      hostp = el[ i ]->value.val;
+    else
+      hostp = NULL;
+    tmp[ 0 ] = '\0';
+    size_t len  = sizeof( tmp );
+    int    port = tport.get_host_port( hostp, tmp, len );
+    if ( port == 0 )
+      port = port2;
+    if ( tport.is_wildcard( hostp ) )
+      hostp = NULL;
+    this->hosts.append( hostp, port );
   }
-  this->set_host_port( host, port );
   this->EvTcpTransportOpts::parse( tport, ptype, mgr );
   if ( is_device )
     this->opts |= OPT_NO_DNS;

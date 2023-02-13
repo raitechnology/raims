@@ -106,6 +106,8 @@ struct ConfigTree {
       return this->get_bool( name, ::strlen( name ), val );
     }
   };
+  struct StringPairArray : public kv::ArrayCount< StringPair *, 8 > {
+  };
   /* [ array of strings ] */
   struct StringList {
     void * operator new( size_t, void *ptr ) { return ptr; }
@@ -186,8 +188,7 @@ struct ConfigTree {
     bool get_route_bool( const char *name,  bool &value ) {
       return this->route.get_bool( name, value );
     }
-    void get_route_pairs( const char *name,  ConfigTree::StringPair **el,
-                          size_t max_el ) noexcept;
+    void get_route_pairs( const char *name,  StringPairArray &el ) noexcept;
 #if 0
     void set_route_int( StringTab &st,  const char *name, int value ) noexcept;
     void set_route_bool( StringTab &st,  const char *name,
@@ -220,7 +221,7 @@ struct ConfigTree {
   typedef kv::SLinkList< Group >      GroupList;
   typedef kv::SLinkList< Parameters > ParametersList;
 
-  struct TransportArray : public kv::ArrayCount< StringVal, 4 > {
+  struct TransportArray : public kv::ArrayCount< StringVal, 8 > {
     void push( const StringVal &tport ) {
       (*this)[ this->count ] = tport;
     }

@@ -323,8 +323,7 @@ SessionMgr::add_transport2( ConfigTree::Transport &t,
                             TransportRoute *&rte ) noexcept
 {
   uint32_t f = ( is_listener ? TPORT_IS_LISTEN : 0 );
-  NameSvc * name_svc[ MAX_TCP_HOSTS ];
-  uint32_t  name_svc_count = 0;
+  NameSvcArray name_svc;
 
   if ( ! this->in_list( IN_ACTIVE_LIST ) ) {
     if ( this->init_sock() != 0 )
@@ -345,8 +344,7 @@ SessionMgr::add_transport2( ConfigTree::Transport &t,
        t.type.equals( T_ANY, T_ANY_SZ ) ) {
     const char * dev = NULL;
     if ( t.get_route_str( R_DEVICE, dev ) ) {
-      name_svc_count = this->start_name_services( t, name_svc );
-      if ( name_svc_count > 0 )
+      if ( this->start_name_services( t, name_svc ) )
         f |= TPORT_IS_DEVICE;
     }
   }
@@ -397,10 +395,10 @@ SessionMgr::add_transport2( ConfigTree::Transport &t,
     if ( is_new )
       this->user_db.add_transport( *rte );
     uint32_t i;
-    for ( i = 0; i < name_svc_count; i++ )
+    for ( i = 0; i < name_svc.count; i++ )
       name_svc[ i ]->adverts.push( rte );
     if ( this->session_started ) {
-      for ( i = 0; i < name_svc_count; i++ )
+      for ( i = 0; i < name_svc.count; i++ )
         this->user_db.mcast_name( *name_svc[ i ] );
     }
     return true;
@@ -447,7 +445,7 @@ SessionMgr::start_transport( TransportRoute &rte,
       if ( rte.connect_ctx != NULL ) {
         EvTcpTransportParameters parm;
         parm.parse_tport( rte.transport, PARAM_NB_CONNECT, *this );
-        rte.connect_ctx->connect( parm.host[ 0 ], parm.port[ 0 ], parm.opts,
+        rte.connect_ctx->connect( parm.host( 0 ), parm.port( 0 ), parm.opts,
                                   parm.timeout );
       }
     }
@@ -609,54 +607,77 @@ SessionMgr::add_tcp_accept( TransportRoute &listen_rte,
   return true;
 }
 
+static size_t
+copy_host_buf( char buf[ MAX_TCP_HOST_LEN ],  size_t off,
+               const char *str ) noexcept
+{
+  while ( *str != '\0' && off < MAX_TCP_HOST_LEN - 1 )
+    buf[ off++ ] = *str++;
+  buf[ off ] = '\0';
+  return off;
+}
+
+namespace {
+struct MeshUrlArray {
+  kv::ArrayCount< const char *, 4 > mesh_url;
+  kv::ArrayCount< uint32_t, 4 > url_hash;
+
+  ~MeshUrlArray() {
+    for ( size_t i = 0; i < this->mesh_url.count; i++ )
+      ::free( (void *) this->mesh_url.ptr[ i ] );
+  }
+  void append( const char *url,  size_t len ) {
+    char * p = (char *) ::malloc( len + 1 );
+    ::memcpy( p, url, len );
+    p[ len ] = '\0';
+    this->mesh_url.push( p );
+    this->url_hash.push( kv_crc_c( p, len, 0 ) );
+  }
+};
+}
+
 bool
 SessionMgr::add_mesh_connect( TransportRoute &mesh_rte ) noexcept
 {
   EvTcpTransportParameters parm;
-  char     url_buf[ MAX_TCP_HOSTS ][ MAX_TCP_HOST_LEN ];
-  size_t   url_buf_sz[ MAX_TCP_HOSTS ], i, j;
-  uint32_t url_hash[ MAX_TCP_HOSTS ];
+  MeshUrlArray url_array;
+  size_t i, j;
 
   parm.parse_tport( mesh_rte.transport, PARAM_NB_CONNECT, *this );
 
-  for ( i = 0; i < MAX_TCP_HOSTS; i++ ) {
-    char   * url    = url_buf[ i ];
-    size_t & url_sz = url_buf_sz[ i ];
-    char     pbuf[ 24 ];
-    ::memcpy( url, "mesh://", 7 );
-    if ( parm.host[ i ] == NULL ) {
+  for ( i = 0; ; i++ ) {
+    char   url[ MAX_TCP_HOST_LEN ];
+    size_t url_sz = 0;
+    char   pbuf[ 24 ];
+
+    url_sz = copy_host_buf( url, 0, "mesh://" );
+    if ( parm.host( i ) == NULL ) {
       if ( i == 0 ) {
         if ( mesh_rte.is_set( TPORT_IS_DEVICE ) )
           return true;
       }
       if ( i > 0 )
         break;
-      url_sz = EvTcpTransportParameters::copy_host_buf( url, 7, "127.0.0.1" );
+      url_sz = copy_host_buf( url, url_sz, "127.0.0.1" );
     }
     else {
-      url_sz = EvTcpTransportParameters::copy_host_buf( url, 7, parm.host[ i ]);
+      url_sz = copy_host_buf( url, url_sz, parm.host( i ) );
     }
-    if ( parm.port[ i ] != 0 ) {
-      j = uint32_to_string( parm.port[ i ], pbuf );
+    if ( parm.port( i ) != 0 ) {
+      j = uint32_to_string( parm.port( i ), pbuf );
       pbuf[ j ] = '\0';
     }
     else {
       ::strcpy( pbuf, "28989" );
     }
-    if ( url_sz < MAX_TCP_HOST_LEN - 1 )
-      url[ url_sz++ ] = ':';
-    for ( j = 0; pbuf[ j ] != '\0'; j++ ) {
-      if ( url_sz < MAX_TCP_HOST_LEN - 1 )
-        url[ url_sz++ ] = pbuf[ j ];
-    }
-    url[ url_sz ] = '\0';
-    url_hash[ i ] = kv_crc_c( url_buf[ i ], url_buf_sz[ i ], 0 );
+    url_sz = copy_host_buf( url, url_sz, ":" );
+    url_sz = copy_host_buf( url, url_sz, pbuf );
+    url_array.append( url, url_sz );
   }
 
-  const char *mesh_url[ MAX_TCP_HOSTS ];
-  for ( j = 0; j < i; j++ )
-    mesh_url[ j ] = url_buf[ j ];
-  return this->add_mesh_connect( mesh_rte, mesh_url, url_hash, i );
+  return this->add_mesh_connect( mesh_rte, url_array.mesh_url.ptr,
+                                 url_array.url_hash.ptr,
+                                 url_array.mesh_url.count );
 }
 
 bool
@@ -779,9 +800,9 @@ SessionMgr::listen_start_noencrypt( ConfigTree::Transport &tport,
   parm.opts &= ~TCP_OPT_ENCRYPT;
 
   if ( ! l->in_list( IN_ACTIVE_LIST ) ) {
-    if ( l->listen2( parm.host[ 0 ], parm.port[ 0 ], parm.opts, k, -1 ) != 0 ) {
+    if ( l->listen2( parm.host( 0 ), parm.port( 0 ), parm.opts, k, -1 ) != 0 ) {
       fprintf( stderr, "%s: failed to start %s at %s.%d\n", tport.type.val,
-       tport.tport.val, parm.host[ 0 ] ? parm.host[ 0 ] : "*", parm.port[ 0 ] );
+       tport.tport.val, parm.host( 0 ) ? parm.host( 0 ) : "*", parm.port( 0 ) );
       return false;
     }
     printf( "%s: %s start listening on %s\n", tport.type.val, tport.tport.val,
@@ -865,18 +886,14 @@ SessionMgr::create_name( ConfigTree::Transport &tport ) noexcept
   return true;
 }
 
-uint32_t
+bool
 SessionMgr::start_name_services( ConfigTree::Transport &tport,
-                                 NameSvc **name_svc ) noexcept
+                                 NameSvcArray &name_svc ) noexcept
 {
-  ConfigTree::StringPair * el[ MAX_TCP_HOSTS ];
-  uint32_t count   = 0;
+  ConfigTree::StringPairArray el;
 
-  tport.get_route_pairs( R_DEVICE, el, MAX_TCP_HOSTS );
-  for ( uint32_t i = 0; i < MAX_TCP_HOSTS; i++ ) {
-    if ( el[ i ] == NULL )
-      continue;
-
+  tport.get_route_pairs( R_DEVICE, el );
+  for ( uint32_t i = 0; i < el.count; i++ ) {
     const char * dev     = el[ i ]->value.val;
     uint32_t     dev_len = el[ i ]->value.len;
 
@@ -917,9 +934,9 @@ SessionMgr::start_name_services( ConfigTree::Transport &tport,
       un = this->unrouteable.find( tptr );
     }
     if ( un != NULL && un->name != NULL )
-      name_svc[ count++ ] = un->name;
+      name_svc.push( un->name );
   }
-  return count;
+  return name_svc.count > 0;
 }
 
 uint32_t

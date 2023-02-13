@@ -518,7 +518,7 @@ UserDB::recv_peer_add( const MsgFramePublish &pub,  UserBridge &n,
   if ( dec.test_2( FID_ADJACENCY, FID_LINK_STATE ) ||
        dec.test_2( FID_BLOOM, FID_SUB_SEQNO ) )
     this->recv_adjacency_result( pub, *user_n, dec );
-
+#if 0
   /* XXX must make sure arrived over the correct mesh link */
   if ( dec.test( FID_MESH_URL ) ) {
     size_t       url_len = dec.mref[ FID_MESH_URL ].fsize;
@@ -526,6 +526,7 @@ UserDB::recv_peer_add( const MsgFramePublish &pub,  UserBridge &n,
     this->mesh_pending.update( pub.rte, url, url_len, 0,
                                user_n->bridge_id.nonce );
   }
+#endif
   return true;
 }
 
@@ -760,7 +761,7 @@ UserDB::recv_mesh_db( const MsgFramePublish &pub,  UserBridge &n,
   if ( ! rte->mesh_url.equals( mesh_url ) ) {
     rte = rte->mgr.find_mesh( mesh_url );
     if ( rte == NULL ) {
-      n.printf( "no mesh url found (%.*s)\n", mesh_url.len, mesh_url.val );
+      n.printf( "rcv no mesh url found (%.*s)\n", mesh_url.len, mesh_url.val );
       return true;
     }
   }
@@ -1055,12 +1056,27 @@ UserDB::recv_mesh_request( const MsgFramePublish &pub,  UserBridge &n,
 {
   char        ret_buf[ 16 ];
   InboxBuf    ibx( n.bridge_id, dec.get_return( ret_buf, _MESH_RPY ) );
-  bool        in_mesh     = pub.rte.uid_in_mesh->is_member( n.uid );
+  TransportRoute * rte = &pub.rte;
   size_t      mesh_db_len = 0;
   UrlDBFilter filter( n.uid, true, &dec );
   
-  if ( in_mesh ) {
-    mesh_db_len = this->url_db_size( pub.rte, filter );
+  if ( ! dec.test( FID_MESH_URL ) )
+    return true;
+  StringVal mesh_url( (const char *) dec.mref[ FID_MESH_URL ].fptr,
+                      dec.mref[ FID_MESH_URL ].fsize );
+  if ( ! rte->mesh_url.equals( mesh_url ) ) {
+    rte = rte->mgr.find_mesh( mesh_url );
+    if ( rte == NULL ) {
+      n.printf( "req no mesh url found (%.*s)\n", mesh_url.len, mesh_url.val );
+      return true;
+    }
+  }
+  if ( debug_peer )
+    n.printf( "recv_mesh_request( %.*s, %.*s )\n",
+              mesh_url.len, mesh_url.val,
+              rte->mesh_url.len, rte->mesh_url.val );
+  if ( rte->uid_in_mesh->is_member( n.uid ) ) {
+    mesh_db_len = this->url_db_size( *rte, filter );
     if ( debug_peer )
       n.printf(
         "%s filter match_count %u url_count %u return_count %u db_len %u\n",
@@ -1075,7 +1091,7 @@ UserDB::recv_mesh_request( const MsgFramePublish &pub,  UserBridge &n,
   if ( debug_peer )
     n.printf( "mesh_request\n" );
 
-  UserRoute *u_ptr = n.user_route_ptr( *this, pub.rte.tport_id );
+  UserRoute *u_ptr = n.user_route_ptr( *this, rte->tport_id );
   if ( ! u_ptr->is_valid() || ! u_ptr->is_set( MESH_URL_STATE ) )
     return true;
 
@@ -1096,7 +1112,7 @@ UserDB::recv_mesh_request( const MsgFramePublish &pub,  UserBridge &n,
   if ( filter.request_count > 0 )
     m.mesh_filter( filter.hash, filter.request_count * 4 );
   if ( filter.return_count > 0 )
-    this->url_db_submsg( pub.rte, filter, m );
+    this->url_db_submsg( *rte, filter, m );
   uint32_t h = ibx.hash();
   m.close( e.sz, h, CABA_INBOX );
   m.sign( ibx.buf, ibx.len(), *this->session_key );
@@ -1127,6 +1143,8 @@ UserDB::send_mesh_request( UserBridge &n,  MsgHdrDecoder &dec ) noexcept
             * filter;
   bool        ok;
 
+  if ( ! n.user_route->is_set( MESH_URL_STATE ) )
+    return true;
   for ( ok = uid_in_mesh.first( uid ); ok; ok = uid_in_mesh.next( uid ) ) {
     u_ptr = this->bridge_tab.ptr[ uid ]->user_route_ptr( *this, t );
     if ( u_ptr->url_hash != 0 )
@@ -1141,15 +1159,18 @@ UserDB::send_mesh_request( UserBridge &n,  MsgHdrDecoder &dec ) noexcept
         filter[ url_count++ ] = u_ptr->url_hash;
     }
   }
+  u_ptr = n.user_route;
   MsgEst e( ibx.len() );
   e.seqno      ()
+   .mesh_url   ( u_ptr->mesh_url.len )
    .mesh_filter( url_count * 4 );
 
   MsgCat m;
   m.reserve( e.sz );
 
   m.open( this->bridge_id.nonce, ibx.len() )
-   .seqno( n.inbox.next_send( U_INBOX_MESH_REQ ) );
+   .seqno   ( n.inbox.next_send( U_INBOX_MESH_REQ ) )
+   .mesh_url( u_ptr->mesh_url.val, u_ptr->mesh_url.len );
   if ( url_count > 0 )
     m.mesh_filter( filter, url_count * 4 );
   uint32_t h = ibx.hash();

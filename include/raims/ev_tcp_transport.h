@@ -57,8 +57,8 @@ struct EvTcpTransport : public AES_Connection, public kv::BPData {
   virtual void on_write_ready( void ) noexcept;
 };
 
-static const size_t MAX_TCP_HOST_LEN = 256,
-                    MAX_TCP_HOSTS    = 8;
+static const size_t MAX_TCP_HOST_LEN = 256;
+
 enum {
   PARAM_REUSEPORT  = 1,
   PARAM_NB_CONNECT = 2,
@@ -86,42 +86,43 @@ struct EvTcpTransportOpts {
               SessionMgr &mgr ) noexcept;
 };
 
+struct HostPort {
+  char * host;
+  int    port;
+  char   buf[ MAX_TCP_HOST_LEN ];
+};
+
+struct HostPortArray : public kv::ArrayCount<HostPort, 4> {
+  void append( const char *host,  int port ) {
+    HostPort & hp = this->push();
+    hp.port = port;
+    if ( host == NULL )
+      hp.host = NULL;
+    else {
+      size_t len = ::strlen( host );
+      hp.host = hp.buf;
+      if ( len > sizeof( hp.buf ) )
+        len = sizeof( hp.buf ) - 1;
+      ::memcpy( hp.buf, host, len );
+      hp.buf[ len ] = '\0';
+    }
+  }
+};
+
 struct EvTcpTransportParameters : public EvTcpTransportOpts {
-  const char * host[ MAX_TCP_HOSTS ]; /* connect host */
-  int          port[ MAX_TCP_HOSTS ]; /* connect port */
-  uint32_t     hash[ MAX_TCP_HOSTS ];
-  char         buf[ MAX_TCP_HOSTS ][ MAX_TCP_HOST_LEN ];
+  HostPortArray hosts;
 
-  EvTcpTransportParameters() {
-    for ( size_t i = 0; i < MAX_TCP_HOSTS; i++ ) {
-      this->host[ i ] = NULL;
-      this->port[ i ] = 0;
-      this->hash[ i ] = 0;
-      this->buf[ i ][ 0 ] = '\0';
-    }
+  int port( size_t n ) {
+    if ( n < this->hosts.count )
+      return this->hosts.ptr[ n ].port;
+    return 0;
   }
-  static size_t copy_string( char buf[ MAX_TCP_HOST_LEN ],  size_t off,
-                             const char * str,  size_t len ) noexcept;
-  static size_t copy_host_buf( char buf[ MAX_TCP_HOST_LEN ],  size_t off,
-                               const char * host ) noexcept;
-  void set_host_port( const char *ho,  int po,  uint32_t h,  int k ) {
-    this->port[ k ] = po;
-    this->host[ k ] = this->buf[ k ];
-    this->hash[ k ] = h;
-    copy_host_buf( this->buf[ k ], 0, ho );
+  const char * host( size_t n ) {
+    if ( n < this->hosts.count )
+      return this->hosts.ptr[ n ].host;
+    return NULL;
   }
-
-  void set_host_port( const char *h[ MAX_TCP_HOSTS ], int p[ MAX_TCP_HOSTS ] ) {
-    for ( size_t i = 0; i < MAX_TCP_HOSTS; i++ ) {
-      this->port[ i ] = p[ i ];
-      if ( h[ i ] == NULL )
-        this->host[ i ] = NULL;
-      else {
-        this->host[ i ] = this->buf[ i ];
-        copy_host_buf( this->buf[ i ], 0, h[ i ] );
-      }
-    }
-  }
+  EvTcpTransportParameters() {}
   void parse_tport( ConfigTree::Transport &tport,  int ptype,
                     SessionMgr &mgr ) noexcept;
 };

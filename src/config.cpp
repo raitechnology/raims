@@ -2339,23 +2339,31 @@ ConfigTree::Transport::is_wildcard( const char *host ) noexcept
 
 void
 ConfigTree::Transport::get_route_pairs( const char *name,
-                                        ConfigTree::StringPair **el,
-                                        size_t max_el ) noexcept
+                                        StringPairArray &el ) noexcept
 {
-  size_t i, nlen = ::strlen( name );
+  size_t i, name_len = ::strlen( name );
+  ConfigTree::StringPair * sp, * sp2;
 
-  el[ 0 ] = this->route.get_pair( name, nlen );
-  for ( i = 1; i < max_el; i++ ) {
-    char nbuf[ 16 ]; /* try connect2, connect3, ... */
-    ::snprintf( nbuf, sizeof( nbuf ), "%s%d", name, (int) i + 1 );
-    el[ i ] = this->route.get_pair( nbuf, nlen+1 );
+  sp = this->route.get_pair( name, name_len );
+  if ( sp != NULL ) {
+    el.push( sp );
+    for ( i = 1; ; i++ ) {
+      char nbuf[ 64 ]; /* try connect2, connect3, ... */
+      int nlen = ::snprintf( nbuf, sizeof( nbuf ), "%s%d", name, (int) i + 1 );
+      if ( (size_t) nlen >= sizeof( nbuf ) )
+        break;
+      sp2 = this->route.get_pair( nbuf, nlen );
+      if ( sp2 == NULL )
+        break;
+      el.push( sp2 );
+    }
   }
   /* parse config that uses array of cost */
-  if ( el[ 0 ] != NULL ) {
-    for ( i = 0; i < max_el - 1; i++ ) {
-      if ( el[ i ]->next == NULL ) break;
-      if ( ! el[ i ]->next->name.equals( name, nlen ) ) break;
-      el[ i + 1 ] = el[ i ]->next;
+  if ( sp != NULL ) {
+    while ( (sp = sp->next) != NULL ) {
+      if ( ! sp->name.equals( name, name_len ) )
+        break;
+      el.push( sp );
     }
   }
 }
