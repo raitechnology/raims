@@ -1245,9 +1245,9 @@ MeshDirectList::update( TransportRoute &rte,  const StringVal &tport,
   rte.user_db.string_tab.add_string( tport_ref );
   if ( is_mesh )
     m = new ( p )
-      MeshRoute( *rte.mesh_id, url_ref, tport_ref, h, b_nonce, true );
+      MeshRoute( *rte.mesh_id, tport_ref, url_ref, h, b_nonce, true );
   else
-    m = new ( p ) MeshRoute( rte, url_ref, tport_ref, h, b_nonce, false );
+    m = new ( p ) MeshRoute( rte, tport_ref, url_ref, h, b_nonce, false );
   this->push_tl( m );
 }
 
