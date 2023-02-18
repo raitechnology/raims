@@ -59,6 +59,7 @@ UserDB::make_hb( TransportRoute &rte,  const char *sub,  size_t sublen,
    .cost2     ()
    .cost3     ()
    .cost4     ()
+   .tportid   ()
    .version   ( ver_len )
    .pk_digest ();
 
@@ -103,6 +104,7 @@ UserDB::make_hb( TransportRoute &rte,  const char *sub,  size_t sublen,
       m.cost3( rte.uid_connected.cost[ 2 ] );
       m.cost4( rte.uid_connected.cost[ 3 ] );
     }
+    m.tportid( rte.tport_id );
     m.version( ver_str, ver_len );
   }
   m.pk_digest();
@@ -216,9 +218,8 @@ UserDB::on_heartbeat( const MsgFramePublish &pub,  UserBridge &n,
   ec25519_key pubkey;
   uint64_t    time, seqno, uptime, start, old_hb_seqno,
               current_mono_time = 0;
-  uint32_t    cost[ COST_PATH_COUNT ] = { COST_DEFAULT, COST_DEFAULT,
-                                          COST_DEFAULT, COST_DEFAULT },
-              ival;
+  uint32_t    ival;
+
   if ( ! dec.get_ival<uint64_t>( FID_UPTIME, uptime ) ||
        ! dec.get_ival<uint64_t>( FID_SEQNO, seqno ) ||
        ! dec.get_ival<uint64_t>( FID_TIME, time ) ||
@@ -262,11 +263,18 @@ UserDB::on_heartbeat( const MsgFramePublish &pub,  UserBridge &n,
       }
       this->uid_hb_count++;
     }
+    uint32_t cost[ COST_PATH_COUNT ] = { COST_DEFAULT, COST_DEFAULT,
+                                         COST_DEFAULT, COST_DEFAULT },
+             rem_tport_id = 0;
+    dec.get_ival<uint32_t>( FID_TPORTID, rem_tport_id );
     if ( dec.get_ival<uint32_t>( FID_COST, cost[ 0 ] ) ) {
       dec.get_ival<uint32_t>( FID_COST2, cost[ 1 ] );
       dec.get_ival<uint32_t>( FID_COST3, cost[ 2 ] );
       dec.get_ival<uint32_t>( FID_COST4, cost[ 3 ] );
-      n.user_route->rte.update_cost( n, cost );
+      n.user_route->rte.update_cost( n, cost, rem_tport_id, "hb1" );
+    }
+    else {
+      n.user_route->rte.update_cost( n, NULL, rem_tport_id, "hb2" );
     }
   }
   if ( ! n.user_route->test_set( HAS_HB_STATE ) ) {

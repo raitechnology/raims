@@ -259,6 +259,8 @@ struct MsgBufDigestT : public BMsgBufT<T> {
     return this->n( FID_UID_CSUM, csum ); }
   T  & mesh_csum  ( const Nonce &csum ) {
     return this->n( FID_MESH_CSUM, csum ); }
+  T  & rem_bridge ( const Nonce &bridge ) {
+    return this->n( FID_REM_BRIDGE, bridge ); }
 
   T  & mesh_filter( const void *in, size_t in_len ) {
     return this->o( FID_MESH_FILTER, in, (uint32_t) in_len ); }
@@ -292,6 +294,7 @@ struct MsgBufDigestT : public BMsgBufT<T> {
   T  & hops       ( uint32_t n )  { return this->i( FID_HOPS, n ); }
   T  & ref_seqno  ( uint64_t n )  { return this->u( FID_REF_SEQNO, n ); }
   T  & tportid    ( uint32_t n )  { return this->i( FID_TPORTID, n ); }
+  T  & rem_tportid( uint32_t n )  { return this->i( FID_REM_TPORTID, n ); }
   T  & uid        ( uint32_t n )  { return this->i( FID_UID, n ); }
   T  & uid_cnt    ( uint32_t n )  { return this->i( FID_UID_CNT, n ); }
   T  & subj_hash  ( uint32_t n )  { return this->i4( FID_SUBJ_HASH, n ); }
@@ -435,6 +438,7 @@ static inline size_t fid_est( uint32_t fid ) {
     case FID_BRIDGE:
     case FID_CNONCE:
     case FID_SYNC_BRIDGE:
+    case FID_REM_BRIDGE:
     case FID_UID_CSUM:
     case FID_MESH_CSUM:   return 2 + NONCE_SIZE;
     case FID_AUTH_KEY:
@@ -473,6 +477,7 @@ struct MsgEst {
   MsgEst & version    ( size_t l ) { sz += fid_est( FID_VERSION, l ); return *this; }
 
   MsgEst & sync_bridge( void ) { sz += fid_est( FID_SYNC_BRIDGE ); return *this; }
+  MsgEst & rem_bridge ( void ) { sz += fid_est( FID_REM_BRIDGE ); return *this; }
   MsgEst & uid_csum   ( void ) { sz += fid_est( FID_UID_CSUM ); return *this; }
   MsgEst & mesh_csum  ( void ) { sz += fid_est( FID_MESH_CSUM ); return *this; }
 
@@ -505,6 +510,7 @@ struct MsgEst {
   MsgEst & hops       ( void ) { sz += fid_est( FID_HOPS ); return *this; }
   MsgEst & ref_seqno  ( void ) { sz += fid_est( FID_REF_SEQNO ); return *this; }
   MsgEst & tportid    ( void ) { sz += fid_est( FID_TPORTID ); return *this; }
+  MsgEst & rem_tportid( void ) { sz += fid_est( FID_REM_TPORTID ); return *this; }
   MsgEst & uid        ( void ) { sz += fid_est( FID_UID ); return *this; }
   MsgEst & uid_cnt    ( void ) { sz += fid_est( FID_UID_CNT ); return *this; }
   MsgEst & subj_hash  ( void ) { sz += fid_est( FID_SUBJ_HASH ); return *this; }

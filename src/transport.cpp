@@ -150,59 +150,133 @@ TransportRoute::printf( const char *fmt,  ... ) const noexcept
 }
 
 void
-TransportRoute::update_cost( UserBridge &n,
-                             uint32_t cost[ COST_PATH_COUNT ] ) noexcept
+TransportRoute::update_cost( UserBridge &n,  uint32_t *cost,
+                             uint32_t rem_tport_id,  const char *s ) noexcept
 {
   uint8_t i, eq_count = 0;
   uint32_t *cost2 = this->uid_connected.cost;
-  for ( i = 0; i < COST_PATH_COUNT; i++ ) {
-    if ( cost[ i ] == cost2[ i ] )
-      eq_count++;
-    else {
-      if ( this->uid_connected.is_advertised ) {
-        n.printe( "conflicting cost[%u] "
-                   "[%u,%u,%u,%u] (advert) != [%u,%u,%u,%u] (config) on %s\n", i,
-                   cost[ 0 ], cost[ 1 ], cost[ 2 ], cost[ 3 ],
-                   cost2[ 0 ], cost2[ 1 ], cost2[ 2 ], cost2[ 3 ], this->name );
-        return;
+  bool updated = false, cost_updated = false;
+
+  if ( this->uid_connected.rem_uid == 0 ) {
+    this->uid_connected.rem_uid = n.uid;
+    this->uid_connected.rem_tport_id = rem_tport_id;
+    updated = true;
+  }
+  else if ( this->uid_connected.rem_uid == n.uid ) {
+    if ( this->uid_connected.rem_tport_id == 0 ||
+         rem_tport_id < this->uid_connected.rem_tport_id ) {
+      this->uid_connected.rem_tport_id = rem_tport_id;
+      updated = true;
+    }
+  }
+  else {
+    UserBridge * m =
+      this->user_db.bridge_tab.ptr[ this->uid_connected.rem_uid ];
+    if ( ! m->is_set( AUTHENTICATED_STATE ) || n.start_time < m->start_time ) {
+      this->uid_connected.rem_uid = n.uid;
+      this->uid_connected.rem_tport_id = rem_tport_id;
+      updated = true;
+    }
+  }
+  if ( updated ) {
+    if ( debug_tran )
+      this->printf( "update uid %u tport %u %s\n", 
+          this->uid_connected.rem_uid,
+          this->uid_connected.rem_tport_id, s );
+  }
+  if ( cost != NULL ) {
+    for ( i = 0; i < COST_PATH_COUNT; i++ ) {
+      if ( cost[ i ] == cost2[ i ] )
+        eq_count++;
+      else {
+        if ( this->uid_connected.is_advertised ) {
+          n.printe( "conflicting cost[%u] "
+                "[%u,%u,%u,%u] (advert) != [%u,%u,%u,%u] (config) on %s\n", i,
+                cost[ 0 ], cost[ 1 ], cost[ 2 ], cost[ 3 ],
+                cost2[ 0 ], cost2[ 1 ], cost2[ 2 ], cost2[ 3 ], this->name );
+          return;
+        }
       }
     }
-  }
-  if ( eq_count == COST_PATH_COUNT )
-    return;
-#if 0
-  if ( this->uid_connected.is_advertised ) {
-    for ( i = 0; i < COST_PATH_COUNT; i++ ) {
-      if ( this->uid_connected.cost[ i ] > cost[ i ] )
-        cost[ i ] = this->uid_connected.cost[ i ];
+    if ( eq_count != COST_PATH_COUNT ) {
+      for ( i = 0; i < COST_PATH_COUNT; i++ )
+        this->uid_connected.cost[ i ] = cost[ i ];
+      updated = true;
+      cost_updated = true;
     }
   }
-#endif
-  for ( i = 0; i < COST_PATH_COUNT; i++ )
-    this->uid_connected.cost[ i ] = cost[ i ];
+  /* will update adjacency later if not authenticated */
+  if ( ! updated )
+    return;
   if ( debug_tran )
-    n.printf( "update cost [%u,%u,%u,%u] on %s\n", cost[ 0 ], cost[ 1 ],
-              cost[ 2 ], cost[ 3 ], this->name );
+    n.printf( "update cost [%u,%u,%u,%u] on %s (rem=%u) %s\n",
+              cost[ 0 ], cost[ 1 ], cost[ 2 ], cost[ 3 ], this->name,
+              rem_tport_id, n.is_set( AUTHENTICATED_STATE ) ? "auth" : "not" );
 
-  this->user_db.peer_dist.invalidate( ADVERTISED_COST_INV );
-  this->user_db.adjacency_change.append( n.bridge_id.nonce, n.uid,
-             this->tport_id, this->user_db.link_state_seqno + 1, true );
-
-  if ( this->is_set( TPORT_IS_MESH ) ) {
-    uint32_t count = (uint32_t) this->user_db.transport_tab.count;
-    for ( uint32_t id = 0; id < count; id++ ) {
-      if ( id == this->tport_id )
-        continue;
-      TransportRoute *rte = this->user_db.transport_tab.ptr[ id ];
-      if ( ! rte->is_set( TPORT_IS_SHUTDOWN ) ) {
-        if ( rte->is_set( TPORT_IS_MESH ) &&
-             rte->mesh_id == this->mesh_id ) {
-          for ( i = 0; i < COST_PATH_COUNT; i++ )
-            rte->uid_connected.cost[ i ] = cost[ i ];
+  this->user_db.peer_dist.invalidate( ADVERTISED_COST_INV, n.uid );
+  this->user_db.adjacency_change.append( n.uid, this->tport_id,
+                                  this->user_db.link_state_seqno + 1, true );
+  /*p->rem_uid     = this->uid_connected.rem_uid;
+  p->rem_tportid = this->uid_connected.rem_tport_id;*/
+  if ( cost_updated ) {
+    if ( this->is_set( TPORT_IS_MESH ) ) {
+      uint32_t count = (uint32_t) this->user_db.transport_tab.count;
+      for ( uint32_t id = 0; id < count; id++ ) {
+        if ( id == this->tport_id )
+          continue;
+        TransportRoute *rte = this->user_db.transport_tab.ptr[ id ];
+        if ( ! rte->is_set( TPORT_IS_SHUTDOWN ) ) {
+          if ( rte->is_set( TPORT_IS_MESH ) &&
+               rte->mesh_id == this->mesh_id ) {
+            for ( i = 0; i < COST_PATH_COUNT; i++ )
+              rte->uid_connected.cost[ i ] = cost[ i ];
+          }
         }
       }
     }
   }
+#if 0
+  if ( uid_updated ) {
+    if ( this->is_set( TPORT_IS_MESH ) ) {
+      uint32_t count = (uint32_t) this->user_db.transport_tab.count;
+      for ( uint32_t id = 0; id < count; id++ ) {
+        if ( id == this->tport_id )
+          continue;
+        TransportRoute *rte = this->user_db.transport_tab.ptr[ id ];
+        if ( ! rte->is_set( TPORT_IS_SHUTDOWN ) ) {
+          if ( rte->is_set( TPORT_IS_MESH ) &&
+               rte->mesh_id == this->mesh_id ) {
+            if ( p->rem_uid == rte->uid_connected.rem_uid ) {
+              this->printf( "duplicate uid %u connected tport %u\n",
+                            p->rem_uid, id );
+              /* im older */
+              if ( this->user_db.start_time < n.start_time ) {
+                if ( this->tport_id < id ) {
+                  n.printf( "++keeP tport, i am older and tport %u < %u\n",
+                             this->tport_id, id );
+                }
+                else {
+                  n.printf( "--tosS tport, i am older and tport %u > %u\n",
+                             this->tport_id, id );
+                }
+              }
+              else {
+                if ( p->rem_tportid < rte->uid_connected.rem_tport_id ) {
+                  n.printf( "++Keep tport, i am newer and rem_tport %u < %u\n",
+                             p->rem_tportid, rte->uid_connected.rem_tport_id );
+                }
+                else {
+                  n.printf( "--Toss tport, i am newer and rem_tport %u > %u\n",
+                             p->rem_tportid, rte->uid_connected.rem_tport_id );
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+#endif
 }
 
 void

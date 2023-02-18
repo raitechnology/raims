@@ -2176,7 +2176,7 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
         this->outf( p, "debug flags cleared" );
       }
       if ( dist_dbg ) {
-        this->user_db.peer_dist.invalidate( INVALID_NONE );
+        this->user_db.peer_dist.invalidate( INVALID_NONE, 0 );
         this->outf( p, "recalculate peer dist" );
       }
       if ( kv_pub_debug )
@@ -3386,7 +3386,7 @@ Console::show_events( ConsoleOutput *p ) noexcept
 void
 Console::show_unknown( ConsoleOutput *p ) noexcept
 {
-  static const uint32_t ncols = 6;
+  static const uint32_t ncols = 5;
   TabOut out( this->table, this->tmp, ncols );
   const AdjPending * u;
 
@@ -3398,18 +3398,17 @@ Console::show_unknown( ConsoleOutput *p ) noexcept
     TabPrint * tab = out.add_row_p();
     uint32_t i = 0;
     tab[ i++ ].set( u->rte.transport.tport, u->rte.tport_id ); /* tport */
-    this->tab_nonce( u->nonce, tab[ i++ ] ); /* bridge */
+    this->tab_nonce( u->rec_list[ 0 ].nonce, tab[ i++ ] ); /* bridge */
     if ( u->uid != 0 )
       this->tab_user_id( u->uid, tab[ i++ ] ); /* source */
     else
       tab[ i++ ].set_null();
-    tab[ i++ ].set( u->tport_sv ); /* adj_tp */
-    tab[ i++ ].set( u->user_sv );  /* unknown user */
+    tab[ i++ ].set( u->rec_list[ 0 ].user );  /* unknown user */
     tab[ i++ ].set( peer_sync_reason_string( u->reason ) ); /* reason */
     tab[ i-1 ].typ |= PRINT_LEFT;
   }
   static const char *hdr[ ncols ] = { "tport", "bridge", "source",
-                                      "adj_tp", "user", "reason" };
+                                      "user", "reason" };
   this->print_table( p, hdr, ncols );
 }
 
@@ -3481,7 +3480,7 @@ PortOutput::output( void ( PortOutput::*put )( void ) ) noexcept
       if ( rte->is_set( TPORT_IS_INPROGRESS ) && rte->connect_ctx != NULL ) {
         this->init( rte, P_IS_REMOTE, -1 );
         uint64_t ns = rte->mgr.timer_mono_time -
-                      rte->connect_ctx->start_time;
+                      rte->connect_ctx->start_mono_time;
         this->stats.active_ns = rte->mgr.timer_time - ns;
 
         size_t len = 8;
@@ -3613,10 +3612,12 @@ PortOutput::put_show_ports( void ) noexcept
     type = "inbox";
   tab[ i++ ].set( *this->tport, this->tport_id, PRINT_ID );
   tab[ i++ ].set( type ); /* type */
-  if ( this->rte != NULL && ! this->rte->is_set( TPORT_IS_IPC ) )
-    tab[ i++ ].set_int( this->rte->uid_connected.cost[ 0 ] ); /* cost */
-  else
+  if ( this->rte != NULL && ! this->rte->is_set( TPORT_IS_IPC ) ) {
+    tab[ i++ ].set_int( this->rte->uid_connected.rem_tport_id ); /* rem */
+  }
+  else {
     tab[ i++ ].set_null();
+  }
   if ( ( this->flags & P_IS_DOWN ) == 0 && this->fd >= 0 )
     tab[ i++ ].set_int( this->fd ); /* fd */
   else
@@ -3695,8 +3696,9 @@ Console::show_ports( ConsoleOutput *p, const char *name,  size_t len ) noexcept
     PortOutput port( *this, out, &this->mgr.unrouteable.ptr[ u ] );
     port.output( &PortOutput::put_show_ports );
   }
-  static const char *hdr[ ncols ] = { "tport", "type", "cost", "fd", "bs", "br",
-                                   "ms", "mr", "lat", "idle", "fl", "address" };
+  static const char *hdr[ ncols ] =
+    { "tport", "type", "rem", "fd", "bs", "br",
+      "ms", "mr", "lat", "idle", "fl", "address" };
   this->print_table( p, hdr, ncols );
 }
 
@@ -3715,8 +3717,10 @@ PortOutput::put_show_cost( void ) noexcept
     tab[ i++ ].set_int( this->rte->uid_connected.cost[ 1 ] );
     tab[ i++ ].set_int( this->rte->uid_connected.cost[ 2 ] );
     tab[ i++ ].set_int( this->rte->uid_connected.cost[ 3 ] );
+    tab[ i++ ].set_int( this->rte->uid_connected.rem_tport_id );
   }
   else {
+    tab[ i++ ].set_null();
     tab[ i++ ].set_null();
     tab[ i++ ].set_null();
     tab[ i++ ].set_null();
@@ -3753,7 +3757,7 @@ PortOutput::put_show_cost( void ) noexcept
 void
 Console::show_cost( ConsoleOutput *p, const char *name,  size_t len ) noexcept
 {
-  static const uint32_t ncols = 9;
+  static const uint32_t ncols = 10;
   size_t count = this->user_db.transport_tab.count;
 
   if ( len == 1 && name[ 0 ] == '*' )
@@ -3775,8 +3779,9 @@ Console::show_cost( ConsoleOutput *p, const char *name,  size_t len ) noexcept
     PortOutput port( *this, out, &this->mgr.unrouteable.ptr[ u ] );
     port.output( &PortOutput::put_show_cost );
   }
-  static const char *hdr[ ncols ] = { "tport", "type", "cost", "cost2",
-                                      "cost3", "cost4", "fd", "fl", "address" };
+  static const char *hdr[ ncols ] =
+    { "tport", "type", "cost", "cost2",
+      "cost3", "cost4", "rem", "fd", "fl", "address" };
   this->print_table( p, hdr, ncols );
 }
 
@@ -3981,6 +3986,19 @@ UserBridgeList::cmp_nonce( const UserBridgeElem &e1,
   return n1->bridge_id.nonce.cmp( e1.user_db.bridge_id.nonce );
 }
 
+int
+UserBridgeList::cmp_start( const UserBridgeElem &e1,
+                           const UserBridgeElem &e2 ) noexcept
+{
+  UserBridge * n1 = e1.user_db.bridge_tab.ptr[ e1.uid ],
+             * n2 = e1.user_db.bridge_tab.ptr[ e2.uid ];
+  if ( n1 != NULL && n2 != NULL )
+    return n1->start_time < n2->start_time ? -1 : 1;
+  if ( n1 == NULL )
+    return e1.user_db.start_time < n2->start_time ? -1 : 1;
+  return n1->start_time < e1.user_db.start_time ? -1 : 1;
+}
+
 void
 Console::show_peers( ConsoleOutput *p, const char *name,  size_t len ) noexcept
 {
@@ -3991,6 +4009,9 @@ Console::show_peers( ConsoleOutput *p, const char *name,  size_t len ) noexcept
   UserBridgeList list;
   bool           show_ip = false, show_host = false;
 
+  /* if name == user              , sort by user name
+   *         == nonce | ip | host , sort by nonce
+   *         == start             , sort by start time */
   list.push_tl( new ( this->tmp.make( sizeof( UserBridgeElem ) ) )
                 UserBridgeElem( this->user_db, 0 ) );
   for ( uint32_t uid = 1; uid < this->user_db.next_uid; uid++ ) {
@@ -4000,17 +4021,21 @@ Console::show_peers( ConsoleOutput *p, const char *name,  size_t len ) noexcept
     list.push_tl( new ( this->tmp.make( sizeof( UserBridgeElem ) ) )
                   UserBridgeElem( this->user_db, uid ) );
   }
-  if ( len > 0 && ( name[ 0 ] == 'u' || name[ 0 ] == 'U' ) )
-    list.sort<UserBridgeList::cmp_user>();
-  else if ( len > 0 && ( name[ 0 ] == 'n' || name[ 0 ] == 'N' ||
-                         name[ 0 ] == 'h' || name[ 0 ] == 'H' ||
-                         name[ 0 ] == 'i' || name[ 0 ] == 'I' ) )
-    list.sort<UserBridgeList::cmp_nonce>();
-  if ( len > 0 && ( name[ 0 ] == 'i' || name[ 0 ] == 'I' ) )
-    show_ip = true;
-  else if ( len > 0 && ( name[ 0 ] == 'h' || name[ 0 ] == 'H' ) )
-    show_host = true;
+  if ( len > 0 ) {
+    if ( name[ 0 ] == 'u' || name[ 0 ] == 'U' )       /* user */
+      list.sort<UserBridgeList::cmp_user>();
+    else if ( name[ 0 ] == 'n' || name[ 0 ] == 'N' || /* nonce */
+              name[ 0 ] == 'h' || name[ 0 ] == 'H' || /* host */
+              name[ 0 ] == 'i' || name[ 0 ] == 'I' )  /* ip */
+      list.sort<UserBridgeList::cmp_nonce>();
+    else if ( name[ 0 ] == 's' || name[ 0 ] == 'S' )  /* start */
+      list.sort<UserBridgeList::cmp_start>();
 
+    if ( name[ 0 ] == 'i' || name[ 0 ] == 'I' )       /* ip */
+      show_ip = true;
+    else if ( name[ 0 ] == 'h' || name[ 0 ] == 'H' )  /* host */
+      show_host = true;
+  }
   for ( UserBridgeElem * el = list.hd; el != NULL; el = el->next ) {
     if ( el->uid == 0 ) {
       if ( show_ip )
@@ -4029,9 +4054,9 @@ Console::show_peers( ConsoleOutput *p, const char *name,  size_t len ) noexcept
          .set_null()  /* lat */
          .set_null()  /* max */
          .set_null()  /* avg */
+         .set_time( this->user_db.start_time )
          .set_null()  /* tport */
-         .set_null()  /* cost */
-         .set_null(); /* ptp */
+         .set_null(); /* cost */
       continue;
     }
     UserBridge * n = this->user_db.bridge_tab[ el->uid ];
@@ -4065,26 +4090,27 @@ Console::show_peers( ConsoleOutput *p, const char *name,  size_t len ) noexcept
        .set_long( n->link_state_seqno )  /* link */
        .set_long( rtt, PRINT_LATENCY )   /* lat */
        .set_long( rtt_max, PRINT_LATENCY )  /* max */
-       .set_long( rtt_avg, PRINT_LATENCY ); /* avg */
+       .set_long( rtt_avg, PRINT_LATENCY )  /* avg */
+       .set_time( n->start_time );       /* time */
 
     UserRoute *u_ptr = n->primary( this->user_db );
 
     if ( ! u_ptr->is_valid() ) {
       row.set_null()  /* tport */
-         .set_null()  /* cost */
-         .set_null(); /* address */
+         .set_null(); /* cost */
+         /*.set_null();  address */
     }
     else {
-      TabPrint & ptp =
+      /*TabPrint & ptp =*/
       row.set( u_ptr->rte.transport.tport, u_ptr->rte.tport_id, PRINT_ID )
          .set( n, PRINT_DIST ); /* cost */
 
-      this->output_user_route( ptp, *u_ptr );
+      /*this->output_user_route( ptp, *u_ptr );*/
     }
   }
   static const char *hdr[ ncols ] = { "user", "bridge", "sub", "seq", "link",
-                                      "lat", "max", "avg", "tport", "cost",
-                                      "address" };
+                                      "lat", "max", "avg", "start", "tport",
+                                      "cost"  };
   this->print_table( p, hdr, ncols );
 }
 
@@ -4138,16 +4164,16 @@ Console::output_user_route( TabPrint &ptp,  UserRoute &u_rte ) noexcept
 void
 Console::show_adjacency( ConsoleOutput *p ) noexcept
 {
-  static const size_t ncols = 8;
+  static const size_t ncols = 9;
   TabOut     out( this->table, this->tmp, ncols );
   TabPrint * tab = NULL;
-  size_t     count, i = 0, sep;
-  uint32_t   uid, last_user, last_tport;
+  uint32_t   count, i = 0, r = 0, sep,
+             uid, last_user, last_tport, j;
   bool       is_json = ( p != NULL && p->is_json );
 
   count = this->user_db.transport_tab.count;
   last_user = last_tport = -1;
-  for ( size_t t = 0; t < count; t++ ) {
+  for ( uint32_t t = 0; t < count; t++ ) {
     TransportRoute *rte = this->user_db.transport_tab.ptr[ t ];
     /* print users on the tport */
     for ( bool ok = rte->uid_connected.first( uid ); ok;
@@ -4166,14 +4192,21 @@ Console::show_adjacency( ConsoleOutput *p ) noexcept
         tab[ i++ ].set( rte->transport.tport, (uint32_t) t, PRINT_ID );
         tab[ i++ ].set( rte->transport.type );
       }
-      else {
+      while ( i < r+4 )
         tab[ i++ ].set_null();
-        tab[ i++ ].set_null();
+      if ( ! rte->is_set( TPORT_IS_IPC ) ) {
+        for ( j = 0; j < COST_PATH_COUNT; j++ )
+          tab[ i++ ].set_int( rte->uid_connected.cost[ j ] );
       }
-      tab[ i++ ].set_int( rte->uid_connected.cost[ 0 ] );
-      tab[ i++ ].set_int( rte->uid_connected.cost[ 1 ] );
-      tab[ i++ ].set_int( rte->uid_connected.cost[ 2 ] );
-      tab[ i++ ].set_int( rte->uid_connected.cost[ 3 ] );
+      while ( i < r+8 )
+        tab[ i++ ].set_null();
+      if ( uid == rte->uid_connected.rem_uid ) {
+        if ( rte->uid_connected.rem_tport_id != 0 )
+          tab[ i++ ].set_int( rte->uid_connected.rem_tport_id );
+      }
+      for ( r += ncols; i < r; )
+        tab[ i++ ].set_null();
+
       last_user  = 0;
       last_tport = (uint32_t) t;
     }
@@ -4187,10 +4220,12 @@ Console::show_adjacency( ConsoleOutput *p ) noexcept
       tab[ i++ ].set_null();
       tab[ i++ ].set( rte->transport.tport, (uint32_t) t, PRINT_ID );
       tab[ i++ ].set( rte->transport.type );
-      tab[ i++ ].set_int( rte->uid_connected.cost[ 0 ] );
-      tab[ i++ ].set_int( rte->uid_connected.cost[ 1 ] );
-      tab[ i++ ].set_int( rte->uid_connected.cost[ 2 ] );
-      tab[ i++ ].set_int( rte->uid_connected.cost[ 3 ] );
+      if ( ! rte->is_set( TPORT_IS_IPC ) ) {
+        for ( j = 0; j < COST_PATH_COUNT; j++ )
+          tab[ i++ ].set_int( rte->uid_connected.cost[ j ] );
+      }
+      for ( r += ncols; i < r; )
+        tab[ i++ ].set_null();
       last_user  = 0;
       last_tport = (uint32_t) t;
     }
@@ -4207,8 +4242,8 @@ Console::show_adjacency( ConsoleOutput *p ) noexcept
     count = n->adjacency.count;
     last_tport = -1;
     /* for each tport populated */
-    for ( uint32_t j = 0; j < count; j++ ) {
-      AdjacencySpace *set = n->adjacency[ j ];
+    for ( uint32_t t = 0; t < count; t++ ) {
+      AdjacencySpace *set = n->adjacency[ t ];
       uint32_t b;
       if ( set == NULL )
         continue;
@@ -4227,26 +4262,31 @@ Console::show_adjacency( ConsoleOutput *p ) noexcept
             tab[ i++ ].set( n2, PRINT_USER );
           else
             tab[ i++ ].set( this->user_db.user.user, PRINT_SELF );
-          if ( last_tport != j ) {
+
+          if ( last_tport != t ) {
             if ( set->tport.len > 0 )
-              tab[ i++ ].set( set->tport, j, PRINT_ID );
+              tab[ i++ ].set( set->tport, t, PRINT_ID );
             else
-              tab[ i++ ].set_int( j );
+              tab[ i++ ].set_int( t );
             if ( set->tport_type.len > 0 )
               tab[ i++ ].set( set->tport_type );
             else
               tab[ i++ ].set_null();
           }
-          else {
+          while ( i < r+4 )
             tab[ i++ ].set_null();
-            tab[ i++ ].set_null();
+
+          for ( j = 0; j < COST_PATH_COUNT; j++ )
+            tab[ i++ ].set_int( set->cost[ j ] );
+
+          if ( set->rem_tport_id != 0 ) {
+            if ( set->rem_uid == b )
+              tab[ i++ ].set_int( set->rem_tport_id );
           }
-          tab[ i++ ].set_int( set->cost[ 0 ] );
-          tab[ i++ ].set_int( set->cost[ 1 ] );
-          tab[ i++ ].set_int( set->cost[ 2 ] );
-          tab[ i++ ].set_int( set->cost[ 3 ] );
+          for ( r += ncols; i < r; )
+            tab[ i++ ].set_null();
           last_user  = uid;
-          last_tport = j;
+          last_tport = t;
         }
       }
     }
@@ -4255,7 +4295,8 @@ Console::show_adjacency( ConsoleOutput *p ) noexcept
       sep = i;
     }
   }
-  const char *hdr[ ncols ] = { "user", "adj", "tport", "type", "cost", "cost2", "cost3", "cost4" };
+  const char *hdr[ ncols ] =
+   { "user", "adj", "tport", "type", "cost", "cost2", "cost3", "cost4", "rem" };
   this->print_table( p, hdr, ncols );
 
   if ( ! is_json ) {
@@ -4281,10 +4322,15 @@ Console::show_adjacency( ConsoleOutput *p ) noexcept
 void
 Console::show_links( ConsoleOutput *p ) noexcept
 {
-  static const size_t ncols = 4;
+  static const size_t ncols = 5;
   TabOut   out( this->table, this->tmp, ncols );
   size_t   count;
-  uint32_t uid;
+  uint32_t uid, i, last_uid = -1, prune;
+  TabPrint * tab;
+
+  if ( this->user_db.peer_dist.prune_seqno !=
+       this->user_db.peer_dist.cache_seqno )
+    this->user_db.peer_dist.prune_adjacency_sets();
 
   count = this->user_db.transport_tab.count;
   for ( size_t t = 0; t < count; t++ ) {
@@ -4296,17 +4342,32 @@ Console::show_links( ConsoleOutput *p ) noexcept
       if ( n == NULL || ! n->is_set( AUTHENTICATED_STATE ) )
         continue;
 
-      out.add_row()
-         .set_int( 0 )
-         .set_int( uid )
-         .set( this->user_db.user.user )
-         .set( rte->transport.tport, (uint32_t) t, PRINT_ID );
+      tab = out.add_row_p();
+      i = 0;
+      if ( last_uid != 0 ) {
+        tab[ i++ ].set( this->user_db.user.user, PRINT_SELF );
+        last_uid = 0;
+      }
+      else {
+        tab[ i++ ].set_null();
+      }
+      tab[ i++ ].set( n, PRINT_USER );
+      tab[ i++ ].set( rte->transport.tport, (uint32_t) t, PRINT_ID );
+      tab[ i++ ].set_int( rte->uid_connected.rem_tport_id );
+
+      prune = rte->uid_connected.prune_path;
+      if ( prune == 0 )
+        tab[ i++ ].set_null();
+      else
+        tab[ i++ ].set_long( prune, PRINT_BITS );
     }
   }
   for ( uid = 1; uid < this->user_db.next_uid; uid++ ) {
     UserBridge * n = this->user_db.bridge_tab[ uid ];
     if ( n == NULL || ! n->is_set( AUTHENTICATED_STATE ) )
       continue;
+    if ( out.table.count > 0 )
+      out.row( ncols - 1 ).typ |= PRINT_SEP;
     count = n->adjacency.count;
     /* for each tport populated */
     for ( uint32_t j = 0; j < count; j++ ) {
@@ -4316,18 +4377,40 @@ Console::show_links( ConsoleOutput *p ) noexcept
         continue;
       /* for each user on the port */
       for ( bool ok = set->first( b ); ok; ok = set->next( b ) ) {
-        out.add_row()
-           .set_int( uid )
-           .set_int( b )
-           .set( n->peer.user );
-        if ( set->tport.len > 0 )
-          out.row( 3 ).set( set->tport, j, PRINT_ID );
+        tab = out.add_row_p();
+        i = 0;
+        if ( last_uid != uid ) {
+          UserBridge * n = this->user_db.bridge_tab[ uid ];
+          if ( n == NULL )
+            tab[ i++ ].set( this->user_db.user.user, PRINT_SELF );
+          else
+            tab[ i++ ].set( n, PRINT_USER );
+          last_uid = uid;
+        }
+        else {
+          tab[ i++ ].set_null();
+        }
+
+        UserBridge * m = this->user_db.bridge_tab[ b ];
+        if ( m == NULL )
+          tab[ i++ ].set( this->user_db.user.user, PRINT_SELF );
         else
-          out.row( 3 ).set_int( j );
+          tab[ i++ ].set( m, PRINT_USER );
+        if ( set->tport.len > 0 )
+          tab[ i++ ].set( set->tport, j, PRINT_ID );
+        else
+          tab[ i++ ].set_int( j );
+        tab[ i++ ].set_int( set->rem_tport_id );
+
+        prune = set->prune_path;
+        if ( prune == 0 )
+          tab[ i++ ].set_null();
+        else
+          tab[ i++ ].set_long( prune, PRINT_BITS );
       }
     }
   }
-  const char *hdr[ ncols ] = { "source", "target", "src_user", "src_tport" };
+  const char *hdr[ ncols ] = { "source", "target", "tport", "rem", "prune" };
   this->print_table( p, hdr, ncols );
 }
 
@@ -4368,7 +4451,7 @@ Console::show_nodes( ConsoleOutput *p ) noexcept
 void
 Console::show_routes( ConsoleOutput *p,  uint8_t path_select ) noexcept
 {
-  static const uint32_t ncols = 8;
+  static const uint32_t ncols = 9;
   TabOut       out( this->table, this->tmp, ncols );
   uint32_t     i = 0;
   const char * address;
@@ -4405,6 +4488,7 @@ Console::show_routes( ConsoleOutput *p,  uint8_t path_select ) noexcept
       uint32_t cost = this->user_db.peer_dist.calc_transport_cache( uid,
                                                         tport_id, path_select );
       tab[ i++ ].set( rte->transport.tport, tport_id, PRINT_ID );
+      tab[ i++ ].set_int( rte->uid_connected.rem_tport_id );
       tab[ i++ ].set_int( u_ptr->state, PRINT_STATE ); /* state */
 
       if ( cost != COST_MAXIMUM )
@@ -4483,7 +4567,7 @@ Console::show_routes( ConsoleOutput *p,  uint8_t path_select ) noexcept
       }
     }
   }
-  static const char *hdr[ ncols ] = { "user", "tport", "state",
+  static const char *hdr[ ncols ] = { "user", "tport", "rem", "state",
                                       "cost", "path", "lat", "fd", "route" };
   this->print_table( p, hdr, ncols );
 }
@@ -4657,14 +4741,17 @@ Console::show_counters( ConsoleOutput *p ) noexcept
   static const uint32_t ncols = 10;
   TabOut out( this->table, this->tmp, ncols );
 
-  TabPrint *tab = out.add_row_p();
-  uint32_t  i = 0;
-  tab[ i++ ].set( this->user_db.user.user, PRINT_SELF ); /* user */
-  tab[ i++ ].set_time( this->user_db.start_time );       /* start */
-  while ( i < ncols )
-    tab[ i++ ].set_null();
+  for ( uint32_t uid = 0; uid < this->user_db.next_uid; uid++ ) {
 
-  for ( uint32_t uid = 1; uid < this->user_db.next_uid; uid++ ) {
+    if ( uid == 0 ) {
+      TabPrint *tab = out.add_row_p();
+      uint32_t  i = 0;
+      tab[ i++ ].set( this->user_db.user.user, PRINT_SELF ); /* user */
+      tab[ i++ ].set_time( this->user_db.start_time );       /* start */
+      while ( i < ncols )
+        tab[ i++ ].set_null();
+      continue;
+    }
     UserBridge * n = this->user_db.bridge_tab[ uid ];
     if ( n == NULL || ! n->is_set( AUTHENTICATED_STATE ) )
       continue;
@@ -5002,7 +5089,7 @@ Console::show_path( ConsoleOutput *p,  uint8_t path_select ) noexcept
 void
 Console::show_forward( ConsoleOutput *p,  uint8_t path_select ) noexcept
 {
-  static const uint32_t ncols = 3;
+  static const uint32_t ncols = 5;
   TabOut out( this->table, this->tmp, ncols );
 
   path_select &= ( COST_PATH_COUNT - 1 );
@@ -5037,9 +5124,23 @@ Console::show_forward( ConsoleOutput *p,  uint8_t path_select ) noexcept
         if ( i == ncols ) {
           tab = out.add_row_p();
           i = 0;
-          tab[ i++ ].set_null();
+          tab[ i++ ].set_null(); /* user */
         }
         tab[ i++ ].set( rte->transport.tport, tport_id, PRINT_ID );
+        uint32_t u = rte->uid_connected.rem_uid,
+                 t = rte->uid_connected.rem_tport_id;
+        if ( t != 0 ) {
+          UserBridge *dest = this->user_db.bridge_tab[ u ];
+          if ( dest == NULL )
+            tab[ i++ ].set( this->user_db.user.user, PRINT_SELF ); /* user */
+          else
+            tab[ i++ ].set( dest, PRINT_USER );  /* user */
+          tab[ i++ ].set_int( t );
+        }
+        else {
+          tab[ i++ ].set_null();
+          tab[ i++ ].set_null();
+        }
         tab[ i++ ].set_int( rte->uid_connected.cost[ path_select ] );
       } while ( forward.next( tport_id ) );
     }
@@ -5048,7 +5149,7 @@ Console::show_forward( ConsoleOutput *p,  uint8_t path_select ) noexcept
   }
 
   static const char *hdr[ ncols ] =
-    { "source", "tport", "cost" };
+    { "source", "tport", "dest", "rem", "cost" };
   this->print_table( p, hdr, ncols );
 }
 

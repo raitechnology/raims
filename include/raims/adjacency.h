@@ -54,10 +54,8 @@ enum InvalidReason {
   ADJACENCY_CHANGE_INV  = 4, /* recvd an adjacency change update */
   ADJACENCY_UPDATE_INV  = 5, /* recvd an adjacency sync from peer */
   ADD_TRANSPORT_INV     = 6, /* added a new transport */
-  ADD_MESH_URL_INV      = 7, /* discovered a new mesh endpoint */
-  ADD_UCAST_URL_INV     = 8, /* discovered a new ucast endpoint */
-  ADVERTISED_COST_INV   = 9, /* transport advertised a different cost */
-  MAX_INVALIDATE        = 10
+  ADVERTISED_COST_INV   = 7, /* transport advertised a different cost */
+  MAX_INVALIDATE        = 8
 };
 
 #ifdef INCLUDE_PEER_CONST
@@ -96,8 +94,6 @@ static const char *invalid_reason_str[] = {
   "adj_change",
   "adj_update",
   "add_tport",
-  "add_mesh",
-  "add_ucast",
   "adv_cost"
 };
 #if __cplusplus >= 201103L
@@ -163,16 +159,19 @@ struct AdjacencySpace : public kv::BitSpace {
                    tport_type;/* type of link (mesh, tcp, pgm, ipc) */
   uint32_t         uid,       /* uid owner of link */
                    tport_id,  /* tport owner of link */
-                   cost[ COST_PATH_COUNT ]; /* cost of each path shard */
+                   cost[ COST_PATH_COUNT ], /* cost of each path shard */
+                   rem_uid,      /* uid rem_tport blongs to */
+                   rem_tport_id; /* remote tport_id */
   uint16_t         clock;     /* adjacency calc upates when route is chosen */
+  uint8_t          prune_path;
   bool             is_advertised; /* whether to publish cost in hb */
 
   void * operator new( size_t, void *ptr ) { return ptr; }
   void operator delete( void *ptr ) { ::free( ptr ); }
 
-  AdjacencySpace()
-      : next_link( 0 ), uid( 0 ), tport_id( 0 ), clock( 0 ),
-        is_advertised( false ) {
+  AdjacencySpace() : next_link( 0 ), uid( 0 ), tport_id( 0 ),
+        rem_uid( 0 ), rem_tport_id( 0 ), clock( 0 ),
+        prune_path( 0 ), is_advertised( false ) {
     for ( uint8_t i = 0; i < COST_PATH_COUNT; i++ )
       this->cost[ i ] = COST_DEFAULT;
   }
@@ -285,7 +284,8 @@ struct AdjDistance : public md::MDMsgMem {
   kv::BitSpace   graph_used,    /* graph description visit map */
                  graph_mesh;    /* mesh common peers */
   uint64_t       cache_seqno,   /* seqno of adjacency in cache */
-                 update_seqno;  /* seqno of current adjacency */
+                 update_seqno,  /* seqno of current adjacency */
+                 prune_seqno;
   uint32_t       max_uid,       /* all uid < max_uid */
                  max_tport,     /* all tport < max_tport */
                  miss_tos,      /* number of missing uids in missing[] */
@@ -296,6 +296,7 @@ struct AdjDistance : public md::MDMsgMem {
                  tport_select;  /* select which port to test */
   uint64_t       last_run_mono, /* timestamp of last adjacency update */
                  invalid_mono; /* when cache was invalidated */
+  uint32_t       invalid_src_uid;
   uint16_t       adjacency_clock; /* label transitions that were taken */
   InvalidReason  invalid_reason; /* why cache was invalidated */
   bool           inc_running,   /* whether incomplete check is running */
@@ -307,16 +308,18 @@ struct AdjDistance : public md::MDMsgMem {
   AdjDistance( UserDB &u ) : user_db( u ) {
     zero_mem( &this->stack, &this->inc_visit );
     zero_mem( &this->max_uid, &this[ 1 ] );
-    this->cache_seqno = 0;
+    this->cache_seqno  = 0;
     this->update_seqno = 1;
+    this->prune_seqno  = 0;
   }
 
-  void invalidate( InvalidReason why ) {
+  void invalidate( InvalidReason why,  uint32_t src_uid ) {
     if ( this->update_seqno++ == this->cache_seqno ) {
       if ( ! this->found_inconsistency ) {
         this->invalid_mono = kv::current_monotonic_time_ns();
         this->invalid_reason = why;
       }
+      this->invalid_src_uid = src_uid;
     }
   }
   bool is_valid( uint64_t seqno ) {
@@ -371,12 +374,16 @@ struct AdjDistance : public md::MDMsgMem {
 
   void zero_clocks( void ) noexcept;
   void coverage_init( uint32_t src_uid ) noexcept;
-  uint64_t get_start_time( uint32_t uid ) noexcept;
+  uint64_t get_start_time( uint32_t uid ) const noexcept;
+  bool is_older( uint32_t uid,  uint32_t uid2 ) const noexcept;
+  int compare_set( AdjacencySpace *set,  AdjacencySpace *set2 ) noexcept;
+  int compare_set2( AdjacencySpace *set,  AdjacencySpace *set2 ) noexcept;
   void push_link( AdjacencySpace *set ) noexcept;
   static AdjacencySpace * order_path_select( AdjacencySpace *set,
                                              uint8_t path_select ) noexcept;
   uint32_t coverage_step( uint8_t path_select ) noexcept;
   AdjacencySpace *coverage_link( uint32_t target_uid ) noexcept;
+  void prune_adjacency_sets( void ) noexcept;
   uint32_t calc_coverage( uint32_t src_uid,  uint8_t path_select ) noexcept;
 
   void update_path( ForwardCache &fwd,  uint8_t path_select ) {
@@ -544,8 +551,13 @@ struct UserDB {
     else if ( y == NULL )
       this->add_link( x, cost, type, name, st );
     else {
-      x->add_link( y, cost, type, name, st );
-      y->add_link( x, cost, type, name, st );
+      AdjacencySpace *spc1, *spc2;
+      spc1 = x->add_link( y, cost, type, name, st );
+      spc2 = y->add_link( x, cost, type, name, st );
+      spc1->rem_tport_id = spc2->tport_id;
+      spc1->rem_uid      = spc2->uid;
+      spc2->rem_tport_id = spc1->tport_id;
+      spc2->rem_uid      = spc1->uid;
     }
   }
   bool load_users( const char *fn,  ms::StringTab &st,

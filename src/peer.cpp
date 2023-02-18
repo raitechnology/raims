@@ -1196,6 +1196,7 @@ UserDB::process_unknown_adjacency( uint64_t current_mono_time ) noexcept
     if ( p->request_count > 5 ) {
       next = p->next;
       this->adjacency_unknown.pop( p );
+      this->remove_pending_peer( NULL, p->pending_seqno );
       delete p;
       continue;
     }
@@ -1218,7 +1219,7 @@ UserDB::process_unknown_adjacency( uint64_t current_mono_time ) noexcept
     for ( bool ok = p->rte.uid_connected.first( uid ); ok;
           ok = p->rte.uid_connected.next( uid ) ) {
       UserBridge * n = this->bridge_tab.ptr[ uid ];
-      if ( n->bridge_id.nonce != p->nonce ) {
+      if ( n->bridge_id.nonce != p->rec_list[ 0 ].nonce ) {
         if ( pr == NULL )
           pr = this->start_pending_adj( *p, *n );
         else {
@@ -1229,6 +1230,7 @@ UserDB::process_unknown_adjacency( uint64_t current_mono_time ) noexcept
         }
       }
     }
+#if 0
     if ( debug_peer ) {
       char buf[ NONCE_B64_LEN + 1 ];
       if ( pr == NULL ) {
@@ -1249,6 +1251,7 @@ UserDB::process_unknown_adjacency( uint64_t current_mono_time ) noexcept
                 peer_sync_reason_string( p->reason ) );
       }
     }
+#endif
     p->request_time_mono = current_mono_time;
     p->request_count++;
   }
@@ -1305,12 +1308,13 @@ UserDB::start_pending_adj( AdjPending &adj,  UserBridge &n ) noexcept
 {
   const PendingUid puid( n.uid, adj.rte.tport_id );
   UserPendingRoute *p;
-  p = this->find_pending_peer( adj.nonce, puid );
+  p = this->find_pending_peer( adj.rec_list[ 0 ].nonce, puid );
   if ( p != NULL )
     return p;
 
   p = new ( ::malloc( sizeof( UserPendingRoute ) ) )
-      UserPendingRoute( adj.nonce, puid, adj.user_sv, adj.reason );
+    UserPendingRoute( adj.rec_list[ 0 ].nonce, puid, adj.rec_list[ 0 ].user,
+                      adj.reason );
   uint64_t current_mono_time = current_monotonic_time_ns();
   p->pending_add_mono  = current_mono_time;
   p->request_time_mono = current_mono_time +

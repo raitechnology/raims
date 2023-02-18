@@ -72,7 +72,7 @@ void
 ConnectPing::on_timeout( ConnectCtx &ctx ) noexcept
 {
   printf( "on timeout, connect tries %u, time %.1f\n", ctx.connect_tries,
-    (double) ( current_monotonic_time_ns() - ctx.start_time ) / 1000000000.0 );
+    (double) ( current_monotonic_time_ns() - ctx.start_mono_time ) / 1000000000.0 );
 }
 
 void

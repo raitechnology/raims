@@ -692,6 +692,7 @@ struct SubDB {
   uint32_t     my_src_fd,    /* subs routed to my_src_fd */
                next_inbox;   /* next inbox sub free */
   uint64_t     sub_seqno,    /* sequence number for my subs */
+               sub_seqno_sum,/* sum of all sub_seqno */
                update_seqno, /* sequence number updated for ext and int subs */
                sub_update_mono_time; /* last time any sub recvd */
   SeqnoTab     seqno_tab;    /* sub -> seqno, time */
@@ -709,9 +710,15 @@ struct SubDB {
 
   void init( uint32_t src_fd ) {
     this->my_src_fd = src_fd;
-    this->sub_seqno = 0;
-    this->update_seqno = 0;
+    this->sub_seqno     = 0;
+    this->sub_seqno_sum = 0;
+    this->update_seqno  = 0;
     this->sub_update_mono_time = 0;
+  }
+  void update_sub_seqno( uint64_t &old_val,  uint32_t new_val ) {
+    this->sub_seqno_sum -= old_val;
+    this->sub_seqno_sum += new_val;
+    old_val = new_val;
   }
   uint64_t sub_start( SubArgs &ctx ) noexcept;
   uint64_t sub_stop( SubArgs &ctx ) noexcept;

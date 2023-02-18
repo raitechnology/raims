@@ -202,8 +202,9 @@ SubDB::fwd_psub( PatternArgs &ctx ) noexcept
   MsgCat m;
   m.reserve( e.sz );
 
+  this->update_sub_seqno( this->sub_seqno, this->sub_seqno + 1 );
   m.open( this->user_db.bridge_id.nonce, s.len() )
-   .seqno     ( ++this->sub_seqno )
+   .seqno     ( this->sub_seqno )
    .subj_hash ( ctx.hash )
    .pattern   ( ctx.pat, ctx.patlen )
    .fmt       ( (uint32_t) ctx.cvt.fmt );

@@ -434,8 +434,8 @@ struct EventRecord {
   void recv_bloom( uint32_t uid,  uint32_t tid,  uint32_t count ) {
     this->tid_event( uid, tid, RECV_BLOOM | HAS_TPORT | HAS_DATA ).data = count;
   }
-  void converge( uint16_t inv ) {
-    this->uid_event( 0, CONVERGE | HAS_DATA ).data = inv;
+  void converge( uint16_t inv,  uint32_t uid ) {
+    this->uid_event( uid, CONVERGE | HAS_DATA ).data = inv;
   }
 };
 

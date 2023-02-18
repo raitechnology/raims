@@ -84,6 +84,7 @@ AdjDistance::clear_cache( void ) noexcept
   uint32_t max       = this->user_db.next_uid,
            rte_cnt   = (uint32_t) this->user_db.transport_tab.count;
   this->cache_seqno  = this->update_seqno;
+  this->prune_seqno  = 0;
   this->max_tport    = rte_cnt;
   this->tport_select = rte_cnt;
   this->max_uid      = max;
@@ -228,7 +229,7 @@ AdjDistance::find_inconsistent( UserBridge *&from,
         if ( ! found ) {
           UidMissing & m = this->missing[ this->miss_tos++ ];
           m.uid = uid;
-          m.uid2 = uid;
+          m.uid2 = uid2;
         }
       }
     }
@@ -304,44 +305,6 @@ AdjDistance::outbound_refs( uint32_t from ) noexcept
   }
   return found;
 }
-#if 0
-void
-AdjDistance::calc_reachable( TransportRoute &rte ) noexcept
-{
-  uint32_t i, uid, uid2, tos = 0;
-  this->clear_cache_if_dirty();
-  this->reachable.zero( this->max_uid );
-  this->visit[ 0 ] = 0; /* exclude self from routing */
-  for ( i = 1; i < this->max_uid; i++ )
-    this->visit[ i ] = 1; /* set other nodes as not reachable */
-  /* push transport connected uids */
-  for ( bool ok = rte.uid_connected.first( uid ); ok;
-        ok = rte.uid_connected.next( uid ) ) {
-    if ( this->visit[ uid ] != 0 ) {
-      this->visit[ uid ] = 0; /* mark visited */
-      this->stack[ tos++ ].uid = uid;
-    }
-  }
-  while ( tos > 0 ) {
-    uid = this->stack[ --tos ].uid;
-    if ( this->user_db.bridge_tab.ptr[ uid ] == NULL )
-      continue;
-    UserBridge &n = *this->user_db.bridge_tab.ptr[ uid ];
-    this->reachable.add( uid );
-    for ( i = 0; i < n.adjacency.count; i++ ) {
-      AdjacencySpace * set = n.adjacency.ptr[ i ];
-      if ( set == NULL )
-        continue;
-      for ( bool ok = set->first( uid2 ); ok; ok = set->next( uid2 ) ) {
-        if ( this->visit[ uid2 ] != 0 ) {
-          this->visit[ uid2 ] = 0;
-          this->stack[ tos++ ].uid = uid2;
-        }
-      }
-    }
-  }
-}
-#endif
 /* find dest through src */
 uint32_t
 AdjDistance::calc_cost( uint32_t src_uid,  uint32_t dest_uid,
@@ -470,6 +433,9 @@ AdjDistance::zero_clocks( void ) noexcept
 void
 AdjDistance::coverage_init( uint32_t src_uid ) noexcept
 {
+  this->tport_select = this->max_tport;
+  if ( this->prune_seqno != this->cache_seqno )
+    this->prune_adjacency_sets();
   this->path.zero( this->max_uid );
   this->fwd.zero( this->max_uid );
   if ( ++this->adjacency_clock == 0 ) {
@@ -478,15 +444,57 @@ AdjDistance::coverage_init( uint32_t src_uid ) noexcept
   }
   this->path.add( src_uid );
   this->visit[ src_uid ] = 0;
-  this->tport_select = this->max_tport;
 }
 
 uint64_t
-AdjDistance::get_start_time( uint32_t uid ) noexcept
+AdjDistance::get_start_time( uint32_t uid ) const noexcept
 {
   if ( uid == 0 )
     return this->user_db.start_time;
   return this->user_db.bridge_tab.ptr[ uid ]->start_time;
+}
+
+bool
+AdjDistance::is_older( uint32_t uid,  uint32_t uid2 ) const noexcept
+{
+  return this->get_start_time( uid ) < this->get_start_time( uid2 );
+}
+
+int
+AdjDistance::compare_set( AdjacencySpace *set,  AdjacencySpace *set2 ) noexcept
+{
+  if ( set->uid == set2->uid ) {
+    if ( set->rem_uid == set2->rem_uid ) {
+      int cmp;
+      if ( this->is_older( set->uid, set->rem_uid ) )
+        cmp = ( set->tport_id < set2->tport_id ? -1 : 1 );
+      else
+        cmp = ( set->rem_tport_id < set2->rem_tport_id ? -1 : 1 );
+      d_adj( "%s.%u -> %s.%u, set %s.%u: %u, set2 %s.%u: %u, cmp %d\n",
+             this->uid_user( set->uid ), set->uid,
+             this->uid_user( set->rem_uid ), set->rem_uid,
+             set->tport.val, set->tport_id, set->rem_tport_id,
+             set2->tport.val, set2->tport_id, set2->rem_tport_id, cmp );
+      return cmp;
+    }
+    return this->is_older( set->rem_uid, set2->rem_uid ) ? -1 : 1;
+  }
+  return this->is_older( set->uid, set2->uid ) ? -1 : 1;
+}
+
+int
+AdjDistance::compare_set2( AdjacencySpace *set,  AdjacencySpace *set2 ) noexcept
+{
+  if ( set->tport_type.cmp( set2->tport_type ) < 0 )
+    return -1;
+  if ( set->tport_type.equals( set2->tport_type ) ) {
+    if ( set->tport.cmp( set2->tport ) > 0 )
+      return -1;
+    if ( set->tport.equals( set2->tport ) )
+      if ( set->tport_id < set2->tport_id )
+        return -1;
+  }
+  return 1;
 }
 /* add a path to the links taken by a coverage step, if a path is equal to
  * an existing one, choose between a redundant list by ordering them by:
@@ -510,19 +518,10 @@ AdjDistance::push_link( AdjacencySpace *set ) noexcept
         /* order by start time */
         do {
           set2 = *ptr;
-          if ( set->uid == set2->uid ) {
-            if ( set->tport_type.cmp( set2->tport_type ) < 0 )
-              break;
-            if ( set->tport_type.equals( set2->tport_type ) ) {
-              if ( set->tport.cmp( set2->tport ) > 0 )
-                break;
-              if ( set->tport.equals( set2->tport ) )
-                if ( set->tport_id < set2->tport_id )
-                  break;
-            }
-          }
-          else if ( this->get_start_time( set->uid ) <
-                    this->get_start_time( set2->uid ) )
+          int cmp = this->compare_set( set, set2 );
+          if ( cmp == 0 )
+            cmp = this->compare_set2( set, set2 );
+          if ( cmp < 0 )
             break;
           ptr = &set2->next_link;
         } while ( set2->next_link != NULL );
@@ -604,7 +603,8 @@ AdjDistance::coverage_step( uint8_t path_select ) noexcept
 
     for ( i = 0; i < count; i++ ) {
       if ( (set = this->adjacency_set( uid, i )) == NULL ||
-           set->clock == this->adjacency_clock )
+           set->clock == this->adjacency_clock ||
+           ( set->prune_path & ( 1 << path_select ) ) == 0 )
         continue;
 
       uint32_t cost = this->visit[ uid ] + set->cost[ path_select ];
@@ -656,6 +656,113 @@ AdjDistance::coverage_link( uint32_t target_uid ) noexcept
   }
   return NULL;
 }
+
+void
+AdjDistance::prune_adjacency_sets( void ) noexcept
+{
+  kv::ArrayCount<AdjacencySpace *, 32> uid_ref;
+  this->prune_seqno = this->cache_seqno;
+  d_adj( "update prune seqno %lu\n", this->prune_seqno );
+
+  for ( uint32_t uid = 0; uid < this->max_uid; uid++ ) {
+    uint32_t count = this->adjacency_count( uid ),
+             rem_uid;
+    AdjacencySpace * set;
+    for ( uint32_t tport_id = 0; tport_id < count; tport_id++ ) {
+      if ( (set = this->adjacency_set( uid, tport_id )) == NULL )
+        continue;
+      set->prune_path = 0;
+    }
+    d_adj( "%s.%u adj_count %u\n", this->uid_user( uid ), uid, count );
+    for ( uint8_t path_select = 0; path_select < COST_PATH_COUNT;
+          path_select++ ) {
+      uid_ref.zero();
+      for ( uint32_t tport_id = 0; tport_id < count; tport_id++ ) {
+        if ( (set = this->adjacency_set( uid, tport_id )) == NULL )
+          continue;
+        rem_uid = set->rem_uid;
+        if ( rem_uid != 0 ) {
+          if ( ! this->user_db.uid_authenticated.is_member( rem_uid ) ) {
+            /* could be a zombie */
+            continue;
+          }
+        }
+        if ( ! set->is_member( rem_uid ) ) {
+          /* uid needs to update this set, rem_uid is not connected */
+          continue;
+        }
+        set->next_link = NULL;
+        AdjacencySpace * set2 = uid_ref[ rem_uid ];
+        /* better cost */
+        if ( set2 == NULL ||
+             set->cost[ path_select ] < set2->cost[ path_select ] ) {
+          uid_ref.ptr[ set->rem_uid ] = set;
+          continue;
+        }
+        if ( set->cost[ path_select ] > set2->cost[ path_select ] )
+          continue;
+
+        int cmp;
+        bool is_old = this->is_older( set->uid, set2->rem_uid );
+        if ( is_old )
+          cmp = ( set->tport_id < set2->tport_id ? -1 : 1 );
+        else
+          cmp = ( set->rem_tport_id < set2->rem_tport_id ? -1 : 1 );
+        /* order sets by tport_id, lowest id of the oldest peer wins  */
+        if ( cmp < 0 ) {
+          set->next_link = uid_ref.ptr[ rem_uid ];
+          uid_ref.ptr[ set->rem_uid ] = set;
+          continue;
+        }
+        /* insert into list */
+        for (;;) {
+          AdjacencySpace * next = set2->next_link;
+          if ( next == NULL ) {
+            set2->next_link = set;
+            break;
+          }
+          if ( is_old )
+            cmp = ( set->tport_id < next->tport_id ? -1 : 1 );
+          else
+            cmp = ( set->rem_tport_id < next->rem_tport_id ? -1 : 1 );
+          if ( cmp < 0 ) {
+            set->next_link = next;
+            set2->next_link = set;
+            break;
+          }
+          set2 = next;
+        }
+      }
+      /* mark links that should be used with the path_select */
+      for ( rem_uid = 0; rem_uid < uid_ref.count; rem_uid++ ) {
+        set = uid_ref.ptr[ rem_uid ];
+        if ( set == NULL )
+          continue;
+        if ( path_select == 0 || set->next_link == NULL )
+          set->prune_path |= 1 << path_select;
+        else {
+          AdjacencySpace * path_set[ COST_PATH_COUNT ];
+          uint8_t n = 0, i;
+          for ( i = 0; i < COST_PATH_COUNT; i++ ) {
+            path_set[ n++ ] = set;
+            if ( (set = set->next_link) == NULL )
+              break;
+          }
+          path_set[ path_select % n ]->prune_path |= 1 << path_select;
+        }
+      }
+    }
+    if ( debug_adj ) {
+      for ( uint32_t tport_id = 0; tport_id < count; tport_id++ ) {
+        if ( (set = this->adjacency_set( uid, tport_id )) == NULL )
+          continue;
+        printf( "%s.%u %s.%u prune_path %u\n",
+                this->uid_user( uid ), uid,
+                set->tport.val, tport_id, set->prune_path );
+      }
+    }
+  }
+}
 /* find which tports are used at midpt_uid starting from src_uid
  * src_uid -> midpt_uid {tport, tport, tport} -> the rest of peers */
 void
@@ -668,15 +775,17 @@ AdjDistance::calc_forward_cache( ForwardCache &fwd,  uint32_t src_uid,
   fwd.init( this->adjacency_count( midpt_uid ), this->cache_seqno );
 
   uint32_t tport_id, clk = this->adjacency_clock;
-  d_adj( "calc_forward_cache src_uid %u, mid %u, path %u, clk %u\n",
-         src_uid, midpt_uid, path_select, clk );
+  d_adj( "calc_forward_cache src %s.%u, mid %s.%u, path %u, clk %u\n",
+         this->uid_user( src_uid ), src_uid,
+         this->uid_user( midpt_uid ), midpt_uid, path_select, clk );
   for ( tport_id = 0; tport_id < fwd.tport_count; tport_id++ ) {
     AdjacencySpace * set;
     if ( (set = this->adjacency_set( midpt_uid, tport_id )) == NULL )
       continue;
     if ( set->clock == clk ) {
-      d_adj( "fwd_cache(%u) mid %u path %u -> tport_id %u\n", src_uid,
-              midpt_uid, path_select, tport_id );
+      d_adj( "fwd_cache(%s.%u) mid %s.%u path %u -> tport_id %u\n",
+              this->uid_user( src_uid ), src_uid,
+              this->uid_user( midpt_uid ), midpt_uid, path_select, tport_id );
       fwd.add( tport_id );
       fwd.fwd_count++;
     }
@@ -710,8 +819,11 @@ AdjDistance::test_forward_midpt( uint32_t midpt_uid,  uint32_t target_uid,
     if ( ! ok )
       continue;
     for ( ; ok; ok = set->next( src_uid ) ) {
-      if ( src_uid == target_uid )
+      if ( src_uid == target_uid ) {
+        d_adj( "target found %s.%u in tport %s.%u\n", this->uid_user( src_uid ),
+               src_uid, set->tport.val, tport_id );
         return true;
+      }
     }
     for ( ok = set->first( src_uid ); ok; ok = set->next( src_uid ) ) {
       if ( this->test_forward_midpt( src_uid, target_uid, path_select ) )
@@ -754,11 +866,7 @@ AdjDistance::calc_path( ForwardCache &fwd,  uint8_t path_select ) noexcept
       for ( uid = 1; uid < this->max_uid; uid++ ) {
         if ( this->fwd.is_member( uid ) ) {
           for ( bool b = set.first( src_uid ); b; b = set.next( src_uid ) ) {
-            if ( path[ uid ].cost == 0 ||
-                 path[ uid ].cost > cost ||
-                 ( path[ uid ].cost == cost &&
-                   this->get_start_time( src_uid ) >
-                   this->get_start_time( path[ uid ].src_uid ) ) ) {
+            if ( path[ uid ].cost == 0 || path[ uid ].cost > cost ) {
               d_adj(
                 "update uid %s.%u path %u tport %u cost %u src_uid %s.%u\n",
                      this->uid_user( uid ), uid, path_select, tport_id, cost,
@@ -1253,8 +1361,7 @@ GraphDescription::find_peer_star( uint32_t uid,  AdjacencySpace *set,
   graph_mesh.add( peer_uid );
   graph_used.add( conn_id );
 
-  if ( this->dist.get_start_time( uid ) <
-       this->dist.get_start_time( peer_uid ) )
+  if ( this->dist.is_older( uid, peer_uid ) )
     listen_uid = uid;
   else
     listen_uid = peer_uid;
@@ -1376,6 +1483,8 @@ GraphDescription::find_peer_conn( AdjacencySpace &set,  uint32_t uid,
         continue;
       if ( peer_set->tport_type.equals( set.tport_type ) &&
            peer_set->is_member( uid ) ) {
+        if ( peer_set->rem_tport_id == set.tport_id )
+          return true;
         if ( peer_set->tport.equals( set.tport ) )
           return true;
         /* if ports are named differently, use at last resort since we

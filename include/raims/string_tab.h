@@ -94,7 +94,12 @@ struct StringTab {
   char            * small_str;
 
   uint32_t ref_string( const char *str,  size_t len,  StringVal &sv ) noexcept;
-  void reref_string( const char *str,  size_t len,  StringVal &sv ) noexcept {
+  uint32_t add_string( StringVal &sv ) {
+    if ( sv.id == 0 )
+      this->ref_string( sv.val, sv.len, sv );
+    return sv.id;
+  }
+  void reref_string( const char *str,  size_t len,  StringVal &sv ) {
     if ( len != sv.len || ::memcmp( str, sv.val, len ) != 0 )
       this->ref_string( str, len, sv );
   }

@@ -1123,7 +1123,7 @@ SessionMgr::on_msg( EvPublish &pub ) noexcept
       if ( dec.seqno == n.sub_seqno + 1 ) {
         /* the leave, stop must be updated in order, dropping subs which have no
          * start will cause corruption of the bloom */
-        n.sub_seqno = dec.seqno;
+        this->sub_db.update_sub_seqno( n.sub_seqno, dec.seqno );
         n.sub_recv_mono_time = current_monotonic_time_ns();
         this->sub_db.sub_update_mono_time = n.sub_recv_mono_time;
         switch ( type ) {

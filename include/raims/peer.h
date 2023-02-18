@@ -230,6 +230,7 @@ struct PeerKeyCache {
 typedef kv::IntHashTabT<PeerKeyHash,uint32_t> PeerKeyHashTab;
 
 struct TransportRoute;
+struct AdjacencyRec;
 /* adjacency for X ( uid ) (X is me for state change, X is uid for unknown)
  *   [ nonce ] [ tport ]
  * where nonce is not yet resolved
@@ -238,87 +239,100 @@ struct AdjPending {
   AdjPending     * next,
                  * back;
   TransportRoute & rte;   /* where nonce came from */
-  Nonce            nonce; /* nonce of adjacency update, unknown or changed */
-  uint64_t         link_state_seqno, /* link_state_seqno of X */
+  uint64_t         link_state_seqno,  /* link_state_seqno of X */
                    request_time_mono, /* last time request started */
-                   pending_time_mono; /* when pending was added to list */
-  uint32_t         uid,   /* uid this adj belongs to */
-                   tportid; /* tport of adj, tab[ tport ]->set.add( nonce ) */
-  StringVal        tport_sv, /* name assigned to tport at src */
-                   tport_type_sv, /* type of tport at src */
-                   user_sv;  /* user assigned to nonce */
-  uint64_t         pending_seqno; /* unique pending list seqno */
-  uint32_t         request_count,
-                   cost[ COST_PATH_COUNT ];
+                   pending_time_mono, /* when pending was added to list */
+                   pending_seqno;     /* unique pending list seqno */
+  uint32_t         uid,               /* uid this adj belongs to */
+                   request_count,
+                   rec_count;
   PeerSyncReason   reason;
-  bool             add;   /* whether to add or remove it */
+  AdjacencyRec   * rec_list;
+
   void * operator new( size_t, void *ptr ) { return ptr; }
   void operator delete( void *ptr ) { ::free( ptr ); }
 
-  AdjPending( TransportRoute &r,  const Nonce &n ) :
-    next( 0 ), back( 0 ), rte( r ), nonce( n ),
-    link_state_seqno( 0 ), request_time_mono( 0 ), pending_time_mono( 0 ),
-    uid( 0 ), tportid( 0 ), pending_seqno( 0 ), request_count( 0 ),
-    reason( UNAUTH_ADJ_SYNC ), add( true ) {
-    for ( uint8_t i = 0; i < COST_PATH_COUNT; i++ )
-      this->cost[ i ] = COST_DEFAULT;
-  }
+  AdjPending( TransportRoute &r ) :
+    next( 0 ), back( 0 ), rte( r ), link_state_seqno( 0 ),
+    request_time_mono( 0 ), pending_time_mono( 0 ), pending_seqno( 0 ),
+    uid( 0 ), request_count( 0 ), rec_count( 0 ), reason( UNAUTH_ADJ_SYNC ),
+    rec_list( 0 ) {}
 };
 
 struct AdjPendingList : public kv::DLinkList< AdjPending > {
   uint64_t pending_seqno;
   AdjPendingList() : pending_seqno( 0 ) {}
-
-  AdjPending *find_unauth( const Nonce &n ) {
-    for ( AdjPending *p = this->hd; p != NULL; p = p->next ) {
-      if ( p->reason == UNAUTH_ADJ_SYNC ) {
-        if ( p->nonce == n )
-          return p;
-      }
-    }
-    return NULL;
-  }
-  AdjPending *find_update( const Nonce &nonce,  uint32_t tportid,  bool add ) {
-    for ( AdjPending *p = this->hd; p != NULL; p = p->next ) {
-      if ( p->reason != UNAUTH_ADJ_SYNC ) {
-        if ( p->nonce == nonce && p->tportid == tportid && p->add == add )
-          return p; 
-      }
-    }
-    return NULL;
-  }
-  AdjPending *create( TransportRoute &rte,  const Nonce &nonce ) {
-    AdjPending *p =
-      new ( ::malloc( sizeof( AdjPending ) ) ) AdjPending( rte, nonce );
-    p->pending_seqno = ++this->pending_seqno;
-    this->push_tl( p );
-    return p;
-  }
 };
 
 struct AdjChange {
   AdjChange * next,
             * back;
-  Nonce       nonce; /* nonce of adjacency, unknown or changed */
   uint32_t    uid,   /* uid this adj belongs to */
               tportid; /* tport of adj, tab[ tportid ]->set.add( nonce ) */
   uint64_t    seqno; /* link_state_seqno of X */
   bool        add;   /* whether to add or remove it */
   void * operator new( size_t, void *ptr ) { return ptr; }
   void operator delete( void *ptr ) { ::free( ptr ); }
-  AdjChange( const Nonce &n, uint32_t u_id, uint32_t tp_id, uint64_t ls_seqno,
-             bool a )
-    : next( 0 ), back( 0 ), nonce( n ), uid( u_id ), tportid( tp_id ),
-      seqno( ls_seqno ), add( a ) {}
+  AdjChange( uint32_t u_id, uint32_t tp_id, uint64_t ls_seqno,  bool a )
+    : next( 0 ), back( 0 ), uid( u_id ), tportid( tp_id ), seqno( ls_seqno ),
+      add( a ) {}
 };
 
 struct AdjChangeList : public kv::DLinkList< AdjChange > {
-  void append( Nonce &n,  uint32_t u_id,  uint32_t tp_id,  uint64_t ls_seqno,
-               bool a ) {
-    this->push_tl(
-      new ( ::malloc( sizeof( AdjChange ) ) )
-        AdjChange( n, u_id, tp_id, ls_seqno, a ) );
+  AdjChange *append( uint32_t uid,  uint32_t tp_id,  uint64_t ls_seqno,
+                     bool a ) {
+    AdjChange *p;
+    for ( p = this->hd; p != NULL; p = p->next ) {
+      if ( p->uid == uid && p->tportid == tp_id &&
+           p->add == a )
+        return p;
+    }
+    p = new ( ::malloc( sizeof( AdjChange ) ) )
+        AdjChange( uid, tp_id, ls_seqno, a );
+    this->push_tl( p );
+    return p;
   }
+};
+
+struct AdjacencyRec : public MsgFldSet {
+  Nonce          nonce,
+                 rem_bridge;
+  StringVal      tport_name,
+                 tport_type,
+                 user;
+  uint32_t       tportid,
+                 cost[ COST_PATH_COUNT ],
+                 rem_tportid;
+  bool           add;
+  AdjacencyRec * next;
+  void * operator new( size_t, void *ptr ) { return ptr; }
+  AdjacencyRec() : tportid( 0 ), rem_tportid( 0 ), add( true ), next( 0 ) {
+    for ( uint8_t i = 0; i < COST_PATH_COUNT; i++ )
+      this->cost[ i ] = COST_DEFAULT;
+    this->nonce.zero();
+    this->rem_bridge.zero();
+  }
+  void copy( const AdjacencyRec &rec ) {
+    uint32_t i;
+    for ( i = 0; i < FID_MAX / 64; i++ )
+      this->is_set[ i ] = rec.is_set[ i ];
+    this->nonce       = rec.nonce;
+    this->rem_bridge  = rec.rem_bridge;
+    this->tport_name  = rec.tport_name;
+    this->tport_type  = rec.tport_type;
+    this->user        = rec.user;
+    this->tportid     = rec.tportid;
+    for ( i = 0; i < COST_PATH_COUNT; i++ )
+      this->cost[ i ] = rec.cost[ i ];
+    this->rem_tportid = rec.rem_tportid;
+    this->add         = rec.add;
+    this->next        = NULL;
+  }
+  void set_field( uint32_t fid,  md::MDReference &mref ) noexcept;
+  char tchar( uint32_t fid ) const { return ( this->test( fid ) ) ? '+' : '-'; }
+  void print( void ) const noexcept;
+  static void print_rec_list( const AdjacencyRec *rec_list,
+                              const char *where ) noexcept;
 };
 
 struct UrlDBFilter {

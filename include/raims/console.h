@@ -531,6 +531,8 @@ struct UserBridgeList : public kv::SLinkList<UserBridgeElem> {
                        const UserBridgeElem &e2 ) noexcept;
   static int cmp_nonce( const UserBridgeElem &e1,
                         const UserBridgeElem &e2 ) noexcept;
+  static int cmp_start( const UserBridgeElem &e1,
+                        const UserBridgeElem &e2 ) noexcept;
 };
 
 struct Console : public md::MDOutput, public SubOnMsg, public ConfigPrinter,

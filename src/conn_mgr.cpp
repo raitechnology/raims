@@ -493,7 +493,7 @@ ConnectMgr::on_timeout( ConnectCtx &ctx ) noexcept
   TransportRoute * rte = this->user_db.transport_tab.ptr[ ctx.event_id ];
   rte->clear( TPORT_IS_INPROGRESS );
   rte->on_timeout( ctx.connect_tries,
-                   current_monotonic_time_ns() - ctx.start_time );
+                   current_monotonic_time_ns() - ctx.start_mono_time );
 }
 
 ConnectCtx *
@@ -510,11 +510,11 @@ void
 ConnectCtx::connect( const char *host,  int port,  int opts,
                      int timeout ) noexcept
 {
-  this->timeout       = timeout;
-  this->opts          = opts;
-  this->connect_tries = 0;
-  this->state         = CONN_GET_ADDRESS;
-  this->start_time    = current_monotonic_time_ns();
+  this->timeout         = timeout;
+  this->opts            = opts;
+  this->connect_tries   = 0;
+  this->state           = CONN_GET_ADDRESS;
+  this->start_mono_time = current_monotonic_time_ns();
   this->addr_info.timeout_ms = this->next_timeout() / 4;
   this->db.on_dns( *this, host, port, opts );
   this->addr_info.get_address( host, port, opts );
@@ -541,7 +541,7 @@ ConnectCtx::expired( uint64_t cur_time ) noexcept
     return false;
   if ( cur_time == 0 )
     cur_time = current_monotonic_time_ns();
-  return this->start_time +
+  return this->start_mono_time +
     ( (uint64_t) this->timeout * 1000000000 ) < cur_time;
 }
 
@@ -556,8 +556,8 @@ ConnectCtx::on_shutdown( EvSocket &,  const char *msg,  size_t len ) noexcept
   this->client = NULL;
   uint64_t cur_time = current_monotonic_time_ns();
   if ( was_connected || this->state == CONN_SHUTDOWN ) {
-    this->start_time    = cur_time;
-    this->connect_tries = 0;
+    this->start_mono_time = cur_time;
+    this->connect_tries   = 0;
   }
 
   if ( this->state != CONN_SHUTDOWN ) {

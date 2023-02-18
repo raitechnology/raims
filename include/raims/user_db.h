@@ -515,6 +515,7 @@ struct UserDB {
                         msg_send_counter[ MAX_PUB_TYPE ];
   uint64_t              send_peer_seqno, /* a unique seqno for peer multicast */
                         link_state_seqno,/* seqno of adjacency updates */
+                        link_state_sum,  /* sum of all link state seqno */
                         mcast_send_seqno,/* seqno of mcast subjects */
                         hb_ival_ns,      /* heartbeat interval */
                         hb_ival_mask,    /* ping ival = pow2 hb_ival * 1.5 */
@@ -559,6 +560,11 @@ struct UserDB {
   }
   PeerEntry *make_peer_entry( size_t len ) {
     return new ( this->alloc( len ) ) PeerEntry();
+  }
+  void update_link_state_seqno( uint64_t &old_val,  uint32_t new_val ) {
+    this->link_state_sum -= old_val;
+    this->link_state_sum += new_val;
+    old_val = new_val;
   }
   /* release secure mem */
   void release_alloc( void ) noexcept;
@@ -709,6 +715,8 @@ struct UserDB {
   /* link_state.cpp */
   void save_unauthorized_adjacency( MsgFramePublish &fpub ) noexcept;
   void print_adjacency( const char *s,  UserBridge &n ) noexcept;
+  void save_unknown_adjacency( UserBridge &n,  TransportRoute &rte,
+                               uint64_t seqno,  AdjacencyRec *recs ) noexcept;
   void add_unknown_adjacency( UserBridge &n ) noexcept;
   void clear_unknown_adjacency( UserBridge &n ) noexcept;
   void remove_adjacency( UserBridge &n ) noexcept;
@@ -722,6 +730,7 @@ struct UserDB {
   void adjacency_submsg( UserBridge *sync,  MsgCat &m ) noexcept;
   bool recv_adjacency_change( const MsgFramePublish &pub,  UserBridge &n,
                               MsgHdrDecoder &dec ) noexcept;
+  bool add_adjacency_change( UserBridge &n,  AdjacencyRec &rec ) noexcept;
   bool send_adjacency( UserBridge &n,  UserBridge *sync,  InboxBuf &ibx,
                        uint64_t time_val,  uint32_t reas,  int which ) noexcept;
   bool send_adjacency_request( UserBridge &n,  AdjacencyRequest reas ) noexcept;

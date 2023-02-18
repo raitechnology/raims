@@ -25,8 +25,8 @@ UserDB::UserDB( EvPoll &p,  ConfigTree::User &u,  ConfigTree::Service &s,
     hb_interval( HB_DEFAULT_INTERVAL ), reliability( DEFAULT_RELIABILITY ),
     next_uid( 0 ), free_uid_count( 0 ), my_src_fd( -1 ), uid_auth_count( 0 ),
     uid_hb_count( 0 ), send_peer_seqno( 0 ), link_state_seqno( 0 ),
-    mcast_send_seqno( 0 ), hb_ival_ns( 0 ), hb_ival_mask( 0 ),
-    next_ping_mono( 0 ), peer_dist( *this )
+    link_state_sum( 0 ), mcast_send_seqno( 0 ), hb_ival_ns( 0 ),
+    hb_ival_mask( 0 ), next_ping_mono( 0 ), peer_dist( *this )
 {
   this->start_time = current_realtime_ns();
   /* fill in lower nanos if resolution is low */
@@ -107,6 +107,7 @@ UserDB::init( const CryptPass &pwd,  uint32_t my_fd,
   this->next_ping_uid    = 0; /* next pinged uid */
   this->send_peer_seqno  = 0; /* sequence num of peer add/del msgs */
   this->link_state_seqno = 0; /* sequence num of link state msgs */
+  this->link_state_sum   = 0; /* sum of link state seqnos */
   this->mcast_send_seqno = 0; /* sequence num of mcast msgs */
   this->hb_ival_ns       = 0; /* hb interval in nanos */
   this->hb_ival_mask     = 0; /* hb interval mask, pow2 - 1 > hv_ival_ns */
@@ -662,6 +663,9 @@ UserDB::check_user_timeout( uint64_t current_mono_time,
                      this->peer_dist.found_inconsistency?"t":"f" );*/
             this->send_adjacency_request( *n, DIJKSTRA_SYNC_REQ );
           }
+          else if ( ! m->throttle_adjacency( 0, current_mono_time ) ) {
+            this->send_adjacency_request( *m, DIJKSTRA_SYNC_REQ );
+          }
         }
         else if ( n->ping_fail_count >= 3 )
           m = NULL;
@@ -687,16 +691,22 @@ UserDB::check_user_timeout( uint64_t current_mono_time,
     else {
       if ( ! this->peer_dist.found_inconsistency &&
            this->peer_dist.invalid_mono != 0 ) {
-        this->events.converge( this->peer_dist.invalid_reason );
+        uint32_t src_uid = this->peer_dist.invalid_src_uid;
+        this->events.converge( this->peer_dist.invalid_reason, src_uid );
         this->converge_time = current_time;
         if ( current_time > this->net_converge_time )
           this->net_converge_time = current_time;
         this->converge_mono = current_mono_time;
         uint64_t t = ( current_mono_time > this->peer_dist.invalid_mono ) ?
                      ( current_mono_time - this->peer_dist.invalid_mono ) : 0;
-        printf( "network converges %.3f secs, %u uids authenticated, %s\n", 
+        const char * src_user = this->user.user.val;
+        if ( src_uid != 0 )
+          src_user = this->bridge_tab.ptr[ src_uid ]->peer.user.val;
+        printf(
+          "network converges %.3f secs, %u uids authenticated, %s from %s.%u\n", 
                 (double) t / SEC_TO_NS, this->uid_auth_count,
-                invalidate_reason_string( this->peer_dist.invalid_reason ) );
+                invalidate_reason_string( this->peer_dist.invalid_reason ),
+                src_user, src_uid );
       }
       this->find_adjacent_routes();
     }
@@ -876,7 +886,7 @@ UserRoute::set_ucast( UserDB &user_db,  const void *p,  size_t len,
     this->set( UCAST_URL_STATE );
     this->clear( UCAST_URL_SRC_STATE );
   }
-  user_db.peer_dist.invalidate( ADD_UCAST_URL_INV );
+  /*user_db.peer_dist.invalidate( ADD_UCAST_URL_INV );*/
   return true;
 }
 
@@ -933,7 +943,7 @@ UserRoute::set_mesh( UserDB &user_db,  const void *p,  size_t len ) noexcept
     }
 #endif
   }
-  user_db.peer_dist.invalidate( ADD_MESH_URL_INV );
+  /*user_db.peer_dist.invalidate( ADD_MESH_URL_INV );*/
   return true;
 }
 
@@ -1632,8 +1642,8 @@ UserDB::remove_authenticated( UserBridge &n,  AuthStage bye ) noexcept
   }
   n.bloom.zero();
   n.adjacency.reset();
-  n.sub_seqno = 0;
-  n.link_state_seqno = 0;
+  this->sub_db.update_sub_seqno( n.sub_seqno, 0 );
+  this->update_link_state_seqno( n.link_state_seqno, 0 );
   n.uid_csum.zero();
 
   if ( this->node_ht->find( n.bridge_id.nonce, n_pos ) )
@@ -1753,7 +1763,7 @@ UserDB::add_bloom_routes( UserBridge &n,  TransportRoute &rte ) noexcept
 void
 UserDB::add_transport( TransportRoute &rte ) noexcept
 {
-  this->peer_dist.invalidate( ADD_TRANSPORT_INV );
+  this->peer_dist.invalidate( ADD_TRANSPORT_INV, 0 );
 
   for ( uint32_t uid = 1; uid < this->next_uid; uid++ ) {
     if ( this->bridge_tab.ptr[ uid ] == NULL )

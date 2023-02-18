@@ -105,6 +105,9 @@ UserDB::on_inbox_auth( const MsgFramePublish &pub,  UserBridge &n,
   StageAuth tmp_auth;
   AuthStage stage = AUTH_NONE;
   uint32_t  stage_num = stage;
+  uint32_t  cost[ COST_PATH_COUNT ] = { COST_DEFAULT, COST_DEFAULT,
+                                        COST_DEFAULT, COST_DEFAULT },
+            rem_tport_id = 0;
 
   if ( ! dec.get_ival<uint32_t>( FID_AUTH_STAGE, stage_num ) )
     return true;
@@ -193,14 +196,18 @@ UserDB::on_inbox_auth( const MsgFramePublish &pub,  UserBridge &n,
     this->recv_trusted( pub, n, dec );
   }
   if ( n.is_set( AUTHENTICATED_STATE ) ) {
-    uint32_t cost[ COST_PATH_COUNT ] = { COST_DEFAULT, COST_DEFAULT,
-                                         COST_DEFAULT, COST_DEFAULT };
-    if ( dec.get_ival<uint32_t>( FID_COST, cost[ 0 ] ) ) {
-      dec.get_ival<uint32_t>( FID_COST2, cost[ 1 ] );
-      dec.get_ival<uint32_t>( FID_COST3, cost[ 2 ] );
-      dec.get_ival<uint32_t>( FID_COST4, cost[ 3 ] );
-      n.user_route->rte.update_cost( n, cost );
+    if ( dec.get_ival<uint32_t>( FID_TPORTID, rem_tport_id ) ) {
+      if ( dec.get_ival<uint32_t>( FID_COST, cost[ 0 ] ) ) {
+        dec.get_ival<uint32_t>( FID_COST2, cost[ 1 ] );
+        dec.get_ival<uint32_t>( FID_COST3, cost[ 2 ] );
+        dec.get_ival<uint32_t>( FID_COST4, cost[ 3 ] );
+        n.user_route->rte.update_cost( n, cost, rem_tport_id, "i1" );
+      }
+      else {
+        n.user_route->rte.update_cost( n, NULL, rem_tport_id, "i2" );
+      }
     }
+
     if ( ! n.test_set( SENT_ZADD_STATE ) ) {
       this->send_peer_add( n );    /* broadcast _Z.ADD with new peer */
       n.user_route->set( SENT_ZADD_STATE );
@@ -271,6 +278,7 @@ UserDB::send_challenge( UserBridge &n,  AuthStage stage ) noexcept
    .cost2      ()
    .cost3      ()
    .cost4      ()
+   .tportid    ()
    .pk_sig     ();
 
   MsgCat m;
@@ -315,6 +323,7 @@ UserDB::send_challenge( UserBridge &n,  AuthStage stage ) noexcept
     m.cost3( rte.uid_connected.cost[ 2 ] );
     m.cost4( rte.uid_connected.cost[ 3 ] );
   }
+  m.tportid( rte.tport_id );
   m.pk_sig();
   uint32_t h = ibx.hash();
   DSA * dsa = ( ! this->svc_dsa->sk.is_zero() ? this->svc_dsa : this->user_dsa );
@@ -413,6 +422,7 @@ UserDB::send_trusted( const MsgFramePublish &pub,  UserBridge &n,
    .cost2     ()
    .cost3     ()
    .cost4     ()
+   .tportid   ()
    .mesh_url  ( u_ptr->mesh_url.len )
    .mesh_db   ( mesh_db_len )
    .ucast_db  ( ucast_db_len );
@@ -435,6 +445,7 @@ UserDB::send_trusted( const MsgFramePublish &pub,  UserBridge &n,
     m.cost3( rte.uid_connected.cost[ 2 ] );
     m.cost4( rte.uid_connected.cost[ 3 ] );
   }
+  m.tportid( rte.tport_id );
   if ( mesh_db_len != 0 && u_ptr->mesh_url.len > 0 ) {
     m.mesh_url( u_ptr->mesh_url.val, u_ptr->mesh_url.len );
     this->url_db_submsg( pub.rte, mesh_filter, m );
@@ -487,6 +498,11 @@ UserDB::send_trusted( const MsgFramePublish &pub,  UserBridge &n,
          .time      ()
          .auth_stage()
          .start     ()
+         .cost      ()
+         .cost2     ()
+         .cost3     ()
+         .cost4     ()
+         .tportid   ()
          .mesh_url  ( u_ptr->mesh_url.len )
          .mesh_db   ( mesh_db_len )
          .ucast_url ( u_ptr->ucast_url.len )
@@ -500,6 +516,15 @@ UserDB::send_trusted( const MsgFramePublish &pub,  UserBridge &n,
          .time      ( n.auth[ 1 ].time   )
          .auth_stage( AUTH_TRUST         )
          .start     ( this->start_time   );
+
+        if ( rte->uid_connected.is_advertised ) {
+          m.cost( rte->uid_connected.cost[ 0 ] );
+          m.cost2( rte->uid_connected.cost[ 1 ] );
+          m.cost3( rte->uid_connected.cost[ 2 ] );
+          m.cost4( rte->uid_connected.cost[ 3 ] );
+        }
+        m.tportid( tport_id );
+
         if ( mesh_db_len != 0 ) {
           m.mesh_url( u_ptr->mesh_url.val, u_ptr->mesh_url.len );
           this->url_db_submsg( *rte, mesh_filter2, m );
@@ -531,6 +556,7 @@ UserDB::recv_trusted( const MsgFramePublish &pub,  UserBridge &n,
   dec.get_ival<uint64_t>( FID_TIME, time );
   if ( n.start_time == start_time && time >= n.hb_time ) {
     this->events.recv_trust( n.uid, pub.rte.tport_id, in_mesh );
+
     if ( in_mesh )
       this->recv_mesh_db( pub, n, dec );
     if ( is_mcast )

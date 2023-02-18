@@ -13,7 +13,8 @@ using namespace md;
 
 SubDB::SubDB( EvPoll &p,  UserDB &udb,  SessionMgr &smg ) noexcept
      : user_db( udb ), mgr( smg ), my_src_fd( -1 ), next_inbox( 0 ),
-       sub_seqno( 0 ), sub_update_mono_time( 0 ), sub_tab( this->sub_list ),
+       sub_seqno( 0 ), sub_seqno_sum( 0 ), sub_update_mono_time( 0 ),
+       sub_tab( this->sub_list ),
        pat_tab( this->sub_list, p.sub_route.pre_seed ),
        bloom( (uint32_t) udb.rand.next(), "(node)", p.g_bloom_db ),
        console( (uint32_t) udb.rand.next(), "(console)", p.g_bloom_db ),
@@ -147,8 +148,9 @@ SubDB::fwd_sub( SubArgs &ctx ) noexcept
   MsgCat m;
   m.reserve( e.sz );
 
+  this->update_sub_seqno( this->sub_seqno, this->sub_seqno + 1 );
   m.open( this->user_db.bridge_id.nonce, s.len() )
-   .seqno     ( ++this->sub_seqno )
+   .seqno     ( this->sub_seqno )
    .subj_hash ( ctx.hash )
    .subject   ( ctx.sub, ctx.sublen );
   uint32_t h = s.hash();
@@ -455,7 +457,7 @@ SubDB::recv_bloom( const MsgFramePublish &pub,  UserBridge &n,
         if ( debug_sub )
           print_bloom( *n.bloom.bits );
 
-        n.sub_seqno = sub_seqno;
+        this->update_sub_seqno( n.sub_seqno, sub_seqno );
         n.sub_recv_mono_time = current_monotonic_time_ns();
         this->sub_update_mono_time = n.sub_recv_mono_time;
         this->user_db.events.recv_bloom( n.uid, pub.rte.tport_id,

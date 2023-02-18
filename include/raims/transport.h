@@ -43,7 +43,7 @@ struct ConnectCtx : public kv::EvConnectionNotify,
   kv::CaresAddrInfo  addr_info;
   kv::EvConnection * client;
   uint64_t           event_id,
-                     start_time;
+                     start_mono_time;
   uint32_t           connect_tries,
                      timeout;
   int                opts;
@@ -52,7 +52,7 @@ struct ConnectCtx : public kv::EvConnectionNotify,
   void * operator new( size_t, void *ptr ) { return ptr; }
   ConnectCtx( kv::EvPoll &poll,  ConnectDB &d )
     : db( d ), addr_info( poll, this ), client( 0 ), event_id( 0 ),
-      start_time( 0 ), connect_tries( 0 ), timeout( 15 ),
+      start_mono_time( 0 ), connect_tries( 0 ), timeout( 15 ),
       state( CONN_SHUTDOWN ) {}
 
   uint32_t next_timeout( void ) const {
@@ -238,7 +238,8 @@ struct TransportRoute : public kv::EvSocket, public kv::EvConnectionNotify,
   int init( void ) noexcept;
   void init_state( void ) noexcept;
   void set_peer_name( kv::PeerData &pd,  const char *suff ) noexcept;
-  void update_cost( UserBridge &n,  uint32_t cost[ COST_PATH_COUNT ] ) noexcept;
+  void update_cost( UserBridge &n,  uint32_t *cost,
+                    uint32_t rem_tport_id,  const char *s ) noexcept;
   const char * connected_names( char *buf,  size_t buflen ) noexcept;
   /*const char * reachable_names( char *buf,  size_t buflen ) noexcept;*/
   size_t port_status( char *buf, size_t buflen ) noexcept;
