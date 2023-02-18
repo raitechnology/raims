@@ -396,19 +396,19 @@ struct MeshRoute {
                   * back;
   TransportRoute  & rte;
   Nonce             b_nonce;
-  const char      * mesh_url;
-  uint32_t          mesh_url_len,
-                    url_hash;
+  StringVal         tport_name,
+                    mesh_url;
+  uint32_t          url_hash;
   uint64_t          conn_mono_time,
                     start_mono_time;
   bool              is_mesh,
                     is_connected;
   void * operator new( size_t, void *ptr ) { return ptr; }
   void operator delete( void *ptr ) { ::free( ptr ); }
-  MeshRoute( TransportRoute &r,  const char *url,  uint32_t len,
+  MeshRoute( TransportRoute &r,  const StringVal &tport,  const StringVal &url,
              uint32_t h,  const Nonce &n,  bool is_me )
-    : next( 0 ), back( 0 ), rte( r ), b_nonce( n ), mesh_url( url ),
-      mesh_url_len( len ), url_hash( h ), conn_mono_time( 0 ),
+    : next( 0 ), back( 0 ), rte( r ), b_nonce( n ), tport_name( tport ),
+      mesh_url( url ), url_hash( h ), conn_mono_time( 0 ),
       start_mono_time( 0 ), is_mesh( is_me ), is_connected( false ) {}
 };
 
@@ -416,9 +416,9 @@ struct MeshDirectList : public kv::DLinkList< MeshRoute > {
   uint64_t last_process_mono;
   MeshDirectList() : last_process_mono( 0 ) {}
   /*void update( UserRoute *u ) noexcept;*/
-  void update( TransportRoute &rte,  const char *url,  uint32_t len,
-               uint32_t h,  const Nonce &b_nonce,
-               bool is_mesh = true ) noexcept;
+  void update( TransportRoute &rte,  const StringVal &tport,
+               const StringVal &url,  uint32_t h,
+               const Nonce &b_nonce,  bool is_mesh = true ) noexcept;
 };
 
 typedef struct kv::PrioQueue< UserBridge *,

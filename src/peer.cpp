@@ -698,14 +698,11 @@ UserDB::recv_peer_del( const MsgFramePublish &pub,  UserBridge &n,
 
 struct MeshDBRec : public MsgFldSet {
   Nonce        nonce;
-  const char * mesh_url,
-             * user;
-  uint32_t     mesh_url_len,
-               user_len;
+  StringVal    mesh_url,
+               user;
   MeshDBRec  * next;
   void * operator new( size_t, void *ptr ) { return ptr; }
-  MeshDBRec() : mesh_url( 0 ), user( 0 ), mesh_url_len( 0 ), user_len( 0 ),
-                next( 0 ) {
+  MeshDBRec() : next( 0 ) {
     this->nonce.zero();
   }
   void set_field( uint32_t fid,  MDReference &mref ) {
@@ -714,12 +711,12 @@ struct MeshDBRec : public MsgFldSet {
         this->nonce.copy_from( mref.fptr );
         break;
       case FID_USER:
-        this->user     = (const char *) mref.fptr;
-        this->user_len = (uint32_t) mref.fsize;
+        this->user.val = (const char *) mref.fptr;
+        this->user.len = (uint32_t) mref.fsize;
         break;
       case FID_MESH_URL:
-        this->mesh_url     = (const char *) mref.fptr;
-        this->mesh_url_len = (uint32_t) mref.fsize;
+        this->mesh_url.val = (const char *) mref.fptr;
+        this->mesh_url.len = (uint32_t) mref.fsize;
         break;
       default:
         break;
@@ -729,8 +726,8 @@ struct MeshDBRec : public MsgFldSet {
     char buf[ NONCE_B64_LEN + 1 ];
     printf( "  nonce[%s] user[%.*s] mesh[%.*s]\n",
             this->nonce.to_base64_str( buf ),
-            this->user_len, this->user,
-            this->mesh_url_len, this->mesh_url );
+            this->user.len, this->user.val,
+            this->mesh_url.len, this->mesh_url.val );
   }
   static void print_rec_list( const MeshDBRec *rec_list,
                               UserBridge &n ) noexcept {
@@ -752,25 +749,28 @@ UserDB::recv_mesh_db( const MsgFramePublish &pub,  UserBridge &n,
   if ( debug_peer )
     MeshDBRec::print_rec_list( rec_list, n );
 
-  if ( ! dec.test( FID_MESH_URL ) ) {
-    n.printf( "ignoring mesh db without mesh url\n" );
+  if ( ! dec.test_2( FID_MESH_URL, FID_TPORT ) ) {
+    n.printf( "ignoring mesh db without mesh url and tport\n" );
     return true;
   }
   StringVal mesh_url( (const char *) dec.mref[ FID_MESH_URL ].fptr,
                       dec.mref[ FID_MESH_URL ].fsize );
-  if ( ! rte->mesh_url.equals( mesh_url ) ) {
+  StringVal tport   ( (const char *) dec.mref[ FID_TPORT ].fptr,
+                      dec.mref[ FID_TPORT ].fsize );
+  if ( ! rte->mesh_url.equals( mesh_url ) ||
+       ! rte->transport.tport.equals( tport ) ) {
     rte = rte->mgr.find_mesh( mesh_url );
-    if ( rte == NULL ) {
-      n.printf( "rcv no mesh url found (%.*s)\n", mesh_url.len, mesh_url.val );
+    if ( rte == NULL || ! rte->transport.tport.equals( tport ) ) {
+      n.printf( "recv mesh db %.*s no mesh url found (%.*s)\n",
+                tport.len, tport.val, mesh_url.len, mesh_url.val );
       return true;
     }
   }
   while ( rec_list != NULL ) {
     MeshDBRec  & rec = *rec_list;
     rec_list = rec.next;
-    if ( rec.mesh_url_len != 0 ) {
-      this->mesh_pending.update( *rte, rec.mesh_url, rec.mesh_url_len, 0,
-                                 rec.nonce );
+    if ( rec.mesh_url.len != 0 ) {
+      this->mesh_pending.update( *rte, tport, rec.mesh_url, 0, rec.nonce );
     }
   }
   return true;
@@ -778,14 +778,11 @@ UserDB::recv_mesh_db( const MsgFramePublish &pub,  UserBridge &n,
 
 struct UcastDBRec : public MsgFldSet {
   Nonce        nonce;
-  const char * ucast_url,
-             * user;
-  uint32_t     ucast_url_len,
-               user_len;
+  StringVal    ucast_url,
+               user;
   UcastDBRec * next;
   void * operator new( size_t, void *ptr ) { return ptr; }
-  UcastDBRec() : ucast_url( 0 ), user( 0 ), ucast_url_len( 0 ), user_len( 0 ),
-                next( 0 ) {
+  UcastDBRec() : next( 0 ) {
     this->nonce.zero();
   }
   void set_field( uint32_t fid,  MDReference &mref ) {
@@ -794,12 +791,12 @@ struct UcastDBRec : public MsgFldSet {
         this->nonce.copy_from( mref.fptr );
         break;
       case FID_USER:
-        this->user     = (const char *) mref.fptr;
-        this->user_len = (uint32_t) mref.fsize;
+        this->user.val = (const char *) mref.fptr;
+        this->user.len = (uint32_t) mref.fsize;
         break;
       case FID_UCAST_URL:
-        this->ucast_url     = (const char *) mref.fptr;
-        this->ucast_url_len = (uint32_t) mref.fsize;
+        this->ucast_url.val = (const char *) mref.fptr;
+        this->ucast_url.len = (uint32_t) mref.fsize;
         break;
       default:
         break;
@@ -809,8 +806,8 @@ struct UcastDBRec : public MsgFldSet {
     char buf[ NONCE_B64_LEN + 1 ];
     printf( "  nonce[%s] user[%.*s] ucast[%.*s]\n",
             this->nonce.to_base64_str( buf ),
-            this->user_len, this->user,
-            this->ucast_url_len, this->ucast_url );
+            this->user.len, this->user.val,
+            this->ucast_url.len, this->ucast_url.val );
   }
   static void print_rec_list( const UcastDBRec *rec_list,
                               UserBridge &n ) noexcept {
@@ -832,13 +829,16 @@ UserDB::recv_ucast_db( const MsgFramePublish &pub,  UserBridge &n,
   if ( debug_peer )
     UcastDBRec::print_rec_list( rec_list, n );
 
-  if ( ! dec.test( FID_UCAST_URL ) ) {
-    n.printf( "ignoring ucast db without ucast url\n" );
+  if ( ! dec.test_2( FID_UCAST_URL, FID_TPORT ) ) {
+    n.printf( "ignoring ucast db without ucast url and tport\n" );
     return true;
   }
   StringVal ucast_url( (const char *) dec.mref[ FID_UCAST_URL ].fptr,
                        dec.mref[ FID_UCAST_URL ].fsize );
-  if ( ! rte->ucast_url.equals( ucast_url ) ) {
+  StringVal tport   ( (const char *) dec.mref[ FID_TPORT ].fptr,
+                      dec.mref[ FID_TPORT ].fsize );
+  if ( ! rte->ucast_url.equals( ucast_url ) ||
+       ! rte->transport.tport.equals( tport ) ) {
     rte = rte->mgr.find_ucast( ucast_url );
     if ( rte == NULL ) {
       n.printf( "no ucast url found (%.*s)\n", ucast_url.len, ucast_url.val );
@@ -850,18 +850,18 @@ UserDB::recv_ucast_db( const MsgFramePublish &pub,  UserBridge &n,
     size_t   n_pos;
     uint32_t uid;
     rec_list = rec.next;
-    if ( rec.ucast_url_len != 0 ) {
+    if ( rec.ucast_url.len != 0 ) {
       if ( this->node_ht->find( rec.nonce, n_pos, uid ) ) {
         UserBridge * n = this->bridge_tab[ uid ];
         if ( n != NULL ) {
           UserRoute * u_ptr = n->user_route_ptr( *this, rte->tport_id );
-          this->set_ucast_url( *u_ptr, rec.ucast_url, rec.ucast_url_len,
+          this->set_ucast_url( *u_ptr, rec.ucast_url.val, rec.ucast_url.len,
                                "recv" );
         }
       }
       else {
-        this->mesh_pending.update( *rte, rec.ucast_url, rec.ucast_url_len, 0,
-                                   rec.nonce, false );
+        this->mesh_pending.update( *rte, tport, rec.ucast_url, 0, rec.nonce,
+                                   false );
       }
     }
   }
@@ -1060,20 +1060,24 @@ UserDB::recv_mesh_request( const MsgFramePublish &pub,  UserBridge &n,
   size_t      mesh_db_len = 0;
   UrlDBFilter filter( n.uid, true, &dec );
   
-  if ( ! dec.test( FID_MESH_URL ) )
+  if ( ! dec.test_2( FID_MESH_URL, FID_TPORT ) )
     return true;
   StringVal mesh_url( (const char *) dec.mref[ FID_MESH_URL ].fptr,
                       dec.mref[ FID_MESH_URL ].fsize );
-  if ( ! rte->mesh_url.equals( mesh_url ) ) {
+  StringVal tport   ( (const char *) dec.mref[ FID_TPORT ].fptr,
+                      dec.mref[ FID_TPORT ].fsize );
+  if ( ! rte->mesh_url.equals( mesh_url ) ||
+       ! rte->transport.tport.equals( tport ) ) {
     rte = rte->mgr.find_mesh( mesh_url );
-    if ( rte == NULL ) {
-      n.printf( "req no mesh url found (%.*s)\n", mesh_url.len, mesh_url.val );
+    if ( rte == NULL || ! rte->transport.tport.equals( tport ) ) {
+      n.printf( "recv mesh req %.*s no mesh url found (%.*s)\n",
+                tport.len, tport.val, mesh_url.len, mesh_url.val );
       return true;
     }
   }
   if ( debug_peer )
-    n.printf( "recv_mesh_request( %.*s, %.*s )\n",
-              mesh_url.len, mesh_url.val,
+    n.printf( "recv_mesh_request( %.*s, %.*s, %.*s )\n",
+              tport.len, tport.val, mesh_url.len, mesh_url.val,
               rte->mesh_url.len, rte->mesh_url.val );
   if ( rte->uid_in_mesh->is_member( n.uid ) ) {
     mesh_db_len = this->url_db_size( *rte, filter );
@@ -1096,8 +1100,9 @@ UserDB::recv_mesh_request( const MsgFramePublish &pub,  UserBridge &n,
     return true;
 
   MsgEst e( ibx.len() );
-  e.seqno()
-   .mesh_url( u_ptr->mesh_url.len );
+  e.seqno   ()
+   .mesh_url( u_ptr->mesh_url.len )
+   .tport   ( u_ptr->rte.transport.tport.len );
   if ( filter.return_count > 0 )
     e.mesh_db( mesh_db_len );
   if ( filter.request_count > 0 )
@@ -1107,8 +1112,10 @@ UserDB::recv_mesh_request( const MsgFramePublish &pub,  UserBridge &n,
   m.reserve( e.sz );
 
   m.open( this->bridge_id.nonce, ibx.len() )
-   .seqno( n.inbox.next_send( U_INBOX_MESH_RPY ) )
-   .mesh_url( u_ptr->mesh_url.val, u_ptr->mesh_url.len );
+   .seqno   ( n.inbox.next_send( U_INBOX_MESH_RPY ) )
+   .mesh_url( u_ptr->mesh_url.val, u_ptr->mesh_url.len )
+   .tport   ( u_ptr->rte.transport.tport.val,
+              u_ptr->rte.transport.tport.len );
   if ( filter.request_count > 0 )
     m.mesh_filter( filter.hash, filter.request_count * 4 );
   if ( filter.return_count > 0 )
@@ -1163,6 +1170,7 @@ UserDB::send_mesh_request( UserBridge &n,  MsgHdrDecoder &dec ) noexcept
   MsgEst e( ibx.len() );
   e.seqno      ()
    .mesh_url   ( u_ptr->mesh_url.len )
+   .tport      ( u_ptr->rte.transport.tport.len )
    .mesh_filter( url_count * 4 );
 
   MsgCat m;
@@ -1170,7 +1178,8 @@ UserDB::send_mesh_request( UserBridge &n,  MsgHdrDecoder &dec ) noexcept
 
   m.open( this->bridge_id.nonce, ibx.len() )
    .seqno   ( n.inbox.next_send( U_INBOX_MESH_REQ ) )
-   .mesh_url( u_ptr->mesh_url.val, u_ptr->mesh_url.len );
+   .mesh_url( u_ptr->mesh_url.val, u_ptr->mesh_url.len )
+   .tport   ( u_ptr->rte.transport.tport.val, u_ptr->rte.transport.tport.len );
   if ( url_count > 0 )
     m.mesh_filter( filter, url_count * 4 );
   uint32_t h = ibx.hash();

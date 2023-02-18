@@ -1219,33 +1219,35 @@ MeshDirectList::update( UserRoute *u ) noexcept
 }
 #endif
 void
-MeshDirectList::update( TransportRoute &rte,  const char *url,  uint32_t len,
-                    uint32_t h,  const Nonce &b_nonce,  bool is_mesh ) noexcept
+MeshDirectList::update( TransportRoute &rte,  const StringVal &tport,
+                        const StringVal &url,  uint32_t h,
+                        const Nonce &b_nonce,  bool is_mesh ) noexcept
 {
   MeshRoute *m;
   if ( rte.mesh_id == NULL && is_mesh ) {
-    fprintf( stderr, "%s not in a mesh: %.*s\n", rte.name, len, url );
+    fprintf( stderr, "%s not in a mesh: %.*s\n", rte.name, url.len, url.val );
     return;
   }
   else if ( rte.mesh_id != NULL && ! is_mesh ) {
-    fprintf( stderr, "%s is in a mesh: %.*s\n", rte.name, len, url );
+    fprintf( stderr, "%s is in a mesh: %.*s\n", rte.name, url.len, url.val );
     return;
   }
   if ( h == 0 )
-    h = kv_crc_c( url, len, 0 );
+    h = kv_crc_c( url.val, url.len, 0 );
   for ( m = this->hd; m != NULL; m = m->next ) {
-    if ( m->url_hash == h && m->mesh_url_len == len &&
-         ::memcmp( url, m->mesh_url, len ) == 0 )
+    if ( m->url_hash == h && m->mesh_url.equals( url ) )
       return;
   }
-  void * p = ::malloc( sizeof( MeshRoute ) + len + 1 );
-  char * s = &((char *) p)[ sizeof( MeshRoute ) ];
-  ::memcpy( s, url, len );
-  s[ len ] = '\0';
+  void * p = ::malloc( sizeof( MeshRoute ) );
+  StringVal url_ref( url );
+  StringVal tport_ref( tport );
+  rte.user_db.string_tab.add_string( url_ref );
+  rte.user_db.string_tab.add_string( tport_ref );
   if ( is_mesh )
-    m = new ( p ) MeshRoute( *rte.mesh_id, s, len, h, b_nonce, true );
+    m = new ( p )
+      MeshRoute( *rte.mesh_id, url_ref, tport_ref, h, b_nonce, true );
   else
-    m = new ( p ) MeshRoute( rte, s, len, h, b_nonce, false );
+    m = new ( p ) MeshRoute( rte, url_ref, tport_ref, h, b_nonce, false );
   this->push_tl( m );
 }
 
@@ -1266,25 +1268,28 @@ UserDB::process_mesh_pending( uint64_t curr_mono ) noexcept
         n = this->bridge_tab[ uid ];
         if ( n != NULL ) {
           m->conn_mono_time = curr_mono;
-          if ( m->is_mesh ) {
+          if ( ! m->rte.transport.tport.equals( m->tport_name ) ) {
+            n->printe( "transport not equal to %s\n", m->tport_name.val );
+          }
+          else if ( m->is_mesh ) {
             if ( this->start_time > n->start_time ) {
-              if ( m->rte.add_mesh_connect( m->mesh_url, m->url_hash ) ) {
+              if ( m->rte.add_mesh_connect( m->mesh_url.val, m->url_hash ) ) {
                 if ( debug_usr )
-                  n->printf( "add_mesh ok %s\n", m->mesh_url );
+                  n->printf( "add_mesh ok %s\n", m->mesh_url.val );
               }
             }
           }
           else if ( ! m->rte.is_mcast() ) {
-            if ( m->rte.add_tcp_connect( m->mesh_url, m->url_hash ) ) {
+            if ( m->rte.add_tcp_connect( m->mesh_url.val, m->url_hash ) ) {
               if ( debug_usr )
-                n->printf( "add_tcp ok %s\n", m->mesh_url );
+                n->printf( "add_tcp ok %s\n", m->mesh_url.val );
             }
           }
           else {
             UserRoute * u_ptr = n->user_route_ptr( *this, m->rte.tport_id );
             if ( u_ptr->url_hash != m->url_hash ||
                  ! u_ptr->is_set( UCAST_URL_STATE ) )
-              this->set_ucast_url( *u_ptr, m->mesh_url, m->mesh_url_len,
+              this->set_ucast_url( *u_ptr, m->mesh_url.val, m->mesh_url.len,
                                    "pend" );
           }
         }
