@@ -752,8 +752,11 @@ SessionMgr::add_mesh_connect( TransportRoute &mesh_rte,  const char *url,
     rte = this->user_db.transport_tab.ptr[ tport_id ];
     if ( &t == &rte->transport &&
          rte->all_set( TPORT_IS_SHUTDOWN | TPORT_IS_MESH ) &&
-         rte->mesh_id == mesh_rte.mesh_id ) {
-      if ( rte->connect_ctx == NULL || rte->mesh_equal( url, url_hash ) ) {
+         rte->mesh_id == mesh_rte.mesh_id &&
+         ( rte->connect_ctx == NULL ||
+           rte->connect_ctx->state == ConnectCtx::CONN_SHUTDOWN ||
+           rte->connect_ctx->state == ConnectCtx::CONN_IDLE ) ) {
+      if ( rte->mesh_equal( url, url_hash ) ) {
         rte->init_state();
         is_new = false;
         break;

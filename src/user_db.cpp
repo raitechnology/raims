@@ -244,7 +244,7 @@ UserDB::check_inbox_route( UserBridge &n,  UserRoute &u_rte ) noexcept
            u_peer->is_set( UCAST_URL_STATE | UCAST_URL_SRC_STATE ) ) {
         u_rte.mcast_fd = u_peer->mcast_fd;
         u_rte.inbox_fd = u_peer->inbox_fd;
-        u_rte.hops     = 1;
+        u_rte.connected( 1 );
         if ( u_peer->is_set( UCAST_URL_STATE ) )
           this->set_ucast_url( u_rte, u_peer, "fwd" );
         else
@@ -1048,7 +1048,7 @@ UserDB::add_user_route( UserBridge &n,  TransportRoute &rte,  uint32_t fd,
   }
   u_ptr->mcast_fd = fd;
   u_ptr->inbox_fd = inbox_fd;
-  u_ptr->hops     = hops;
+  u_ptr->connected( hops );
   n.user_route    = u_ptr;
   this->set_mesh_url( *u_ptr, dec, "add" );
 
@@ -1069,7 +1069,7 @@ UserDB::add_user_route( UserBridge &n,  TransportRoute &rte,  uint32_t fd,
   }
   if ( n.is_set( AUTHENTICATED_STATE ) ) {
     this->push_user_route( n, *u_ptr );
-    if ( u_ptr->hops == 0 )
+    if ( u_ptr->hops() == 0 )
       this->add_inbox_route( n, NULL );
   }
 }
@@ -1113,7 +1113,7 @@ UserDB::find_adjacent_routes( void ) noexcept
           }
           u_ptr->mcast_fd = u_peer->mcast_fd;
           u_ptr->inbox_fd = u_peer->inbox_fd;
-          u_ptr->hops     = 1;
+          u_ptr->connected( 1 );
           if ( u_peer->is_set( UCAST_URL_STATE | UCAST_URL_SRC_STATE ) ) {
             if ( u_peer->is_set( UCAST_URL_STATE ) )
               this->set_ucast_url( *u_ptr, u_peer, "find" );
@@ -1699,7 +1699,7 @@ UserDB::set_ucast_url( UserRoute &u_rte,  const MsgHdrDecoder &dec,
                        const char *src ) noexcept
 {
   /* check if url based point to point */
-  if ( u_rte.hops == 0 && dec.test( FID_UCAST_URL ) ) {
+  if ( u_rte.hops() == 0 && dec.test( FID_UCAST_URL ) ) {
     uint32_t     url_len = (uint32_t) dec.mref[ FID_UCAST_URL ].fsize;
     const char * url     = (const char *) dec.mref[ FID_UCAST_URL ].fptr;
     if ( u_rte.set_ucast( *this, url, url_len, NULL ) ) {

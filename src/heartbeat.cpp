@@ -251,12 +251,12 @@ UserDB::on_heartbeat( const MsgFramePublish &pub,  UserBridge &n,
       if ( debug_hb )
         n.printf( "authenticated but not a uid member!\n" );
       this->pop_user_route( n, *n.user_route );
-      n.user_route->hops = 0;
+      n.user_route->connected( 0 );
       this->push_user_route( n, *n.user_route );
     }
     if ( ! n.test_set( HAS_HB_STATE ) ) {
       UserRoute * primary = n.primary( *this );
-      if ( primary->hops > n.user_route->hops ) {
+      if ( primary->hops() > n.user_route->hops() ) {
         if ( debug_hb )
           n.printf( "primary hops greater than hb user_route!\n" );
         this->add_inbox_route( n, n.user_route );

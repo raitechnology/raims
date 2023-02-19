@@ -49,22 +49,24 @@ struct McastBuf : public ShortSubjectBuf {
 };
 
 enum UserNonceState {
-  CHALLENGE_STATE         =      1, /* challenge sent, this is timed for retry */
-  AUTHENTICATED_STATE     =      2, /* challenge recvd and auth succeeded */
-  INBOX_ROUTE_STATE       =      4, /* inbox routed to source */
-  IN_ROUTE_LIST_STATE     =      8, /* is a member of the route list */
-  SENT_ZADD_STATE         =   0x10, /* sent a zadd to peers after auth */
-  IN_HB_QUEUE_STATE       =   0x20, /* is a member of the heartbeat queue */
-  SUBS_REQUEST_STATE      =   0x40, /* is a member of the subs queue */
-  ADJACENCY_REQUEST_STATE =   0x80, /* is a member of the adj queue */
-  PING_STATE              =  0x100, /* is a member of the ping queue */
-  ZOMBIE_STATE            =  0x200, /* timed out, no clear dead signal */
-  DEAD_STATE              =  0x400, /* dead from bye or z.del */
-  UCAST_URL_STATE         =  0x800, /* has ucast url */
-  UCAST_URL_SRC_STATE     = 0x1000, /* routes through a ucast url */
-  MESH_URL_STATE          = 0x2000, /* has a mesh url */
-  HAS_HB_STATE            = 0x4000, /* recvd a hb */
-  IS_INIT_STATE           = 0x8000  /* if initialized with reset() */
+  CHALLENGE_STATE         =       1, /* challenge sent, this is timed for retry */
+  AUTHENTICATED_STATE     =       2, /* challenge recvd and auth succeeded */
+  INBOX_ROUTE_STATE       =       4, /* inbox routed to source */
+  IN_ROUTE_LIST_STATE     =       8, /* is a member of the route list */
+  SENT_ZADD_STATE         =    0x10, /* sent a zadd to peers after auth */
+  IN_HB_QUEUE_STATE       =    0x20, /* is a member of the heartbeat queue */
+  SUBS_REQUEST_STATE      =    0x40, /* is a member of the subs queue */
+  ADJACENCY_REQUEST_STATE =    0x80, /* is a member of the adj queue */
+  PING_STATE              =   0x100, /* is a member of the ping queue */
+  ZOMBIE_STATE            =   0x200, /* timed out, no clear dead signal */
+  DEAD_STATE              =   0x400, /* dead from bye or z.del */
+  UCAST_URL_STATE         =   0x800, /* has ucast url */
+  UCAST_URL_SRC_STATE     =  0x1000, /* routes through a ucast url */
+  MESH_URL_STATE          =  0x2000, /* has a mesh url */
+  HAS_HB_STATE            =  0x4000, /* recvd a hb */
+  IS_INIT_STATE           =  0x8000, /* if initialized with reset() */
+  IS_VALID_STATE          = 0x10000,
+  DIRECT_LINK_STATE       = 0x20000
 };
 static const size_t MAX_NONCE_STATE_STRING = 16 * 16; /* 16 states * 16 chars*/
 char *user_state_string( uint32_t state,  char *buf ) noexcept;
@@ -82,15 +84,14 @@ struct UserDB;
 struct NameSvc;
 union  NameInbox;
 struct UserRoute : public UserStateTest<UserRoute> {
-  static const uint32_t NO_RTE  = -1;
-  static const uint16_t NO_HOPS = -1;
+  static const uint32_t NO_RTE  = -1,
+                        NO_HOPS = -1;
   UserBridge      & n;
   TransportRoute  & rte;           /* transport */
   uint32_t          mcast_fd,      /* fd src, tcp fd or pgm fd */
-                    inbox_fd;      /* inbox fd */
-  uint16_t          hops,          /* number of links away */
-                    state;         /* whether in route list */
-  uint32_t          url_hash,      /* hash of ucast_url, mesh_url */
+                    inbox_fd,      /* inbox fd */
+                    state,         /* whether in route list */
+                    url_hash,      /* hash of ucast_url, mesh_url */
                     hb_seqno;      /* hb sequence on this transport */
   uint64_t          bytes_sent,    /* bytes sent ptp */
                     msgs_sent;     /* msgs sent ptp */
@@ -108,12 +109,27 @@ struct UserRoute : public UserStateTest<UserRoute> {
     return this->is_set( IS_INIT_STATE ) != 0;
   }
   bool is_valid( void ) const {
-    return this->is_init() && this->hops != NO_HOPS;
+    return this->is_init() &&
+           this->is_set( IS_VALID_STATE ) != 0;
+  }
+  void invalidate( void ) {
+    this->clear( IS_VALID_STATE );
+  }
+  void connected( uint32_t hops ) {
+    this->set( IS_VALID_STATE );
+    if ( hops == 0 )
+      this->set( DIRECT_LINK_STATE );
+    else
+      this->clear( DIRECT_LINK_STATE );
+  }
+  uint32_t hops( void ) const {
+    if ( ! this->is_set( IS_VALID_STATE ) )
+      return NO_HOPS;
+    return this->is_set( DIRECT_LINK_STATE ) ? 0 : 1;
   }
   void reset( void ) {
     this->mcast_fd   = NO_RTE;
     this->inbox_fd   = NO_RTE;
-    this->hops       = NO_HOPS;
     this->state      = IS_INIT_STATE;
     this->ucast_url.zero();
     this->mesh_url.zero();

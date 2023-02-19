@@ -250,23 +250,22 @@ UserDB::push_user_route( UserBridge &n,  UserRoute &u_rte ) noexcept
 
     if ( debug_lnk )
       n.printf( "push_user_route %s fd %u\n", u_rte.rte.name, fd );
-    if ( u_rte.hops == 0 ) {
+    if ( u_rte.hops() == 0 ) {
       if ( rte.mesh_id != NULL ) {
-        if ( ! rte.uid_in_mesh->test_set( n.uid ) ) {
-          char buf[ NONCE_B64_LEN + 1 ];
+        if ( rte.uid_in_mesh->ref( n.uid ) == 0 ) {
           *rte.mesh_csum ^= n.bridge_id.nonce;
-          if ( debug_lnk )
-            n.printf( "add to mesh %s [%s]\n", rte.transport.tport.val,
-                      rte.mesh_csum->to_base64_str( buf ) );
+          /*if ( debug_lnk )*/
+            n.printf( "add to mesh %s\n", rte.transport.tport.val );
         }
         else {
           n.printf( "already in mesh %s\n", rte.name );
         }
       }
       else if ( rte.dev_id != NULL ) {
-        rte.uid_in_device->add( n.uid );
-        if ( debug_lnk )
-          n.printf( "add to dev %s\n", rte.transport.tport.val );
+        if ( rte.uid_in_device->ref( n.uid ) == 0 ) {
+          if ( debug_lnk )
+            n.printf( "add to dev %s\n", rte.transport.tport.val );
+        }
       }
       if ( ! rte.uid_connected.test_set( n.uid ) ) {
         this->peer_dist.invalidate( PUSH_ROUTE_INV, n.uid );
@@ -323,20 +322,19 @@ UserDB::pop_user_route( UserBridge &n,  UserRoute &u_rte ) noexcept
     if ( debug_lnk )
       n.printf( "pop_user_route %s fd %u\n", u_rte.rte.name, fd );
     list.pop( &u_rte );
-    if ( u_rte.hops == 0 ) {
+    if ( u_rte.hops() == 0 ) {
       if ( rte.mesh_id != NULL ) {
-        if ( rte.uid_in_mesh->test_clear( n.uid ) ) {
-          char buf[ NONCE_B64_LEN + 1 ];
+        if ( rte.uid_in_mesh->deref( n.uid ) == 0 ) {
           *rte.mesh_csum ^= n.bridge_id.nonce;
-          if ( debug_lnk )
-            n.printf( "rm from mesh %s [%s]\n", rte.transport.tport.val,
-                      rte.mesh_csum->to_base64_str( buf ) );
+          /*if ( debug_lnk )*/
+            n.printf( "rm from mesh %s\n", rte.transport.tport.val );
         }
       }
       else if ( rte.dev_id != NULL ) {
-        rte.uid_in_device->remove( n.uid );
-        if ( debug_lnk )
-          n.printf( "rm from dev %s\n", rte.transport.tport.val );
+        if ( rte.uid_in_device->deref( n.uid ) == 0 ) {
+          if ( debug_lnk )
+            n.printf( "rm from dev %s\n", rte.transport.tport.val );
+        }
       }
       if ( rte.is_mcast() && rte.ibx_tport != NULL ) {
         if ( u_rte.is_set( UCAST_URL_STATE ) ) {
@@ -371,7 +369,7 @@ UserDB::pop_user_route( UserBridge &n,  UserRoute &u_rte ) noexcept
         }
       }
     }
-    u_rte.hops = UserRoute::NO_HOPS;
+    u_rte.invalidate();
   }
 }
 

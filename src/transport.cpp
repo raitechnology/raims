@@ -90,6 +90,41 @@ TransportRoute::TransportRoute( kv::EvPoll &p,  SessionMgr &m,
   this->user_db.transport_tab.push( this );
   this->bp_flags = BP_FORWARD | BP_NOTIFY;
 }
+/* return ref_count++ */
+uint32_t
+BitRefCount::ref( uint32_t i ) noexcept
+{
+  if ( ! this->bits.test_set( i ) )
+    return 0;
+  size_t   pos;
+  uint32_t val = 1;
+  if ( this->ht == NULL )
+    this->ht = UIntHashTab::resize( NULL );
+  if ( this->ht->find( i, pos, val ) )
+    this->ht->set( i, pos, val + 1 );
+  else
+    this->ht->set_rsz( this->ht, i, pos, 1 );
+  return val;
+}
+/* return --ref_count */
+uint32_t
+BitRefCount::deref( uint32_t i ) noexcept
+{
+  if ( this->ht != NULL ) {
+    size_t   pos;
+    uint32_t val;
+    if ( this->ht->find( i, pos, val ) ) {
+      if ( val == 1 )
+        this->ht->remove_rsz( this->ht, pos );
+      else
+        this->ht->set( i, pos, val - 1 );
+      return val;
+    }
+  }
+  if ( this->bits.test_clear( i ) )
+    return 0;
+  return -1;
+}
 
 int
 TransportRoute::init( void ) noexcept

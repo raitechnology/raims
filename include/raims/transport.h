@@ -167,6 +167,19 @@ struct IpcRteList : public kv::RouteNotify {
                     bool is_start ) noexcept;
 };
 
+struct BitRefCount {
+  kv::BitSpace      bits;
+  kv::UIntHashTab * ht;
+  BitRefCount() : ht( 0 ) {}
+  ~BitRefCount() { if ( this->ht != NULL ) delete this->ht; }
+
+  bool is_member( uint32_t i ) const { return this->bits.is_member( i ); }
+  bool first( uint32_t &i )    const { return this->bits.first( i ); }
+  bool next( uint32_t &i )     const { return this->bits.next( i ); }
+  uint32_t ref( uint32_t i )   noexcept; /* return ref_count++ */
+  uint32_t deref( uint32_t i ) noexcept; /* return --ref_count */
+};
+
 struct TransportRoute : public kv::EvSocket, public kv::EvConnectionNotify,
                         public kv::BPData, public StateTest<TransportRoute> {
   kv::EvPoll            & poll;           /* event poller */
@@ -175,8 +188,8 @@ struct TransportRoute : public kv::EvSocket, public kv::EvConnectionNotify,
   kv::RoutePublish      & sub_route;      /* bus for transport */
   kv::BloomRoute        * router_rt[ COST_PATH_COUNT ]; /* router 4 subs */
   kv::BitSpace            connected,      /* which fds are connected */
-                          connected_auth, /* which fds are authenticated */
-                          mesh_connected, /* shared with uid_in_mesh */
+                          connected_auth; /* which fds are authenticated */
+  BitRefCount             mesh_connected, /* shared with uid_in_mesh */
                         * uid_in_mesh,    /* all tports point to one mesh */
                         * uid_in_device;  /* all tports point to one device */
   AdjacencySpace          uid_connected;  /* which uids are connected */

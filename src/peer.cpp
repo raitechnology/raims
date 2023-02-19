@@ -1141,14 +1141,14 @@ UserDB::recv_mesh_result( const MsgFramePublish &pub,  UserBridge &n,
 bool
 UserDB::send_mesh_request( UserBridge &n,  MsgHdrDecoder &dec ) noexcept
 {
-  InboxBuf    ibx( n.bridge_id, _MESH_REQ );
-  BitSpace  & uid_in_mesh = *n.user_route->rte.uid_in_mesh;
-  UserRoute * u_ptr;
-  uint32_t    uid,
-              t = n.user_route->rte.tport_id,
-              url_count = 0,
-            * filter;
-  bool        ok;
+  InboxBuf      ibx( n.bridge_id, _MESH_REQ );
+  BitRefCount & uid_in_mesh = *n.user_route->rte.uid_in_mesh;
+  UserRoute   * u_ptr;
+  uint32_t      uid,
+                t = n.user_route->rte.tport_id,
+                url_count = 0,
+              * filter;
+  bool          ok;
 
   if ( ! n.user_route->is_set( MESH_URL_STATE ) )
     return true;
