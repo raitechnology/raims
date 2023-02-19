@@ -42,16 +42,16 @@ struct ConnectCtx : public kv::EvConnectionNotify,
   ConnectDB        & db;
   kv::CaresAddrInfo  addr_info;
   kv::EvConnection * client;
-  uint64_t           event_id,
-                     start_mono_time;
+  const uint64_t     event_id;
+  uint64_t           start_mono_time;
   uint32_t           connect_tries,
                      timeout;
   int                opts;
   ConnectState       state;
 
   void * operator new( size_t, void *ptr ) { return ptr; }
-  ConnectCtx( kv::EvPoll &poll,  ConnectDB &d )
-    : db( d ), addr_info( poll, this ), client( 0 ), event_id( 0 ),
+  ConnectCtx( kv::EvPoll &poll,  ConnectDB &d,  uint64_t id )
+    : db( d ), addr_info( poll, this ), client( 0 ), event_id( id ),
       start_mono_time( 0 ), connect_tries( 0 ), timeout( 15 ),
       state( CONN_SHUTDOWN ) {}
 
@@ -237,12 +237,14 @@ struct TransportRoute : public kv::EvSocket, public kv::EvConnectionNotify,
                   ConfigTree::Transport &t,  const char *svc_name,
                   uint32_t f ) noexcept;
 
-  bool is_listen( void ) const { return this->is_set( TPORT_IS_LISTEN ) != 0; }
-  bool is_connect( void )const { return this->is_set( TPORT_IS_CONNECT ) != 0; }
-  bool is_mcast( void )  const { return this->is_set( TPORT_IS_MCAST ) != 0; }
-  bool is_mesh( void )   const { return this->is_set( TPORT_IS_MESH ) != 0; }
-  bool is_edge( void )   const { return this->is_set( TPORT_IS_EDGE ) != 0; }
-  bool is_ipc( void )    const { return this->is_set( TPORT_IS_IPC ) != 0; }
+  bool is_shutdown( void ) const { return this->is_set( TPORT_IS_SHUTDOWN ) != 0; }
+  bool is_listen( void )   const { return this->is_set( TPORT_IS_LISTEN ) != 0; }
+  bool is_connect( void )  const { return this->is_set( TPORT_IS_CONNECT ) != 0; }
+  bool is_device( void )   const { return this->is_set( TPORT_IS_DEVICE ) != 0; }
+  bool is_mcast( void )    const { return this->is_set( TPORT_IS_MCAST ) != 0; }
+  bool is_mesh( void )     const { return this->is_set( TPORT_IS_MESH ) != 0; }
+  bool is_edge( void )     const { return this->is_set( TPORT_IS_EDGE ) != 0; }
+  bool is_ipc( void )      const { return this->is_set( TPORT_IS_IPC ) != 0; }
   bool mesh_equal( const char *url,  uint32_t hash ) const {
     if ( hash != this->mesh_url_hash ) return false;
     return this->mesh_url.equals( url );
@@ -251,7 +253,7 @@ struct TransportRoute : public kv::EvSocket, public kv::EvConnectionNotify,
   int init( void ) noexcept;
   void init_state( void ) noexcept;
   void set_peer_name( kv::PeerData &pd,  const char *suff ) noexcept;
-  void update_cost( UserBridge &n,  uint32_t *cost,
+  void update_cost( UserBridge &n,  StringVal &tport,  uint32_t *cost,
                     uint32_t rem_tport_id,  const char *s ) noexcept;
   const char * connected_names( char *buf,  size_t buflen ) noexcept;
   /*const char * reachable_names( char *buf,  size_t buflen ) noexcept;*/

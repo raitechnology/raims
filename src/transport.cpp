@@ -73,7 +73,7 @@ TransportRoute::TransportRoute( kv::EvPoll &p,  SessionMgr &m,
   /* external tports do not have protocol for link state routing:
    *   _I.inbox, _X.HB, _Z.ADD, _Z.BLM, _Z.ADJ, _S.JOIN, _P.PSUB, etc */
   /* console_rt causes msgs to flow from tport -> session management */
-  if ( ! this->is_set( TPORT_IS_IPC ) ) {
+  if ( ! this->is_ipc() ) {
     BloomRoute *rt;
     rt = this->sub_route.create_bloom_route( m.fd, &m.sub_db.console, 0 );
     rt->add_bloom_ref( &m.sys_bloom );
@@ -185,13 +185,20 @@ TransportRoute::printf( const char *fmt,  ... ) const noexcept
 }
 
 void
-TransportRoute::update_cost( UserBridge &n,  uint32_t *cost,
+TransportRoute::update_cost( UserBridge &n,  StringVal &tport,  uint32_t *cost,
                              uint32_t rem_tport_id,  const char *s ) noexcept
 {
   uint8_t i, eq_count = 0;
   uint32_t *cost2 = this->uid_connected.cost;
   bool updated = false, cost_updated = false;
 
+  if ( ! this->transport.tport.equals( tport ) ) {
+    if ( this->is_mesh() ) {
+      n.printe( "tport not equal %.*s and %.*s.%u (%s)\n", tport.len, tport.val,
+                 this->transport.tport.len, this->transport.tport.val,
+                 this->tport_id, s );
+    }
+  }
   if ( this->uid_connected.rem_uid == 0 ) {
     this->uid_connected.rem_uid = n.uid;
     this->uid_connected.rem_tport_id = rem_tport_id;
@@ -215,7 +222,7 @@ TransportRoute::update_cost( UserBridge &n,  uint32_t *cost,
   }
   if ( updated ) {
     if ( debug_tran )
-      this->printf( "update uid %u tport %u %s\n", 
+      this->printf( "update uid %u tport %u (%s)\n", 
           this->uid_connected.rem_uid,
           this->uid_connected.rem_tport_id, s );
   }
@@ -225,10 +232,11 @@ TransportRoute::update_cost( UserBridge &n,  uint32_t *cost,
         eq_count++;
       else {
         if ( this->uid_connected.is_advertised ) {
-          n.printe( "conflicting cost[%u] "
-                "[%u,%u,%u,%u] (advert) != [%u,%u,%u,%u] (config) on %s\n", i,
+          n.printe( "conflicting cost[idx=%u] "
+ "[%u,%u,%u,%u] (advert) != [%u,%u,%u,%u] (config) on %s (rem=%u) (%s)\n", i,
                 cost[ 0 ], cost[ 1 ], cost[ 2 ], cost[ 3 ],
-                cost2[ 0 ], cost2[ 1 ], cost2[ 2 ], cost2[ 3 ], this->name );
+                cost2[ 0 ], cost2[ 1 ], cost2[ 2 ], cost2[ 3 ],
+                this->name, rem_tport_id, s );
           return;
         }
       }
@@ -244,9 +252,9 @@ TransportRoute::update_cost( UserBridge &n,  uint32_t *cost,
   if ( ! updated )
     return;
   if ( debug_tran )
-    n.printf( "update cost [%u,%u,%u,%u] on %s (rem=%u) %s\n",
+    n.printf( "update cost [%u,%u,%u,%u] on %s (rem=%u) %s (%s)\n",
               cost[ 0 ], cost[ 1 ], cost[ 2 ], cost[ 3 ], this->name,
-              rem_tport_id, n.is_set( AUTHENTICATED_STATE ) ? "auth" : "not" );
+              rem_tport_id, n.is_set( AUTHENTICATED_STATE ) ? "auth" : "not", s );
 
   this->user_db.peer_dist.invalidate( ADVERTISED_COST_INV, n.uid );
   this->user_db.adjacency_change.append( n.uid, this->tport_id,
@@ -254,14 +262,14 @@ TransportRoute::update_cost( UserBridge &n,  uint32_t *cost,
   /*p->rem_uid     = this->uid_connected.rem_uid;
   p->rem_tportid = this->uid_connected.rem_tport_id;*/
   if ( cost_updated ) {
-    if ( this->is_set( TPORT_IS_MESH ) ) {
+    if ( this->is_mesh() ) {
       uint32_t count = (uint32_t) this->user_db.transport_tab.count;
       for ( uint32_t id = 0; id < count; id++ ) {
         if ( id == this->tport_id )
           continue;
         TransportRoute *rte = this->user_db.transport_tab.ptr[ id ];
-        if ( ! rte->is_set( TPORT_IS_SHUTDOWN ) ) {
-          if ( rte->is_set( TPORT_IS_MESH ) &&
+        if ( ! rte->is_shutdown() ) {
+          if ( rte->is_mesh() &&
                rte->mesh_id == this->mesh_id ) {
             for ( i = 0; i < COST_PATH_COUNT; i++ )
               rte->uid_connected.cost[ i ] = cost[ i ];
@@ -528,7 +536,7 @@ TransportRoute::change_any( const char *type,  NameSvc & ) noexcept
 bool
 TransportRoute::create_transport( ConfigTree::Transport &tport ) noexcept
 {
-  bool is_listener = this->is_set( TPORT_IS_LISTEN ), b = false;
+  bool is_listener = this->is_listen(), b = false;
   if ( tport.type.equals( T_ANY, T_ANY_SZ ) ) {
     return true;
   }
@@ -542,7 +550,7 @@ TransportRoute::create_transport( ConfigTree::Transport &tport ) noexcept
     return this->create_redis_listener( tport );
   }
   if ( tport.type.equals( T_TCP, T_TCP_SZ ) ) {
-    if ( this->is_set( TPORT_IS_DEVICE ) )
+    if ( this->is_device() )
       this->dev_id = this;
     else
       this->dev_id = NULL;
@@ -577,7 +585,7 @@ TransportRoute::create_transport( ConfigTree::Transport &tport ) noexcept
     this->listener = l;
     this->create_listener_mesh_url();
 
-    if ( ! is_listener || this->is_set( TPORT_IS_CONNECT ) ) {
+    if ( ! is_listener || this->is_connect() ) {
       this->set( TPORT_IS_CONNECT );
       this->add_mesh_connect( NULL, 0 );
     }
@@ -687,7 +695,7 @@ TransportRoute::start_listener( EvTcpListen *l,
   this->clear( TPORT_IS_SHUTDOWN );
   this->printf( "%s listening on %s%s\n", tport.tport.val,
                 l->peer_address.buf,
-                this->is_set( TPORT_IS_EDGE ) ? " edge is true" : "" );
+                this->is_edge() ? " edge is true" : "" );
   return true;
 }
 
@@ -857,7 +865,7 @@ TransportRoute::create_tcp_connect( ConfigTree::Transport &tport ) noexcept
   EvTcpTransportParameters parm;
   parm.parse_tport( tport, PARAM_NB_CONNECT, this->mgr );
 
-  if ( ! this->is_set( TPORT_IS_DEVICE ) ) {
+  if ( ! this->is_device() ) {
     if ( this->connect_ctx == NULL )
       this->connect_ctx = this->mgr.connect_mgr.create( this->tport_id );
 

@@ -196,15 +196,20 @@ UserDB::on_inbox_auth( const MsgFramePublish &pub,  UserBridge &n,
     this->recv_trusted( pub, n, dec );
   }
   if ( n.is_set( AUTHENTICATED_STATE ) ) {
+    StringVal tport;
+    if ( dec.test( FID_TPORT ) ) {
+      tport.val = (const char *) dec.mref[ FID_TPORT ].fptr;
+      tport.len = dec.mref[ FID_TPORT ].fsize;
+    }
     if ( dec.get_ival<uint32_t>( FID_TPORTID, rem_tport_id ) ) {
       if ( dec.get_ival<uint32_t>( FID_COST, cost[ 0 ] ) ) {
         dec.get_ival<uint32_t>( FID_COST2, cost[ 1 ] );
         dec.get_ival<uint32_t>( FID_COST3, cost[ 2 ] );
         dec.get_ival<uint32_t>( FID_COST4, cost[ 3 ] );
-        n.user_route->rte.update_cost( n, cost, rem_tport_id, "i1" );
+        n.user_route->rte.update_cost( n, tport, cost, rem_tport_id, "i1" );
       }
       else {
-        n.user_route->rte.update_cost( n, NULL, rem_tport_id, "i2" );
+        n.user_route->rte.update_cost( n, tport, NULL, rem_tport_id, "i2" );
       }
     }
 
@@ -279,6 +284,7 @@ UserDB::send_challenge( UserBridge &n,  AuthStage stage ) noexcept
    .cost3      ()
    .cost4      ()
    .tportid    ()
+   .tport      ( rte.transport.tport.len )
    .pk_sig     ();
 
   MsgCat m;
@@ -323,7 +329,8 @@ UserDB::send_challenge( UserBridge &n,  AuthStage stage ) noexcept
     m.cost3( rte.uid_connected.cost[ 2 ] );
     m.cost4( rte.uid_connected.cost[ 3 ] );
   }
-  m.tportid( rte.tport_id );
+  m.tportid( rte.tport_id )
+   .tport( rte.transport.tport.val, rte.transport.tport.len );
   m.pk_sig();
   uint32_t h = ibx.hash();
   DSA * dsa = ( ! this->svc_dsa->sk.is_zero() ? this->svc_dsa : this->user_dsa );
@@ -423,8 +430,8 @@ UserDB::send_trusted( const MsgFramePublish &pub,  UserBridge &n,
    .cost3     ()
    .cost4     ()
    .tportid   ()
-   .mesh_url  ( u_ptr->mesh_url.len )
    .tport     ( rte.transport.tport.len )
+   .mesh_url  ( u_ptr->mesh_url.len )
    .mesh_db   ( mesh_db_len )
    .ucast_db  ( ucast_db_len );
 
@@ -446,15 +453,14 @@ UserDB::send_trusted( const MsgFramePublish &pub,  UserBridge &n,
     m.cost3( rte.uid_connected.cost[ 2 ] );
     m.cost4( rte.uid_connected.cost[ 3 ] );
   }
-  m.tportid( rte.tport_id );
+  m.tportid( rte.tport_id )
+   .tport   ( rte.transport.tport.val, rte.transport.tport.len );
   if ( mesh_db_len != 0 && u_ptr->mesh_url.len > 0 ) {
-    m.mesh_url( u_ptr->mesh_url.val, u_ptr->mesh_url.len )
-     .tport   ( rte.transport.tport.val, rte.transport.tport.len );
+    m.mesh_url( u_ptr->mesh_url.val, u_ptr->mesh_url.len );
     this->url_db_submsg( rte, mesh_filter, m );
   }
   if ( ucast_db_len != 0 && u_ptr->ucast_url.len > 0 ) {
-    m.ucast_url( u_ptr->ucast_url.val, u_ptr->ucast_url.len )
-     .tport    ( rte.transport.tport.val, rte.transport.tport.len );
+    m.ucast_url( u_ptr->ucast_url.val, u_ptr->ucast_url.len );
     this->url_db_submsg( rte, ucast_filter, m );
   }
   uint32_t h = ibx.hash();
@@ -506,11 +512,11 @@ UserDB::send_trusted( const MsgFramePublish &pub,  UserBridge &n,
          .cost3     ()
          .cost4     ()
          .tportid   ()
+         .tport     ( rte->transport.tport.len )
          .mesh_url  ( u_ptr->mesh_url.len )
          .mesh_db   ( mesh_db_len )
          .ucast_url ( u_ptr->ucast_url.len )
-         .ucast_db  ( ucast_db_len )
-         .tport     ( rte->transport.tport.len );
+         .ucast_db  ( ucast_db_len );
 
         MsgCat m;
         m.reserve( e.sz );
@@ -527,16 +533,15 @@ UserDB::send_trusted( const MsgFramePublish &pub,  UserBridge &n,
           m.cost3( rte->uid_connected.cost[ 2 ] );
           m.cost4( rte->uid_connected.cost[ 3 ] );
         }
-        m.tportid( tport_id );
+        m.tportid( tport_id )
+         .tport( rte->transport.tport.val, rte->transport.tport.len );
 
         if ( mesh_db_len != 0 ) {
-          m.mesh_url( u_ptr->mesh_url.val, u_ptr->mesh_url.len )
-           .tport( rte->transport.tport.val, rte->transport.tport.len );
+          m.mesh_url( u_ptr->mesh_url.val, u_ptr->mesh_url.len );
           this->url_db_submsg( *rte, mesh_filter2, m );
         }
         if ( ucast_db_len != 0 ) {
-          m.ucast_url( u_ptr->ucast_url.val, u_ptr->ucast_url.len )
-           .tport( rte->transport.tport.val, rte->transport.tport.len );
+          m.ucast_url( u_ptr->ucast_url.val, u_ptr->ucast_url.len );
           this->url_db_submsg( *rte, ucast_filter2, m );
         }
         m.close( e.sz, h, CABA_INBOX );

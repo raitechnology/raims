@@ -60,6 +60,7 @@ UserDB::make_hb( TransportRoute &rte,  const char *sub,  size_t sublen,
    .cost3     ()
    .cost4     ()
    .tportid   ()
+   .tport     ( rte.transport.tport.len )
    .version   ( ver_len )
    .pk_digest ();
 
@@ -105,6 +106,7 @@ UserDB::make_hb( TransportRoute &rte,  const char *sub,  size_t sublen,
       m.cost4( rte.uid_connected.cost[ 3 ] );
     }
     m.tportid( rte.tport_id );
+    m.tport  ( rte.transport.tport.val, rte.transport.tport.len );
     m.version( ver_str, ver_len );
   }
   m.pk_digest();
@@ -266,15 +268,20 @@ UserDB::on_heartbeat( const MsgFramePublish &pub,  UserBridge &n,
     uint32_t cost[ COST_PATH_COUNT ] = { COST_DEFAULT, COST_DEFAULT,
                                          COST_DEFAULT, COST_DEFAULT },
              rem_tport_id = 0;
+    StringVal tport;
     dec.get_ival<uint32_t>( FID_TPORTID, rem_tport_id );
+    if ( dec.test( FID_TPORT ) ) {
+      tport.val = (const char *) dec.mref[ FID_TPORT ].fptr;
+      tport.len = dec.mref[ FID_TPORT ].fsize;
+    }
     if ( dec.get_ival<uint32_t>( FID_COST, cost[ 0 ] ) ) {
       dec.get_ival<uint32_t>( FID_COST2, cost[ 1 ] );
       dec.get_ival<uint32_t>( FID_COST3, cost[ 2 ] );
       dec.get_ival<uint32_t>( FID_COST4, cost[ 3 ] );
-      n.user_route->rte.update_cost( n, cost, rem_tport_id, "hb1" );
+      n.user_route->rte.update_cost( n, tport, cost, rem_tport_id, "hb1" );
     }
     else {
-      n.user_route->rte.update_cost( n, NULL, rem_tport_id, "hb2" );
+      n.user_route->rte.update_cost( n, tport, NULL, rem_tport_id, "hb2" );
     }
   }
   if ( ! n.user_route->test_set( HAS_HB_STATE ) ) {

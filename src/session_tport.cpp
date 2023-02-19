@@ -53,7 +53,7 @@ SessionMgr::add_startup_transports( const char *name,  size_t name_sz,
         tport = this->tree.find_transport( sp->value.val, len );
         rte   = this->user_db.transport_tab.find_transport( tport );
         if ( rte != NULL ) {
-          if ( ! rte->is_set( TPORT_IS_SHUTDOWN ) ) {
+          if ( ! rte->is_shutdown() ) {
             fprintf( stderr,
                      "Startup %.*s transport \"%.*s\" already running\n",
                      (int) name_sz, name,
@@ -449,20 +449,20 @@ SessionMgr::start_transport( TransportRoute &rte,
                                   parm.timeout );
       }
     }
-    if ( rte.is_set( TPORT_IS_DEVICE ) )
+    if ( rte.is_device() )
       this->name_hb( 0 );
     return true;
   }
   else if ( rte.transport.type.equals( T_MESH, T_MESH_SZ ) ) {
     if ( rte.listener != NULL ) {
-      if ( rte.is_set( TPORT_IS_SHUTDOWN ) ) {
+      if ( rte.is_shutdown() ) {
         if ( ! rte.start_listener( rte.listener, rte.transport ) )
           return false;
         rte.create_listener_mesh_url();
       }
       if ( ! is_listener )
         rte.add_mesh_connect( NULL, 0 );
-      if ( rte.is_set( TPORT_IS_DEVICE ) )
+      if ( rte.is_device() )
         this->name_hb( 0 );
       return true;
     }
@@ -500,7 +500,7 @@ SessionMgr::add_mesh_accept( TransportRoute &listen_rte,
     if ( &t == &rte->transport &&
          rte->all_set( TPORT_IS_SHUTDOWN | TPORT_IS_MESH ) &&
          rte->mesh_id == conn.rte->mesh_id ) {
-      if ( rte->connect_ctx == NULL ) {
+      if ( rte->connect_ctx == NULL && rte->connect_count == 0 ) {
         rte->init_state();
         is_new = false;
         break;
@@ -527,10 +527,15 @@ SessionMgr::add_mesh_accept( TransportRoute &listen_rte,
   conn.notify   = rte;
   conn.route_id = rte->sub_route.route_id;
 
-  rte->printf( "add_mesh_accept from %s\n", conn.peer_address.buf );
-  if ( is_new ) {
+  PeerAddrStr paddr;
+  paddr.set_sock_addr( conn.fd );
+  rte->printf( "add_mesh_accept(%s) from %s (listen:%s.%u) local(%s)\n",
+               is_new ? "new" : "reuse",
+               conn.peer_address.buf, listen_rte.transport.tport.val,
+               listen_rte.tport_id,
+               paddr.buf );
+  if ( is_new )
     this->user_db.add_transport( *rte );
-  }
   this->events.on_connect( rte->tport_id, TPORT_IS_MESH, conn.encrypt );
   if ( ! rte->connected.test_set( conn.fd ) )
     rte->connect_count++;
@@ -559,7 +564,7 @@ SessionMgr::add_tcp_rte( TransportRoute &src_rte,  uint32_t conn_hash ) noexcept
     if ( &t == &rte->transport &&
          rte->all_set( TPORT_IS_SHUTDOWN | TPORT_IS_TCP ) &&
          rte->dev_id == src_rte.dev_id ) {
-      if ( rte->connect_ctx == NULL ) {
+      if ( rte->connect_ctx == NULL && rte->connect_count == 0 ) {
         rte->init_state();
         is_new = false;
         break;
@@ -653,7 +658,7 @@ SessionMgr::add_mesh_connect( TransportRoute &mesh_rte ) noexcept
     url_sz = copy_host_buf( url, 0, "mesh://" );
     if ( parm.host( i ) == NULL ) {
       if ( i == 0 ) {
-        if ( mesh_rte.is_set( TPORT_IS_DEVICE ) )
+        if ( mesh_rte.is_device() )
           return true;
       }
       if ( i > 0 )
@@ -745,14 +750,13 @@ SessionMgr::add_mesh_connect( TransportRoute &mesh_rte,  const char *url,
   port = ConfigTree::Transport::get_host_port( host, host_buf, len );
   opts.parse( mesh_rte.transport, PARAM_NB_CONNECT, *this );
 
-  mesh_rte.printf( "add_mesh_connect timeout=%u encrypt=%s %s (%x)\n",
-             opts.timeout, opts.noencrypt ? "false" : "true", url, url_hash );
   count = (uint32_t) this->user_db.transport_tab.count;
   for ( uint32_t tport_id = 0; tport_id < count; tport_id++ ) {
     rte = this->user_db.transport_tab.ptr[ tport_id ];
     if ( &t == &rte->transport &&
          rte->all_set( TPORT_IS_SHUTDOWN | TPORT_IS_MESH ) &&
          rte->mesh_id == mesh_rte.mesh_id &&
+         rte->connect_count == 0 &&
          ( rte->connect_ctx == NULL ||
            rte->connect_ctx->state == ConnectCtx::CONN_SHUTDOWN ||
            rte->connect_ctx->state == ConnectCtx::CONN_IDLE ) ) {
@@ -783,6 +787,12 @@ SessionMgr::add_mesh_connect( TransportRoute &mesh_rte,  const char *url,
     rte->uid_connected.cost[ i ] = mesh_rte.uid_connected.cost[ i ];
 
   rte->set( TPORT_IS_MESH | TPORT_IS_CONNECT );
+  rte->printf(
+    "add_mesh_connect(%s) timeout=%u encrypt=%s %s (%x) (mesh:%s.%u)\n",
+    is_new ? "new" : "reuse",
+    opts.timeout, opts.noencrypt ? "false" : "true", url, url_hash,
+    mesh_rte.transport.tport.val, mesh_rte.tport_id );
+
   if ( is_new )
     this->user_db.add_transport( *rte );
 

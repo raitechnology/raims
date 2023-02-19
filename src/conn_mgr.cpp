@@ -131,7 +131,7 @@ TransportRoute::on_connect( kv::EvSocket &conn ) noexcept
   bool     is_encrypt    = false,
            first_connect = true;
 
-  if ( this->is_set( TPORT_IS_IPC ) ) {
+  if ( this->is_ipc() ) {
     if ( ! this->connected.test_set( conn.fd ) ) {
       TransportRvHost svc( *this, conn );
       this->connect_count++;
@@ -159,7 +159,8 @@ TransportRoute::on_connect( kv::EvSocket &conn ) noexcept
         return;
 
       if ( first_connect ) {
-        this->printf( "connect %s %s %s using %s fd %u\n",
+        this->printf( "%s %s %s %s using %s fd %u\n",
+                      tcp.is_connect ? "connect" : "accept",
                       tcp.encrypt ? "encrypted" : "plaintext",
                       conn.peer_address.buf, conn.type_string(),
                       this->sub_route.service_name, conn.fd );
@@ -204,7 +205,7 @@ TransportRoute::on_shutdown( EvSocket &conn,  const char *err,
   const char *s = "disconnected";
   char errbuf[ 256 ];
 
-  if ( this->is_set( TPORT_IS_IPC ) ) {
+  if ( this->is_ipc() ) {
     if ( this->connected.test_clear( conn.fd ) ) {
       this->connect_count--;
       TransportRvHost svc( *this, conn );
@@ -235,12 +236,9 @@ TransportRoute::on_shutdown( EvSocket &conn,  const char *err,
         err = errbuf;
     }
     if ( conn.bytes_recv > 0  ) {
-      if ( errlen > 0 )
-        this->printf( "%s %s (%.*s)\n", s, conn.peer_address.buf,
-                      (int) errlen, err );
-      else
-        this->printf( "%s %s (count=%u)\n", s, conn.peer_address.buf,
-                      this->connect_count );
+      this->printf( "%s %s (count=%u) %.*s\n", s,
+                    conn.peer_address.buf, this->connect_count,
+                    (int) errlen, err );
       this->mgr.events.on_shutdown( this->tport_id, conn.fd >= 0 );
     }
     if ( conn.fd >= 0 ) {
@@ -248,7 +246,7 @@ TransportRoute::on_shutdown( EvSocket &conn,  const char *err,
       if ( this->connected.test_clear( conn.fd ) ) {
         if ( --this->connect_count == 0 ) {
           this->last_connect_count = 0;
-          if ( ! this->is_set( TPORT_IS_LISTEN ) ) {
+          if ( ! this->is_listen() ) {
             this->set( TPORT_IS_SHUTDOWN );
             if ( this->notify_ctx != NULL ) {
               if ( this->notify_ctx->state == ConnectCtx::CONN_SHUTDOWN )
@@ -272,7 +270,7 @@ TransportRoute::on_shutdown( EvSocket &conn,  const char *err,
 void
 TransportRoute::on_data_loss( EvSocket &conn,  EvPublish &pub ) noexcept
 {
-  if ( this->is_set( TPORT_IS_IPC ) ) {
+  if ( this->is_ipc() ) {
     d_conn( "on_data_loss fd %d pub_status %d\n", conn.fd, pub.pub_status );
     TransportRvHost svc( *this, conn );
     if ( svc.rv_host != NULL ) {
@@ -337,8 +335,7 @@ SessionMgr::find_mesh( const StringVal &mesh_url ) noexcept
 
   for ( uint32_t tport_id = 0; tport_id < count; tport_id++ ) {
     TransportRoute *rte = this->user_db.transport_tab.ptr[ tport_id ];
-    if ( ! rte->is_set( TPORT_IS_SHUTDOWN ) && rte->is_set( TPORT_IS_LISTEN ) &&
-           rte->is_set( TPORT_IS_MESH ) ) {
+    if ( ! rte->is_shutdown() && rte->is_listen() && rte->is_mesh() ) {
       if ( rte->mesh_url.equals( mesh_url ) )
         return rte;
     }
@@ -353,7 +350,7 @@ SessionMgr::find_ucast( const StringVal &ucast_url ) noexcept
 
   for ( uint32_t tport_id = 0; tport_id < count; tport_id++ ) {
     TransportRoute *rte = this->user_db.transport_tab.ptr[ tport_id ];
-    if ( ! rte->is_set( TPORT_IS_SHUTDOWN ) && rte->is_set( TPORT_IS_MCAST ) ) {
+    if ( ! rte->is_shutdown() && rte->is_mcast() ) {
       if ( rte->ucast_url.equals( ucast_url ) )
         return rte;
     }
@@ -374,8 +371,7 @@ SessionMgr::find_mesh( TransportRoute &mesh_rte,
   for ( uint32_t tport_id = 0; tport_id < count; tport_id++ ) {
     TransportRoute *rte = this->user_db.transport_tab.ptr[ tport_id ];
     if ( rte != &mesh_rte && rte->mesh_id == mesh_rte.mesh_id &&
-         ! rte->is_set( TPORT_IS_SHUTDOWN ) &&
-         ! rte->is_set( TPORT_IS_LISTEN ) ) {
+         ! rte->is_shutdown() && ! rte->is_listen() ) {
       if ( rte->mesh_url_hash == mesh_rte.mesh_url_hash ) {
         d_conn( "mesh matched %u(%x)(%.*s) %u(%x)(%.*s)\n",
          rte->tport_id, rte->mesh_url_hash, rte->mesh_url.len, rte->mesh_url.val,
@@ -406,8 +402,7 @@ SessionMgr::find_mesh( TransportRoute &mesh_rte,
     for ( uint32_t tport_id = 0; tport_id < count; tport_id++ ) {
       TransportRoute *rte = this->user_db.transport_tab.ptr[ tport_id ];
       if ( rte != &mesh_rte && rte->mesh_id == mesh_rte.mesh_id &&
-           ! rte->is_set( TPORT_IS_SHUTDOWN ) &&
-           ! rte->is_set( TPORT_IS_LISTEN ) ) {
+           ! rte->is_shutdown() && ! rte->is_listen() ) {
         for ( uint32_t i = 0; i < addr_count; i++ ) {
           if ( rte->mesh_url_hash == dns_cache[ i ] )
             return rte;
@@ -425,7 +420,7 @@ ConnectMgr::connect( ConnectCtx &ctx ) noexcept
                   * active_rte;
   struct addrinfo * ai  = ctx.addr_info.addr_list;
 
-  if ( rte->is_set( TPORT_IS_MESH ) &&
+  if ( rte->is_mesh() &&
        (active_rte = this->mgr.find_mesh( *rte, ai )) != NULL ) {
     const char * host = "";
     if ( ctx.addr_info.host != NULL )
@@ -500,8 +495,7 @@ ConnectCtx *
 ConnectDB::create( uint64_t id ) noexcept
 {
   ConnectCtx * ctx = new ( ::malloc( sizeof( ConnectCtx ) ) )
-    ConnectCtx( this->poll, *this );
-  ctx->event_id = id;
+    ConnectCtx( this->poll, *this, id );
   this->ctx_array[ id ] = ctx;
   return ctx;
 }
