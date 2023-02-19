@@ -766,6 +766,18 @@ UserDB::recv_mesh_db( const MsgFramePublish &pub,  UserBridge &n,
       return true;
     }
   }
+  ArrayOutput bout;
+  bout.s( "tport( " )
+      .b( tport.val, tport.len )
+      .s( ", url " )
+      .b( mesh_url.val, mesh_url.len )
+      .s( ") [" );
+  for ( MeshDBRec *rec = rec_list; rec != NULL; rec = rec->next ) {
+    bout.b( rec->mesh_url.val, rec->mesh_url.len )
+        .s( "," );
+  }
+  bout.s( "]" );
+  n.printf( "mesh_db(%s): %.*s\n", rte->name, (int) bout.count, bout.ptr );
   while ( rec_list != NULL ) {
     MeshDBRec  & rec = *rec_list;
     rec_list = rec.next;

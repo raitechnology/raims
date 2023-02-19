@@ -255,16 +255,16 @@ UserDB::push_user_route( UserBridge &n,  UserRoute &u_rte ) noexcept
         if ( rte.uid_in_mesh->ref( n.uid ) == 0 ) {
           *rte.mesh_csum ^= n.bridge_id.nonce;
           /*if ( debug_lnk )*/
-            n.printf( "add to mesh %s\n", rte.transport.tport.val );
+            n.printf( "add to mesh %s fd %u\n", rte.name, fd );
         }
         else {
-          n.printf( "already in mesh %s\n", rte.name );
+          n.printf( "already in mesh %s fd %u\n", rte.name, fd );
         }
       }
       else if ( rte.dev_id != NULL ) {
         if ( rte.uid_in_device->ref( n.uid ) == 0 ) {
           if ( debug_lnk )
-            n.printf( "add to dev %s\n", rte.transport.tport.val );
+            n.printf( "add to dev %s fd %u\n", rte.name, fd );
         }
       }
       if ( ! rte.uid_connected.test_set( n.uid ) ) {
@@ -327,13 +327,13 @@ UserDB::pop_user_route( UserBridge &n,  UserRoute &u_rte ) noexcept
         if ( rte.uid_in_mesh->deref( n.uid ) == 0 ) {
           *rte.mesh_csum ^= n.bridge_id.nonce;
           /*if ( debug_lnk )*/
-            n.printf( "rm from mesh %s\n", rte.transport.tport.val );
+            n.printf( "rm from mesh %s\n", rte.name );
         }
       }
       else if ( rte.dev_id != NULL ) {
         if ( rte.uid_in_device->deref( n.uid ) == 0 ) {
           if ( debug_lnk )
-            n.printf( "rm from dev %s\n", rte.transport.tport.val );
+            n.printf( "rm from dev %s\n", rte.name );
         }
       }
       if ( rte.is_mcast() && rte.ibx_tport != NULL ) {
