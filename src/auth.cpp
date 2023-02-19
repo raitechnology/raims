@@ -562,10 +562,10 @@ UserDB::recv_trusted( const MsgFramePublish &pub,  UserBridge &n,
     return true;
   bool in_mesh  = ( dec.test( FID_MESH_DB ) != 0 ),
        is_mcast = ( dec.test( FID_UCAST_DB ) != 0 );
-  uint64_t start_time = 0, time = 0;
+  uint64_t start_time = 0/*, time = 0*/;
   dec.get_ival<uint64_t>( FID_START, start_time );
-  dec.get_ival<uint64_t>( FID_TIME, time );
-  if ( n.start_time == start_time && time >= n.hb_time ) {
+  /*dec.get_ival<uint64_t>( FID_TIME, time );*/
+  if ( n.start_time == start_time /*&& time >= n.hb_time */) {
     this->events.recv_trust( n.uid, pub.rte.tport_id, in_mesh );
 
     if ( in_mesh )
@@ -573,11 +573,12 @@ UserDB::recv_trusted( const MsgFramePublish &pub,  UserBridge &n,
     if ( is_mcast )
       this->recv_ucast_db( pub, n, dec );
   }
-  else {
+  /* could be hb between trust, start_time sufficient */
+  /*else {
     n.printe( "ignore trusted, time not correct (%lu %lu) %d, (%lu %lu) %d\n",
               n.start_time, start_time, n.start_time == start_time,
               time, n.hb_time, time >= n.hb_time );
-  }
+  }*/
   return true;
 }
 
