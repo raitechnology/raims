@@ -349,7 +349,8 @@ UserDB::recv_challenge( const MsgFramePublish &pub,  UserBridge &n,
                         AuthStage stage ) noexcept
 {
   HashDigest challenge_ha1,
-             encrypted_ha1;
+             encrypted_ha1,
+             save_key;
   Nonce      recv_cnonce;
   PolyHmacDigest secret_hmac;
 
@@ -369,6 +370,7 @@ UserDB::recv_challenge( const MsgFramePublish &pub,  UserBridge &n,
                                       n.auth[ 0 ].seqno, n.auth[ 0 ].time,
                                       stage );
   encrypted_ha1.copy_from( dec.mref[ FID_AUTH_KEY ].fptr );
+  save_key = n.peer_key;
   n.peer_key.decrypt_hash( challenge_ha1, encrypted_ha1 );
   secret_hmac.zero();
   encrypted_ha1.zero();
@@ -392,7 +394,13 @@ UserDB::recv_challenge( const MsgFramePublish &pub,  UserBridge &n,
     n.printf( "auth msg verified with service %s public key\n",
               this->my_svc.service );
   }
-  return dec.msg->verify( n.peer_key );
+  /* requires material from both peers, could fail even if sign ok if
+   * my auth[] history is old, restart key exchange in that case */
+  if ( ! dec.msg->verify( n.peer_key ) ) {
+    n.peer_key = save_key;
+    return false;
+  }
+  return true;
 }
 /* notify peer that it is trusted */
 bool
