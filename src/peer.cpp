@@ -1163,6 +1163,7 @@ UserDB::send_mesh_request( UserBridge &n,  MsgHdrDecoder &dec,
   TransportRoute & rte = n.user_route->rte;
   BitRefCount    & uid_in_mesh = *rte.uid_in_mesh;
   UserRoute      * u_ptr;
+  UserBridge     * mesh_n;
   uint32_t         uid,
                    url_count = 0,
                  * filter;
@@ -1172,7 +1173,7 @@ UserDB::send_mesh_request( UserBridge &n,  MsgHdrDecoder &dec,
   if ( ! n.user_route->is_set( MESH_URL_STATE ) )
     return true;
   for ( ok = uid_in_mesh.first( uid ); ok; ok = uid_in_mesh.next( uid ) ) {
-    UserBridge *mesh_n = this->bridge_tab.ptr[ uid ];
+    mesh_n = this->bridge_tab.ptr[ uid ];
     csum ^= mesh_n->bridge_id.nonce;
     u_ptr = mesh_n->user_route_ptr( *this, rte.tport_id );
     if ( u_ptr != NULL && u_ptr->is_valid() && u_ptr->url_hash != 0 )
@@ -1187,11 +1188,14 @@ UserDB::send_mesh_request( UserBridge &n,  MsgHdrDecoder &dec,
   else {
     ArrayOutput bout;
     for ( ok = uid_in_mesh.first( uid ); ok; ok = uid_in_mesh.next( uid ) ) {
-      bout.i( uid )
-          .s( ", " );
+      mesh_n = this->bridge_tab.ptr[ uid ];
+      bout.s( mesh_n->peer.user.val )
+          .s( "." )
+          .i( uid )
+          .s( "," );
     }
-    n.printf( "mesh_request current uids( %.*s )\n", (int) bout.count,
-              bout.ptr );
+    n.printf( "mesh_request(%s) cur_uids[%.*s]\n",
+              rte.name, (int) bout.count, bout.ptr );
   }
   if ( url_count > 0 ) {
     filter = (uint32_t *) dec.mem.make( url_count * 4 );

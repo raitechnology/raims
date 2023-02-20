@@ -396,7 +396,7 @@ UserDB::on_heartbeat( const MsgFramePublish &pub,  UserBridge &n,
       this->send_adjacency_request( n, HB_SYNC_REQ );
     }
     else {
-      char buf[ NONCE_B64_LEN + 1 ], buf2[ NONCE_B64_LEN + 1 ];
+      /*char buf[ NONCE_B64_LEN + 1 ], buf2[ NONCE_B64_LEN + 1 ];*/
       if ( dec.test( FID_UID_CSUM ) ) {
         Nonce csum;
         csum.copy_from( dec.mref[ FID_UID_CSUM ].fptr );
@@ -418,13 +418,14 @@ UserDB::on_heartbeat( const MsgFramePublish &pub,  UserBridge &n,
         if ( my_csum != csum ) {
           if ( current_mono_time == 0 )
             current_mono_time = current_monotonic_time_ns();
-          if ( this->last_auth_mono + sec_to_ns( 1 ) < current_mono_time )
-            n.printf( "mesh_csum not equal %s=[%s] hb[%s] "
+          if ( this->last_auth_mono + sec_to_ns( 1 ) < current_mono_time ) {
+            /*n.printf( "mesh_csum not equal %s=[%s] hb[%s] "
                       "mesh pending queue is_empty=%u\n",
-                   n.peer.user.val, my_csum.to_base64_str( buf ),
-                   csum.to_base64_str( buf2 ), this->mesh_pending.is_empty() );
-          if ( this->mesh_pending.is_empty() )
-            this->send_mesh_request( n, dec, csum );
+                 n.peer.user.val, my_csum.to_base64_str( buf ),
+                 csum.to_base64_str( buf2 ), this->mesh_pending.is_empty() );*/
+            if ( this->mesh_pending.is_empty() )
+              this->send_mesh_request( n, dec, csum );
+          }
         }
       }
     }
