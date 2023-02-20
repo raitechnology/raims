@@ -423,10 +423,8 @@ UserDB::on_heartbeat( const MsgFramePublish &pub,  UserBridge &n,
                       "mesh pending queue is_empty=%u\n",
                    n.peer.user.val, my_csum.to_base64_str( buf ),
                    csum.to_base64_str( buf2 ), this->mesh_pending.is_empty() );
-          /*if ( debug_hb )
-            this->debug_uids( *pub.rte.uid_in_mesh, csum );*/
           if ( this->mesh_pending.is_empty() )
-            this->send_mesh_request( n, dec );
+            this->send_mesh_request( n, dec, csum );
         }
       }
     }

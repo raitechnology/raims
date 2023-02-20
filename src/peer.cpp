@@ -1156,29 +1156,49 @@ UserDB::recv_mesh_result( const MsgFramePublish &pub,  UserBridge &n,
 }
 
 bool
-UserDB::send_mesh_request( UserBridge &n,  MsgHdrDecoder &dec ) noexcept
+UserDB::send_mesh_request( UserBridge &n,  MsgHdrDecoder &dec,
+                           const Nonce &peer_csum ) noexcept
 {
-  InboxBuf      ibx( n.bridge_id, _MESH_REQ );
-  BitRefCount & uid_in_mesh = *n.user_route->rte.uid_in_mesh;
-  UserRoute   * u_ptr;
-  uint32_t      uid,
-                t = n.user_route->rte.tport_id,
-                url_count = 0,
-              * filter;
-  bool          ok;
+  InboxBuf         ibx( n.bridge_id, _MESH_REQ );
+  TransportRoute & rte = n.user_route->rte;
+  BitRefCount    & uid_in_mesh = *rte.uid_in_mesh;
+  UserRoute      * u_ptr;
+  uint32_t         uid,
+                   url_count = 0,
+                 * filter;
+  Nonce            csum = this->bridge_id.nonce;
+  bool             ok;
 
   if ( ! n.user_route->is_set( MESH_URL_STATE ) )
     return true;
   for ( ok = uid_in_mesh.first( uid ); ok; ok = uid_in_mesh.next( uid ) ) {
-    u_ptr = this->bridge_tab.ptr[ uid ]->user_route_ptr( *this, t );
+    UserBridge *mesh_n = this->bridge_tab.ptr[ uid ];
+    csum ^= mesh_n->bridge_id.nonce;
+    u_ptr = mesh_n->user_route_ptr( *this, rte.tport_id );
     if ( u_ptr != NULL && u_ptr->is_valid() && u_ptr->url_hash != 0 )
       url_count++;
+  }
+  if ( csum == peer_csum ) {
+    n.printe( "my mesh csum wrong, updating\n" );
+    csum ^= this->bridge_id.nonce;
+    *rte.mesh_csum = csum;
+    return true;
+  }
+  else {
+    ArrayOutput bout;
+    for ( ok = uid_in_mesh.first( uid ); ok; ok = uid_in_mesh.next( uid ) ) {
+      bout.i( uid )
+          .s( ", " );
+    }
+    n.printf( "mesh_request current uids( %.*s )\n", (int) bout.count,
+              bout.ptr );
   }
   if ( url_count > 0 ) {
     filter = (uint32_t *) dec.mem.make( url_count * 4 );
     url_count = 0;
     for ( ok = uid_in_mesh.first( uid ); ok; ok = uid_in_mesh.next( uid ) ) {
-      u_ptr = this->bridge_tab.ptr[ uid ]->user_route_ptr( *this, t );
+      u_ptr = this->bridge_tab.ptr[ uid ]->
+                    user_route_ptr( *this, rte.tport_id );
       if ( u_ptr != NULL && u_ptr->is_valid() && u_ptr->url_hash != 0 )
         filter[ url_count++ ] = u_ptr->url_hash;
     }
@@ -1187,7 +1207,7 @@ UserDB::send_mesh_request( UserBridge &n,  MsgHdrDecoder &dec ) noexcept
   MsgEst e( ibx.len() );
   e.seqno      ()
    .mesh_url   ( u_ptr->mesh_url.len )
-   .tport      ( u_ptr->rte.transport.tport.len )
+   .tport      ( rte.transport.tport.len )
    .mesh_filter( url_count * 4 );
 
   MsgCat m;
@@ -1196,7 +1216,7 @@ UserDB::send_mesh_request( UserBridge &n,  MsgHdrDecoder &dec ) noexcept
   m.open( this->bridge_id.nonce, ibx.len() )
    .seqno   ( n.inbox.next_send( U_INBOX_MESH_REQ ) )
    .mesh_url( u_ptr->mesh_url.val, u_ptr->mesh_url.len )
-   .tport   ( u_ptr->rte.transport.tport.val, u_ptr->rte.transport.tport.len );
+   .tport   ( rte.transport.tport.val, rte.transport.tport.len );
   if ( url_count > 0 )
     m.mesh_filter( filter, url_count * 4 );
   uint32_t h = ibx.hash();
@@ -1256,28 +1276,7 @@ UserDB::process_unknown_adjacency( uint64_t current_mono_time ) noexcept
         }
       }
     }
-#if 0
-    if ( debug_peer ) {
-      char buf[ NONCE_B64_LEN + 1 ];
-      if ( pr == NULL ) {
-        printf( "no route found, nonce [%s] user %.*s reason %s\n",
-                p->nonce.to_base64_str( buf ),
-                p->user_sv.len, p->user_sv.val,
-                peer_sync_reason_string( p->reason ) );
-      }
-      else {
-        uint32_t uid = pr->hd.uid,
-                 tid = pr->hd.tport_id;
-        UserBridge     * n   = this->bridge_tab.ptr[ uid ];
-        TransportRoute * rte = this->transport_tab.ptr[ tid ];
-        printf( "route to %s.%u over %s nonce [%s] user %.*s reason %s\n",
-                n->peer.user.val, uid, rte->transport.tport.val,
-                p->nonce.to_base64_str( buf ),
-                p->user_sv.len, p->user_sv.val,
-                peer_sync_reason_string( p->reason ) );
-      }
-    }
-#endif
+
     p->request_time_mono = current_mono_time;
     p->request_count++;
   }

@@ -561,9 +561,10 @@ UserDB::check_user_timeout( uint64_t current_mono_time,
     n = this->adj_queue.heap[ 0 ];
     if ( current_mono_time < n->adj_timeout() )
       break;
-    /*if ( debug_usr )*/
-      n->printf( "adjacency request timeout (%s)\n",
-             n->primary( *this )->inbox_route_str( buf, sizeof( buf ) ) );
+    if ( n->unknown_adj_refs != 0 )
+      n->printf( "adjacency request timeout (%s) unknown adj refs %u\n",
+             n->primary( *this )->inbox_route_str( buf, sizeof( buf ) ),
+             n->unknown_adj_refs );
     n->clear( ADJACENCY_REQUEST_STATE );
     this->adj_queue.pop();
     if ( ! n->test_set( PING_STATE ) ) {

@@ -124,18 +124,41 @@ UserDB::print_adjacency( const char *s,  UserBridge &n ) noexcept
 
 void
 UserDB::save_unknown_adjacency( UserBridge &n,  TransportRoute &rte,
-                                uint64_t seqno,  AdjacencyRec *recs ) noexcept
+                                uint64_t seqno,  AdjacencyRec *recs,
+                                bool is_change ) noexcept
 {
+  AdjPending * p, * sav = NULL;
   uint32_t rec_count = 0;
+
   for ( AdjacencyRec * r = recs; r != NULL; r = r->next )
     rec_count++;
+  n.unknown_link_seqno = seqno;
   if ( debug_lnk ) {
     n.printf( "save adj %lu %s rec_count %u\n", seqno, rte.name, rec_count );
     AdjacencyRec::print_rec_list( recs, "save_unknown" );
   }
+  if ( rec_count == 0 )
+    return;
+  /* append rec list to existing */
+  if ( is_change ) {
+    for ( sav = this->adjacency_unknown.hd; sav != NULL; sav = sav->next ){
+      if ( sav->uid == n.uid ) {
+        this->adjacency_unknown.pop( sav );
+        for ( AdjacencyRec *r = sav->rec_list; r != NULL; r = r->next ) {
+          if ( r->next == NULL ) {
+            r->next = recs;
+            recs = sav->rec_list;
+            rec_count += sav->rec_count;
+            break;
+          }
+        }
+        break;
+      }
+    }
+  }
   void * m = ::malloc( sizeof( AdjPending ) +
                        rec_count * sizeof( AdjacencyRec ) );
-  AdjPending * p = new ( m ) AdjPending( rte );
+  p = new ( m ) AdjPending( rte );
   p->link_state_seqno = seqno;
   p->uid              = n.uid;
   p->reason           = ADJ_RESULT_SYNC;
@@ -150,6 +173,11 @@ UserDB::save_unknown_adjacency( UserBridge &n,  TransportRoute &rte,
   }
   cpy[ rec_count - 1 ].next = NULL;
   this->adjacency_unknown.push_tl( p );
+
+  if ( sav != NULL ) {
+    this->remove_pending_peer( NULL, sav->pending_seqno );
+    delete sav;
+  }
 }
 
 void
@@ -191,7 +219,7 @@ UserDB::add_unknown_adjacency( UserBridge &n ) noexcept
         m->printf( "add unknown adj: sync to %lu\n", p->link_state_seqno );
       this->update_link_state_seqno( m->link_state_seqno, p->link_state_seqno );
     remove_pending:;
-      m->unknown_refs = 0;
+      m->unknown_adj_refs = 0;
       this->adjacency_unknown.pop( p );
       this->remove_pending_peer( NULL, p->pending_seqno );
       delete p;
@@ -218,7 +246,7 @@ UserDB::clear_unknown_adjacency( UserBridge &n ) noexcept
       delete p;
     }
   }
-  n.unknown_refs = 0;
+  n.unknown_adj_refs = 0;
 }
 
 void
@@ -534,6 +562,8 @@ UserDB::recv_adjacency_change( const MsgFramePublish &pub,  UserBridge &n,
   if ( ! dec.get_ival<uint64_t>( FID_LINK_STATE, link_state ) ||
        ! dec.test( FID_ADJACENCY ) )
     return true;
+  AdjacencyRec * unknown, * rec_list =
+    dec.decode_rec_list<AdjacencyRec>( FID_ADJACENCY );
 
   if ( link_state != n.link_state_seqno + 1 ) {
     if ( n.link_state_seqno >= link_state ) {
@@ -543,10 +573,17 @@ UserDB::recv_adjacency_change( const MsgFramePublish &pub,  UserBridge &n,
       adj_change = HAVE_ADJ_CHANGE;
     }
     else {
-      if ( debug_lnk )
-        n.printf( "missing link state %" PRIu64 " + 1 != %" PRIu64 "\n",
-                  n.link_state_seqno, link_state );
-      b = this->send_adjacency_request( n, ADJ_CHG_SYNC_REQ );
+      if ( link_state == n.unknown_link_seqno + 1 ) {
+        unknown = this->apply_adjacency_change( n, rec_list );
+        this->save_unknown_adjacency( n, pub.rte, link_state,
+                                      unknown, true );
+      }
+      else {
+        if ( debug_lnk )
+          n.printf( "missing link state %" PRIu64 " + 1 != %" PRIu64 "\n",
+                    n.link_state_seqno, link_state );
+        b = this->send_adjacency_request( n, ADJ_CHG_SYNC_REQ );
+      }
       adj_change = NEED_ADJ_SYNC;
     }
   }
@@ -556,28 +593,45 @@ UserDB::recv_adjacency_change( const MsgFramePublish &pub,  UserBridge &n,
     if ( debug_lnk )
       n.printf( "recv change link state %" PRIu64 "\n", link_state );
     adj_change = UPDATE_ADJ_CHANGE;
-    AdjacencyRec * rec_list =
-      dec.decode_rec_list<AdjacencyRec>( FID_ADJACENCY );
     if ( debug_lnk )
       AdjacencyRec::print_rec_list( rec_list, "recv_change" );
     /* there may be multiple users per tport, which has the effect
      * of decoding several records without a tport after the record
      * with the tport set */
-    while ( rec_list != NULL ) {
-      if ( ! this->add_adjacency_change( n, *rec_list ) )
-        n.unknown_refs++;
-      rec_list = rec_list->next;
+    unknown = this->apply_adjacency_change( n, rec_list );
+    if ( unknown != NULL ) {
+      this->save_unknown_adjacency( n, pub.rte, link_state,
+                                    unknown, true );
     }
-    if ( n.unknown_refs == 0 )
+    if ( n.unknown_adj_refs == 0 )
       this->update_link_state_seqno( n.link_state_seqno, link_state );
-    else if ( debug_lnk )
-      n.printf( "recv adj change: unknown_refs %u to %lu\n", n.unknown_refs,
-                link_state );
+    else {
+      adj_change = NEED_ADJ_SYNC;
+      if ( debug_lnk )
+        n.printf( "recv adj change: unknown_adj_refs %u to %lu\n",
+                  n.unknown_adj_refs, link_state );
+    }
     this->peer_dist.invalidate( ADJACENCY_CHANGE_INV, n.uid );
   }
   this->events.recv_adjacency_change( n.uid, pub.rte.tport_id, adj_change );
   b &= this->bcast_pub( pub, n, dec );
   return b;
+}
+
+AdjacencyRec *
+UserDB::apply_adjacency_change( UserBridge &n,
+                                AdjacencyRec *rec_list ) noexcept
+{
+  SLinkList< AdjacencyRec > unknown_recs;
+  while ( rec_list != NULL ) {
+    AdjacencyRec * next = rec_list->next;
+    if ( ! this->add_adjacency_change( n, *rec_list ) ) {
+      unknown_recs.push_tl( rec_list );
+      n.unknown_adj_refs++;
+    }
+    rec_list = next;
+  }
+  return unknown_recs.hd;
 }
 
 bool
@@ -670,32 +724,6 @@ UserDB::add_adjacency_change( UserBridge &n,  AdjacencyRec &rec ) noexcept
   return true;
 }
 
-#if 0
-  n.unknown_link_seqno = link_state;
-  AdjPending *p =
-    this->adjacency_unknown.find_update( rec.nonce, tport_id, rec.add );
-  if ( p == NULL )
-    p = this->adjacency_unknown.create( pub.rte, rec.nonce );
-  if ( link_state > p->link_state_seqno ) {
-    p->link_state_seqno = link_state;
-    p->uid              = n.uid;
-    p->tportid          = tport_id;
-    p->tport_sv         = set->tport;
-    p->tport_type_sv    = set->tport_type;
-    p->user_sv          = user_sv;
-    p->reason           = ADJ_CHANGE_SYNC;
-    p->add              = rec.add;
-    for ( uint8_t i = 0; i < COST_PATH_COUNT; i++ )
-      p->cost[ i ] = rec.cost[ i ];
-  }
-  if ( rec.add ) {
-    UserBridge * m;
-    uint32_t tmp_cost;
-    m = this->closest_peer_route( pub.rte, n, tmp_cost );
-    if ( m != NULL )
-      this->start_pending_adj( *p, *m );
-  }
-#endif
 bool
 UserBridge::throttle_adjacency( uint32_t inc,  uint64_t cur_mono ) noexcept
 {
@@ -1152,7 +1180,7 @@ UserDB::recv_adjacency_result( const MsgFramePublish &pub,  UserBridge &n,
 
     sync->uid_csum.zero();
     this->peer_dist.clear_cache_if_dirty();
-    if ( sync->unknown_refs != 0 )
+    if ( sync->unknown_adj_refs != 0 )
       this->clear_unknown_adjacency( *sync );
 
     AdjacencySpace * set = NULL;
@@ -1164,24 +1192,15 @@ UserDB::recv_adjacency_result( const MsgFramePublish &pub,  UserBridge &n,
         set->rem_tport_id = 0;
       }
     }
-    SLinkList< AdjacencyRec >  unknown_recs;
-    while ( rec_list != NULL ) {
-      AdjacencyRec * next = rec_list->next;
-      if ( ! this->add_adjacency_change( *sync, *rec_list ) ) {
-        unknown_recs.push_tl( rec_list );
-        sync->unknown_refs++;
-      }
-      rec_list = next;
-    }
-    if ( sync->unknown_refs == 0 )
+    AdjacencyRec * unknown = this->apply_adjacency_change( *sync, rec_list );
+    if ( sync->unknown_adj_refs == 0 )
       this->update_link_state_seqno( sync->link_state_seqno, link_state );
     else {
-      if ( debug_lnk )
-        sync->printf( "have unknown %u refs to %lu\n", sync->unknown_refs,
-                      link_state );
-      sync->unknown_link_seqno = link_state;
       this->save_unknown_adjacency( *sync, pub.rte, link_state,
-                                    unknown_recs.hd );
+                                    unknown, false );
+      if ( debug_lnk )
+        sync->printf( "have unknown %u refs to %lu\n", sync->unknown_adj_refs,
+                      link_state );
     }
     this->peer_dist.invalidate( ADJACENCY_UPDATE_INV, sync->uid );
   }
@@ -1190,27 +1209,3 @@ UserDB::recv_adjacency_result( const MsgFramePublish &pub,  UserBridge &n,
 
   return true;
 }
-#if 0
-  sync->unknown_link_seqno = link_state;
-  AdjPending *p =
-    this->adjacency_unknown.find_update( rec.nonce, tport_id, rec.add );
-  if ( p == NULL )
-    p = this->adjacency_unknown.create( pub.rte, rec.nonce );
-  if ( link_state > p->link_state_seqno ) {
-    p->link_state_seqno = link_state;
-    p->uid              = sync->uid;
-    p->tportid          = tport_id;
-    p->tport_sv         = set->tport;
-    p->tport_type_sv    = set->tport_type;
-    p->user_sv          = user_sv;
-    p->reason           = ADJ_RESULT_SYNC;
-    p->add              = true;
-    for ( uint8_t i = 0; i < COST_PATH_COUNT; i++ )
-      p->cost[ i ] = rec.cost[ i ];
-  }
-  UserBridge * m;
-  uint32_t dist;
-  m = this->closest_peer_route( pub.rte, *sync, dist );
-  if ( m != NULL )
-    this->start_pending_adj( *p, *m );
-#endif

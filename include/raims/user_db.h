@@ -230,7 +230,7 @@ struct UserBridge : public UserStateTest<UserBridge> {
                      ping_fail_count,     /* ping counters */
                      challenge_count,     /* count of challenges */
                      hb_miss,             /* count of hb missed */
-                     unknown_refs,        /* link refs are yet to be resolved */
+                     unknown_adj_refs,    /* link refs are yet to be resolved */
                      auth_count,          /* number of times authenticated */
                      adj_req_count,       /* throttle the number of requests */
                      bridge_nonce_int;    /* first 4 bytes of bridge_id.nonce */
@@ -732,7 +732,8 @@ struct UserDB {
   void save_unauthorized_adjacency( MsgFramePublish &fpub ) noexcept;
   void print_adjacency( const char *s,  UserBridge &n ) noexcept;
   void save_unknown_adjacency( UserBridge &n,  TransportRoute &rte,
-                               uint64_t seqno,  AdjacencyRec *recs ) noexcept;
+                               uint64_t seqno,  AdjacencyRec *recs,
+                               bool is_change ) noexcept;
   void add_unknown_adjacency( UserBridge &n ) noexcept;
   void clear_unknown_adjacency( UserBridge &n ) noexcept;
   void remove_adjacency( UserBridge &n ) noexcept;
@@ -746,6 +747,8 @@ struct UserDB {
   void adjacency_submsg( UserBridge *sync,  MsgCat &m ) noexcept;
   bool recv_adjacency_change( const MsgFramePublish &pub,  UserBridge &n,
                               MsgHdrDecoder &dec ) noexcept;
+  AdjacencyRec * apply_adjacency_change( UserBridge &n,
+                                         AdjacencyRec *rec_list ) noexcept;
   bool add_adjacency_change( UserBridge &n,  AdjacencyRec &rec ) noexcept;
   bool send_adjacency( UserBridge &n,  UserBridge *sync,  InboxBuf &ibx,
                        uint64_t time_val,  uint32_t reas,  int which ) noexcept;
@@ -817,7 +820,8 @@ struct UserDB {
                           MsgHdrDecoder &dec ) noexcept;
   bool recv_mesh_result( const MsgFramePublish &pub,  UserBridge &n,
                          MsgHdrDecoder &dec ) noexcept;
-  bool send_mesh_request( UserBridge &n,  MsgHdrDecoder &dec ) noexcept;
+  bool send_mesh_request( UserBridge &n,  MsgHdrDecoder &dec,
+                          const Nonce &peer_csum ) noexcept;
 
   /* try to resolve unknown peers and adjacency */
   void process_unknown_adjacency( uint64_t current_mono_time ) noexcept;
