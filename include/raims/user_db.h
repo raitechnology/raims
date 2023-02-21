@@ -66,7 +66,8 @@ enum UserNonceState {
   HAS_HB_STATE            =  0x4000, /* recvd a hb */
   IS_INIT_STATE           =  0x8000, /* if initialized with reset() */
   IS_VALID_STATE          = 0x10000,
-  DIRECT_LINK_STATE       = 0x20000
+  DIRECT_LINK_STATE       = 0x20000,
+  MESH_REQUEST_STATE      = 0x40000
 };
 static const size_t MAX_NONCE_STATE_STRING = 16 * 16; /* 16 states * 16 chars*/
 char *user_state_string( uint32_t state,  char *buf ) noexcept;
@@ -77,6 +78,15 @@ struct UserStateTest : public StateTest<T> {
   char *state_to_string( char *buf ) {
     return user_state_string( ((T *) this)->state, buf );
   }
+};
+
+struct ThrottleState {
+  uint64_t       mono_time;
+  uint32_t     & state;
+  uint32_t       req_count;
+  const uint32_t state_bit;
+  ThrottleState( uint32_t &stat,  UserNonceState bit )
+    : mono_time( 0 ), state( stat ), req_count( 0 ), state_bit( bit ) {}
 };
 
 struct UserBridge;
@@ -92,7 +102,8 @@ struct UserRoute : public UserStateTest<UserRoute> {
                     inbox_fd,      /* inbox fd */
                     state,         /* whether in route list */
                     url_hash,      /* hash of ucast_url, mesh_url */
-                    hb_seqno;      /* hb sequence on this transport */
+                    hb_seqno,      /* hb sequence on this transport */
+                    list_id;       /* the user route list ptr */
   uint64_t          bytes_sent,    /* bytes sent ptp */
                     msgs_sent;     /* msgs sent ptp */
   StringVal         ucast_url,
@@ -113,7 +124,14 @@ struct UserRoute : public UserStateTest<UserRoute> {
            this->is_set( IS_VALID_STATE ) != 0;
   }
   void invalidate( void ) {
-    this->clear( IS_VALID_STATE );
+    this->state      = IS_INIT_STATE;
+    this->ucast_url.zero();
+    this->mesh_url.zero();
+    this->url_hash   = 0;
+    this->hb_seqno   = 0;
+    this->bytes_sent = 0;
+    this->msgs_sent  = 0;
+    this->ucast_src  = NULL;
   }
   void connected( uint32_t hops ) {
     this->set( IS_VALID_STATE );
@@ -128,16 +146,10 @@ struct UserRoute : public UserStateTest<UserRoute> {
     return this->is_set( DIRECT_LINK_STATE ) ? 0 : 1;
   }
   void reset( void ) {
-    this->mcast_fd   = NO_RTE;
-    this->inbox_fd   = NO_RTE;
-    this->state      = IS_INIT_STATE;
-    this->ucast_url.zero();
-    this->mesh_url.zero();
-    this->url_hash   = 0;
-    this->hb_seqno   = 0;
-    this->bytes_sent = 0;
-    this->msgs_sent  = 0;
-    this->ucast_src  = NULL;
+    this->mcast_fd = NO_RTE;
+    this->inbox_fd = NO_RTE;
+    this->list_id  = NO_RTE;
+    this->invalidate();
   }
   bool set_ucast( UserDB &user_db,  const void *p,  size_t len,
                   const UserRoute *src ) noexcept;
@@ -232,7 +244,6 @@ struct UserBridge : public UserStateTest<UserBridge> {
                      hb_miss,             /* count of hb missed */
                      unknown_adj_refs,    /* link refs are yet to be resolved */
                      auth_count,          /* number of times authenticated */
-                     adj_req_count,       /* throttle the number of requests */
                      bridge_nonce_int;    /* first 4 bytes of bridge_id.nonce */
   AuthStage          last_auth_type;
   uint64_t           unknown_link_seqno,  /* edge of link_state_seqno */
@@ -243,7 +254,6 @@ struct UserBridge : public UserStateTest<UserBridge> {
                      challenge_mono_time, /* time challenge sent */
                      subs_mono_time,      /* time subs reqeust sent */
                      sub_recv_mono_time,  /* time subscription reqeust recv */
-                     adj_mono_time,       /* time adjacency reqeust sent */
                      ping_mono_time,      /* time start in ping state */
                      round_trip_time,     /* ping/pong */
                      min_rtt,             /* ping pong min rt time */
@@ -267,11 +277,16 @@ struct UserBridge : public UserStateTest<UserBridge> {
   kv::UIntHashTab  * inbound_svc_loss;    /* service msg loss map */
   InboxSeqno         inbox;               /* track inbox sent/recv */
   RttHistory         rtt;
+  ThrottleState      adj_req_throttle,
+                     mesh_req_throttle;
+
   void * operator new( size_t, void *ptr ) { return ptr; }
 
   UserBridge( PeerEntry &pentry,  kv::BloomDB &db,  uint32_t seed,
               uint32_t *ctr )
-      : peer( pentry ), bloom( seed, pentry.user.val, db ) {
+      : peer( pentry ), bloom( seed, pentry.user.val, db ),
+        adj_req_throttle( this->state, ADJACENCY_REQUEST_STATE ),
+        mesh_req_throttle( this->state, MESH_REQUEST_STATE ) {
     ::memset( this->bloom_rt, 0, sizeof( this->bloom_rt ) );
     this->peer_key.zero();
     this->peer_hello.zero();
@@ -346,12 +361,25 @@ struct UserBridge : public UserStateTest<UserBridge> {
     return r1->subs_timeout() > r2->subs_timeout();
   }
   uint64_t adj_timeout( void ) const {
-    return this->adj_mono_time + sec_to_ns( 5 );
+    return this->adj_req_throttle.mono_time + sec_to_ns( 5 );
   }
   static bool is_adj_older( UserBridge *r1,  UserBridge *r2 ) {
     return r1->adj_timeout() > r2->adj_timeout();
   }
-  bool throttle_adjacency( uint32_t inc,  uint64_t cur_mono = 0 ) noexcept;
+  uint64_t mesh_timeout( void ) const {
+    return this->mesh_req_throttle.mono_time + sec_to_ns( 5 );
+  }
+  static bool is_mesh_older( UserBridge *r1,  UserBridge *r2 ) {
+    return r1->mesh_timeout() > r2->mesh_timeout();
+  }
+  bool throttle_request( uint32_t inc,  ThrottleState &throttle,
+                         uint64_t cur_mono = 0 ) noexcept;
+  bool throttle_adjacency( uint32_t inc,  uint64_t cur_mono = 0 ) {
+    return this->throttle_request( inc, this->adj_req_throttle, cur_mono );
+  }
+  bool throttle_mesh( uint32_t inc,  uint64_t cur_mono = 0 ) {
+    return this->throttle_request( inc, this->mesh_req_throttle, cur_mono );
+  }
   uint64_t ping_timeout( void ) const {
     return this->ping_mono_time + sec_to_ns( 5 );
   }
@@ -446,6 +474,8 @@ typedef struct kv::PrioQueue< UserBridge *,
 typedef struct kv::PrioQueue< UserBridge *,
                         UserBridge::is_adj_older >       UserAdjQueue;
 typedef struct kv::PrioQueue< UserBridge *,
+                        UserBridge::is_mesh_older >      UserMeshQueue;
+typedef struct kv::PrioQueue< UserBridge *,
                         UserBridge::is_ping_older >      UserPingQueue;
 typedef struct kv::PrioQueue< UserPendingRoute *,
                         UserPendingRoute::is_pending_older > UserPendingQueue;
@@ -501,6 +531,7 @@ struct UserDB {
   UserChallengeQueue    challenge_queue; /* throttle auth challenge */
   UserSubsQueue         subs_queue;      /* throttle subs request */
   UserAdjQueue          adj_queue;       /* throttle adjacency request */
+  UserMeshQueue         mesh_queue;      /* throttle mesh request */
   UserPingQueue         ping_queue;      /* test pingable */
   UserPendingQueue      pending_queue;   /* retry user/peer resolve */
   AdjPendingList        adjacency_unknown; /* adjacency recv not resolved */
@@ -737,11 +768,15 @@ struct UserDB {
   void add_unknown_adjacency( UserBridge &n ) noexcept;
   void clear_unknown_adjacency( UserBridge &n ) noexcept;
   void remove_adjacency( UserBridge &n ) noexcept;
+
   UserBridge *close_source_route( uint32_t fd ) noexcept;
   void push_source_route( UserBridge &n ) noexcept;
   void push_user_route( UserBridge &n,  UserRoute &u_rte ) noexcept;
   void pop_source_route( UserBridge &n ) noexcept;
+  void push_connected_user_route( UserBridge &n,  UserRoute &u_rte ) noexcept;
+  void set_connected_user_route( UserBridge &n,  UserRoute &u_rte ) noexcept;
   void pop_user_route( UserBridge &n,  UserRoute &u_rte ) noexcept;
+
   void send_adjacency_change( void ) noexcept;
   size_t adjacency_size( UserBridge *sync ) noexcept;
   void adjacency_submsg( UserBridge *sync,  MsgCat &m ) noexcept;

@@ -1148,6 +1148,8 @@ bool
 UserDB::recv_mesh_result( const MsgFramePublish &pub,  UserBridge &n,
                           MsgHdrDecoder &dec ) noexcept
 {
+  if ( n.test_clear( MESH_REQUEST_STATE ) )
+    this->mesh_queue.remove( &n );
   if ( dec.test( FID_MESH_FILTER ) )
     this->recv_mesh_request( pub, n, dec );
   if ( dec.test( FID_MESH_DB ) )
@@ -1180,23 +1182,24 @@ UserDB::send_mesh_request( UserBridge &n,  MsgHdrDecoder &dec,
       url_count++;
   }
   if ( csum == peer_csum ) {
-    n.printe( "my mesh csum wrong, updating\n" );
+    n.printf( "my mesh csum wrong, updating\n" );
     csum ^= this->bridge_id.nonce;
     *rte.mesh_csum = csum;
     return true;
   }
-  else {
-    ArrayOutput bout;
-    for ( ok = uid_in_mesh.first( uid ); ok; ok = uid_in_mesh.next( uid ) ) {
-      mesh_n = this->bridge_tab.ptr[ uid ];
-      bout.s( mesh_n->peer.user.val )
-          .s( "." )
-          .i( uid )
-          .s( "," );
-    }
-    n.printf( "mesh_request(%s) cur_uids[%.*s]\n",
-              rte.name, (int) bout.count, bout.ptr );
+  if ( n.throttle_mesh( 1 ) )
+    return true;
+  this->mesh_queue.push( &n );
+  ArrayOutput bout;
+  for ( ok = uid_in_mesh.first( uid ); ok; ok = uid_in_mesh.next( uid ) ) {
+    mesh_n = this->bridge_tab.ptr[ uid ];
+    bout.s( mesh_n->peer.user.val )
+        .s( "." )
+        .i( uid )
+        .s( "," );
   }
+  n.printf( "mesh_request(%s) cur_uids[%.*s]\n",
+            rte.name, (int) bout.count, bout.ptr );
   if ( url_count > 0 ) {
     filter = (uint32_t *) dec.mem.make( url_count * 4 );
     url_count = 0;
@@ -1269,7 +1272,7 @@ UserDB::process_unknown_adjacency( uint64_t current_mono_time ) noexcept
     for ( bool ok = p->rte.uid_connected.first( uid ); ok;
           ok = p->rte.uid_connected.next( uid ) ) {
       UserBridge * n = this->bridge_tab.ptr[ uid ];
-      if ( n->bridge_id.nonce != p->rec_list[ 0 ].nonce ) {
+      if ( n->bridge_id.nonce != p->rec_list->nonce ) {
         if ( pr == NULL )
           pr = this->start_pending_adj( *p, *n );
         else {
@@ -1337,12 +1340,12 @@ UserDB::start_pending_adj( AdjPending &adj,  UserBridge &n ) noexcept
 {
   const PendingUid puid( n.uid, adj.rte.tport_id );
   UserPendingRoute *p;
-  p = this->find_pending_peer( adj.rec_list[ 0 ].nonce, puid );
+  p = this->find_pending_peer( adj.rec_list->nonce, puid );
   if ( p != NULL )
     return p;
 
   p = new ( ::malloc( sizeof( UserPendingRoute ) ) )
-    UserPendingRoute( adj.rec_list[ 0 ].nonce, puid, adj.rec_list[ 0 ].user,
+    UserPendingRoute( adj.rec_list->nonce, puid, adj.rec_list->user,
                       adj.reason );
   uint64_t current_mono_time = current_monotonic_time_ns();
   p->pending_add_mono  = current_mono_time;

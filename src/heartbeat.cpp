@@ -252,9 +252,10 @@ UserDB::on_heartbeat( const MsgFramePublish &pub,  UserBridge &n,
     if ( ! pub.rte.uid_connected.is_member( n.uid ) ) {
       if ( debug_hb )
         n.printf( "authenticated but not a uid member!\n" );
-      this->pop_user_route( n, *n.user_route );
+      this->set_connected_user_route( n, *n.user_route );
+      /*this->pop_user_route( n, *n.user_route );
       n.user_route->connected( 0 );
-      this->push_user_route( n, *n.user_route );
+      this->push_user_route( n, *n.user_route );*/
     }
     if ( ! n.test_set( HAS_HB_STATE ) ) {
       UserRoute * primary = n.primary( *this );
@@ -414,11 +415,11 @@ UserDB::on_heartbeat( const MsgFramePublish &pub,  UserBridge &n,
       if ( dec.test( FID_MESH_CSUM ) && pub.rte.is_mesh() ) {
         Nonce csum, my_csum = *pub.rte.mesh_csum;
         csum.copy_from( dec.mref[ FID_MESH_CSUM ].fptr );
-        my_csum ^= this->bridge_id.nonce;
+        my_csum ^= this->bridge_id.nonce; /* includes all nonces */
         if ( my_csum != csum ) {
           if ( current_mono_time == 0 )
             current_mono_time = current_monotonic_time_ns();
-          if ( this->last_auth_mono + sec_to_ns( 1 ) < current_mono_time ) {
+          if ( this->last_auth_mono + sec_to_ns( 5 ) < current_mono_time ) {
             /*n.printf( "mesh_csum not equal %s=[%s] hb[%s] "
                       "mesh pending queue is_empty=%u\n",
                  n.peer.user.val, my_csum.to_base64_str( buf ),

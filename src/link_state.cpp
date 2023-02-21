@@ -263,65 +263,36 @@ UserDB::push_source_route( UserBridge &n ) noexcept
   for ( uint32_t i = 0; i < count; i++ ) {
     if ( (u_ptr = n.user_route_ptr( *this, i )) == NULL )
       break;
-    this->push_user_route( n, *u_ptr );
+    if ( u_ptr->is_valid() )
+      this->push_user_route( n, *u_ptr );
   }
 }
 
 void
 UserDB::push_user_route( UserBridge &n,  UserRoute &u_rte ) noexcept
 {
+  uint32_t fd = u_rte.mcast_fd;
+  if ( ! u_rte.is_valid() ) {
+    n.printe( "user route not valid\n" );
+    return;
+  }
+  if ( fd > this->poll.maxfd ) {
+    n.printe( "fd is invalid, tport %u\n", u_rte.rte.tport_id );
+    return;
+  }
   /* if the bcast route is valid */
-  if ( u_rte.is_valid() && ! u_rte.is_set( IN_ROUTE_LIST_STATE ) ) {
-    uint32_t         fd   = u_rte.mcast_fd;
+  if ( ! u_rte.is_set( IN_ROUTE_LIST_STATE ) ) {
     UserRouteList  & list = this->route_list[ fd ];
-    TransportRoute & rte  = u_rte.rte;
 
     if ( debug_lnk )
       n.printf( "push_user_route %s fd %u\n", u_rte.rte.name, fd );
-    if ( u_rte.hops() == 0 ) {
-      if ( rte.mesh_id != NULL ) {
-        if ( rte.uid_in_mesh->ref( n.uid ) == 0 ) {
-          *rte.mesh_csum ^= n.bridge_id.nonce;
-          /*if ( debug_lnk )*/
-            n.printf( "add to mesh %s fd %u\n", rte.name, fd );
-        }
-        else {
-          n.printf( "already in mesh %s fd %u\n", rte.name, fd );
-        }
-      }
-      else if ( rte.dev_id != NULL ) {
-        if ( rte.uid_in_device->ref( n.uid ) == 0 ) {
-          if ( debug_lnk )
-            n.printf( "add to dev %s fd %u\n", rte.name, fd );
-        }
-      }
-      if ( ! rte.uid_connected.test_set( n.uid ) ) {
-        this->peer_dist.invalidate( PUSH_ROUTE_INV, n.uid );
-        this->adjacency_change.append( n.uid, rte.tport_id,
-                                       this->link_state_seqno + 1, true );
-      }
-      if ( list.sys_route_refs++ == 0 ) {
-        if ( debug_lnk )
-          printf( "push sys_route %u\n", fd );
-        rte.connected_auth.add( fd );
-        rte.sub_route.create_bloom_route( fd, &this->peer_bloom, 0 );
-      }
-      if ( this->start_time > n.start_time ) {
-        if ( n.start_time == 0 )
-          n.printe( "bad start time %" PRIu64 "\n", n.start_time );
-        else {
-          if ( rte.oldest_uid == 0 )
-            rte.oldest_uid = n.uid;
-          else {
-            UserBridge * n2 = this->bridge_tab[ rte.oldest_uid ];
-            if ( n2->start_time > n.start_time )
-              rte.oldest_uid = n.uid;
-          }
-        }
-      }
-    }
+
     u_rte.set( IN_ROUTE_LIST_STATE );
+    u_rte.list_id = fd;
     list.push_tl( &u_rte );
+
+    if ( u_rte.hops() == 0 )
+      this->push_connected_user_route( n, u_rte );
   }
 }
 
@@ -335,15 +306,92 @@ UserDB::pop_source_route( UserBridge &n ) noexcept
     UserRoute * u_ptr = n.user_route_ptr( *this, i );
     if ( u_ptr == NULL )
       break;
-    this->pop_user_route( n, *u_ptr );
+    if ( u_ptr->is_valid() )
+      this->pop_user_route( n, *u_ptr );
   }
+}
+
+void
+UserDB::push_connected_user_route( UserBridge &n,  UserRoute &u_rte ) noexcept
+{
+  TransportRoute & rte = u_rte.rte;
+  uint32_t fd = u_rte.list_id;
+  UserRouteList  & list = this->route_list[ fd ];
+
+  if ( rte.mesh_id != NULL ) {
+    if ( rte.uid_in_mesh->ref( n.uid ) == 0 ) {
+      *rte.mesh_csum ^= n.bridge_id.nonce;
+      /*if ( debug_lnk )*/
+        n.printf( "add to mesh %s fd %u\n", rte.name, fd );
+    }
+    else {
+      n.printf( "already in mesh %s fd %u\n", rte.name, fd );
+    }
+  }
+  else if ( rte.dev_id != NULL ) {
+    if ( rte.uid_in_device->ref( n.uid ) == 0 ) {
+      if ( debug_lnk )
+        n.printf( "add to dev %s fd %u\n", rte.name, fd );
+    }
+  }
+  if ( ! rte.uid_connected.test_set( n.uid ) ) {
+    this->peer_dist.invalidate( PUSH_ROUTE_INV, n.uid );
+    this->adjacency_change.append( n.uid, rte.tport_id,
+                                   this->link_state_seqno + 1, true );
+  }
+  if ( list.sys_route_refs++ == 0 ) {
+    if ( debug_lnk )
+      printf( "push sys_route %u\n", fd );
+    rte.connected_auth.add( fd );
+    rte.sub_route.create_bloom_route( fd, &this->peer_bloom, 0 );
+  }
+  if ( this->start_time > n.start_time ) {
+    if ( n.start_time == 0 )
+      n.printe( "bad start time %" PRIu64 "\n", n.start_time );
+    else {
+      if ( rte.oldest_uid == 0 )
+        rte.oldest_uid = n.uid;
+      else {
+        UserBridge * n2 = this->bridge_tab[ rte.oldest_uid ];
+        if ( n2->start_time > n.start_time )
+          rte.oldest_uid = n.uid;
+      }
+    }
+  }
+}
+
+void
+UserDB::set_connected_user_route( UserBridge &n,  UserRoute &u_rte ) noexcept
+{
+  if ( ! u_rte.is_valid() ) {
+    n.printe( "user route not valid\n" );
+    return;
+  }
+  if ( u_rte.is_set( IN_ROUTE_LIST_STATE ) ) {
+    if ( u_rte.hops() == 0 )
+      return;
+    if ( u_rte.list_id != u_rte.mcast_fd ) {
+      uint32_t fd = u_rte.mcast_fd;
+      if ( fd > this->poll.maxfd ) {
+        n.printe( "fd is invalid, tport %u\n", u_rte.rte.tport_id );
+        return;
+      }
+      this->route_list[ u_rte.list_id ].pop( &u_rte );
+      this->route_list[ fd ].push_tl( &u_rte );
+      u_rte.list_id = fd;
+    }
+    u_rte.connected( 0 );
+    this->push_connected_user_route( n, u_rte );
+    return;
+  }
+  this->push_user_route( n, u_rte );
 }
 
 void
 UserDB::pop_user_route( UserBridge &n,  UserRoute &u_rte ) noexcept
 {
   if ( u_rte.test_clear( IN_ROUTE_LIST_STATE ) ) {
-    uint32_t         fd   = u_rte.mcast_fd;
+    uint32_t         fd   = u_rte.list_id;
     UserRouteList  & list = this->route_list[ fd ];
     TransportRoute & rte  = u_rte.rte;
 
@@ -725,19 +773,21 @@ UserDB::add_adjacency_change( UserBridge &n,  AdjacencyRec &rec ) noexcept
 }
 
 bool
-UserBridge::throttle_adjacency( uint32_t inc,  uint64_t cur_mono ) noexcept
+UserBridge::throttle_request( uint32_t inc,  ThrottleState &throttle,
+                              uint64_t cur_mono  ) noexcept
 {
-  if ( this->is_set( ADJACENCY_REQUEST_STATE ) )
+  if ( ( throttle.state & throttle.state_bit ) != 0 )
     return true;
   if ( cur_mono == 0 )
     cur_mono = current_monotonic_time_ns();
-  if ( this->adj_mono_time +
-       ( (uint64_t) 10000000 << this->adj_req_count ) >= cur_mono )
+  if ( throttle.mono_time +
+       ( (uint64_t) 10000000 << throttle.req_count ) >= cur_mono )
     return true;
   if ( inc > 0 ) {
-    this->adj_mono_time = cur_mono;
-    if ( this->adj_req_count < 7 )
-      this->adj_req_count += inc;
+    throttle.state |= throttle.state_bit;
+    throttle.mono_time = cur_mono;
+    if ( throttle.req_count < 9 ) /* 5 seconds */
+      throttle.req_count += inc;
   }
   return false;
 }
@@ -747,8 +797,6 @@ UserDB::send_adjacency_request( UserBridge &n, AdjacencyRequest reas ) noexcept
 {
   if ( n.throttle_adjacency( 1 ) )
     return true;
-
-  n.set( ADJACENCY_REQUEST_STATE );
   this->adj_queue.push( &n );
 
   bool use_primary   = ( reas == DIJKSTRA_SYNC_REQ || 
@@ -1162,7 +1210,7 @@ UserDB::recv_adjacency_result( const MsgFramePublish &pub,  UserBridge &n,
 
   if ( ( which & SYNC_LINK ) != 0 ) {
     if ( link_state > sync->link_state_seqno )
-      n.adj_req_count = 0;
+      n.adj_req_throttle.req_count = 0;
     if ( link_state <= sync->link_state_seqno ) {
       if ( debug_lnk )
         n.printf( "sync link result already have seqno %lu\n", link_state );
@@ -1170,7 +1218,7 @@ UserDB::recv_adjacency_result( const MsgFramePublish &pub,  UserBridge &n,
   }
   if ( ( which & SYNC_SUB ) != 0 ) {
     if ( sub_seqno > sync->sub_seqno )
-      n.adj_req_count = 0;
+      n.adj_req_throttle.req_count = 0;
   }
   if ( ( which & SYNC_LINK ) != 0 && link_state > sync->link_state_seqno ) {
     AdjacencyRec * rec_list =

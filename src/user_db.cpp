@@ -527,6 +527,7 @@ UserDB::release( void ) noexcept
   this->challenge_queue.reset();
   this->subs_queue.reset();
   this->adj_queue.reset();
+  this->mesh_queue.reset();
   this->ping_queue.reset();
   this->pending_queue.reset();
   this->uid_authenticated.reset();
@@ -546,6 +547,7 @@ UserDB::check_user_timeout( uint64_t current_mono_time,
   UserBridge *n;
   char buf[ 256 ];
   bool req_timeout = false;
+
   while ( this->subs_queue.num_elems > 0 ) {
     n = this->subs_queue.heap[ 0 ];
     if ( current_mono_time < n->subs_timeout() )
@@ -573,6 +575,15 @@ UserDB::check_user_timeout( uint64_t current_mono_time,
       this->send_ping_request( *n );
     }
     req_timeout = true;
+  }
+
+  while ( this->mesh_queue.num_elems > 0 ) {
+    n = this->mesh_queue.heap[ 0 ];
+    if ( current_mono_time < n->mesh_timeout() )
+      break;
+    this->mesh_queue.pop();
+    n->printf( "mesh request timeout\n" );
+    n->clear( MESH_REQUEST_STATE );
   }
 
   while ( this->ping_queue.num_elems > 0 ) {
@@ -1630,6 +1641,8 @@ UserDB::remove_authenticated( UserBridge &n,  AuthStage bye ) noexcept
     this->subs_queue.remove( &n );
   if ( n.test_clear( ADJACENCY_REQUEST_STATE ) )
     this->adj_queue.remove( &n );
+  if ( n.test_clear( MESH_REQUEST_STATE ) )
+    this->mesh_queue.remove( &n );
   if ( n.test_clear( PING_STATE ) )
     this->ping_queue.remove( &n );
   n.ping_fail_count = 0;
