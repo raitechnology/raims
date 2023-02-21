@@ -642,7 +642,22 @@ UserDB::check_user_timeout( uint64_t current_mono_time,
       n->challenge_count = 0;
   }
 
-  UserBridge *m;
+  if ( this->converge_network( current_mono_time, current_time,
+                               req_timeout ) ) {
+    if ( ! this->adjacency_change.is_empty() )
+      this->send_adjacency_change();
+    if ( this->uid_auth_count > 0 )
+      this->interval_ping( current_mono_time, current_time );
+    if ( ! this->mesh_pending.is_empty() )
+      this->process_mesh_pending( current_mono_time );
+  }
+}
+
+bool
+UserDB::converge_network( uint64_t current_mono_time,  uint64_t current_time,
+                          bool req_timeout ) noexcept
+{
+  UserBridge *n, *m;
   bool run_peer_inc = false;
   this->peer_dist.clear_cache_if_dirty();
   if ( this->peer_dist.inc_run_count == 0 || req_timeout ||
@@ -661,77 +676,72 @@ UserDB::check_user_timeout( uint64_t current_mono_time,
     /*printf( "test2 inc_run_count %u", this->peer_dist.inc_run_count );*/
     run_peer_inc = true;
   }
-  if ( run_peer_inc ) {
-    bool b = this->peer_dist.find_inconsistent( n, m );
-    if ( b ) {
-      if ( n != NULL && m != NULL ) {
-        if ( ! n->is_set( PING_STATE ) ) {
-          if ( ! n->throttle_adjacency( 0, current_mono_time ) ) {
-            /*printf( "---- find_inconsistent from %s(%u) to %s(%u) "
-               "inc_run_count %u, req_timeout %s inc_running %s found_inc %s\n",
-                     n->peer.user.val, n->uid, m->peer.user.val, m->uid,
-                     this->peer_dist.inc_run_count, req_timeout?"t":"f",
-                     this->peer_dist.inc_running?"t":"f",
-                     this->peer_dist.found_inconsistency?"t":"f" );*/
-            this->send_adjacency_request( *n, DIJKSTRA_SYNC_REQ );
-          }
-          else if ( ! m->throttle_adjacency( 0, current_mono_time ) ) {
-            this->send_adjacency_request( *m, DIJKSTRA_SYNC_REQ );
-          }
-        }
-        else if ( n->ping_fail_count >= 3 )
-          m = NULL;
-      }
+  if ( ! run_peer_inc )
+    return true;
 
-      if ( n != NULL && m == NULL ) {
-        uint64_t ns,
-                 hb_timeout_ns = (uint64_t) n->hb_interval * 2 * SEC_TO_NS;
-        ns = n->start_mono_time + hb_timeout_ns; /* if hb and still orphaned */
-
-        if ( this->adjacency_unknown.is_empty() && ns < current_mono_time ) {
-          d_usr( "find_inconsistent orphaned %s(%u)\n", 
-                   n->peer.user.val, n->uid );
-          this->remove_authenticated( *n,
-            n->ping_fail_count ? BYE_PING : BYE_ORPHANED );
+  bool b = this->peer_dist.find_inconsistent( n, m );
+  if ( b ) {
+    if ( n != NULL && m != NULL ) {
+      if ( ! n->is_set( PING_STATE ) ) {
+        if ( ! n->throttle_adjacency( 0, current_mono_time ) ) {
+          /*printf( "---- find_inconsistent from %s(%u) to %s(%u) "
+             "inc_run_count %u, req_timeout %s inc_running %s found_inc %s\n",
+                   n->peer.user.val, n->uid, m->peer.user.val, m->uid,
+                   this->peer_dist.inc_run_count, req_timeout?"t":"f",
+                   this->peer_dist.inc_running?"t":"f",
+                   this->peer_dist.found_inconsistency?"t":"f" );*/
+          this->send_adjacency_request( *n, DIJKSTRA_SYNC_REQ );
         }
-        else { /* n != NULL && m == NULL */
-          if ( ! n->throttle_adjacency( 0, current_mono_time ) )
-            this->send_adjacency_request( *n, DIJKSTRA_SYNC_REQ );
+        else if ( ! m->throttle_adjacency( 0, current_mono_time ) ) {
+          this->send_adjacency_request( *m, DIJKSTRA_SYNC_REQ );
         }
       }
+      else if ( n->ping_fail_count >= 3 )
+        m = NULL;
     }
-    else {
-      if ( ! this->peer_dist.found_inconsistency &&
-           this->peer_dist.invalid_mono != 0 ) {
-        uint32_t src_uid = this->peer_dist.invalid_src_uid;
-        this->events.converge( this->peer_dist.invalid_reason, src_uid );
-        this->converge_time = current_time;
-        if ( current_time > this->net_converge_time )
-          this->net_converge_time = current_time;
-        this->converge_mono = current_mono_time;
-        uint64_t t = ( current_mono_time > this->peer_dist.invalid_mono ) ?
-                     ( current_mono_time - this->peer_dist.invalid_mono ) : 0;
-        const char * src_user = this->user.user.val;
-        if ( src_uid != 0 )
-          src_user = this->bridge_tab.ptr[ src_uid ]->peer.user.val;
-        printf(
-          "network converges %.3f secs, %u uids authenticated, %s from %s.%u\n", 
-                (double) t / SEC_TO_NS, this->uid_auth_count,
-                invalidate_reason_string( this->peer_dist.invalid_reason ),
-                src_user, src_uid );
+
+    if ( n != NULL && m == NULL ) {
+      uint64_t ns,
+               hb_timeout_ns = (uint64_t) n->hb_interval * 2 * SEC_TO_NS;
+      ns = n->start_mono_time + hb_timeout_ns; /* if hb and still orphaned */
+
+      if ( this->adjacency_unknown.is_empty() && ns < current_mono_time ) {
+        d_usr( "find_inconsistent orphaned %s(%u)\n", 
+                 n->peer.user.val, n->uid );
+        this->remove_authenticated( *n,
+          n->ping_fail_count ? BYE_PING : BYE_ORPHANED );
       }
-      this->find_adjacent_routes();
+      else { /* n != NULL && m == NULL */
+        if ( ! n->throttle_adjacency( 0, current_mono_time ) )
+          this->send_adjacency_request( *n, DIJKSTRA_SYNC_REQ );
+      }
     }
   }
   else {
-    if ( ! this->adjacency_change.is_empty() )
-      this->send_adjacency_change();
-    if ( this->uid_auth_count > 0 )
-      this->interval_ping( current_mono_time, current_time );
-    if ( ! this->mesh_pending.is_empty() )
-      this->process_mesh_pending( current_mono_time );
+    if ( ! this->peer_dist.found_inconsistency &&
+         this->peer_dist.invalid_mono != 0 ) {
+      uint32_t src_uid = this->peer_dist.invalid_src_uid;
+      this->events.converge( this->peer_dist.invalid_reason, src_uid );
+      this->converge_time = current_time;
+      if ( current_time > this->net_converge_time )
+        this->net_converge_time = current_time;
+      this->converge_mono = current_mono_time;
+      uint64_t t = ( current_mono_time > this->peer_dist.invalid_mono ) ?
+                   ( current_mono_time - this->peer_dist.invalid_mono ) : 0;
+      const char * src_user = this->user.user.val;
+      if ( src_uid != 0 )
+        src_user = this->bridge_tab.ptr[ src_uid ]->peer.user.val;
+      printf(
+        "network converges %.3f secs, %u uids authenticated, %s from %s.%u\n", 
+              (double) t / SEC_TO_NS, this->uid_auth_count,
+              invalidate_reason_string( this->peer_dist.invalid_reason ),
+              src_user, src_uid );
+    }
+    this->find_adjacent_routes();
   }
+  return false;
 }
+
 const char *
 rai::ms::peer_sync_reason_string( PeerSyncReason r ) noexcept {
   return peer_sync_reason_str[ r < MAX_REASON_SYNC ? r : 0 ];

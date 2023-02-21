@@ -766,18 +766,20 @@ UserDB::recv_mesh_db( const MsgFramePublish &pub,  UserBridge &n,
       return true;
     }
   }
-  ArrayOutput bout;
-  bout.s( "tport( " )
-      .b( tport.val, tport.len )
-      .s( ", url " )
-      .b( mesh_url.val, mesh_url.len )
-      .s( ") [" );
-  for ( MeshDBRec *rec = rec_list; rec != NULL; rec = rec->next ) {
-    bout.b( rec->mesh_url.val, rec->mesh_url.len )
-        .s( "," );
+  if ( debug_peer ) {
+    ArrayOutput bout;
+    bout.s( "tport( " )
+        .b( tport.val, tport.len )
+        .s( ", url " )
+        .b( mesh_url.val, mesh_url.len )
+        .s( ") [" );
+    for ( MeshDBRec *rec = rec_list; rec != NULL; rec = rec->next ) {
+      bout.b( rec->mesh_url.val, rec->mesh_url.len )
+          .s( "," );
+    }
+    bout.s( "]" );
+    n.printf( "mesh_db(%s): %.*s\n", rte->name, (int) bout.count, bout.ptr );
   }
-  bout.s( "]" );
-  n.printf( "mesh_db(%s): %.*s\n", rte->name, (int) bout.count, bout.ptr );
   while ( rec_list != NULL ) {
     MeshDBRec  & rec = *rec_list;
     rec_list = rec.next;
@@ -1190,16 +1192,18 @@ UserDB::send_mesh_request( UserBridge &n,  MsgHdrDecoder &dec,
   if ( n.throttle_mesh( 1 ) )
     return true;
   this->mesh_queue.push( &n );
-  ArrayOutput bout;
-  for ( ok = uid_in_mesh.first( uid ); ok; ok = uid_in_mesh.next( uid ) ) {
-    mesh_n = this->bridge_tab.ptr[ uid ];
-    bout.s( mesh_n->peer.user.val )
-        .s( "." )
-        .i( uid )
-        .s( "," );
+  if ( debug_peer ) {
+    ArrayOutput bout;
+    for ( ok = uid_in_mesh.first( uid ); ok; ok = uid_in_mesh.next( uid ) ) {
+      mesh_n = this->bridge_tab.ptr[ uid ];
+      bout.s( mesh_n->peer.user.val )
+          .s( "." )
+          .i( uid )
+          .s( "," );
+    }
+    n.printf( "mesh_request(%s) cur_uids[%.*s]\n",
+              rte.name, (int) bout.count, bout.ptr );
   }
-  n.printf( "mesh_request(%s) cur_uids[%.*s]\n",
-            rte.name, (int) bout.count, bout.ptr );
   if ( url_count > 0 ) {
     filter = (uint32_t *) dec.mem.make( url_count * 4 );
     url_count = 0;

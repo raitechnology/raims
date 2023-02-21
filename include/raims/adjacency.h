@@ -273,6 +273,7 @@ struct AdjDistance : public md::MDMsgMem {
   uint32_t     * cache,         /* cache of uid distence via a tport */
                * visit,         /* minimum distance to uid */
                * inc_list;      /* list of uids to be checked for links */
+  uint64_t     * start_time;    /* start times of uids */
   PathSeqno      x[ COST_PATH_COUNT ]; /* x[ path_select ].port[ uid ]*/
   kv::UIntBitSet inc_visit,     /* inconsistent check visit uid map */
                  adj,           /* uid map masked with path for coverage */
@@ -326,9 +327,12 @@ struct AdjDistance : public md::MDMsgMem {
     this->clear_cache_if_dirty();
     return seqno == this->cache_seqno;
   }
-  void clear_cache_if_dirty( void ) {
-    if ( this->cache_seqno != this->update_seqno )
+  bool clear_cache_if_dirty( void ) {
+    if ( this->cache_seqno != this->update_seqno ) {
       this->clear_cache();
+      return false;
+    }
+    return true;
   }
   void clear_cache( void ) noexcept;
   void update_forward_cache( ForwardCache &fwd,  uint32_t src_uid,

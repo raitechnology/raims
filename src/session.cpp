@@ -1837,11 +1837,23 @@ SessionMgr::loop( uint32_t &idle ) noexcept
   if ( this->poll.quit >= 5 )
     return false;
   if ( (status = this->poll.dispatch()) == EvPoll::DISPATCH_IDLE ) {
+    int timeout = 0;
     idle_count++;
-    this->poll.wait( idle_count > this->idle_busy ? 100 : 0 );
-  }
-  else {
-    idle_count = 0;
+    if ( idle_count > this->idle_busy ) {
+      timeout = 100;
+      if ( ! this->user_db.peer_dist.clear_cache_if_dirty() ) {
+        if ( this->user_db.converge_network( this->poll.mono_ns,
+                                             this->poll.now_ns, false ) )
+          timeout = 0;
+      }
+      else {
+        if ( ! this->user_db.adjacency_change.is_empty() ) {
+          this->user_db.send_adjacency_change();
+          timeout = 0;
+        }
+      }
+    }
+    this->poll.wait( timeout );
   }
   if ( ( status & EvPoll::POLL_NEEDED ) != 0 ) {
     this->poll.wait( 0 );

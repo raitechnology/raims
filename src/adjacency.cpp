@@ -96,6 +96,7 @@ AdjDistance::clear_cache( void ) noexcept
          size = max * sizeof( UidDist ) +    /* stack */
                 max * sizeof( uint32_t ) +   /* visit */
                 max * sizeof( uint32_t ) +   /* inc_list */
+                max * sizeof( uint64_t ) +   /* start_time */
                 max * sizeof( UidSrcPath ) * COST_PATH_COUNT + /* x */
                 isz * sizeof( uint64_t ) +   /* inc_visit */
                 isz * sizeof( uint64_t ) +   /* adj */
@@ -113,6 +114,7 @@ AdjDistance::clear_cache( void ) noexcept
   this->fwd.ptr       = m; m += isz;
   this->reachable.ptr = m; m += isz;
   this->stack         = (UidDist *) m; m = &m[ max ];
+  this->start_time    = m; m = &m[ max ];
 
   uint32_t *n = (uint32_t *) (void *) m;
   this->cache         = n; n += wsz * COST_PATH_COUNT;
@@ -449,9 +451,13 @@ AdjDistance::coverage_init( uint32_t src_uid ) noexcept
 uint64_t
 AdjDistance::get_start_time( uint32_t uid ) const noexcept
 {
+  if ( this->start_time[ uid ] != 0 )
+    return this->start_time[ uid ];
   if ( uid == 0 )
-    return this->user_db.start_time;
-  return this->user_db.bridge_tab.ptr[ uid ]->start_time;
+    this->start_time[ uid ] = this->user_db.start_time;
+  else
+    this->start_time[ uid ] = this->user_db.bridge_tab.ptr[ uid ]->start_time;
+  return this->start_time[ uid ];
 }
 
 bool

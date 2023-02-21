@@ -321,10 +321,10 @@ UserDB::push_connected_user_route( UserBridge &n,  UserRoute &u_rte ) noexcept
   if ( rte.mesh_id != NULL ) {
     if ( rte.uid_in_mesh->ref( n.uid ) == 0 ) {
       *rte.mesh_csum ^= n.bridge_id.nonce;
-      /*if ( debug_lnk )*/
+      if ( debug_lnk )
         n.printf( "add to mesh %s fd %u\n", rte.name, fd );
     }
-    else {
+    else if ( debug_lnk ) {
       n.printf( "already in mesh %s fd %u\n", rte.name, fd );
     }
   }
@@ -402,7 +402,7 @@ UserDB::pop_user_route( UserBridge &n,  UserRoute &u_rte ) noexcept
       if ( rte.mesh_id != NULL ) {
         if ( rte.uid_in_mesh->deref( n.uid ) == 0 ) {
           *rte.mesh_csum ^= n.bridge_id.nonce;
-          /*if ( debug_lnk )*/
+          if ( debug_lnk )
             n.printf( "rm from mesh %s\n", rte.name );
         }
       }
