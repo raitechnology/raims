@@ -569,10 +569,12 @@ UserDB::check_user_timeout( uint64_t current_mono_time,
              n->unknown_adj_refs );
     n->clear( ADJACENCY_REQUEST_STATE );
     this->adj_queue.pop();
-    if ( ! n->test_set( PING_STATE ) ) {
-      n->ping_mono_time = current_mono_time;
-      this->ping_queue.push( n );
-      this->send_ping_request( *n );
+    if ( n->is_set( AUTHENTICATED_STATE ) ) {
+      if ( ! n->test_set( PING_STATE ) ) {
+        n->ping_mono_time = current_mono_time;
+        this->ping_queue.push( n );
+        this->send_ping_request( *n );
+      }
     }
     req_timeout = true;
   }
@@ -591,7 +593,12 @@ UserDB::check_user_timeout( uint64_t current_mono_time,
     if ( current_mono_time < n->ping_timeout() )
       break;
     this->ping_queue.pop();
-    if ( ++n->ping_fail_count >= 3 ) {
+    if ( ! n->is_set( AUTHENTICATED_STATE ) ) {
+      n->printf( "ping request zombie\n" );
+      n->clear( PING_STATE );
+      n = NULL;
+    }
+    else if ( ++n->ping_fail_count >= 3 ) {
       /*if ( debug_usr )*/
         n->printf( "ping request timeout (%s)\n",
              n->primary( *this )->inbox_route_str( buf, sizeof( buf ) ) );

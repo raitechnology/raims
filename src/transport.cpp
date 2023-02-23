@@ -190,9 +190,12 @@ TransportRoute::update_cost( UserBridge &n,  StringVal &tport,  uint32_t *cost,
 {
   uint8_t i, eq_count = 0;
   uint32_t *cost2 = this->uid_connected.cost;
+  StringVal & my_tport = this->transport.tport;
   bool updated = false, cost_updated = false, ok = true;
 
-  if ( ! this->transport.tport.equals( tport ) ) {
+  if ( this->uid_connected.cost[ 0 ] == COST_BAD )
+    return false;
+  if ( ! my_tport.equals( tport ) ) {
     if ( this->is_mesh() ) {
       ok = false;
       goto invalid_cost;
@@ -231,11 +234,6 @@ TransportRoute::update_cost( UserBridge &n,  StringVal &tport,  uint32_t *cost,
         eq_count++;
       else {
         if ( this->uid_connected.is_advertised ) {
-          n.printe( "conflicting cost[idx=%u] "
- "[%u,%u,%u,%u] (advert) != [%u,%u,%u,%u] (config) on %s (rem=%u) (%s)\n", i,
-                cost[ 0 ], cost[ 1 ], cost[ 2 ], cost[ 3 ],
-                cost2[ 0 ], cost2[ 1 ], cost2[ 2 ], cost2[ 3 ],
-                this->name, rem_tport_id, s );
           ok = false;
           goto invalid_cost;
         }
@@ -258,12 +256,13 @@ TransportRoute::update_cost( UserBridge &n,  StringVal &tport,  uint32_t *cost,
 
   if ( 0 ) {
 invalid_cost:;
-    int cnt = 0;
-    for ( i = 0; i < COST_PATH_COUNT; i++ )
-      if ( this->uid_connected.cost[ i ] == COST_BAD )
-        cnt++;
-    if ( cnt == COST_PATH_COUNT )
-      return false;
+    n.printe( "conflicting tport[%.*s] cost[%u,%u,%u,%u] (advert)"
+              " != tport[%.*s] [%u,%u,%u,%u] rte=%s remote=%u (%s)\n",
+                tport.len, tport.val,
+                cost[ 0 ], cost[ 1 ], cost[ 2 ], cost[ 3 ],
+                my_tport.len, my_tport.val,
+                cost2[ 0 ], cost2[ 1 ], cost2[ 2 ], cost2[ 3 ],
+                this->name, rem_tport_id, s );
     for ( i = 0; i < COST_PATH_COUNT; i++ )
       this->uid_connected.cost[ i ] = COST_BAD;
   }
@@ -288,11 +287,6 @@ invalid_cost:;
         }
       }
     }
-  }
-  if ( ! ok ) {
-    n.printe( "tport invalid %.*s and %.*s.%u (%s)\n", tport.len, tport.val,
-               this->transport.tport.len, this->transport.tport.val,
-               this->tport_id, s );
   }
   return ok;
 }
