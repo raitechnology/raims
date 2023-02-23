@@ -404,7 +404,7 @@ UserDB::recv_challenge( const MsgFramePublish &pub,  UserBridge &n,
 }
 /* notify peer that it is trusted */
 bool
-UserDB::send_trusted( const MsgFramePublish &pub,  UserBridge &n,
+UserDB::send_trusted( const MsgFramePublish &/*pub*/,  UserBridge &n,
                       MsgHdrDecoder & ) noexcept
 {
   InboxBuf ibx( n.bridge_id, _AUTH );
@@ -416,11 +416,13 @@ UserDB::send_trusted( const MsgFramePublish &pub,  UserBridge &n,
               ucast_db_len = 0;
   UrlDBFilter mesh_filter( n.uid, true ),
               ucast_filter( n.uid, false );
+  Nonce       csum;
 
+  csum.zero();
   if ( in_mesh )
-    mesh_db_len = this->url_db_size( pub.rte, mesh_filter );
+    mesh_db_len = this->mesh_db_size( rte, mesh_filter, csum );
   if ( is_mcast )
-    ucast_db_len = this->url_db_size( pub.rte, ucast_filter );
+    ucast_db_len = this->ucast_db_size( rte, ucast_filter );
   this->events.send_trust( n.uid, n.user_route->rte.tport_id, in_mesh );
   uint64_t uptime = current_monotonic_time_ns() - this->start_mono_time;
 
@@ -465,11 +467,11 @@ UserDB::send_trusted( const MsgFramePublish &pub,  UserBridge &n,
    .tport   ( rte.transport.tport.val, rte.transport.tport.len );
   if ( mesh_db_len != 0 && u_ptr->mesh_url.len > 0 ) {
     m.mesh_url( u_ptr->mesh_url.val, u_ptr->mesh_url.len );
-    this->url_db_submsg( rte, mesh_filter, m );
+    this->mesh_db_submsg( rte, mesh_filter, m );
   }
   if ( ucast_db_len != 0 && u_ptr->ucast_url.len > 0 ) {
     m.ucast_url( u_ptr->ucast_url.val, u_ptr->ucast_url.len );
-    this->url_db_submsg( rte, ucast_filter, m );
+    this->ucast_db_submsg( rte, ucast_filter, m );
   }
   uint32_t h = ibx.hash();
   m.close( e.sz, h, CABA_INBOX );
@@ -502,12 +504,13 @@ UserDB::send_trusted( const MsgFramePublish &pub,  UserBridge &n,
       UrlDBFilter mesh_filter2( n.uid, true );
       UrlDBFilter ucast_filter2( n.uid, false );
 
+      csum.zero();
       mesh_db_len  = 0;
       ucast_db_len = 0;
       if ( rte->is_mesh() )
-        mesh_db_len = this->url_db_size( *rte, mesh_filter2 );
+        mesh_db_len = this->mesh_db_size( *rte, mesh_filter2, csum );
       else
-        ucast_db_len = this->url_db_size( *rte, ucast_filter2 );
+        ucast_db_len = this->ucast_db_size( *rte, ucast_filter2 );
       if ( mesh_db_len + ucast_db_len != 0 ) {
         MsgEst e( ibx.len() );
 
@@ -546,11 +549,11 @@ UserDB::send_trusted( const MsgFramePublish &pub,  UserBridge &n,
 
         if ( mesh_db_len != 0 ) {
           m.mesh_url( u_ptr->mesh_url.val, u_ptr->mesh_url.len );
-          this->url_db_submsg( *rte, mesh_filter2, m );
+          this->mesh_db_submsg( *rte, mesh_filter2, m );
         }
         if ( ucast_db_len != 0 ) {
           m.ucast_url( u_ptr->ucast_url.val, u_ptr->ucast_url.len );
-          this->url_db_submsg( *rte, ucast_filter2, m );
+          this->ucast_db_submsg( *rte, ucast_filter2, m );
         }
         m.close( e.sz, h, CABA_INBOX );
         m.sign( ibx.buf, ibx.len(), *this->session_key );

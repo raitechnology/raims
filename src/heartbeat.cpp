@@ -248,10 +248,11 @@ UserDB::on_heartbeat( const MsgFramePublish &pub,  UserBridge &n,
     return true;
   }
 
+  TransportRoute & rte = pub.rte;
   if ( pub.status == FRAME_STATUS_OK && n.is_set( AUTHENTICATED_STATE ) ) {
-    if ( ! pub.rte.uid_connected.is_member( n.uid ) ) {
+    if ( ! rte.uid_connected.is_member( n.uid ) ) {
       if ( debug_hb )
-        n.printf( "authenticated but not a uid member!\n" );
+        n.printf( "authenticated but not a uid member (%s)\n", rte.name );
       this->set_connected_user_route( n, *n.user_route );
       /*this->pop_user_route( n, *n.user_route );
       n.user_route->connected( 0 );
@@ -261,7 +262,7 @@ UserDB::on_heartbeat( const MsgFramePublish &pub,  UserBridge &n,
       UserRoute * primary = n.primary( *this );
       if ( primary->hops() > n.user_route->hops() ) {
         if ( debug_hb )
-          n.printf( "primary hops greater than hb user_route!\n" );
+          n.printf( "hb reconnect inbox (%s)\n", rte.name );
         this->add_inbox_route( n, n.user_route );
       }
       this->uid_hb_count++;
@@ -275,14 +276,20 @@ UserDB::on_heartbeat( const MsgFramePublish &pub,  UserBridge &n,
       tport.val = (const char *) dec.mref[ FID_TPORT ].fptr;
       tport.len = dec.mref[ FID_TPORT ].fsize;
     }
+    bool b;
     if ( dec.get_ival<uint32_t>( FID_COST, cost[ 0 ] ) ) {
       dec.get_ival<uint32_t>( FID_COST2, cost[ 1 ] );
       dec.get_ival<uint32_t>( FID_COST3, cost[ 2 ] );
       dec.get_ival<uint32_t>( FID_COST4, cost[ 3 ] );
-      n.user_route->rte.update_cost( n, tport, cost, rem_tport_id, "hb1" );
+      b = rte.update_cost( n, tport, cost, rem_tport_id, "hb1" );
     }
     else {
-      n.user_route->rte.update_cost( n, tport, NULL, rem_tport_id, "hb2" );
+      b = rte.update_cost( n, tport, NULL, rem_tport_id, "hb2" );
+    }
+    if ( ! b ) {
+      if ( debug_hb )
+        n.printf( "bad transport cost (%s)\n", rte.name );
+      return true;
     }
   }
   if ( ! n.user_route->test_set( HAS_HB_STATE ) ) {
@@ -300,7 +307,7 @@ UserDB::on_heartbeat( const MsgFramePublish &pub,  UserBridge &n,
   /*if ( seqno <= n.hb_seqno )
     return true;*/
   /* the following for unauthenticated, watches for hb replay */
-  if ( n.primary_route != pub.rte.tport_id ) {
+  if ( n.primary_route != rte.tport_id ) {
     if ( pub.status != FRAME_STATUS_OK ) {
       if ( debug_hb )
         n.printf( "primary route not hb %s\n", n.user_route->rte.name );
@@ -326,7 +333,7 @@ UserDB::on_heartbeat( const MsgFramePublish &pub,  UserBridge &n,
       /*else if ( start == this->start_time )
         i_am_older = ( uptime <= n.hb_mono_time - this->start_mono_time );*/
       /* if I am the oldest node in route_list (or only node), do the challenge */
-      oldest_peer = ( pub.rte.oldest_uid == 0 );
+      oldest_peer = ( rte.oldest_uid == 0 );
       if ( n.hb_skew < -(int64_t) sec_to_ns( ival ) ||
            n.hb_skew >  (int64_t) sec_to_ns( ival ) ) {
         n.printe( "heartbeat time skew %ld is greater than the "
@@ -342,7 +349,7 @@ UserDB::on_heartbeat( const MsgFramePublish &pub,  UserBridge &n,
       else {
         n.printf( "i_am %s oldest %s\n", i_am_older ? "true" : "false",
                                          oldest_peer ? "true" : "false" );
-        if ( ( oldest_peer && pub.rte.is_mcast() ) ||
+        if ( ( oldest_peer && rte.is_mcast() ) ||
              ( old_hb_seqno > 0 && old_hb_seqno + 1 == seqno &&
                start + sec_to_ns( 1 ) < cur_time ) ) {
           n.printf( "old_hb_seqno %lu seqno %lu, age %lu\n",
@@ -397,7 +404,6 @@ UserDB::on_heartbeat( const MsgFramePublish &pub,  UserBridge &n,
       this->send_adjacency_request( n, HB_SYNC_REQ );
     }
     else {
-      /*char buf[ NONCE_B64_LEN + 1 ], buf2[ NONCE_B64_LEN + 1 ];*/
       if ( dec.test( FID_UID_CSUM ) ) {
         Nonce csum;
         csum.copy_from( dec.mref[ FID_UID_CSUM ].fptr );
@@ -412,21 +418,38 @@ UserDB::on_heartbeat( const MsgFramePublish &pub,  UserBridge &n,
           }
         }
       }
-      if ( dec.test( FID_MESH_CSUM ) && pub.rte.is_mesh() ) {
-        Nonce csum, my_csum = *pub.rte.mesh_csum;
+      if ( dec.test( FID_MESH_CSUM ) && rte.is_mesh() ) {
+        Nonce csum, my_csum = *rte.mesh_csum;
         csum.copy_from( dec.mref[ FID_MESH_CSUM ].fptr );
         my_csum ^= this->bridge_id.nonce; /* includes all nonces */
         if ( my_csum != csum ) {
-          if ( current_mono_time == 0 )
-            current_mono_time = current_monotonic_time_ns();
-          if ( this->last_auth_mono + sec_to_ns( 5 ) < current_mono_time ) {
-            /*n.printf( "mesh_csum not equal %s=[%s] hb[%s] "
-                      "mesh pending queue is_empty=%u\n",
-                 n.peer.user.val, my_csum.to_base64_str( buf ),
-                 csum.to_base64_str( buf2 ), this->mesh_pending.is_empty() );*/
-            if ( this->mesh_pending.is_empty() )
-              this->send_mesh_request( n, dec, csum );
+          if ( rte.mesh_cache == NULL ||
+               rte.mesh_cache->uid != n.uid ||
+               rte.mesh_cache->csum != csum ) {
+            if ( current_mono_time == 0 )
+              current_mono_time = current_monotonic_time_ns();
+            if ( this->last_auth_mono + sec_to_ns( 5 ) < current_mono_time ) {
+              char buf[ NONCE_B64_LEN + 1 ],
+                   buf2[ NONCE_B64_LEN + 1 ],
+                   buf3[ NONCE_B64_LEN + 1 ];
+              uint32_t cache_uid = 0;
+              buf3[ 0 ] = '\0';
+              if ( rte.mesh_cache != NULL ) {
+                rte.mesh_cache->csum.to_base64_str( buf3 );
+                cache_uid = rte.mesh_cache->uid;
+              }
+              n.printf( "hb mesh_csum %s=[%s] hb[%s] cache[%s/%u]\n",
+                   n.peer.user.val, my_csum.to_base64_str( buf ),
+                   csum.to_base64_str( buf2 ), buf3, cache_uid );
+
+              if ( this->mesh_pending.is_empty() )
+                this->send_mesh_request( n, dec, csum );
+            }
           }
+        }
+        else if ( rte.mesh_cache != NULL ) {
+          delete rte.mesh_cache;
+          rte.mesh_cache = NULL;
         }
       }
     }

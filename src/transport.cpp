@@ -44,7 +44,7 @@ TransportRoute::TransportRoute( kv::EvPoll &p,  SessionMgr &m,
       connect_ctx( 0 ), notify_ctx( 0 ), pgm_tport( 0 ), ibx_tport( 0 ),
       rv_svc( 0 ), inbox_fd( -1 ), mcast_fd( -1 ), mesh_url_hash( 0 ),
       conn_hash( 0 ), ucast_url_hash( 0 ), oldest_uid( 0 ),
-      primary_count( 0 ), ext( 0 ), svc( s ), transport( t )
+      primary_count( 0 ), ext( 0 ), mesh_cache( 0 ), svc( s ), transport( t )
 {
   uint8_t i;
   this->uid_connected.tport      = t.tport;
@@ -184,19 +184,18 @@ TransportRoute::printf( const char *fmt,  ... ) const noexcept
   return ( n >= 0 && m >= 0 ) ? n + m : -1;
 }
 
-void
+bool
 TransportRoute::update_cost( UserBridge &n,  StringVal &tport,  uint32_t *cost,
                              uint32_t rem_tport_id,  const char *s ) noexcept
 {
   uint8_t i, eq_count = 0;
   uint32_t *cost2 = this->uid_connected.cost;
-  bool updated = false, cost_updated = false;
+  bool updated = false, cost_updated = false, ok = true;
 
   if ( ! this->transport.tport.equals( tport ) ) {
     if ( this->is_mesh() ) {
-      n.printe( "tport not equal %.*s and %.*s.%u (%s)\n", tport.len, tport.val,
-                 this->transport.tport.len, this->transport.tport.val,
-                 this->tport_id, s );
+      ok = false;
+      goto invalid_cost;
     }
   }
   if ( this->uid_connected.rem_uid == 0 ) {
@@ -237,7 +236,8 @@ TransportRoute::update_cost( UserBridge &n,  StringVal &tport,  uint32_t *cost,
                 cost[ 0 ], cost[ 1 ], cost[ 2 ], cost[ 3 ],
                 cost2[ 0 ], cost2[ 1 ], cost2[ 2 ], cost2[ 3 ],
                 this->name, rem_tport_id, s );
-          return;
+          ok = false;
+          goto invalid_cost;
         }
       }
     }
@@ -250,12 +250,23 @@ TransportRoute::update_cost( UserBridge &n,  StringVal &tport,  uint32_t *cost,
   }
   /* will update adjacency later if not authenticated */
   if ( ! updated )
-    return;
+    return true;
   if ( debug_tran )
     n.printf( "update cost [%u,%u,%u,%u] on %s (rem=%u) %s (%s)\n",
               cost[ 0 ], cost[ 1 ], cost[ 2 ], cost[ 3 ], this->name,
               rem_tport_id, n.is_set( AUTHENTICATED_STATE ) ? "auth" : "not", s );
 
+  if ( 0 ) {
+invalid_cost:;
+    int cnt = 0;
+    for ( i = 0; i < COST_PATH_COUNT; i++ )
+      if ( this->uid_connected.cost[ i ] == COST_BAD )
+        cnt++;
+    if ( cnt == COST_PATH_COUNT )
+      return false;
+    for ( i = 0; i < COST_PATH_COUNT; i++ )
+      this->uid_connected.cost[ i ] = COST_BAD;
+  }
   this->user_db.peer_dist.invalidate( ADVERTISED_COST_INV, n.uid );
   this->user_db.adjacency_change.append( n.uid, this->tport_id,
                                   this->user_db.link_state_seqno + 1, true );
@@ -278,48 +289,12 @@ TransportRoute::update_cost( UserBridge &n,  StringVal &tport,  uint32_t *cost,
       }
     }
   }
-#if 0
-  if ( uid_updated ) {
-    if ( this->is_set( TPORT_IS_MESH ) ) {
-      uint32_t count = (uint32_t) this->user_db.transport_tab.count;
-      for ( uint32_t id = 0; id < count; id++ ) {
-        if ( id == this->tport_id )
-          continue;
-        TransportRoute *rte = this->user_db.transport_tab.ptr[ id ];
-        if ( ! rte->is_set( TPORT_IS_SHUTDOWN ) ) {
-          if ( rte->is_set( TPORT_IS_MESH ) &&
-               rte->mesh_id == this->mesh_id ) {
-            if ( p->rem_uid == rte->uid_connected.rem_uid ) {
-              this->printf( "duplicate uid %u connected tport %u\n",
-                            p->rem_uid, id );
-              /* im older */
-              if ( this->user_db.start_time < n.start_time ) {
-                if ( this->tport_id < id ) {
-                  n.printf( "++keeP tport, i am older and tport %u < %u\n",
-                             this->tport_id, id );
-                }
-                else {
-                  n.printf( "--tosS tport, i am older and tport %u > %u\n",
-                             this->tport_id, id );
-                }
-              }
-              else {
-                if ( p->rem_tportid < rte->uid_connected.rem_tport_id ) {
-                  n.printf( "++Keep tport, i am newer and rem_tport %u < %u\n",
-                             p->rem_tportid, rte->uid_connected.rem_tport_id );
-                }
-                else {
-                  n.printf( "--Toss tport, i am newer and rem_tport %u > %u\n",
-                             p->rem_tportid, rte->uid_connected.rem_tport_id );
-                }
-              }
-            }
-          }
-        }
-      }
-    }
+  if ( ! ok ) {
+    n.printe( "tport invalid %.*s and %.*s.%u (%s)\n", tport.len, tport.val,
+               this->transport.tport.len, this->transport.tport.val,
+               this->tport_id, s );
   }
-#endif
+  return ok;
 }
 
 void

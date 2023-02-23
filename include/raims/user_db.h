@@ -850,9 +850,14 @@ struct UserDB {
                      MsgHdrDecoder &dec ) noexcept;
   bool recv_ucast_db( const MsgFramePublish &pub,  UserBridge &n,
                       MsgHdrDecoder &dec ) noexcept;
-  size_t url_db_size( TransportRoute &rte,  UrlDBFilter &filter ) noexcept;
-  void url_db_submsg( TransportRoute &rte,  UrlDBFilter &filter,
+  size_t mesh_db_size( TransportRoute &rte,  UrlDBFilter &filter,
+                       Nonce &csum ) noexcept;
+  size_t ucast_db_size( TransportRoute &rte,  UrlDBFilter &filter ) noexcept;
+  bool filter_db_size( UrlDBFilter &filter ) noexcept;
+  void mesh_db_submsg( TransportRoute &rte,  UrlDBFilter &filter,
                        MsgCat &m ) noexcept;
+  void ucast_db_submsg( TransportRoute &rte,  UrlDBFilter &filter,
+                        MsgCat &m ) noexcept;
   bool recv_mesh_request( const MsgFramePublish &pub,  UserBridge &n,
                           MsgHdrDecoder &dec ) noexcept;
   bool recv_mesh_result( const MsgFramePublish &pub,  UserBridge &n,

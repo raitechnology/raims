@@ -150,7 +150,8 @@ struct UidMissing {
 };
 
 static const uint32_t COST_MAXIMUM    = 0xffffffffU,
-                      COST_DEFAULT    = 1000;
+                      COST_DEFAULT    = 1000,
+                      COST_BAD        = 1000 * 1000 * 1000; /* label bad path */
 static const uint8_t  COST_PATH_COUNT = 4;
 
 struct AdjacencySpace : public kv::BitSpace {

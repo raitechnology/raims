@@ -883,157 +883,70 @@ UserDB::recv_ucast_db( const MsgFramePublish &pub,  UserBridge &n,
 }
 
 size_t
-UserDB::url_db_size( TransportRoute &rte,  UrlDBFilter &filter ) noexcept
+UserDB::ucast_db_size( TransportRoute &rte,  UrlDBFilter &filter ) noexcept
 {
-  TransportRoute * rte2;
-  uint32_t         tport_id, uid,
-                   tport_count = this->transport_tab.count;
-  bool             ok;
-
   MsgEst e;
+  if ( ! filter.filter_hash( rte.ucast_url_hash ) ) {
+    e.user      ( this->user.user.len )
+     .bridge2   ()
+     .ucast_url ( rte.ucast_url.len );
+  }
+  uint32_t uid;
+  for ( bool ok = rte.uid_connected.first( uid ); ok;
+        ok = rte.uid_connected.next( uid ) ) {
+    UserBridge * n     = this->bridge_tab.ptr[ uid ];
+    UserRoute  * u_ptr = n->user_route_ptr( *this, rte.tport_id );
 
-  if ( filter.is_mesh_filter ) {
-    for ( tport_id = 0; tport_id < tport_count; tport_id++ ) {
-      rte2 = this->transport_tab.ptr[ tport_id ];
-      if ( rte2->mesh_id == rte.mesh_id ) {
-        for ( ok = rte2->uid_connected.first( uid ); ok;
-              ok = rte2->uid_connected.next( uid ) ) {
-          UserBridge * n     = this->bridge_tab.ptr[ uid ];
-          UserRoute  * u_ptr = n->user_route_ptr( *this, rte2->tport_id );
+    if ( u_ptr != NULL && u_ptr->is_valid() &&
+         u_ptr->is_set( UCAST_URL_STATE ) ) {
+      bool is_matched = filter.filter_hash( u_ptr->url_hash );
+      if ( uid == filter.except_uid )
+        continue;
 
-          if ( u_ptr != NULL && u_ptr->is_valid() &&
-               u_ptr->is_set( MESH_URL_STATE ) ) {
-            bool is_matched = filter.filter_hash( u_ptr->url_hash );
-            if ( uid == filter.except_uid )
-              continue;
-
-            if ( ! is_matched ) {
-              e.user    ( n->peer.user.len )
-               .bridge2 ()
-               .mesh_url( u_ptr->mesh_url.len );
-              filter.return_count++;
-            }
-          }
-        }
+      if ( ! is_matched ) {
+        e.user     ( n->peer.user.len )
+         .bridge2  ()
+         .ucast_url( u_ptr->ucast_url.len );
+        filter.return_count++;
       }
     }
   }
-  else {
-    if ( ! filter.filter_hash( rte.ucast_url_hash ) ) {
-      e.user      ( this->user.user.len )
-       .bridge2   ()
-       .ucast_url ( rte.ucast_url.len );
-    }
-    for ( ok = rte.uid_connected.first( uid ); ok;
-          ok = rte.uid_connected.next( uid ) ) {
-      UserBridge * n     = this->bridge_tab.ptr[ uid ];
-      UserRoute  * u_ptr = n->user_route_ptr( *this, rte.tport_id );
-
-      if ( u_ptr != NULL && u_ptr->is_valid() &&
-           u_ptr->is_set( UCAST_URL_STATE ) ) {
-        bool is_matched = filter.filter_hash( u_ptr->url_hash );
-        if ( uid == filter.except_uid )
-          continue;
-
-        if ( ! is_matched ) {
-          e.user     ( n->peer.user.len )
-           .bridge2  ()
-           .ucast_url( u_ptr->ucast_url.len );
-          filter.return_count++;
-        }
-      }
-    }
-  }
-  if ( ! filter.invert_match && filter.match_count < filter.url_count ) {
-    if ( filter.match_count == 0 ) {
-      filter.request_count = filter.url_count;
-    }
-    else {
-      uint32_t i = 0, j = filter.url_count - 1;
-      while ( i < j ) {
-        if ( ! filter.matched[ i ] ) {
-          i++;
-        }
-        else {
-          bool     m = filter.matched[ i ];
-          uint32_t h = filter.hash[ i ];
-          filter.matched[ i ] = filter.matched[ j ];
-          filter.hash[ i ]    = filter.hash[ j ];
-          filter.matched[ j ] = m;
-          filter.hash[ j ]    = h;
-          --j;
-        }
-      }
-      filter.request_count = i;
-    }
-  }
-  if ( filter.return_count == 0 && filter.request_count == 0 )
+  if ( ! this->filter_db_size( filter ) )
     return 0;
   return e.sz;
 }
 
 void
-UserDB::url_db_submsg( TransportRoute &rte,  UrlDBFilter &filter,
-                       MsgCat &m ) noexcept
+UserDB::ucast_db_submsg( TransportRoute &rte,  UrlDBFilter &filter,
+                         MsgCat &m ) noexcept
 {
-  TransportRoute * rte2;
-  uint32_t         tport_id, uid,
-                   tport_count = this->transport_tab.count;
-  bool             ok;
-
   SubMsgBuf s( m );
   s.open_submsg();
 
-  if ( filter.is_mesh_filter ) {
-    for ( tport_id = 0; tport_id < tport_count; tport_id++ ) {
-      rte2 = this->transport_tab.ptr[ tport_id ];
-      if ( rte2->mesh_id == rte.mesh_id ) {
-        for ( ok = rte2->uid_connected.first( uid ); ok;
-              ok = rte2->uid_connected.next( uid ) ) {
-          if ( uid == filter.except_uid )
-            continue;
+  if ( ! filter.filter_hash( rte.ucast_url_hash ) ) {
+    s.user      ( this->user.user.val, this->user.user.len )
+     .bridge2   ( this->bridge_id.nonce )
+     .ucast_url ( rte.ucast_url.val, rte.ucast_url.len );
+  }
+  uint32_t uid;
+  for ( bool ok = rte.uid_connected.first( uid ); ok;
+        ok = rte.uid_connected.next( uid ) ) {
+    if ( uid == filter.except_uid )
+      continue;
 
-          UserBridge * n     = this->bridge_tab.ptr[ uid ];
-          UserRoute  * u_ptr = n->user_route_ptr( *this, rte2->tport_id );
+    UserBridge * n     = this->bridge_tab.ptr[ uid ];
+    UserRoute  * u_ptr = n->user_route_ptr( *this, rte.tport_id );
 
-          if ( u_ptr != NULL && u_ptr->is_valid() &&
-               u_ptr->is_set( MESH_URL_STATE ) ) {
-            if ( ! filter.filter_hash( u_ptr->url_hash ) ) {
-              s.user    ( n->peer.user.val, n->peer.user.len )
-               .bridge2 ( n->bridge_id.nonce )
-               .mesh_url( u_ptr->mesh_url.val, u_ptr->mesh_url.len );
-            }
-          }
-        }
+    if ( u_ptr != NULL && u_ptr->is_valid() &&
+         u_ptr->is_set( UCAST_URL_STATE ) ) {
+      if ( ! filter.filter_hash( u_ptr->url_hash ) ) {
+        s.user     ( n->peer.user.val, n->peer.user.len )
+         .bridge2  ( n->bridge_id.nonce )
+         .ucast_url( u_ptr->ucast_url.val, u_ptr->ucast_url.len );
       }
     }
-    s.close( m, FID_MESH_DB );
   }
-  else {
-    if ( ! filter.filter_hash( rte.ucast_url_hash ) ) {
-      s.user      ( this->user.user.val, this->user.user.len )
-       .bridge2   ( this->bridge_id.nonce )
-       .ucast_url ( rte.ucast_url.val, rte.ucast_url.len );
-    }
-    for ( ok = rte.uid_connected.first( uid ); ok;
-          ok = rte.uid_connected.next( uid ) ) {
-      if ( uid == filter.except_uid )
-        continue;
-
-      UserBridge * n     = this->bridge_tab.ptr[ uid ];
-      UserRoute  * u_ptr = n->user_route_ptr( *this, rte.tport_id );
-
-      if ( u_ptr != NULL && u_ptr->is_valid() &&
-           u_ptr->is_set( UCAST_URL_STATE ) ) {
-        if ( ! filter.filter_hash( u_ptr->url_hash ) ) {
-          s.user     ( n->peer.user.val, n->peer.user.len )
-           .bridge2  ( n->bridge_id.nonce )
-           .ucast_url( u_ptr->ucast_url.val, u_ptr->ucast_url.len );
-        }
-      }
-    }
-    s.close( m, FID_UCAST_DB );
-  }
+  s.close( m, FID_UCAST_DB );
 }
 
 void
@@ -1069,17 +982,138 @@ UrlDBFilter::setup_filter( MsgHdrDecoder &dec ) noexcept
 }
 
 bool
+UserDB::filter_db_size( UrlDBFilter &filter ) noexcept
+{
+  if ( ! filter.invert_match && filter.match_count < filter.url_count ) {
+    if ( filter.match_count == 0 ) {
+      filter.request_count = filter.url_count;
+    }
+    else {
+      uint32_t i = 0, j = filter.url_count - 1;
+      while ( i < j ) {
+        if ( ! filter.matched[ i ] ) {
+          i++;
+        }
+        else {
+          bool     m = filter.matched[ i ];
+          uint32_t h = filter.hash[ i ];
+          filter.matched[ i ] = filter.matched[ j ];
+          filter.hash[ i ]    = filter.hash[ j ];
+          filter.matched[ j ] = m;
+          filter.hash[ j ]    = h;
+          --j;
+        }
+      }
+      filter.request_count = i;
+    }
+  }
+  if ( filter.return_count == 0 && filter.request_count == 0 )
+    return false;
+  return true;
+}
+
+size_t
+UserDB::mesh_db_size( TransportRoute &rte,  UrlDBFilter &filter,
+                      Nonce &csum ) noexcept
+{
+  TransportRoute * rte2;
+  uint32_t         tport_id, uid,
+                   tport_count = this->transport_tab.count;
+  BitSpace         uid_vec;
+
+  MsgEst e;
+  csum = this->bridge_id.nonce;
+  for ( tport_id = 0; tport_id < tport_count; tport_id++ ) {
+    rte2 = this->transport_tab.ptr[ tport_id ];
+    if ( rte2->mesh_id == rte.mesh_id &&
+         rte2->uid_connected.cost[ 0 ] != COST_BAD ) {
+      for ( bool ok = rte2->uid_connected.first( uid ); ok;
+            ok = rte2->uid_connected.next( uid ) ) {
+        UserBridge * n     = this->bridge_tab.ptr[ uid ];
+        UserRoute  * u_ptr = n->user_route_ptr( *this, rte2->tport_id );
+
+        if ( u_ptr != NULL && u_ptr->is_valid() &&
+             u_ptr->is_set( MESH_URL_STATE ) ) {
+          if ( ! uid_vec.test_set( uid ) ) {
+            csum ^= n->bridge_id.nonce;
+          }
+          bool is_matched = filter.filter_hash( u_ptr->url_hash );
+          if ( uid == filter.except_uid )
+            continue;
+
+          if ( ! is_matched ) {
+            e.user    ( n->peer.user.len )
+             .bridge2 ()
+             .mesh_url( u_ptr->mesh_url.len );
+            filter.return_count++;
+          }
+        }
+      }
+    }
+  }
+  if ( ! this->filter_db_size( filter ) )
+    return 0;
+  return e.sz;
+}
+
+void
+UserDB::mesh_db_submsg( TransportRoute &rte,  UrlDBFilter &filter,
+                        MsgCat &m ) noexcept
+{
+  TransportRoute * rte2;
+  uint32_t         tport_id, uid,
+                   tport_count = this->transport_tab.count;
+  SubMsgBuf s( m );
+  s.open_submsg();
+
+  for ( tport_id = 0; tport_id < tport_count; tport_id++ ) {
+    rte2 = this->transport_tab.ptr[ tport_id ];
+    if ( rte2->mesh_id == rte.mesh_id &&
+         rte2->uid_connected.cost[ 0 ] != COST_BAD ) {
+      for ( bool ok = rte2->uid_connected.first( uid ); ok;
+            ok = rte2->uid_connected.next( uid ) ) {
+        UserBridge * n     = this->bridge_tab.ptr[ uid ];
+        UserRoute  * u_ptr = n->user_route_ptr( *this, rte2->tport_id );
+
+        if ( u_ptr != NULL && u_ptr->is_valid() &&
+             u_ptr->is_set( MESH_URL_STATE ) ) {
+
+          bool is_matched = filter.filter_hash( u_ptr->url_hash );
+          if ( uid == filter.except_uid )
+            continue;
+
+          if ( ! is_matched ) {
+            s.user    ( n->peer.user.val, n->peer.user.len )
+             .bridge2 ( n->bridge_id.nonce )
+             .mesh_url( u_ptr->mesh_url.val, u_ptr->mesh_url.len );
+          }
+        }
+      }
+    }
+  }
+  s.close( m, FID_MESH_DB );
+}
+
+bool
 UserDB::recv_mesh_request( const MsgFramePublish &pub,  UserBridge &n,
                            MsgHdrDecoder &dec ) noexcept
 {
-  char        ret_buf[ 16 ];
-  InboxBuf    ibx( n.bridge_id, dec.get_return( ret_buf, _MESH_RPY ) );
+  char             ret_buf[ 16 ];
+  InboxBuf         ibx( n.bridge_id, dec.get_return( ret_buf, _MESH_RPY ) );
   TransportRoute * rte = &pub.rte;
-  size_t      mesh_db_len = 0;
-  UrlDBFilter filter( n.uid, true, &dec );
+  UserRoute      * u_ptr = NULL;
+  Nonce            mesh_csum;
+  size_t           mesh_db_len = 0;
+  UrlDBFilter      filter( n.uid, true, &dec );
+  uint32_t         req_tport_id = 0;
+  MeshStatus       status = MESH_OK;
   
-  if ( ! dec.test_2( FID_MESH_URL, FID_TPORT ) )
+  if ( ! dec.test_3( FID_MESH_URL, FID_TPORT, FID_TPORTID ) )
     return true;
+
+  mesh_csum.zero();
+  cvt_number<uint32_t>( dec.mref[ FID_TPORTID ], req_tport_id );
+
   StringVal mesh_url( (const char *) dec.mref[ FID_MESH_URL ].fptr,
                       dec.mref[ FID_MESH_URL ].fsize );
   StringVal tport   ( (const char *) dec.mref[ FID_TPORT ].fptr,
@@ -1090,38 +1124,55 @@ UserDB::recv_mesh_request( const MsgFramePublish &pub,  UserBridge &n,
     if ( rte == NULL || ! rte->transport.tport.equals( tport ) ) {
       n.printf( "recv mesh req %.*s no mesh url found (%.*s)\n",
                 tport.len, tport.val, mesh_url.len, mesh_url.val );
-      return true;
+      status = MESH_NOT_FOUND;
     }
   }
-  if ( debug_peer )
-    n.printf( "recv_mesh_request( %.*s, %.*s, %.*s )\n",
-              tport.len, tport.val, mesh_url.len, mesh_url.val,
-              rte->mesh_url.len, rte->mesh_url.val );
-  if ( rte->uid_in_mesh->is_member( n.uid ) ) {
-    mesh_db_len = this->url_db_size( *rte, filter );
+  if ( status == MESH_OK ) {
     if ( debug_peer )
-      n.printf(
-        "%s filter match_count %u url_count %u return_count %u db_len %u\n",
-                 dec.get_type_string(), filter.match_count, filter.url_count,
-                 filter.return_count, (uint32_t) mesh_db_len );
-  }
-  if ( filter.return_count == 0 && filter.request_count == 0 ) {
-    if ( debug_peer )
-      n.printf( "mesh_request hash zero entries\n" );
-    return true;
-  }
-  if ( debug_peer )
-    n.printf( "mesh_request\n" );
+      n.printf( "recv_mesh_request( %.*s.%u, %.*s, %.*s )\n",
+                tport.len, tport.val, req_tport_id, mesh_url.len, mesh_url.val,
+                rte->mesh_url.len, rte->mesh_url.val );
+    if ( rte->uid_in_mesh->is_member( n.uid ) ) {
+      mesh_db_len = this->mesh_db_size( *rte, filter, mesh_csum );
+      if ( debug_peer )
+        n.printf(
+          "%s filter match_count %u url_count %u return_count %u db_len %u\n",
+                   dec.get_type_string(), filter.match_count, filter.url_count,
+                   filter.return_count, (uint32_t) mesh_db_len );
 
-  UserRoute *u_ptr = n.user_route_ptr( *this, rte->tport_id );
-  if ( u_ptr == NULL || ! u_ptr->is_valid() ||
-       ! u_ptr->is_set( MESH_URL_STATE ) )
-    return true;
-
+      Nonce csum2 = mesh_csum;
+      csum2 ^= this->bridge_id.nonce;
+      if ( csum2 != *rte->mesh_csum ) {
+        char buf[ NONCE_B64_LEN + 1 ], buf2[ NONCE_B64_LEN + 1 ];
+        rte->printf( "update csum %s, rte csum %s\n",
+                csum2.to_base64_str( buf ),
+                rte->mesh_csum->to_base64_str( buf2 ) );
+        *rte->mesh_csum = csum2;
+      }
+    }
+    if ( filter.return_count == 0 /*&& filter.request_count == 0*/ ) {
+      if ( debug_peer ) {
+        char buf[ NONCE_B64_LEN + 1 ];
+        n.printf( "mesh_request has zero entries (%s) csum %s\n", rte->name,
+                  mesh_csum.to_base64_str( buf ) );
+      }
+      status = MESH_NO_ENTRIES;
+    }
+  }
   MsgEst e( ibx.len() );
-  e.seqno   ()
-   .mesh_url( u_ptr->mesh_url.len )
-   .tport   ( u_ptr->rte.transport.tport.len );
+  e.seqno    ();
+  if ( u_ptr != NULL ) {
+    e.mesh_url( u_ptr->mesh_url.len )
+     .tport   ( u_ptr->rte.transport.tport.len );
+  }
+  else {
+    e.mesh_url( mesh_url.len )
+     .tport   ( tport.len );
+  }
+  if ( status != MESH_NOT_FOUND )
+    e.mesh_csum();
+  e.mesh_info()
+   .tportid();
   if ( filter.return_count > 0 )
     e.mesh_db( mesh_db_len );
   if ( filter.request_count > 0 )
@@ -1131,14 +1182,26 @@ UserDB::recv_mesh_request( const MsgFramePublish &pub,  UserBridge &n,
   m.reserve( e.sz );
 
   m.open( this->bridge_id.nonce, ibx.len() )
-   .seqno   ( n.inbox.next_send( U_INBOX_MESH_RPY ) )
-   .mesh_url( u_ptr->mesh_url.val, u_ptr->mesh_url.len )
-   .tport   ( u_ptr->rte.transport.tport.val,
-              u_ptr->rte.transport.tport.len );
-  if ( filter.request_count > 0 )
-    m.mesh_filter( filter.hash, filter.request_count * 4 );
-  if ( filter.return_count > 0 )
-    this->url_db_submsg( *rte, filter, m );
+   .seqno    ( n.inbox.next_send( U_INBOX_MESH_RPY ) );
+  if ( u_ptr != NULL ) {
+    m.mesh_url ( u_ptr->mesh_url.val, u_ptr->mesh_url.len )
+     .tport    ( u_ptr->rte.transport.tport.val,
+                 u_ptr->rte.transport.tport.len );
+  }
+  else {
+    m.mesh_url( mesh_url.val, mesh_url.len )
+     .tport   ( tport.val, tport.len );
+  }
+  if ( status != MESH_NOT_FOUND )
+    m.mesh_csum( mesh_csum );
+  m.mesh_info( status )
+   .tportid( req_tport_id );
+  if ( status == MESH_OK ) {
+    if ( filter.request_count > 0 )
+      m.mesh_filter( filter.hash, filter.request_count * 4 );
+    if ( filter.return_count > 0 )
+      this->mesh_db_submsg( *rte, filter, m );
+  }
   uint32_t h = ibx.hash();
   m.close( e.sz, h, CABA_INBOX );
   m.sign( ibx.buf, ibx.len(), *this->session_key );
@@ -1152,8 +1215,46 @@ UserDB::recv_mesh_result( const MsgFramePublish &pub,  UserBridge &n,
 {
   if ( n.test_clear( MESH_REQUEST_STATE ) )
     this->mesh_queue.remove( &n );
-  if ( dec.test( FID_MESH_FILTER ) )
-    this->recv_mesh_request( pub, n, dec );
+
+  /*if ( dec.test( FID_MESH_FILTER ) )
+    this->recv_mesh_request( pub, n, dec );*/
+
+  if ( dec.test( FID_MESH_INFO ) ) {
+    uint32_t status = MESH_OK;
+    UserRoute * u_ptr = NULL;
+    cvt_number<uint32_t>( dec.mref[ FID_MESH_INFO ], status );
+    if ( dec.test( FID_MESH_CSUM ) ) {
+      uint32_t tport_id = 0;
+      cvt_number<uint32_t>( dec.mref[ FID_TPORTID ], tport_id );
+      StringVal mesh_url( (const char *) dec.mref[ FID_MESH_URL ].fptr,
+                          dec.mref[ FID_MESH_URL ].fsize );
+      StringVal tport   ( (const char *) dec.mref[ FID_TPORT ].fptr,
+                          dec.mref[ FID_TPORT ].fsize );
+      TransportRoute * rte = NULL;
+      if ( tport_id < this->transport_tab.count )
+        rte = this->transport_tab.ptr[ tport_id ];
+
+      if ( rte != NULL && rte->transport.tport.equals( tport ) ) {
+        u_ptr = n.user_route_ptr( *this, tport_id );
+
+        if ( rte->mesh_cache == NULL )
+          rte->mesh_cache = new ( ::malloc( sizeof( MeshCsumCache ) ) )
+            MeshCsumCache();
+        rte->mesh_cache->uid = n.uid;
+        rte->mesh_cache->csum.copy_from( dec.mref[ FID_MESH_CSUM ].fptr );
+        char buf[ NONCE_B64_LEN + 1 ];
+        n.printf( "tport %.*s cache mesh csum %s\n", tport.len, tport.val,
+          rte->mesh_cache->csum.to_base64_str( buf ) );
+      }
+      if ( u_ptr == NULL )
+        n.printf( "mesh status %u mismatch tport=%.*s id=%u n=%s\n", status,
+                  tport.len, tport.val, tport_id, rte ? rte->name : "null" );
+    }
+    else if ( status != MESH_OK ) {
+      n.printf( "mesh status %u\n", status );
+    }
+  }
+
   if ( dec.test( FID_MESH_DB ) )
     return this->recv_mesh_db( pub, n, dec );
   return true;
@@ -1170,6 +1271,8 @@ UserDB::send_mesh_request( UserBridge &n,  MsgHdrDecoder &dec,
   UserBridge     * mesh_n;
   uint32_t         uid,
                    url_count = 0,
+                   tport_count = this->transport_tab.count,
+                   tport_id,
                  * filter;
   Nonce            csum = this->bridge_id.nonce;
   bool             ok;
@@ -1179,15 +1282,29 @@ UserDB::send_mesh_request( UserBridge &n,  MsgHdrDecoder &dec,
   for ( ok = uid_in_mesh.first( uid ); ok; ok = uid_in_mesh.next( uid ) ) {
     mesh_n = this->bridge_tab.ptr[ uid ];
     csum ^= mesh_n->bridge_id.nonce;
-    u_ptr = mesh_n->user_route_ptr( *this, rte.tport_id );
-    if ( u_ptr != NULL && u_ptr->is_valid() && u_ptr->url_hash != 0 )
-      url_count++;
+    for ( tport_id = 0; tport_id < tport_count; tport_id++ ) {
+      if ( tport_id == rte.tport_id )
+        continue;
+      u_ptr = mesh_n->user_route_ptr( *this, tport_id );
+      if ( u_ptr == NULL || ! u_ptr->is_valid() )
+        continue;
+      if ( u_ptr->is_set( MESH_URL_STATE ) &&
+           u_ptr->rte.mesh_id == rte.mesh_id )
+        url_count++;
+    }
   }
   if ( csum == peer_csum ) {
-    n.printf( "my mesh csum wrong, updating\n" );
-    csum ^= this->bridge_id.nonce;
-    *rte.mesh_csum = csum;
-    return true;
+    Nonce my_csum = *rte.mesh_csum;
+    my_csum ^= this->bridge_id.nonce;
+    if ( my_csum != csum ) {
+      char buf[ NONCE_B64_LEN + 1 ], buf2[ NONCE_B64_LEN + 1 ];
+      n.printf( "my mesh csum wrong %s, updating to %s\n",
+                my_csum.to_base64_str( buf ),
+                csum.to_base64_str( buf2 ) );
+      csum ^= this->bridge_id.nonce;
+      *rte.mesh_csum = csum;
+    }
+    /*return true;*/
   }
   if ( n.throttle_mesh( 1 ) )
     return true;
@@ -1201,17 +1318,26 @@ UserDB::send_mesh_request( UserBridge &n,  MsgHdrDecoder &dec,
           .i( uid )
           .s( "," );
     }
-    n.printf( "mesh_request(%s) cur_uids[%.*s]\n",
-              rte.name, (int) bout.count, bout.ptr );
+    n.printf( "mesh_request(%s) tport_id=%u cur_uids[%.*s]\n",
+              rte.name, rte.tport_id, (int) bout.count, bout.ptr );
   }
   if ( url_count > 0 ) {
     filter = (uint32_t *) dec.mem.make( url_count * 4 );
     url_count = 0;
     for ( ok = uid_in_mesh.first( uid ); ok; ok = uid_in_mesh.next( uid ) ) {
-      u_ptr = this->bridge_tab.ptr[ uid ]->
-                    user_route_ptr( *this, rte.tport_id );
-      if ( u_ptr != NULL && u_ptr->is_valid() && u_ptr->url_hash != 0 )
-        filter[ url_count++ ] = u_ptr->url_hash;
+      mesh_n = this->bridge_tab.ptr[ uid ];
+      for ( tport_id = 0; tport_id < tport_count; tport_id++ ) {
+        if ( tport_id == rte.tport_id )
+          continue;
+        u_ptr = mesh_n->user_route_ptr( *this, tport_id );
+        if ( u_ptr == NULL || ! u_ptr->is_valid() )
+          continue;
+        if ( u_ptr->is_set( MESH_URL_STATE ) &&
+             u_ptr->rte.mesh_id == rte.mesh_id ) {
+          filter[ url_count++ ] = u_ptr->url_hash;
+          url_count++;
+        }
+      }
     }
   }
   u_ptr = n.user_route;
@@ -1219,6 +1345,7 @@ UserDB::send_mesh_request( UserBridge &n,  MsgHdrDecoder &dec,
   e.seqno      ()
    .mesh_url   ( u_ptr->mesh_url.len )
    .tport      ( rte.transport.tport.len )
+   .tportid    ()
    .mesh_filter( url_count * 4 );
 
   MsgCat m;
@@ -1227,7 +1354,8 @@ UserDB::send_mesh_request( UserBridge &n,  MsgHdrDecoder &dec,
   m.open( this->bridge_id.nonce, ibx.len() )
    .seqno   ( n.inbox.next_send( U_INBOX_MESH_REQ ) )
    .mesh_url( u_ptr->mesh_url.val, u_ptr->mesh_url.len )
-   .tport   ( rte.transport.tport.val, rte.transport.tport.len );
+   .tport   ( rte.transport.tport.val, rte.transport.tport.len )
+   .tportid ( rte.tport_id );
   if ( url_count > 0 )
     m.mesh_filter( filter, url_count * 4 );
   uint32_t h = ibx.hash();

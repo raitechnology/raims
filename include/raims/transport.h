@@ -180,6 +180,17 @@ struct BitRefCount {
   uint32_t deref( uint32_t i ) noexcept; /* return --ref_count */
 };
 
+struct MeshCsumCache {
+  uint32_t uid;
+  Nonce    csum;
+
+  void * operator new( size_t, void *ptr ) { return ptr; }
+  void operator delete( void *ptr ) { ::free( ptr ); }
+  MeshCsumCache() : uid( 0 ) {
+    this->csum.zero();
+  }
+};
+
 struct TransportRoute : public kv::EvSocket, public kv::EvConnectionNotify,
                         public kv::BPData, public StateTest<TransportRoute> {
   kv::EvPoll            & poll;           /* event poller */
@@ -227,6 +238,7 @@ struct TransportRoute : public kv::EvSocket, public kv::EvConnectionNotify,
                           oldest_uid,     /* which uid is oldest connect */
                           primary_count;
   IpcRteList            * ext;      
+  MeshCsumCache         * mesh_cache;
   ConfigTree::Service   & svc;            /* service definition */
   ConfigTree::Transport & transport;      /* transport definition */
 
@@ -253,7 +265,7 @@ struct TransportRoute : public kv::EvSocket, public kv::EvConnectionNotify,
   int init( void ) noexcept;
   void init_state( void ) noexcept;
   void set_peer_name( kv::PeerData &pd,  const char *suff ) noexcept;
-  void update_cost( UserBridge &n,  StringVal &tport,  uint32_t *cost,
+  bool update_cost( UserBridge &n,  StringVal &tport,  uint32_t *cost,
                     uint32_t rem_tport_id,  const char *s ) noexcept;
   const char * connected_names( char *buf,  size_t buflen ) noexcept;
   /*const char * reachable_names( char *buf,  size_t buflen ) noexcept;*/

@@ -309,8 +309,9 @@ enum MsgFid {
   FID_UCAST_FILTER   = 79 , /* filter ucast db requests */
   FID_IDL_SERVICE    = 80 , /* inbound data loss service */
   FID_IDL_MSG_LOSS   = 81 , /* inbound data loss message loss */
-  FID_REM_BRIDGE     = 82 ,
-  FID_REM_TPORTID    = 83
+  FID_REM_BRIDGE     = 82 , /* remote bridge directly connected to a link */
+  FID_REM_TPORTID    = 83 , /* remote tport on the directly connected link */
+  FID_MESH_INFO      = 84   /* status of mesh in mesh reply */
 };
 static const int FID_TYPE_SHIFT = 8,
                  FID_MAX        = 1 << FID_TYPE_SHIFT; /* 256 */
@@ -843,7 +844,8 @@ static FidTypeName fid_type_name[] = {
 { FID_IDL_SERVICE , U_SHORT                     , XCL , 0 ,"idl_service"     },
 { FID_IDL_MSG_LOSS, U_SHORT | U_INT | U_LONG    , XCL , 0 ,"idl_msg_loss"    },
 { FID_REM_BRIDGE  , OPAQUE_16                   , XCL , 0 ,"rem_bridge"      },
-{ FID_REM_TPORTID , U_SHORT | U_INT             , XCL , 0 ,"rem_tportid"     }
+{ FID_REM_TPORTID , U_SHORT | U_INT             , XCL , 0 ,"rem_tportid"     },
+{ FID_MESH_INFO   , U_SHORT | U_INT             , XCL , 0 ,"mesh_info"       }
 };
 
 #endif

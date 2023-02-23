@@ -298,6 +298,7 @@ struct MsgBufDigestT : public BMsgBufT<T> {
   T  & uid        ( uint32_t n )  { return this->i( FID_UID, n ); }
   T  & uid_cnt    ( uint32_t n )  { return this->i( FID_UID_CNT, n ); }
   T  & subj_hash  ( uint32_t n )  { return this->i4( FID_SUBJ_HASH, n ); }
+  T  & mesh_info  ( uint32_t n )  { return this->i( FID_MESH_INFO, n ); }
 
   T  & auth_stage ( uint16_t n )  { return this->i2( FID_AUTH_STAGE, n ); }
   T  & link_add   ( uint8_t n )   { return this->y( FID_LINK_ADD, n ); }
@@ -514,6 +515,7 @@ struct MsgEst {
   MsgEst & uid        ( void ) { sz += fid_est( FID_UID ); return *this; }
   MsgEst & uid_cnt    ( void ) { sz += fid_est( FID_UID_CNT ); return *this; }
   MsgEst & subj_hash  ( void ) { sz += fid_est( FID_SUBJ_HASH ); return *this; }
+  MsgEst & mesh_info  ( void ) { sz += fid_est( FID_MESH_INFO ); return *this; }
 
   MsgEst & auth_stage ( void ) { sz += fid_est( FID_AUTH_STAGE ); return *this; }
   MsgEst & link_add   ( void ) { sz += fid_est( FID_LINK_ADD ); return *this; }

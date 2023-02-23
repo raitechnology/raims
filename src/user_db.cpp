@@ -942,28 +942,6 @@ UserRoute::set_mesh( UserDB &user_db,  const void *p,  size_t len ) noexcept
     this->rte.mesh_url      = this->mesh_url;
 
     this->set( MESH_URL_STATE );
-#if 0
-    uint32_t count = (uint32_t) user_db.transport_tab.count;
-    for ( uint32_t tport_id = 0; tport_id < count; tport_id++ ) {
-      TransportRoute *rte = user_db.transport_tab.ptr[ tport_id ];
-      if ( rte != &this->rte && rte->mesh_id == this->rte.mesh_id &&
-           ! rte->is_set( TPORT_IS_SHUTDOWN ) ) {
-        if ( rte->mesh_equal( this->mesh_url.val, this->url_hash ) ) {
-          uint32_t fd = 0, x = 0;
-          UserRoute *u_rte = this->n.user_route_ptr( user_db, tport_id );
-          rte->connected.first( fd );
-          if ( u_rte->is_valid() )
-            x = u_rte->state;
-
-          this->rte.printf(
-            "%s %u already connected (%s) on %s flags %x state %x\n",
-             rte->connect_ctx != NULL ? "connect" : "accept", fd,
-             this->mesh_url.val, rte->name, rte->state, x );
-          break;
-        }
-      }
-    }
-#endif
   }
   /*user_db.peer_dist.invalidate( ADD_MESH_URL_INV );*/
   return true;

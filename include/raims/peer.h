@@ -378,6 +378,13 @@ struct UrlDBFilter {
   }
 };
 
+enum MeshStatus {
+  MESH_OK            = 0,
+  MESH_NOT_FOUND     = 1,
+  MESH_NO_ENTRIES    = 2,
+  MESH_NOT_CONNECTED = 3
+};
+
 }
 }
 
