@@ -693,8 +693,8 @@ struct UserDB {
   bool on_heartbeat( const MsgFramePublish &pub,  UserBridge &n,
                      MsgHdrDecoder &dec ) noexcept;
   void mcast_sync( TransportRoute &rte ) noexcept;
-  bool hb_adjacency( UserBridge &n,  const MsgHdrDecoder &dec,
-                     AdjacencyRequest type ) noexcept;
+  bool hb_adjacency_request( UserBridge &n,  const MsgHdrDecoder &dec,
+                             AdjacencyRequest type ) noexcept;
   bool recv_mcast_sync_request( MsgFramePublish &pub,  UserBridge &n,
                                 const MsgHdrDecoder &dec ) noexcept;
   bool recv_mcast_sync_result( MsgFramePublish &pub,  UserBridge &n,

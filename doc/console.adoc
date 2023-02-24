@@ -70,6 +70,7 @@ The following is the help screen, displayed when "help" is entered at the cli.
 | link:#show_events[show events]         | Show event recorder
 | link:#show_logs[show logs]             | Show current log buffer
 | link:#show_counters[show counters]     | Show system seqno and time values
+| link:#show_sync[show sync]             | Show system seqno and sums
 | link:#show_pubtype[show pubtype]       | Show system publish type received
 | link:#show_inbox[show inbox] [U]       | Show inbox sequences
 | link:#show_loss[show loss]             | Show message loss counters and time
@@ -521,14 +522,15 @@ Example:
 
 [source%nowrap]
 ----
-chex.rvd[LQ9YfNwX/KtuiniQNvVkQg]@chex[129]> show peers
-   user    |         bridge         | sub |   seq | link |   lat  |   max  |   avg  |  tport | cost |               address
------------+------------------------+-----+-------+------+--------+--------+--------+--------+------+-----------------------------------
-    chex.* | LQ9YfNwX/KtuiniQNvVkQg |   2 |     0 |    1 |        |        |        |        |      |
-   lex_a.1 | itdZ1mlWSlXyT9BcLI9bhg |   2 |     0 |    9 | 21.9ms |   22ms | 21.9ms | test.1 | 1000 |         tcp://209.237.252.105:9000
-   edo_a.2 | 7LdF5BgMITq0f+7UZKdBqg |   2 |     0 |    5 | 22.1ms | 22.7ms | 22.2ms | test.1 | 2000 | lex_a.1@tcp://209.237.252.105:9000
-  lex_a2.3 | G26tiXX/uqnA3PwDb4j60A |  74 | 21608 |    4 |   22ms | 22.5ms |   22ms | test.1 | 2000 | lex_a.1@tcp://209.237.252.105:9000
-  lex_a1.4 | L0MOCmhQpwX2JqsBjYBypA | 115 |   113 |    4 |   22ms | 22.1ms | 21.9ms | test.1 | 2000 | lex_a.1@tcp://209.237.252.105:9000
+   user    |         bridge         | sub |  seq | link |   lat |   max |   avg |        start      |     tport   | cost
+-----------+------------------------+-----+------+------+-------+-------+-------+-------------------+-------------+-----
+  pic_a1.* | zD1mbc/elMr2GJ/v+vx9hA |   4 |    2 |    8 |       |       |       | 0224 11:31:35.247 |             |
+  pic_a2.1 | fiZzmz7UlHLLyCEum+mbpQ |   4 |    2 |    8 | 226us | 296us | 182us | 0224 11:31:35.806 | pic_amesh.2 | 1000
+  pic_a3.2 | zv2CyNOl+2TZotZhL3iEwA |  75 | 8617 |    8 | 246us | 409us | 231us | 0224 11:31:36.381 | pic_amesh.3 | 1000
+  pic_a4.3 | JN3DyA6dXDMsh9kOtdFi7Q |  13 | 8553 |    8 | 167us | 288us | 225us | 0224 11:31:36.960 | pic_amesh.4 | 1000
+   pic_a.4 | ikdNy92Qp/gHbBger09G6g |   2 |    0 |   17 | 109us | 538us | 183us | 0224 11:31:36.988 | pic_amesh.5 | 1000
+  robo_a.5 | WnC1wQLMzxxKeP/55Y2cHA |   2 |    0 |   18 | 453us | 708us | 427us | 0224 11:31:27.442 | pic_amesh.5 | 2000
+...
 ----
 
 The `bridge` is the 128 bit random nonce created on startup by each peer.  It
@@ -549,7 +551,15 @@ The `lat`, `max`, `avg` are ping round trip times that are sent 1.5x the
 heartbeat interval to a random peer.  They are tracked for at least an hour
 before being rotated.
 
-The `tport`, `cost`, and `address` reference the inbox route to peer.
+The `start` is the start time of the peer.
+
+The `tport` and `cost` reference the inbox route to peer.
+
+The order in the table is by uid.  Using the `show peers bridge` orders the
+table by bridge, `show peers start` orders the table by start time,
+`show peers user` orders the table by user name.  The `show peers host` shows
+the first 4 bytes of the bridge used as the host id and `show peers ip` shows
+the first 4 bytes of the bridge in IPv4 dotted quad format.
 
 [[show_ports]]
 - show ports [T]
@@ -878,6 +888,7 @@ robo_a2.6 | 0206 22:09:05.371 |        0 |                   |      11 |      15
 robo_a4.7 | 0206 22:09:07.183 |        0 |                   |      11 |      95 |      420 | 0208 20:41:30.568 |      420 |      418
 robo_a1.8 | 0206 22:09:04.452 |        0 |                   |      11 |      15 |      423 | 0208 20:41:48.848 |      423 |      424
   edo_a.9 | 0206 22:09:12.993 |        0 |                   |       2 |      20 |      422 | 0208 20:42:05.808 |      422 |      419
+...
 ----
 
 The `start` field is when the process started.  The `hb seqno` and `hb time`
@@ -888,6 +899,53 @@ the same counters which should match these.  The link:#show_inbox[show inbox]
 command will show the last 32 of these sequences.  The `ping` and `pong`
 sequences have their own counters, since these are used to check connectivity
 between peers and are expected to have loss when the network is unstable.
+
+[[show_sync]]
+- show sync
+
+Show the link state seqno and sub seqno sums.
+
+Example:
+
+[source%nowrap]
+----
+   user    |        start      | link_seqno | link_sum | sub_seqno | sub_sum | diff
+-----------+-------------------+------------+----------+-----------+---------+-----
+  pic_a1.* | 0224 11:31:35.247 |          8 |      291 |         2 |   99765 |
+  pic_a2.1 | 0224 11:31:35.806 |          8 |      291 |         2 |   99761 |    2
+  pic_a3.2 | 0224 11:31:36.381 |          8 |      291 |      8291 |   99763 |    3
+  pic_a4.3 | 0224 11:31:36.960 |          8 |      291 |      8369 |   99764 |    3
+   pic_a.4 | 0224 11:31:36.988 |         17 |      291 |         0 |   99764 |    1
+  robo_a.5 | 0224 11:31:27.442 |         18 |        0 |         0 |       0 |    0
+   lex_a.6 | 0224 11:31:33.316 |         16 |        0 |         0 |       0 |    0
+...
+----
+
+The `start` field is when the process started.  The `link_seqno` and `link_sum`
+are the link state seqno and the sum of all of the peers link state seqnos.
+The `sub_seqno` and `sub_sum` are the subscription seqno and the sum of all
+peers subscription seqnos.  These sums will only appear then the nodes is
+directly connected to the peer, since they are the values last seen in the
+heartbeat messages.
+
+The sequence numbers are always increasing after a change in the link state or
+subscription state, so the sums of these seqnos are unique for the current
+network state and provide a way for peers to check whether they are in sync
+with the network.
+
+These are exchanged with the heartbeat messages.  When a difference is detected,
+the `diff` is incremented and a `_M.sync` message is multicast to the network.
+When a peer receives the sync message, it checks that their sums match with the
+sending peer.  If they do not match, then they reply with their current link
+state and subscription seqno values in a `_I.<nonce>.sync` point to point
+message.  When a peer receives the sync reply it checks that these are in sync
+and requests adjacency with `_I.<nonce>.sync_req` if they do not.
+
+The `diff` may not always result in an actual difference with the network,
+since it is possible that a subscription or a link state message is received
+and applied to the peer at a different rate than the heartbeat is received, but
+the reply of the current sequence numbers at the peer will most likely be less
+than or equal the state of the network when the peer is in sync.
 
 [[show_pubtype]]
 - show pubtype
@@ -1677,4 +1735,3 @@ messages to the network.
 
 Normal shutdown.  Existing connections will stop reading new messages send bye
 messages to connected peers and flush the data in the write queues.
-

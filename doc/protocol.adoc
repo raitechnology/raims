@@ -189,7 +189,7 @@ peer misses messages for a delta changes in the subscriptions or links
 database, the state is reinitialized by replicating it from an up to date peer.
 
 The multicast subjects follow normal forwarding rules.  The _M prefix is used
-for a multicast ping.
+for a multicast ping and a multicast link state sync.
 
 The _N prefix has unique subjects for link and peer statistics like messages
 sent or received, bytes sent or received, as well as adjacency notifications.

@@ -668,8 +668,8 @@ UserDB::mcast_sync( TransportRoute &rte ) noexcept
 }
 
 bool
-UserDB::hb_adjacency( UserBridge &n,  const MsgHdrDecoder &dec,
-                      AdjacencyRequest type ) noexcept
+UserDB::hb_adjacency_request( UserBridge &n,  const MsgHdrDecoder &dec,
+                              AdjacencyRequest type ) noexcept
 {
   if ( dec.test_2( FID_SUB_SEQNO, FID_LINK_STATE ) ) {
     uint64_t link_seqno = 0,
@@ -677,9 +677,10 @@ UserDB::hb_adjacency( UserBridge &n,  const MsgHdrDecoder &dec,
     cvt_number<uint64_t>( dec.mref[ FID_LINK_STATE ], link_seqno );
     cvt_number<uint64_t>( dec.mref[ FID_SUB_SEQNO ], sub_seqno );
     if ( n.link_state_seqno < link_seqno || n.sub_seqno < sub_seqno ) {
-      n.printf( "sync link_state %lu != link_state %lu || "
-                "sync sub_seqno %lu != sub_seqno %lu\n", n.link_state_seqno,
-                link_seqno, n.sub_seqno, sub_seqno );
+      if ( debug_hb )
+        n.printf( "sync link_state %lu != link_state %lu || "
+                  "sync sub_seqno %lu != sub_seqno %lu\n", n.link_state_seqno,
+                  link_seqno, n.sub_seqno, sub_seqno );
       return this->send_adjacency_request( n, type );
     }
   }
@@ -765,7 +766,7 @@ UserDB::recv_mcast_sync_request( MsgFramePublish &pub,  UserBridge &n,
     b = this->forward_to_primary_inbox( n, ibx, h, m.msg, m.len() );
   }
 
-  b &= this->hb_adjacency( n, dec, MCAST_SYNC_REQ );
+  b &= this->hb_adjacency_request( n, dec, MCAST_SYNC_REQ );
   return b;
 }
 
@@ -785,7 +786,7 @@ UserDB::recv_mcast_sync_result( MsgFramePublish &pub,  UserBridge &n,
       return true;
     }
   }
-  return this->hb_adjacency( n, dec, MCAST_SYNC_RES );
+  return this->hb_adjacency_request( n, dec, MCAST_SYNC_RES );
 }
 
 bool
@@ -890,8 +891,7 @@ UserDB::recv_ping_request( MsgFramePublish &pub,  UserBridge &n,
     b = this->forward_to_primary_inbox( n, ibx, h, m.msg, m.len() );
   else
     b = this->forward_to_inbox( n, ibx, h, m.msg, m.len() );
-
-  b &= this->hb_adjacency( n, dec, PING_SYNC_REQ );
+  b &= this->hb_adjacency_request( n, dec, PING_SYNC_REQ );
 
   if ( idl_svc != 0 ) {
     size_t count = this->transport_tab.count;
