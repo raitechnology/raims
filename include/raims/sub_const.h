@@ -57,6 +57,7 @@ namespace ms {
 #define _TRACE          "trace"
 #define _ACK            "ack"
 #define _ANY            "any"
+#define _SYNC           "sync"
 
 #ifdef DECLARE_SUB_CONST
 #define SUB_CONST( CON, VAL ) \

@@ -311,7 +311,9 @@ enum MsgFid {
   FID_IDL_MSG_LOSS   = 81 , /* inbound data loss message loss */
   FID_REM_BRIDGE     = 82 , /* remote bridge directly connected to a link */
   FID_REM_TPORTID    = 83 , /* remote tport on the directly connected link */
-  FID_MESH_INFO      = 84   /* status of mesh in mesh reply */
+  FID_MESH_INFO      = 84 , /* status of mesh in mesh reply */
+  FID_LINK_STATE_SUM = 85 , /* sum of peers link_state seqno */
+  FID_SUB_SEQNO_SUM  = 86   /* sum of peers sub seqno */
 };
 static const int FID_TYPE_SHIFT = 8,
                  FID_MAX        = 1 << FID_TYPE_SHIFT; /* 256 */
@@ -402,14 +404,16 @@ enum PublishType {
   U_INBOX_TRACE     = 34, /* _I.Nonce.trace */
   U_INBOX_ACK       = 35, /* _I.Nonce.ack */
   U_INBOX_ANY       = 36, /* _I.Nonce.any */
-  U_INBOX           = 37, /* _I.Nonce.X reply subject, X is integer */
+  U_INBOX_SYNC      = 37, /* _I.Nonce.sync */
+  U_INBOX           = 38, /* _I.Nonce.X reply subject, X is integer */
 
-  U_MCAST_PING      = 38, /* _M.ping */
-  U_MCAST           = 39, /* _M.> */
+  U_MCAST_PING      = 39, /* _M.ping */
+  U_MCAST_SYNC      = 40, /* _M.sync */
+  U_MCAST           = 41, /* _M.> */
   /* other subject */
-  U_INBOX_ANY_RTE   = 40, /* _I.Nonce.any, ipc inbox */
-  MCAST_SUBJECT     = 41, /* not _XX subject */
-  UNKNOWN_SUBJECT   = 42, /* init, not resolved */
+  U_INBOX_ANY_RTE   = 42, /* _I.Nonce.any, ipc inbox */
+  MCAST_SUBJECT     = 43, /* not _XX subject */
+  UNKNOWN_SUBJECT   = 44, /* init, not resolved */
   MAX_PUB_TYPE      = 64
 };
 #ifdef INCLUDE_MSG_CONST
@@ -448,8 +452,10 @@ static const char *publish_type_str[] = {
   "u_inbox_trace",
   "u_inbox_ack",
   "u_inbox_any",
+  "u_inbox_sync",
   "u_inbox",
   "u_mcast_ping",
+  "u_mcast_sync",
   "u_mcast",
   "u_inbox_any_rte",
   "mcast_subject",
@@ -845,7 +851,9 @@ static FidTypeName fid_type_name[] = {
 { FID_IDL_MSG_LOSS, U_SHORT | U_INT | U_LONG    , XCL , 0 ,"idl_msg_loss"    },
 { FID_REM_BRIDGE  , OPAQUE_16                   , XCL , 0 ,"rem_bridge"      },
 { FID_REM_TPORTID , U_SHORT | U_INT             , XCL , 0 ,"rem_tportid"     },
-{ FID_MESH_INFO   , U_SHORT | U_INT             , XCL , 0 ,"mesh_info"       }
+{ FID_MESH_INFO   , U_SHORT | U_INT             , XCL , 0 ,"mesh_info"       },
+{ FID_LINK_STATE_SUM,U_SHORT | U_INT | U_LONG   , XCL , 0 ,"link_state_sum"  },
+{ FID_SUB_SEQNO_SUM ,U_SHORT | U_INT | U_LONG   , XCL , 0 ,"sub_seqno_sum"   }
 };
 
 #endif

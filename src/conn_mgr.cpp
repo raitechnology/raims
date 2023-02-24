@@ -504,6 +504,8 @@ void
 ConnectCtx::connect( const char *host,  int port,  int opts,
                      int timeout ) noexcept
 {
+  if ( this->db.poll.quit )
+    return;
   this->timeout         = timeout;
   this->opts            = opts;
   this->connect_tries   = 0;
@@ -587,7 +589,7 @@ ConnectCtx::timer_cb( uint64_t, uint64_t eid ) noexcept
 void
 ConnectCtx::addr_resolve_cb( CaresAddrInfo & ) noexcept
 {
-  if ( this->state == CONN_SHUTDOWN )
+  if ( this->state == CONN_SHUTDOWN || this->db.poll.quit )
     return;
   this->connect_tries++;
   if ( this->addr_info.addr_list != NULL ) {

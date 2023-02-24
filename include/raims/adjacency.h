@@ -44,7 +44,9 @@ enum AdjacencyRequest {
   MISSING_SYNC_REQ  = 8, /* missing sub seqno */
   REQUEST_SYNC_REQ  = 9, /* adjacency request bounce */
   UID_CSUM_SYNC_REQ = 10, /* uid csum not correct */
-  MAX_ADJ_REQ       = 11
+  MCAST_SYNC_REQ    = 11, /* mcast link_state_sum and sub_seqno_sum */
+  MCAST_SYNC_RES    = 12, /* mcast link_state_sum and sub_seqno_sum */
+  MAX_ADJ_REQ       = 13
 };
 enum InvalidReason {
   INVALID_NONE          = 0,
@@ -84,7 +86,9 @@ static const char *adjacency_request_str[] = {
   "adjc_sync",
   "missing_sync",
   "request_sync",
-  "uid_csum_sync"
+  "uid_csum_sync",
+  "mcast_sync_req",
+  "mcast_sync_res"
 };
 static const char *invalid_reason_str[] = {
   "no_reason",

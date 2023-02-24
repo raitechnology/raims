@@ -2116,6 +2116,7 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
       this->colorize_log( p, this->log.ptr, this->log_index );
       break;
     case CMD_SHOW_COUNTERS:  this->show_counters( p );  break;
+    case CMD_SHOW_SYNC:      this->show_sync( p );  break;
     case CMD_SHOW_PUBTYPE:   this->show_pubtype( p );  break;
     case CMD_SHOW_INBOX:     this->show_inbox( p, arg, len ); break;
     case CMD_SHOW_LOSS:      this->show_loss( p );      break;
@@ -4771,6 +4772,44 @@ Console::show_counters( ConsoleOutput *p ) noexcept
   static const char *hdr[ ncols ] =
     { "user", "start", "hb seqno", "hb time", "snd ibx", "rcv ibx",
       "ping snd", "ping stime", "pong rcv", "ping rcv" };
+  this->print_table( p, hdr, ncols );
+}
+
+void
+Console::show_sync( ConsoleOutput *p ) noexcept
+{
+  static const uint32_t ncols = 7;
+  TabOut out( this->table, this->tmp, ncols );
+
+  for ( uint32_t uid = 0; uid < this->user_db.next_uid; uid++ ) {
+
+    if ( uid == 0 ) {
+      TabPrint *tab = out.add_row_p();
+      uint32_t  i = 0;
+      tab[ i++ ].set( this->user_db.user.user, PRINT_SELF ); /* user */
+      tab[ i++ ].set_time( this->user_db.start_time );       /* start */
+      tab[ i++ ].set_long( this->user_db.link_state_seqno );
+      tab[ i++ ].set_long( this->user_db.link_state_sum );
+      tab[ i++ ].set_long( this->sub_db.sub_seqno );
+      tab[ i++ ].set_long( this->sub_db.sub_seqno_sum );
+      tab[ i++ ].set_null();
+      continue;
+    }
+    UserBridge * n = this->user_db.bridge_tab[ uid ];
+    if ( n == NULL || ! n->is_set( AUTHENTICATED_STATE ) )
+      continue;
+
+    out.add_row()
+       .set( n, PRINT_USER )
+       .set_time( n->start_time )
+       .set_long( n->link_state_seqno )
+       .set_long( n->link_state_sum )
+       .set_long( n->sub_seqno )
+       .set_long( n->sub_seqno_sum )
+       .set_int( n->sync_sum_diff );
+  }
+  static const char *hdr[ ncols ] =
+  { "user", "start", "link_seqno", "link_sum", "sub_seqno", "sub_sum", "diff" };
   this->print_table( p, hdr, ncols );
 }
 

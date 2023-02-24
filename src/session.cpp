@@ -270,10 +270,12 @@ SessionMgr::init_session( const CryptPass &pwd ) noexcept
   this->ibx.init( ibx, _TRACE    , U_INBOX_TRACE );
   this->ibx.init( ibx, _ACK      , U_INBOX_ACK );
   this->ibx.init( ibx, _ANY      , U_INBOX_ANY );
+  this->ibx.init( ibx, _SYNC     , U_INBOX_SYNC );
 
   McastBuf mcb;
   this->mch.len = (uint16_t) mcb.len();
   this->mch.init( mcb, _PING     , U_MCAST_PING );
+  this->mch.init( mcb, _SYNC     , U_MCAST_SYNC );
 
   if ( ! this->ibx.is_full() || ! this->mch.is_full() ) {
     fprintf( stderr, "not fully initialized\n" );
@@ -1176,6 +1178,7 @@ SessionMgr::on_msg( EvPublish &pub ) noexcept
     }
     case U_INBOX_PING: return this->user_db.recv_ping_request( fpub, n, dec );/* _I.Nonce.ping */
     case U_INBOX_PONG: return this->user_db.recv_pong_result( fpub, n, dec ); /* _I.Nonce.pong */
+    case U_INBOX_SYNC: return this->user_db.recv_mcast_sync_result( fpub, n, dec ); /* _I.Nonce.sync */
 
     case U_INBOX_SUBS:      /* _I.Nonce.subs      */
     case U_INBOX_REM:       /* _I.Nonce.rem       */
@@ -1239,9 +1242,12 @@ SessionMgr::on_msg( EvPublish &pub ) noexcept
       }
       break;
 
+    case U_MCAST_SYNC:
+      return this->user_db.recv_mcast_sync_request( fpub, n, dec ); /* _M.sync */
+
     case U_MCAST_PING:
     case U_MCAST:
-      return this->user_db.recv_ping_request( fpub, n, dec, true );
+      return this->user_db.recv_ping_request( fpub, n, dec, true ); /* _M.ping */
 
     case U_NORMAL:        /* _SUBJECT */
     case U_INBOX:         /* _I.Nonce.<inbox_ret> */

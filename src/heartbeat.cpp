@@ -36,33 +36,35 @@ UserDB::make_hb( TransportRoute &rte,  const char *sub,  size_t sublen,
     uptime = 1;
 
   MsgEst e( sublen );
-  e.user_hmac ()
-   .seqno     ()
-   .time      ()
-   .uptime    ()
-   .start     ()
-   .interval  ()
-   .cnonce    ()
-   .pubkey    ()
-   .sub_seqno ()
-   .link_state()
-   .converge  ()
-   .uid_cnt   ()
-   .uid_csum  ()
-   .mesh_csum ()
-   .user      ( this->user.user.len )
-   .create    ( this->user.create.len )
-   .expires   ( this->user.expires.len )
-   .ucast_url ( rte.ucast_url.len )
-   .mesh_url  ( mesh_url.len )
-   .cost      ()
-   .cost2     ()
-   .cost3     ()
-   .cost4     ()
-   .tportid   ()
-   .tport     ( rte.transport.tport.len )
-   .version   ( ver_len )
-   .pk_digest ();
+  e.user_hmac     ()
+   .seqno         ()
+   .time          ()
+   .uptime        ()
+   .start         ()
+   .interval      ()
+   .cnonce        ()
+   .pubkey        ()
+   .sub_seqno     ()
+   .link_state    ()
+   .sub_seqno_sum ()
+   .link_state_sum()
+   .converge      ()
+   .uid_cnt       ()
+   .uid_csum      ()
+   .mesh_csum     ()
+   .user          ( this->user.user.len )
+   .create        ( this->user.create.len )
+   .expires       ( this->user.expires.len )
+   .ucast_url     ( rte.ucast_url.len )
+   .mesh_url      ( mesh_url.len )
+   .cost          ()
+   .cost2         ()
+   .cost3         ()
+   .cost4         ()
+   .tportid       ()
+   .tport         ( rte.transport.tport.len )
+   .version       ( ver_len )
+   .pk_digest     ();
 
   m.reserve( e.sz );
   m.open( this->bridge_id.nonce, sublen )
@@ -73,22 +75,24 @@ UserDB::make_hb( TransportRoute &rte,  const char *sub,  size_t sublen,
    .start    ( this->start_time );
   
   if ( h != bye_h ) {
-    m.interval  ( this->hb_interval      )
-     .cnonce    ( rte.hb_cnonce          )
-     .pubkey    ( this->hb_keypair->pub  )
-     .sub_seqno ( this->sub_db.sub_seqno )
-     .user      ( this->user.user.val,
-                  this->user.user.len    )
-     .create    ( this->user.create.val,
-                  this->user.create.len  );
+    m.interval     ( this->hb_interval          )
+     .cnonce       ( rte.hb_cnonce              )
+     .pubkey       ( this->hb_keypair->pub      )
+     .sub_seqno    ( this->sub_db.sub_seqno     )
+     .sub_seqno_sum( this->sub_db.sub_seqno_sum )
+     .user         ( this->user.user.val,
+                     this->user.user.len        )
+     .create       ( this->user.create.val,
+                     this->user.create.len      );
     if ( this->user.expires.len > 0 )
       m.expires ( this->user.expires.val,
                   this->user.expires.len );
     if ( h != hello_h ) {
-      m.link_state( this->link_state_seqno  )
-       .converge  ( this->net_converge_time )
-       .uid_cnt   ( this->uid_auth_count    )
-       .uid_csum  ( this->uid_csum          );
+      m.link_state    ( this->link_state_seqno  )
+       .link_state_sum( this->link_state_sum    )
+       .converge      ( this->net_converge_time )
+       .uid_cnt       ( this->uid_auth_count    )
+       .uid_csum      ( this->uid_csum          );
       if ( rte.is_set( TPORT_IS_MESH ) ) {
         Nonce csum = *rte.mesh_csum;
         csum ^= this->bridge_id.nonce;
@@ -392,8 +396,11 @@ UserDB::on_heartbeat( const MsgFramePublish &pub,  UserBridge &n,
       this->net_converge_time = converge;
   }
   if ( dec.test_2( FID_LINK_STATE, FID_SUB_SEQNO ) ) {
-    uint64_t link_seqno = 0,
-             sub_seqno  = 0;
+    uint64_t link_seqno     = 0,
+             sub_seqno      = 0;
+    bool     sync_adj       = false,
+             sync_uid_csum  = false,
+             sync_mesh_csum = false;
     cvt_number<uint64_t>( dec.mref[ FID_LINK_STATE ], link_seqno );
     cvt_number<uint64_t>( dec.mref[ FID_SUB_SEQNO ], sub_seqno );
     if ( n.link_state_seqno < link_seqno || n.sub_seqno < sub_seqno ) {
@@ -401,6 +408,7 @@ UserDB::on_heartbeat( const MsgFramePublish &pub,  UserBridge &n,
         n.printf( "hb link_state %lu != link_state %lu || "
                   "hb sub_seqno %lu != sub_seqno %lu\n", n.link_state_seqno,
                   link_seqno, n.sub_seqno, sub_seqno );
+      sync_adj = true;
       this->send_adjacency_request( n, HB_SYNC_REQ );
     }
     else {
@@ -409,12 +417,12 @@ UserDB::on_heartbeat( const MsgFramePublish &pub,  UserBridge &n,
         csum.copy_from( dec.mref[ FID_UID_CSUM ].fptr );
         n.uid_csum = csum;
         if ( this->uid_csum != csum ) {
+          sync_uid_csum = true;
           if ( current_mono_time == 0 )
             current_mono_time = current_monotonic_time_ns();
           if ( this->last_auth_mono + sec_to_ns( 1 ) < current_mono_time ) {
-            if ( ! this->check_uid_csum( n, csum ) ) {
+            if ( ! this->check_uid_csum( n, csum ) )
               this->send_adjacency_request( n, UID_CSUM_SYNC_REQ );
-            }
           }
         }
       }
@@ -426,6 +434,7 @@ UserDB::on_heartbeat( const MsgFramePublish &pub,  UserBridge &n,
           if ( rte.mesh_cache == NULL ||
                rte.mesh_cache->uid != n.uid ||
                rte.mesh_cache->csum != csum ) {
+            sync_mesh_csum = true;
             if ( current_mono_time == 0 )
               current_mono_time = current_monotonic_time_ns();
             if ( this->last_auth_mono + sec_to_ns( 5 ) < current_mono_time ) {
@@ -438,18 +447,39 @@ UserDB::on_heartbeat( const MsgFramePublish &pub,  UserBridge &n,
                 rte.mesh_cache->csum.to_base64_str( buf3 );
                 cache_uid = rte.mesh_cache->uid;
               }
-              n.printf( "hb mesh_csum %s=[%s] hb[%s] cache[%s/%u]\n",
-                   n.peer.user.val, my_csum.to_base64_str( buf ),
-                   csum.to_base64_str( buf2 ), buf3, cache_uid );
-
-              if ( this->mesh_pending.is_empty() )
+              if ( this->mesh_pending.is_empty() ) {
+                n.printf( "hb mesh_csum %s=[%s] hb[%s] cache[%s/%u]\n",
+                     n.peer.user.val, my_csum.to_base64_str( buf ),
+                     csum.to_base64_str( buf2 ), buf3, cache_uid );
                 this->send_mesh_request( n, dec, csum );
+              }
             }
           }
         }
         else if ( rte.mesh_cache != NULL ) {
           delete rte.mesh_cache;
           rte.mesh_cache = NULL;
+        }
+      }
+
+      if ( ! sync_adj && ! sync_uid_csum && ! sync_mesh_csum ) {
+        if ( dec.test_2( FID_LINK_STATE_SUM, FID_SUB_SEQNO_SUM ) ) {
+          cvt_number<uint64_t>( dec.mref[ FID_LINK_STATE_SUM ],
+                                n.link_state_sum );
+          cvt_number<uint64_t>( dec.mref[ FID_SUB_SEQNO_SUM ],
+                                n.sub_seqno_sum );
+          if ( n.link_state_sum != this->link_state_sum ||
+               n.sub_seqno_sum != this->sub_db.sub_seqno_sum ) {
+            if ( current_mono_time == 0 )
+              current_mono_time = current_monotonic_time_ns();
+            if ( this->converge_mono + sec_to_ns( 3 ) < current_mono_time ) {
+              n.sync_sum_diff++;
+              /*n.printf( "hb link sum %lu != %lu || sub sum %lu != %lu\n",
+                        n.link_state_sum, this->link_state_sum,
+                        n.sub_seqno_sum, this->sub_db.sub_seqno_sum );*/
+              this->mcast_sync( rte );
+            }
+          }
         }
       }
     }
@@ -598,6 +628,166 @@ UserDB::send_ping_request( UserBridge &n ) noexcept
   this->forward_to_primary_inbox( n, ibx, h, m.msg, m.len() );
 }
 
+void
+UserDB::mcast_sync( TransportRoute &rte ) noexcept
+{
+  static const char m_sync[] = _MCAST "." _SYNC;
+  static const uint32_t m_sync_len = sizeof( m_sync ) - 1;
+  uint64_t seqno = ++this->mcast_send_seqno;
+  uint64_t stamp = current_realtime_ns();
+
+  this->msg_send_counter[ U_MCAST_SYNC ]++;
+
+  MsgEst e( m_sync_len );
+  e.seqno         ()
+   .stamp         ()
+   .sub_seqno     ()
+   .link_state    ()
+   .sub_seqno_sum ()
+   .link_state_sum();
+
+  MsgCat m;
+  m.reserve( e.sz );
+
+  m.open( this->bridge_id.nonce, m_sync_len    )
+   .seqno         ( seqno                      )
+   .stamp         ( stamp                      )
+   .sub_seqno     ( this->sub_db.sub_seqno     )
+   .link_state    ( this->link_state_seqno     )
+   .sub_seqno_sum ( this->sub_db.sub_seqno_sum )
+   .link_state_sum( this->link_state_sum       );
+
+  uint32_t h = kv_crc_c( m_sync, m_sync_len, 0 );
+  m.close( e.sz, h, CABA_RTR_ALERT );
+  m.sign( m_sync, m_sync_len, *this->session_key );
+
+  EvPublish pub( m_sync, m_sync_len, NULL, 0, m.msg, m.len(),
+                 rte.sub_route, this->my_src_fd, h,
+                 CABA_TYPE_ID, 'p' );
+  rte.sub_route.forward_except( pub, this->router_set );
+}
+
+bool
+UserDB::hb_adjacency( UserBridge &n,  const MsgHdrDecoder &dec,
+                      AdjacencyRequest type ) noexcept
+{
+  if ( dec.test_2( FID_SUB_SEQNO, FID_LINK_STATE ) ) {
+    uint64_t link_seqno = 0,
+             sub_seqno  = 0;
+    cvt_number<uint64_t>( dec.mref[ FID_LINK_STATE ], link_seqno );
+    cvt_number<uint64_t>( dec.mref[ FID_SUB_SEQNO ], sub_seqno );
+    if ( n.link_state_seqno < link_seqno || n.sub_seqno < sub_seqno ) {
+      n.printf( "sync link_state %lu != link_state %lu || "
+                "sync sub_seqno %lu != sub_seqno %lu\n", n.link_state_seqno,
+                link_seqno, n.sub_seqno, sub_seqno );
+      return this->send_adjacency_request( n, type );
+    }
+  }
+  return true;
+}
+
+bool
+UserDB::recv_mcast_sync_request( MsgFramePublish &pub,  UserBridge &n,
+                                 const MsgHdrDecoder &dec ) noexcept
+{
+  char         ret_buf[ 16 ];
+  const char * suf = dec.get_return( ret_buf, _SYNC );
+  uint64_t     seqno;
+
+  if ( dec.seqno != 0 ) {
+    seqno = n.mcast_recv_seqno;
+    if ( dec.seqno > seqno )
+      n.mcast_recv_seqno = dec.seqno;
+    if ( dec.seqno <= seqno ) {
+      n.printf(
+        "%.*s ignoring sync seqno replay %" PRIu64 " -> %" PRIu64 " (%s)\n",
+        (int) pub.subject_len, pub.subject, seqno, dec.seqno, pub.rte.name );
+      pub.status = FRAME_STATUS_DUP_SEQNO;
+      return true;
+    }
+  }
+
+  uint64_t sub_seqno_sum  = 0,
+           link_state_sum = 0;
+  bool     b = true;
+
+  if ( dec.test( FID_SUB_SEQNO_SUM ) )
+    cvt_number<uint64_t>( dec.mref[ FID_SUB_SEQNO_SUM ], sub_seqno_sum );
+  if ( dec.test( FID_LINK_STATE_SUM ) )
+    cvt_number<uint64_t>( dec.mref[ FID_LINK_STATE_SUM ], link_state_sum );
+
+  if ( sub_seqno_sum != this->sub_db.sub_seqno_sum ||
+       link_state_sum != this->link_state_sum ) {
+    InboxBuf ibx( n.bridge_id, suf );
+    uint64_t stamp = 0, token = 0;
+    uint64_t cur_time = current_realtime_ns();
+
+    if ( dec.test( FID_STAMP ) )
+      cvt_number<uint64_t>( dec.mref[ FID_STAMP ], stamp );
+    if ( dec.test( FID_TOKEN ) )
+      cvt_number<uint64_t>( dec.mref[ FID_TOKEN ], token );
+    if ( stamp == 0 )
+      stamp = cur_time;
+
+    MsgEst e( ibx.len() );
+    e.seqno         ()
+     .stamp         ()
+     .reply_stamp   ()
+     .token         ()
+     .sub_seqno     ()
+     .link_state    ()
+     .sub_seqno_sum ()
+     .link_state_sum();
+
+    MsgCat m;
+    m.reserve( e.sz );
+
+    if ( suf == ret_buf )
+      seqno = n.inbox.next_send( U_INBOX_SYNC );
+    else {
+      this->msg_send_counter[ U_INBOX_SYNC ]++;
+      seqno = ++n.sync_send_seqno;
+    }
+    m.open( this->bridge_id.nonce, ibx.len() )
+     .seqno       ( seqno    )
+     .stamp       ( stamp    )
+     .reply_stamp ( cur_time );
+    if ( token != 0 )
+      m.token( token );
+    m.sub_seqno     ( this->sub_db.sub_seqno     )
+     .link_state    ( this->link_state_seqno     )
+     .sub_seqno_sum ( this->sub_db.sub_seqno_sum )
+     .link_state_sum( this->link_state_sum       );
+
+    uint32_t h = ibx.hash();
+    m.close( e.sz, h, CABA_INBOX );
+    m.sign( ibx.buf, ibx.len(), *this->session_key );
+    b = this->forward_to_primary_inbox( n, ibx, h, m.msg, m.len() );
+  }
+
+  b &= this->hb_adjacency( n, dec, MCAST_SYNC_REQ );
+  return b;
+}
+
+bool
+UserDB::recv_mcast_sync_result( MsgFramePublish &pub,  UserBridge &n,
+                                const MsgHdrDecoder &dec ) noexcept
+{
+  if ( dec.seqno != 0 ) {
+    uint64_t seqno = n.sync_recv_seqno;
+    if ( dec.seqno > seqno )
+      n.sync_recv_seqno = dec.seqno;
+    if ( dec.seqno <= seqno ) {
+      n.printf(
+        "%.*s ignoring sync seqno replay %" PRIu64 " -> %" PRIu64 " (%s)\n",
+        (int) pub.subject_len, pub.subject, seqno, dec.seqno, pub.rte.name );
+      pub.status = FRAME_STATUS_DUP_SEQNO;
+      return true;
+    }
+  }
+  return this->hb_adjacency( n, dec, MCAST_SYNC_RES );
+}
+
 bool
 UserDB::recv_ping_request( MsgFramePublish &pub,  UserBridge &n,
                            const MsgHdrDecoder &dec,
@@ -701,19 +891,8 @@ UserDB::recv_ping_request( MsgFramePublish &pub,  UserBridge &n,
   else
     b = this->forward_to_inbox( n, ibx, h, m.msg, m.len() );
 
-  if ( dec.test_2( FID_SUB_SEQNO, FID_LINK_STATE ) ) {
-    uint64_t link_seqno = 0,
-             sub_seqno  = 0;
-    cvt_number<uint64_t>( dec.mref[ FID_LINK_STATE ], link_seqno );
-    cvt_number<uint64_t>( dec.mref[ FID_SUB_SEQNO ], sub_seqno );
-    if ( n.link_state_seqno < link_seqno || n.sub_seqno < sub_seqno ) {
-      if ( debug_hb )
-        n.printf( "ping link_state %lu != link_state %lu || "
-                  "ping sub_seqno %lu != sub_seqno %lu\n", n.link_state_seqno,
-                  link_seqno, n.sub_seqno, sub_seqno );
-      this->send_adjacency_request( n, PING_SYNC_REQ );
-    }
-  }
+  b &= this->hb_adjacency( n, dec, PING_SYNC_REQ );
+
   if ( idl_svc != 0 ) {
     size_t count = this->transport_tab.count;
     for ( size_t i = 0; i < count; i++ ) {

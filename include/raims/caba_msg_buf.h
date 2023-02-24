@@ -278,6 +278,7 @@ struct MsgBufDigestT : public BMsgBufT<T> {
 
   T  & seqno      ( uint64_t n )  { return this->u( FID_SEQNO, n ); }
   T  & sub_seqno  ( uint64_t n )  { return this->u( FID_SUB_SEQNO, n ); }
+  T  & sub_seqno_sum( uint64_t n ){ return this->u( FID_SUB_SEQNO_SUM, n ); }
   T  & time       ( uint64_t n )  { return this->u( FID_TIME, n ); }
   T  & uptime     ( uint64_t n )  { return this->u( FID_UPTIME, n ); }
   T  & interval   ( uint32_t n )  { return this->i( FID_INTERVAL, n ); }
@@ -285,6 +286,7 @@ struct MsgBufDigestT : public BMsgBufT<T> {
   T  & token      ( uint64_t n )  { return this->u( FID_TOKEN, n ); }
   T  & ret        ( uint64_t n )  { return this->u( FID_RET, n ); }
   T  & link_state ( uint64_t n )  { return this->u( FID_LINK_STATE, n ); }
+  T  & link_state_sum( uint64_t n){ return this->u( FID_LINK_STATE_SUM, n ); }
   T  & start      ( uint64_t n )  { return this->u( FID_START, n ); }
   T  & end        ( uint64_t n )  { return this->u( FID_END, n ); }
   T  & adj_info   ( uint32_t n )  { return this->i( FID_ADJ_INFO, n ); }
@@ -495,6 +497,7 @@ struct MsgEst {
 
   MsgEst & seqno      ( void ) { sz += fid_est( FID_SEQNO ); return *this; }
   MsgEst & sub_seqno  ( void ) { sz += fid_est( FID_SUB_SEQNO ); return *this; }
+  MsgEst & sub_seqno_sum(void) { sz += fid_est( FID_SUB_SEQNO_SUM ); return *this; }
   MsgEst & time       ( void ) { sz += fid_est( FID_TIME ); return *this; }
   MsgEst & uptime     ( void ) { sz += fid_est( FID_UPTIME ); return *this; }
   MsgEst & interval   ( void ) { sz += fid_est( FID_INTERVAL ); return *this; }
@@ -502,6 +505,7 @@ struct MsgEst {
   MsgEst & token      ( void ) { sz += fid_est( FID_TOKEN ); return *this; }
   MsgEst & ret        ( void ) { sz += fid_est( FID_RET ); return *this; }
   MsgEst & link_state ( void ) { sz += fid_est( FID_LINK_STATE ); return *this; }
+  MsgEst & link_state_sum(void){ sz += fid_est( FID_LINK_STATE_SUM ); return *this; }
   MsgEst & start      ( void ) { sz += fid_est( FID_START ); return *this; }
   MsgEst & end        ( void ) { sz += fid_est( FID_END ); return *this; }
   MsgEst & adj_info   ( void ) { sz += fid_est( FID_ADJ_INFO ); return *this; }

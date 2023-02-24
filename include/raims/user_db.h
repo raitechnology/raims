@@ -244,7 +244,10 @@ struct UserBridge : public UserStateTest<UserBridge> {
                      hb_miss,             /* count of hb missed */
                      unknown_adj_refs,    /* link refs are yet to be resolved */
                      auth_count,          /* number of times authenticated */
-                     bridge_nonce_int;    /* first 4 bytes of bridge_id.nonce */
+                     bridge_nonce_int,    /* first 4 bytes of bridge_id.nonce */
+                     sync_sum_diff,
+                     sync_send_seqno,
+                     sync_recv_seqno;
   AuthStage          last_auth_type;
   uint64_t           unknown_link_seqno,  /* edge of link_state_seqno */
                      peer_recv_seqno,     /* seqno used for add/del/blm peer */
@@ -273,7 +276,9 @@ struct UserBridge : public UserStateTest<UserBridge> {
                      name_recv_time,
                      name_recv_mask,
                      last_idl_pub,        /* one loss if many clients subscr */
-                     inbound_msg_loss;    /* count of msg loss from subs */
+                     inbound_msg_loss,    /* count of msg loss from subs */
+                     link_state_sum,
+                     sub_seqno_sum;
   kv::UIntHashTab  * inbound_svc_loss;    /* service msg loss map */
   InboxSeqno         inbox;               /* track inbox sent/recv */
   RttHistory         rtt;
@@ -687,6 +692,13 @@ struct UserDB {
                 uint32_t h,  MsgCat &m ) noexcept;
   bool on_heartbeat( const MsgFramePublish &pub,  UserBridge &n,
                      MsgHdrDecoder &dec ) noexcept;
+  void mcast_sync( TransportRoute &rte ) noexcept;
+  bool hb_adjacency( UserBridge &n,  const MsgHdrDecoder &dec,
+                     AdjacencyRequest type ) noexcept;
+  bool recv_mcast_sync_request( MsgFramePublish &pub,  UserBridge &n,
+                                const MsgHdrDecoder &dec ) noexcept;
+  bool recv_mcast_sync_result( MsgFramePublish &pub,  UserBridge &n,
+                               const MsgHdrDecoder &dec ) noexcept;
   void interval_ping( uint64_t curr_mono,  uint64_t curr_time ) noexcept;
   void send_ping_request( UserBridge &n ) noexcept;
   bool recv_ping_request( MsgFramePublish &pub,  UserBridge &n,
