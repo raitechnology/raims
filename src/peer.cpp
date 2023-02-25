@@ -138,6 +138,35 @@ UserDB::recv_sync_request( const MsgFramePublish &pub,  UserBridge &n,
     n.printf( "sync_request(user=%.*s), peer not found: [%s]\n",
               user_sv.len, user_sv.val, b_nonce.to_base64_str( buf ) );
   }
+  /* check if peer is gone */
+  if ( this->zombie_ht->find( b_nonce, n_pos, uid ) ) {
+    user_n = this->bridge_tab[ uid ];
+    if ( user_n != NULL ) {
+      MsgCat   m;
+      InboxBuf ibx( n.bridge_id, _SYNC_RPY );
+
+      MsgEst e( ibx.len() );
+      e.seqno      ()
+       .time       ()
+       .session    ()
+       .user       ( user_n->peer.user.len )
+       .auth_stage ();
+
+      m.reserve( e.sz );
+      m.open( this->bridge_id.nonce, ibx.len() )
+       .seqno      ( n.inbox.next_send( U_INBOX_SYNC_RPY ) )
+       .time       ( user_n->hb_time  )
+       .session    ( user_n->bridge_id.hmac, user_n->bridge_id.nonce )
+       .user       ( user_n->peer.user.val, user_n->peer.user.len )
+       .auth_stage ( user_n->last_auth_type );
+
+      uint32_t h = ibx.hash();
+      m.close( e.sz, h, CABA_INBOX );
+      m.sign( ibx.buf, ibx.len(), *this->session_key );
+
+      return this->forward_to_inbox( n, ibx, h, m.msg, m.len() );
+    }
+  }
   return true;
 }
 
@@ -465,6 +494,11 @@ UserDB::recv_peer_add( const MsgFramePublish &pub,  UserBridge &n,
     return this->recv_peer_db( pub, n, dec, stage );
   if ( ! get_bridge_nonce( b_nonce, dec ) )
     return true;
+  if ( dec.test( FID_USER ) ) {
+    const char * user     = (const char *) dec.mref[ FID_USER ].fptr;
+    uint32_t     user_len = (uint32_t) dec.mref[ FID_USER ].fsize;
+    this->string_tab.ref_string( user, user_len, user_sv );
+  }
 
   if ( this->node_ht->find( b_nonce, n_pos, uid ) ||
        this->zombie_ht->find( b_nonce, n_pos, uid ) ) {
@@ -473,15 +507,20 @@ UserDB::recv_peer_add( const MsgFramePublish &pub,  UserBridge &n,
     user_n = this->bridge_tab[ uid ];
     if ( user_n != NULL && user_n->last_auth_type == BYE_BYE )
       return true;
+    uint32_t stage_num;
+    if ( dec.test( FID_AUTH_STAGE ) &&
+         dec.get_ival<uint32_t>( FID_AUTH_STAGE, stage_num ) ) {
+      if ( is_bye_stage( stage_num ) ) {
+        this->remove_authenticated( *user_n, (AuthStage) stage_num );
+        this->events.recv_peer_add( n.uid, pub.rte.tport_id,
+                                    user_n->uid, stage_num, user_sv.id );
+        return true;
+      }
+    }
   }
   if ( dec.test( FID_SESS_KEY ) &&
        ( user_n == NULL || ! user_n->is_set( AUTHENTICATED_STATE ) ) )
     user_n = this->make_peer_session( pub, n, dec, user_n );
-  if ( dec.test( FID_USER ) ) {
-    const char * user     = (const char *) dec.mref[ FID_USER ].fptr;
-    uint32_t     user_len = (uint32_t) dec.mref[ FID_USER ].fsize;
-    this->string_tab.ref_string( user, user_len, user_sv );
-  }
   this->events.recv_peer_add( n.uid, pub.rte.tport_id,
                            ( user_n == NULL ? UserRoute::NO_RTE : user_n->uid ),
                               stage, user_sv.id );

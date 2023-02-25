@@ -55,6 +55,10 @@ enum AuthStage {
   MAX_AUTH              = 14
 };
 
+static inline bool is_bye_stage( uint32_t stage ) {
+  return stage >= BYE_HB_TIMEOUT && stage <= BYE_PING;
+}
+
 #if 0
 enum ByeReason {
   BYE_NONE       = 0,
