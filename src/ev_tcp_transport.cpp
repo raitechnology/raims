@@ -84,6 +84,7 @@ EvTcpTransportParameters::parse_tport( ConfigTree::Transport &tport,
     }
   }
   tport.get_route_int( R_PORT, port2 );
+  this->default_port = port2;
   for ( size_t i = 0; i < el.count; i++ ) {
     const char * hostp;
     if ( i < el.count )

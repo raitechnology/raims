@@ -240,6 +240,7 @@ struct UserBridge : public UserStateTest<UserBridge> {
                      ping_recv_count,
                      pong_recv_count,
                      ping_fail_count,     /* ping counters */
+                     ping_sync_adj,
                      challenge_count,     /* count of challenges */
                      hb_miss,             /* count of hb missed */
                      unknown_adj_refs,    /* link refs are yet to be resolved */
@@ -247,7 +248,11 @@ struct UserBridge : public UserStateTest<UserBridge> {
                      bridge_nonce_int,    /* first 4 bytes of bridge_id.nonce */
                      sync_sum_diff,
                      sync_send_seqno,
-                     sync_recv_seqno;
+                     sync_recv_seqno,
+                     sync_sum_req,
+                     sync_sum_req_adj,
+                     sync_sum_res,
+                     sync_sum_res_adj;
   AuthStage          last_auth_type;
   uint64_t           unknown_link_seqno,  /* edge of link_state_seqno */
                      peer_recv_seqno,     /* seqno used for add/del/blm peer */
@@ -694,7 +699,7 @@ struct UserDB {
                      MsgHdrDecoder &dec ) noexcept;
   void mcast_sync( TransportRoute &rte ) noexcept;
   bool hb_adjacency_request( UserBridge &n,  const MsgHdrDecoder &dec,
-                             AdjacencyRequest type ) noexcept;
+                             AdjacencyRequest type,  uint32_t &cnt ) noexcept;
   bool recv_mcast_sync_request( MsgFramePublish &pub,  UserBridge &n,
                                 const MsgHdrDecoder &dec ) noexcept;
   bool recv_mcast_sync_result( MsgFramePublish &pub,  UserBridge &n,

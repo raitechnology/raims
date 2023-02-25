@@ -1080,7 +1080,8 @@ UserDB::send_adjacency( UserBridge &n,  UserBridge *sync,  InboxBuf &ibx,
 {
   BloomCodec code;
   uint64_t   link_seqno, sub_seqno;
-  uint32_t   hops = 1;
+  uint32_t   hops = 1, sync_uid = 0;
+  StringVal  sync_user;
 
   if ( sync != NULL ) {
     if ( n.user_route->rte.uid_connected.is_member( sync->uid ) &&
@@ -1088,21 +1089,26 @@ UserDB::send_adjacency( UserBridge &n,  UserBridge *sync,  InboxBuf &ibx,
       hops = 0;
     link_seqno = sync->link_state_seqno;
     sub_seqno  = sync->sub_seqno;
+    sync_uid   = sync->uid;
+    sync_user  = sync->peer.user;
   }
   else {
     if ( n.user_route->rte.uid_connected.is_member( n.uid ) )
       hops = 0;
     link_seqno = this->link_state_seqno;
     sub_seqno  = this->sub_db.sub_seqno;
+    sync_user  = this->user.user;
   }
+
   this->events.send_adjacency( n.uid, n.user_route->rte.tport_id,
-                               ( sync == NULL ? 0 : sync->uid ), reas );
+                               sync_uid, reas );
   MsgEst e( ibx.len() );
   e.seqno      ()
    .link_state ()
    .sub_seqno  ()
    .hops       ()
    .adj_info   ()
+   .user       ( sync_user.len )
    .time       ()
    .sync_bridge();
 
@@ -1125,7 +1131,8 @@ UserDB::send_adjacency( UserBridge &n,  UserBridge *sync,  InboxBuf &ibx,
   m.open( this->bridge_id.nonce, ibx.len() )
    .seqno   ( n.inbox.next_send( U_INBOX_ADJ_RPY ) )
    .hops    ( hops )
-   .adj_info( reas );
+   .adj_info( reas )
+   .user    ( sync_user.val, sync_user.len );
 
   if ( time_val != 0 )
     m.time( time_val );
@@ -1160,7 +1167,12 @@ UserDB::recv_adjacency_result( const MsgFramePublish &pub,  UserBridge &n,
   uint32_t     reas;
   int          which = SYNC_NONE;
   UserBridge * sync  = NULL;
+  StringVal    sync_user;
 
+  if ( dec.test( FID_USER ) ) {
+    sync_user.val = (const char *) dec.mref[ FID_USER ].fptr;
+    sync_user.len = (uint32_t) dec.mref[ FID_USER ].fsize;
+  }
   if ( dec.get_nonce( FID_SYNC_BRIDGE, nonce ) ) {
     size_t   pos;
     uint32_t uid;
@@ -1175,7 +1187,8 @@ UserDB::recv_adjacency_result( const MsgFramePublish &pub,  UserBridge &n,
       if ( ! this->zombie_ht->find( nonce, pos, uid ) ) {
         char buf[ NONCE_B64_LEN + 1 ];
         nonce.to_base64_str( buf );
-        n.printe( "sync nonce not found [%s]\n", buf );
+        n.printf( "sync user %.*s, nonce not found [%s]\n",
+                  sync_user.len, sync_user.val, buf );
         return true;
       }
       sync = this->bridge_tab[ uid ];

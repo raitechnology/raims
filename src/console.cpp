@@ -4778,7 +4778,7 @@ Console::show_counters( ConsoleOutput *p ) noexcept
 void
 Console::show_sync( ConsoleOutput *p ) noexcept
 {
-  static const uint32_t ncols = 7;
+  static const uint32_t ncols = 12;
   TabOut out( this->table, this->tmp, ncols );
 
   for ( uint32_t uid = 0; uid < this->user_db.next_uid; uid++ ) {
@@ -4793,6 +4793,11 @@ Console::show_sync( ConsoleOutput *p ) noexcept
       tab[ i++ ].set_long( this->sub_db.sub_seqno );
       tab[ i++ ].set_long( this->sub_db.sub_seqno_sum );
       tab[ i++ ].set_null();
+      tab[ i++ ].set_null();
+      tab[ i++ ].set_null();
+      tab[ i++ ].set_null();
+      tab[ i++ ].set_null();
+      tab[ i++ ].set_null();
       continue;
     }
     UserBridge * n = this->user_db.bridge_tab[ uid ];
@@ -4806,10 +4811,16 @@ Console::show_sync( ConsoleOutput *p ) noexcept
        .set_long( n->link_state_sum )
        .set_long( n->sub_seqno )
        .set_long( n->sub_seqno_sum )
-       .set_int( n->sync_sum_diff );
+       .set_int( n->sync_sum_diff )
+       .set_int( n->sync_sum_req )
+       .set_int( n->sync_sum_res )
+       .set_int( n->sync_sum_req_adj )
+       .set_int( n->sync_sum_res_adj )
+       .set_int( n->ping_sync_adj );
   }
   static const char *hdr[ ncols ] =
-  { "user", "start", "link_seqno", "link_sum", "sub_seqno", "sub_sum", "diff" };
+  { "user", "start", "link_seqno", "link_sum", "sub_seqno", "sub_sum",
+    "hb_diff", "mc_req", "mc_res", "req_adj", "res_adj", "ping_adj" };
   this->print_table( p, hdr, ncols );
 }
 

@@ -633,9 +633,14 @@ UserDB::mcast_sync( TransportRoute &rte ) noexcept
 {
   static const char m_sync[] = _MCAST "." _SYNC;
   static const uint32_t m_sync_len = sizeof( m_sync ) - 1;
+
+  ForwardCache & forward = this->forward_path[ 0 ];
+  this->peer_dist.update_forward_cache( forward, 0, 0 );
+  if ( ! forward.is_member( rte.tport_id ) )
+    return;
+
   uint64_t seqno = ++this->mcast_send_seqno;
   uint64_t stamp = current_realtime_ns();
-
   this->msg_send_counter[ U_MCAST_SYNC ]++;
 
   MsgEst e( m_sync_len );
@@ -669,7 +674,7 @@ UserDB::mcast_sync( TransportRoute &rte ) noexcept
 
 bool
 UserDB::hb_adjacency_request( UserBridge &n,  const MsgHdrDecoder &dec,
-                              AdjacencyRequest type ) noexcept
+                              AdjacencyRequest type,  uint32_t &cnt ) noexcept
 {
   if ( dec.test_2( FID_SUB_SEQNO, FID_LINK_STATE ) ) {
     uint64_t link_seqno = 0,
@@ -681,6 +686,7 @@ UserDB::hb_adjacency_request( UserBridge &n,  const MsgHdrDecoder &dec,
         n.printf( "sync link_state %lu != link_state %lu || "
                   "sync sub_seqno %lu != sub_seqno %lu\n", n.link_state_seqno,
                   link_seqno, n.sub_seqno, sub_seqno );
+      cnt++;
       return this->send_adjacency_request( n, type );
     }
   }
@@ -764,9 +770,11 @@ UserDB::recv_mcast_sync_request( MsgFramePublish &pub,  UserBridge &n,
     m.close( e.sz, h, CABA_INBOX );
     m.sign( ibx.buf, ibx.len(), *this->session_key );
     b = this->forward_to_primary_inbox( n, ibx, h, m.msg, m.len() );
+    n.sync_sum_req++;
   }
 
-  b &= this->hb_adjacency_request( n, dec, MCAST_SYNC_REQ );
+  b &= this->hb_adjacency_request( n, dec, MCAST_SYNC_REQ,
+                                   n.sync_sum_req_adj );
   return b;
 }
 
@@ -786,7 +794,9 @@ UserDB::recv_mcast_sync_result( MsgFramePublish &pub,  UserBridge &n,
       return true;
     }
   }
-  return this->hb_adjacency_request( n, dec, MCAST_SYNC_RES );
+  n.sync_sum_res++;
+  return this->hb_adjacency_request( n, dec, MCAST_SYNC_RES,
+                                     n.sync_sum_res_adj );
 }
 
 bool
@@ -891,7 +901,8 @@ UserDB::recv_ping_request( MsgFramePublish &pub,  UserBridge &n,
     b = this->forward_to_primary_inbox( n, ibx, h, m.msg, m.len() );
   else
     b = this->forward_to_inbox( n, ibx, h, m.msg, m.len() );
-  b &= this->hb_adjacency_request( n, dec, PING_SYNC_REQ );
+  b &= this->hb_adjacency_request( n, dec, PING_SYNC_REQ,
+                                   n.ping_sync_adj );
 
   if ( idl_svc != 0 ) {
     size_t count = this->transport_tab.count;

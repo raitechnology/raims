@@ -5942,15 +5942,15 @@ between peers and are expected to have loss when the network is unstable.</p>
 </div>
 <div class="listingblock">
 <div class="content">
-<pre class="highlight nowrap"><code>   user    |        start      | link_seqno | link_sum | sub_seqno | sub_sum | diff
------------+-------------------+------------+----------+-----------+---------+-----
-  pic_a1.* | 0224 11:31:35.247 |          8 |      291 |         2 |   99765 |
-  pic_a2.1 | 0224 11:31:35.806 |          8 |      291 |         2 |   99761 |    2
-  pic_a3.2 | 0224 11:31:36.381 |          8 |      291 |      8291 |   99763 |    3
-  pic_a4.3 | 0224 11:31:36.960 |          8 |      291 |      8369 |   99764 |    3
-   pic_a.4 | 0224 11:31:36.988 |         17 |      291 |         0 |   99764 |    1
-  robo_a.5 | 0224 11:31:27.442 |         18 |        0 |         0 |       0 |    0
-   lex_a.6 | 0224 11:31:33.316 |         16 |        0 |         0 |       0 |    0
+<pre class="highlight nowrap"><code>    user   |        start      | link_seqno | link_sum | sub_seqno | sub_sum | hb_diff | mc_req | mc_res | req_adj | res_adj | ping_adj
+-----------+-------------------+------------+----------+-----------+---------+---------+--------+--------+---------+---------+---------
+    chex.* | 0225 01:38:14.590 |          5 |     1447 |         0 |   81677 |         |        |        |         |         |
+   edo_a.1 | 0224 17:07:32.126 |         25 |     1447 |         0 |   81653 |       0 |      0 |      0 |       0 |       0 |        0
+  edo_a2.3 | 0224 17:07:29.173 |          8 |        0 |         2 |       0 |       0 |      0 |      0 |       0 |       0 |        0
+  edo_a1.4 | 0224 17:07:27.696 |          8 |        0 |         2 |       0 |       0 |      0 |      0 |       0 |       0 |        0
+  edo_a3.5 | 0224 17:07:30.591 |          8 |        0 |      6673 |       0 |       0 |      0 |      0 |       0 |       0 |        0
+  edo_a4.6 | 0224 17:07:32.052 |          7 |        0 |      6874 |       0 |       0 |      0 |      0 |       0 |       0 |        0
+  robo_a.7 | 0224 17:07:26.471 |         18 |        0 |         0 |       0 |       0 |      0 |      0 |       0 |       0 |        0
 ...</code></pre>
 </div>
 </div>
@@ -5970,7 +5970,7 @@ with the network.</p>
 </div>
 <div class="paragraph">
 <p>These are exchanged with the heartbeat messages.  When a difference is detected,
-the <code>diff</code> is incremented and a <code>_M.sync</code> message is multicast to the network.
+the <code>hb_diff</code> is incremented and a <code>_M.sync</code> message is multicast to the network.
 When a peer receives the sync message, it checks that their sums match with the
 sending peer.  If they do not match, then they reply with their current link
 state and subscription seqno values in a <code>_I.&lt;nonce&gt;.sync</code> point to point
@@ -5978,11 +5978,19 @@ message.  When a peer receives the sync reply it checks that these are in sync
 and requests adjacency with <code>_I.&lt;nonce&gt;.sync_req</code> if they do not.</p>
 </div>
 <div class="paragraph">
-<p>The <code>diff</code> may not always result in an actual difference with the network,
+<p>The <code>hb_diff</code> may not always result in an actual difference with the network,
 since it is possible that a subscription or a link state message is received
 and applied to the peer at a different rate than the heartbeat is received, but
 the reply of the current sequence numbers at the peer will most likely be less
 than or equal the state of the network when the peer is in sync.</p>
+</div>
+<div class="paragraph">
+<p>The <code>mc_req</code> is the number of <code>_M.sync</code> message received, <code>mc_res</code> is the
+number of <code>_I.&lt;nonce&gt;.sync</code> messages received.  The <code>req_adj</code> is the number of
+adjacency requests made as a result of the <code>_M.sync</code> messages, and <code>res_adj</code> is
+adjacency requests made as a result of the <code>_I.&lt;nonce&gt;.sync</code> messages and
+<code>ping_adj</code> is adjacency requests made as a result of <code>_I.&lt;nonce&gt;.ping</code>
+messages.</p>
 </div>
 <div id="show_pubtype" class="ulist">
 <ul>

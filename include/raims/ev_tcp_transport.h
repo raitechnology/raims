@@ -111,18 +111,19 @@ struct HostPortArray : public kv::ArrayCount<HostPort, 4> {
 
 struct EvTcpTransportParameters : public EvTcpTransportOpts {
   HostPortArray hosts;
+  int default_port;
 
   int port( size_t n ) {
     if ( n < this->hosts.count )
       return this->hosts.ptr[ n ].port;
-    return 0;
+    return this->default_port;
   }
   const char * host( size_t n ) {
     if ( n < this->hosts.count )
       return this->hosts.ptr[ n ].host;
     return NULL;
   }
-  EvTcpTransportParameters() {}
+  EvTcpTransportParameters() : default_port( 0 ) {}
   void parse_tport( ConfigTree::Transport &tport,  int ptype,
                     SessionMgr &mgr ) noexcept;
 };
