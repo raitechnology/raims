@@ -468,11 +468,13 @@ UserDB::on_heartbeat( const MsgFramePublish &pub,  UserBridge &n,
                                 n.link_state_sum );
           cvt_number<uint64_t>( dec.mref[ FID_SUB_SEQNO_SUM ],
                                 n.sub_seqno_sum );
-          if ( n.link_state_sum != this->link_state_sum ||
-               n.sub_seqno_sum != this->sub_db.sub_seqno_sum ) {
+          if ( n.link_state_sum > this->link_state_sum ||
+               n.sub_seqno_sum > this->sub_db.sub_seqno_sum ) {
             if ( current_mono_time == 0 )
               current_mono_time = current_monotonic_time_ns();
-            if ( this->converge_mono + sec_to_ns( 3 ) < current_mono_time ) {
+            uint64_t t1 = this->converge_mono + sec_to_ns( 3 ),
+                     t2 = this->peer_dist.invalid_mono + sec_to_ns( 3 );
+            if ( t1 < current_mono_time && t2 < current_mono_time ) {
               n.sync_sum_diff++;
               /*n.printf( "hb link sum %lu != %lu || sub sum %lu != %lu\n",
                         n.link_state_sum, this->link_state_sum,
@@ -723,8 +725,8 @@ UserDB::recv_mcast_sync_request( MsgFramePublish &pub,  UserBridge &n,
   if ( dec.test( FID_LINK_STATE_SUM ) )
     cvt_number<uint64_t>( dec.mref[ FID_LINK_STATE_SUM ], link_state_sum );
 
-  if ( sub_seqno_sum != this->sub_db.sub_seqno_sum ||
-       link_state_sum != this->link_state_sum ) {
+  if ( sub_seqno_sum < this->sub_db.sub_seqno_sum ||
+       link_state_sum < this->link_state_sum ) {
     InboxBuf ibx( n.bridge_id, suf );
     uint64_t stamp = 0, token = 0;
     uint64_t cur_time = current_realtime_ns();

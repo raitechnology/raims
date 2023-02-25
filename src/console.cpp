@@ -4000,6 +4000,15 @@ UserBridgeList::cmp_start( const UserBridgeElem &e1,
   return n1->start_time < e1.user_db.start_time ? -1 : 1;
 }
 
+int
+UserBridgeList::cmp_stop( const UserBridgeElem &e1,
+                          const UserBridgeElem &e2 ) noexcept
+{
+  UserBridge * n1 = e1.user_db.bridge_tab.ptr[ e1.uid ],
+             * n2 = e1.user_db.bridge_tab.ptr[ e2.uid ];
+  return n1->remove_auth_time > n2->remove_auth_time ? -1 : 1;
+}
+
 void
 Console::show_peers( ConsoleOutput *p, const char *name,  size_t len ) noexcept
 {
@@ -4008,17 +4017,26 @@ Console::show_peers( ConsoleOutput *p, const char *name,  size_t len ) noexcept
   const char   * nstr;
   char           nonce[ NONCE_B64_LEN + 1 ];
   UserBridgeList list;
-  bool           show_ip = false, show_host = false;
+  bool           show_ip = false, show_host = false, show_zombie = false;
 
   /* if name == user              , sort by user name
    *         == nonce | ip | host , sort by nonce
    *         == start             , sort by start time */
-  list.push_tl( new ( this->tmp.make( sizeof( UserBridgeElem ) ) )
-                UserBridgeElem( this->user_db, 0 ) );
+  if ( len > 0 ) {
+    if ( name[ 0 ] == 'z' || name[ 0 ] == 'Z' )       /* zombie */
+      show_zombie = true;
+  }
+  if ( ! show_zombie )
+    list.push_tl( new ( this->tmp.make( sizeof( UserBridgeElem ) ) )
+                  UserBridgeElem( this->user_db, 0 ) );
   for ( uint32_t uid = 1; uid < this->user_db.next_uid; uid++ ) {
     UserBridge * n = this->user_db.bridge_tab[ uid ];
-    if ( n == NULL || ! n->is_set( AUTHENTICATED_STATE ) )
+    if ( n == NULL )
       continue;
+    if ( ( ! n->is_set( AUTHENTICATED_STATE ) && ! show_zombie ) ||
+         ( n->is_set( AUTHENTICATED_STATE ) && show_zombie ) )
+      continue;
+
     list.push_tl( new ( this->tmp.make( sizeof( UserBridgeElem ) ) )
                   UserBridgeElem( this->user_db, uid ) );
   }
@@ -4031,6 +4049,8 @@ Console::show_peers( ConsoleOutput *p, const char *name,  size_t len ) noexcept
       list.sort<UserBridgeList::cmp_nonce>();
     else if ( name[ 0 ] == 's' || name[ 0 ] == 'S' )  /* start */
       list.sort<UserBridgeList::cmp_start>();
+    else if ( name[ 0 ] == 'z' || name[ 0 ] == 'Z' )  /* zombie */
+      list.sort<UserBridgeList::cmp_stop>();
 
     if ( name[ 0 ] == 'i' || name[ 0 ] == 'I' )       /* ip */
       show_ip = true;
@@ -4091,26 +4111,30 @@ Console::show_peers( ConsoleOutput *p, const char *name,  size_t len ) noexcept
        .set_long( n->link_state_seqno )  /* link */
        .set_long( rtt, PRINT_LATENCY )   /* lat */
        .set_long( rtt_max, PRINT_LATENCY )  /* max */
-       .set_long( rtt_avg, PRINT_LATENCY )  /* avg */
-       .set_time( n->start_time );       /* time */
+       .set_long( rtt_avg, PRINT_LATENCY ); /* avg */
 
-    UserRoute *u_ptr = n->primary( this->user_db );
+    if ( ! show_zombie ) {
+      UserRoute *u_ptr = n->primary( this->user_db );
 
-    if ( ! u_ptr->is_valid() ) {
-      row.set_null()  /* tport */
-         .set_null(); /* cost */
-         /*.set_null();  address */
+      if ( ! u_ptr->is_valid() ) {
+        row.set_time( n->start_time )
+           .set_null()  /* tport */
+           .set_null(); /* cost */
+      }
+      else {
+        row.set_time( n->start_time )
+           .set( u_ptr->rte.transport.tport, u_ptr->rte.tport_id, PRINT_ID )
+           .set( n, PRINT_DIST ); /* cost */
+      }
     }
     else {
-      /*TabPrint & ptp =*/
-      row.set( u_ptr->rte.transport.tport, u_ptr->rte.tport_id, PRINT_ID )
-         .set( n, PRINT_DIST ); /* cost */
-
-      /*this->output_user_route( ptp, *u_ptr );*/
+      row.set_time( n->remove_auth_time ) /* time */
+         .set_null()
+         .set_null();
     }
   }
   static const char *hdr[ ncols ] = { "user", "bridge", "sub", "seq", "link",
-                                      "lat", "max", "avg", "start", "tport",
+                                      "lat", "max", "avg", "time", "tport",
                                       "cost"  };
   this->print_table( p, hdr, ncols );
 }

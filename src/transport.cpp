@@ -367,8 +367,9 @@ TransportRoute::on_msg( EvPublish &pub ) noexcept
   }
   MsgFramePublish & fpub = (MsgFramePublish &) pub;
   MsgHdrDecoder   & dec  = fpub.dec;
-  if ( ( fpub.flags & MSG_FRAME_TPORT_CONTROL ) != 0 ) {
-    d_tran( "rte(%s) tport_route == true transport_route: on_msg (%.*s)\n",
+  if ( ( fpub.flags & MSG_FRAME_TPORT_CONTROL ) != 0 ||
+       fpub.status == FRAME_STATUS_DUP_SEQNO ) {
+    d_tran( "rte(%s) dup transport_route: on_msg (%.*s)\n",
             fpub.rte.name, (int) pub.subject_len, pub.subject );
     return true;
   }

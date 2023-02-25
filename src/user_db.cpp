@@ -1606,6 +1606,7 @@ UserDB::remove_authenticated( UserBridge &n,  AuthStage bye ) noexcept
     n.printn( "remove auth %s %s\n", auth_stage_string( bye ),
                n.is_set( ZOMBIE_STATE ) ? "zombie" : "" );
   if ( n.test_clear( AUTHENTICATED_STATE ) ) {
+    n.remove_auth_time = this->poll.now_ns;
     this->events.auth_remove( n.uid, bye );
     this->uid_authenticated.remove( n.uid );
     this->uid_rtt.remove( n.uid );

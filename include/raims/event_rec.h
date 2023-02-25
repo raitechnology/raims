@@ -230,8 +230,10 @@ struct EventRecord {
   static const uint32_t MAX_EVENTS = 4096;
   EventRec * ptr;
   uint32_t hd, count;
+  uint64_t * cur_time;
 
-  EventRecord() : ptr( 0 ), hd( 0 ), count( 0 ) {}
+  EventRecord( uint64_t *now_ns ) : ptr( 0 ), hd( 0 ), count( 0 ),
+    cur_time( now_ns ) {}
   ~EventRecord() {
     if ( this->ptr != NULL ) 
       ::free( this->ptr );
@@ -268,7 +270,7 @@ struct EventRecord {
   }
   EventRec &tid_event( uint32_t uid,  uint32_t tid,  uint16_t fl ) {
     EventRec &ev = this->next_event();
-    ev.stamp       = kv::current_realtime_coarse_ns();
+    ev.stamp       = *this->cur_time;
     ev.event_flags = fl;
     ev.source_uid  = uid;
     ev.tport_id    = tid;

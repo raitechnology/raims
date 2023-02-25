@@ -259,6 +259,7 @@ struct UserBridge : public UserStateTest<UserBridge> {
                      mcast_recv_seqno,    /* recv side mcast seqno */
                      start_mono_time,     /* uptime from hb */
                      auth_mono_time,      /* when auth happens */
+                     remove_auth_time,
                      challenge_mono_time, /* time challenge sent */
                      subs_mono_time,      /* time subs reqeust sent */
                      sub_recv_mono_time,  /* time subscription reqeust recv */
