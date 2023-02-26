@@ -689,27 +689,27 @@ UserDB::converge_network( uint64_t current_mono_time,  uint64_t current_time,
   bool b = this->peer_dist.find_inconsistent( n, m );
   if ( b ) {
     if ( n != NULL && m != NULL ) {
-      if ( ! n->is_set( PING_STATE ) ) {
-        if ( ! n->throttle_adjacency( 0, current_mono_time ) ) {
-          /*printf( "---- find_inconsistent from %s(%u) to %s(%u) "
-             "inc_run_count %u, req_timeout %s inc_running %s found_inc %s\n",
-                   n->peer.user.val, n->uid, m->peer.user.val, m->uid,
-                   this->peer_dist.inc_run_count, req_timeout?"t":"f",
-                   this->peer_dist.inc_running?"t":"f",
-                   this->peer_dist.found_inconsistency?"t":"f" );*/
-          this->send_adjacency_request( *n, DIJKSTRA_SYNC_REQ );
-        }
-        else if ( ! m->throttle_adjacency( 0, current_mono_time ) ) {
-          this->send_adjacency_request( *m, DIJKSTRA_SYNC_REQ );
-        }
+      bool n_less = ( n->adj_req_throttle.mono_time <=
+                      m->adj_req_throttle.mono_time );
+      if ( ! n_less ) {
+        UserBridge * x = n;
+        n = m; m = x;
+      }
+      if ( ! n->is_set( PING_STATE ) &&
+           ! n->throttle_adjacency( 0, current_mono_time ) ) {
+        /*printf( "---- find_inconsistent from %s(%u) to %s(%u) "
+           "inc_run_count %u, req_timeout %s inc_running %s found_inc %s\n",
+                 n->peer.user.val, n->uid, m->peer.user.val, m->uid,
+                 this->peer_dist.inc_run_count, req_timeout?"t":"f",
+                 this->peer_dist.inc_running?"t":"f",
+                 this->peer_dist.found_inconsistency?"t":"f" );*/
+        this->send_adjacency_request( *n, DIJKSTRA_SYNC_REQ );
       }
       else if ( n->ping_fail_count >= 3 )
         m = NULL;
     }
-
     if ( n != NULL && m == NULL ) {
-      uint64_t ns,
-               hb_timeout_ns = (uint64_t) n->hb_interval * 2 * SEC_TO_NS;
+      uint64_t ns, hb_timeout_ns = sec_to_ns( n->hb_interval * 2 ) + SEC_TO_NS;
       ns = n->start_mono_time + hb_timeout_ns; /* if hb and still orphaned */
 
       if ( this->adjacency_unknown.is_empty() && ns < current_mono_time ) {

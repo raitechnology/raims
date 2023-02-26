@@ -252,7 +252,8 @@ struct UserBridge : public UserStateTest<UserBridge> {
                      sync_sum_req,
                      sync_sum_req_adj,
                      sync_sum_res,
-                     sync_sum_res_adj;
+                     sync_sum_res_adj,
+                     null_sync_res;
   AuthStage          last_auth_type;
   uint64_t           unknown_link_seqno,  /* edge of link_state_seqno */
                      peer_recv_seqno,     /* seqno used for add/del/blm peer */
