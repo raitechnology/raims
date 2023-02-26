@@ -1490,12 +1490,13 @@ UserDB::add_authenticated( UserBridge &n,
       n.printf( "refusing to auth bye bye\n" );
       return;
     }
-    if ( stage >= AUTH_FROM_ADJ_RESULT ) {
+    if ( stage >= AUTH_FROM_ADJ_RESULT && n.auth_mono_time > 0 ) {
       uint32_t countdown = 0;
-      if ( cur_mono + sec_to_ns( 15 ) > n.remove_auth_mono )
+      /* removed auth within the last 15 seconds */
+      if ( n.remove_auth_mono + sec_to_ns( 15 ) > cur_mono )
         countdown = ( n.auth_count > 8 ? 8 : n.auth_count );
-
-      if ( cur_mono + sec_to_ns( countdown * 2 ) > n.auth_mono_time ) {
+      /* last added auth within grace period */
+      if ( n.auth_mono_time + sec_to_ns( countdown * 2 ) > cur_mono ) {
         n.printf( "refusing to auth %s after %s within %u secs\n",
                   from, auth_stage_string( n.last_auth_type ), countdown * 2 );
         return;
