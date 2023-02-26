@@ -555,11 +555,13 @@ The `start` is the start time of the peer.
 
 The `tport` and `cost` reference the inbox route to peer.
 
-The order in the table is by uid.  Using the `show peers bridge` orders the
-table by bridge, `show peers start` orders the table by start time,
+The order in the table is by uid.  Using the `show peers nonce` orders the
+table by bridge nonce, `show peers start` orders the table by start time,
 `show peers user` orders the table by user name.  The `show peers host` shows
 the first 4 bytes of the bridge used as the host id and `show peers ip` shows
 the first 4 bytes of the bridge in IPv4 dotted quad format.
+
+Using `show peers zombie`, the dead peers are displayed.
 
 [[show_ports]]
 - show ports [T]

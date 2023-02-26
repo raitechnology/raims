@@ -4129,7 +4129,7 @@ Console::show_peers( ConsoleOutput *p, const char *name,  size_t len ) noexcept
     }
     else {
       row.set_time( n->remove_auth_time ) /* time */
-         .set_null()
+         .set( auth_stage_string( n->last_auth_type ) )
          .set_null();
     }
   }

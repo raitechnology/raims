@@ -181,7 +181,7 @@ UserDB::save_unknown_adjacency( UserBridge &n,  TransportRoute &rte,
 }
 
 void
-UserDB::add_unknown_adjacency( UserBridge &n ) noexcept
+UserDB::add_unknown_adjacency( UserBridge *n,  Nonce *b_nonce ) noexcept
 {
   AdjPending    * p_next;
   AdjacencyRec ** recp_next,
@@ -189,6 +189,9 @@ UserDB::add_unknown_adjacency( UserBridge &n ) noexcept
                 * rec;
   UserBridge    * m;
   bool            changed = false;
+
+  if ( n != NULL )
+    b_nonce = &n->bridge_id.nonce;
 
   for ( AdjPending *p = this->adjacency_unknown.hd; p != NULL; p = p_next ) {
     p_next = p->next;
@@ -202,12 +205,11 @@ UserDB::add_unknown_adjacency( UserBridge &n ) noexcept
     for ( recp = &p->rec_list; *recp != NULL; recp = recp_next ) {
       rec = *recp;
       recp_next = &rec->next;
-      if ( rec->nonce == n.bridge_id.nonce ||
-           ( rec->test( FID_REM_BRIDGE ) &&
-             rec->rem_bridge == n.bridge_id.nonce ) ) {
-        UserBridge * m = this->bridge_tab.ptr[ p->uid ];
-        if ( ! m->is_set( AUTHENTICATED_STATE ) ||
-             (changed |= this->add_adjacency_change( *m, *rec )) ) {
+      if ( rec->nonce == *b_nonce ||
+           ( rec->test( FID_REM_BRIDGE ) && rec->rem_bridge == *b_nonce ) ) {
+        if ( n == NULL )
+          goto remove_pending;
+        if ( (changed |= this->add_adjacency_change( *m, *rec )) ) {
           *recp = rec->next;
           if ( --p->rec_count == 0 )
             break;
@@ -215,9 +217,12 @@ UserDB::add_unknown_adjacency( UserBridge &n ) noexcept
       }
     }
     if ( p->rec_count == 0 ) {
-      if ( debug_lnk )
-        m->printf( "add unknown adj: sync to %lu\n", p->link_state_seqno );
-      this->update_link_state_seqno( m->link_state_seqno, p->link_state_seqno );
+      if ( n != NULL ) {
+        if ( debug_lnk )
+          m->printf( "add unknown adj: sync to %lu\n", p->link_state_seqno );
+        this->update_link_state_seqno( m->link_state_seqno,
+                                       p->link_state_seqno );
+      }
     remove_pending:;
       m->unknown_adj_refs = 0;
       this->adjacency_unknown.pop( p );
@@ -228,13 +233,13 @@ UserDB::add_unknown_adjacency( UserBridge &n ) noexcept
   if ( this->adjacency_unknown.is_empty() )
     d_lnk( "no more unknown adj\n" );
   if ( changed )
-    this->peer_dist.invalidate( ADJACENCY_CHANGE_INV, n.uid );
+    this->peer_dist.invalidate( ADJACENCY_CHANGE_INV, n != NULL ? n->uid : 0 );
 }
 
 void
 UserDB::clear_unknown_adjacency( UserBridge &n ) noexcept
 {
-  AdjPending  * next;
+  AdjPending * next;
 
   if ( debug_lnk )
     n.printf( "clear_unknown\n" );

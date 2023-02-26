@@ -257,10 +257,6 @@ struct UserBridge : public UserStateTest<UserBridge> {
   uint64_t           unknown_link_seqno,  /* edge of link_state_seqno */
                      peer_recv_seqno,     /* seqno used for add/del/blm peer */
                      mcast_recv_seqno,    /* recv side mcast seqno */
-                     start_mono_time,     /* uptime from hb */
-                     auth_mono_time,      /* when auth happens */
-                     remove_auth_time,
-                     challenge_mono_time, /* time challenge sent */
                      subs_mono_time,      /* time subs reqeust sent */
                      sub_recv_mono_time,  /* time subscription reqeust recv */
                      ping_mono_time,      /* time start in ping state */
@@ -284,7 +280,12 @@ struct UserBridge : public UserStateTest<UserBridge> {
                      last_idl_pub,        /* one loss if many clients subscr */
                      inbound_msg_loss,    /* count of msg loss from subs */
                      link_state_sum,
-                     sub_seqno_sum;
+                     sub_seqno_sum,
+                     start_mono_time,     /* uptime from hb */
+                     auth_mono_time,      /* when auth happens */
+                     challenge_mono_time, /* time challenge sent */
+                     remove_auth_time,
+                     remove_auth_mono;
   kv::UIntHashTab  * inbound_svc_loss;    /* service msg loss map */
   InboxSeqno         inbox;               /* track inbox sent/recv */
   RttHistory         rtt;
@@ -785,7 +786,7 @@ struct UserDB {
   void save_unknown_adjacency( UserBridge &n,  TransportRoute &rte,
                                uint64_t seqno,  AdjacencyRec *recs,
                                bool is_change ) noexcept;
-  void add_unknown_adjacency( UserBridge &n ) noexcept;
+  void add_unknown_adjacency( UserBridge *n,  Nonce *b_nonce ) noexcept;
   void clear_unknown_adjacency( UserBridge &n ) noexcept;
   void remove_adjacency( UserBridge &n ) noexcept;
 

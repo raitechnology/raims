@@ -486,7 +486,7 @@ UserDB::recv_peer_add( const MsgFramePublish &pub,  UserBridge &n,
   size_t       n_pos;
   UserBridge * user_n = NULL;
   StringVal    user_sv;
-  uint32_t     uid;
+  uint32_t     uid, stage_num;
 
   if ( ! n.is_set( AUTHENTICATED_STATE ) )
     return true;
@@ -507,9 +507,7 @@ UserDB::recv_peer_add( const MsgFramePublish &pub,  UserBridge &n,
     user_n = this->bridge_tab[ uid ];
     if ( user_n != NULL && user_n->last_auth_type == BYE_BYE )
       return true;
-    uint32_t stage_num;
-    if ( dec.test( FID_AUTH_STAGE ) &&
-         dec.get_ival<uint32_t>( FID_AUTH_STAGE, stage_num ) ) {
+    if ( dec.get_ival<uint32_t>( FID_AUTH_STAGE, stage_num ) ) {
       if ( is_bye_stage( stage_num ) ) {
         this->remove_authenticated( *user_n, (AuthStage) stage_num );
         this->events.recv_peer_add( n.uid, pub.rte.tport_id,
@@ -518,6 +516,14 @@ UserDB::recv_peer_add( const MsgFramePublish &pub,  UserBridge &n,
       }
     }
   }
+  if ( dec.get_ival<uint32_t>( FID_AUTH_STAGE, stage_num ) ) {
+    if ( is_bye_stage( stage_num ) ) {
+      d_peer( "bye peer I never knew\n" ); /* likely a previous instance */
+      this->add_unknown_adjacency( NULL, &b_nonce );
+      return true;
+    }
+  }
+
   if ( dec.test( FID_SESS_KEY ) &&
        ( user_n == NULL || ! user_n->is_set( AUTHENTICATED_STATE ) ) )
     user_n = this->make_peer_session( pub, n, dec, user_n );

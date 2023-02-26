@@ -1491,9 +1491,13 @@ UserDB::add_authenticated( UserBridge &n,
       return;
     }
     if ( stage >= AUTH_FROM_ADJ_RESULT ) {
-      if ( cur_mono - n.auth_mono_time < sec_to_ns( n.auth_count * 2 ) ) {
+      uint32_t countdown = 0;
+      if ( cur_mono + sec_to_ns( 15 ) > n.remove_auth_mono )
+        countdown = ( n.auth_count > 8 ? 8 : n.auth_count );
+
+      if ( cur_mono + sec_to_ns( countdown * 2 ) > n.auth_mono_time ) {
         n.printf( "refusing to auth %s after %s within %u secs\n",
-                  from, auth_stage_string( n.last_auth_type ), n.auth_count );
+                  from, auth_stage_string( n.last_auth_type ), countdown * 2 );
         return;
       }
     }
@@ -1585,7 +1589,7 @@ UserDB::add_authenticated( UserBridge &n,
       send_add = true;
   }
   if ( ! this->adjacency_unknown.is_empty() )
-    this->add_unknown_adjacency( n );
+    this->add_unknown_adjacency( &n, NULL );
   if ( ! this->adjacency_change.is_empty() ) {
     if ( stage != AUTH_FROM_HELLO ) /* stage 1, need stage 2 */
       this->send_adjacency_change();
@@ -1607,6 +1611,7 @@ UserDB::remove_authenticated( UserBridge &n,  AuthStage bye ) noexcept
                n.is_set( ZOMBIE_STATE ) ? "zombie" : "" );
   if ( n.test_clear( AUTHENTICATED_STATE ) ) {
     n.remove_auth_time = this->poll.now_ns;
+    n.remove_auth_mono = this->last_auth_mono;
     this->events.auth_remove( n.uid, bye );
     this->uid_authenticated.remove( n.uid );
     this->uid_rtt.remove( n.uid );
