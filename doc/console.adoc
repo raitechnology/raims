@@ -87,6 +87,7 @@ The following is the help screen, displayed when "help" is entered at the cli.
 | link:#show_graph[show graph]           | Show network description for node graph
 | link:#show_cache[show cache]           | Show routing cache geom, hits and misses
 | link:#show_poll[show poll]             | Show poll dispatch latency
+| link:#show_hosts[show hosts]           | Show rv hosts and services
 | link:#conf_tran[show running]             | Show current config running
 | link:#conf_tran[show running transport] T | Show transports running, T or all
 | link:#conf_tran[show running service] S   | Show services running config, S or all
@@ -1571,6 +1572,44 @@ the read buffer is full or the fd has no more data to read.  The `wr_hi` are
 the number of times that the write buffer is full.  The `wr_poll` state is the
 number of times that the fd is part of the poll set because there is back
 pressure on the connection.
+
+[[show_hosts]]
+- show hosts
+
+Show the RV host services.
+
+Example:
+[source%nowrap]
+----
+chex.rvd[UjD6fIiAd1lXaCPmnarXUg]@chex[129]> show hosts
+ svc |  session |   session ip  | port |        start      | cl |     bs     |      br     |    ms    |     mr    | idl | odl
+-----+----------+---------------+------+-------------------+----+------------+-------------+----------+-----------+-----+----
+7500 | 5230FA7C | 82.48.250.124 | 7500 | 0226 22:38:27.401 |  2 | 6448254563 | 28658399876 | 26756243 | 113590979 |   0 |   0
+----
+
+The `svc` is the service number, `session` is the session identifier, `session ip` is the IPv4 address, `port` is the daemon
+port number, `start` is when the host started.  The `cl` is the active number of clients.  If the number of clients is zero
+then the host service is not active, it doesn't publish any `_RV` system subjects.  The `bs`, `br`, `ms`, `mr`, `idl`, `odl` are
+the same stats published with the `_RV.INFO.SYSTEM.HOST.STATUS.5230FA7C` message.
+
+[%autowidth,options="header",grid="cols",stripes="even"]
+|=============================================
+| Field | Description
+| svc | Service number
+| session | Session identifier
+| session ip | Session identifier in IPv4 address format
+| port | Daemon port number
+| start | Start time of the host
+| cl | Number of clients connected to service
+| bs | Bytes sent
+| br | Bytes received
+| ms | Messages sent
+| mr | Messagtes received
+| idl | Inbound data loss, messages lost by subscriptions
+| odl | Outbound data loss, messsages lost by publishers
+|=============================================
+
+The `session ip` will be a random address unless configured with the `no_fakeip` setting, described in <<Tib_RV>>.
 
 Test Pub Sub
 ~~~~~~~~~~~~

@@ -677,6 +677,7 @@ struct Console : public md::MDOutput, public SubOnMsg, public ConfigPrinter,
   void show_status( ConsoleOutput *p,  const char *name,  size_t len ) noexcept;
   void show_peers( ConsoleOutput *p,  const char *name,  size_t len ) noexcept;
   void output_user_route( TabPrint &ptp,  UserRoute &u_rte ) noexcept;
+  void show_hosts( ConsoleOutput *p ) noexcept;
   void show_adjacency( ConsoleOutput *p ) noexcept;
   void show_links( ConsoleOutput *p ) noexcept;
   void show_nodes( ConsoleOutput *p ) noexcept;
@@ -790,45 +791,46 @@ enum ConsoleCmd {
   CMD_SHOW_GRAPH        = 38, /* show graph                 */
   CMD_SHOW_CACHE        = 39, /* show cache                 */
   CMD_SHOW_POLL         = 40, /* show poll                  */
-  CMD_SHOW_RUN          = 41, /* show running               */
-  CMD_SHOW_RUN_TPORTS   = 42, /* show running transport [T] */
-  CMD_SHOW_RUN_SVCS     = 43, /* show running service [S]   */
-  CMD_SHOW_RUN_USERS    = 44, /* show running user [U]      */
-  CMD_SHOW_RUN_GROUPS   = 45, /* show running group [G]     */
-  CMD_SHOW_RUN_PARAM    = 46, /* show running parameter [P] */
-  CMD_SHOW_START        = 47, /* show startup               */
-  CMD_SHOW_START_TPORTS = 48, /* show startup transport [T] */
-  CMD_SHOW_START_SVCS   = 49, /* show startup service [S]   */
-  CMD_SHOW_START_USERS  = 50, /* show startup user [U]      */
-  CMD_SHOW_START_GROUPS = 51, /* show startup group [G]     */
-  CMD_SHOW_START_PARAM  = 52, /* show startup parameter [P] */
-  CMD_CONNECT           = 53, /* connect [T]                */
-  CMD_LISTEN            = 54, /* listen [T]                 */
-  CMD_SHUTDOWN          = 55, /* shutdown [T]               */
-  CMD_NETWORK           = 56, /* network svc network        */
-  CMD_CONFIGURE         = 57, /* configure                  */
-  CMD_CONFIGURE_TPORT   = 58, /* configure transport T      */
-  CMD_CONFIGURE_PARAM   = 59, /* configure parameter P V    */
-  CMD_SAVE              = 60, /* save                       */
-  CMD_SUB_START         = 61, /* sub subject [file]         */
-  CMD_SUB_STOP          = 62, /* unsub subject [file]       */
-  CMD_PSUB_START        = 63, /* psub rv-wildcard [file]    */
-  CMD_PSUB_STOP         = 64, /* punsub rv-wildcard [file]  */
-  CMD_GSUB_START        = 65, /* gsub glob-wildcard [file]  */
-  CMD_GSUB_STOP         = 66, /* gunsub glob-wildcard [file]*/
-  CMD_PUBLISH           = 67, /* pub subject msg            */
-  CMD_TRACE             = 68, /* trace subject msg          */
-  CMD_PUB_ACK           = 69, /* ack subject msg            */
-  CMD_RPC               = 70, /* rpc subject msg            */
-  CMD_ANY               = 71, /* any subject msg            */
-  CMD_RESEED            = 72, /* reseed bloom filters       */
-  CMD_DEBUG             = 73, /* debug ival                 */
-  CMD_CANCEL            = 74, /* cancel                     */
-  CMD_MUTE_LOG          = 75, /* mute                       */
-  CMD_UNMUTE_LOG        = 76, /* unmute                     */
-  CMD_WEVENTS           = 77, /* write events to file       */
-  CMD_DIE               = 78, /* die, exit 1                */
-  CMD_QUIT              = 79, /* quit/exit                  */
+  CMD_SHOW_HOSTS        = 41, /* show hosts                 */
+  CMD_SHOW_RUN          = 42, /* show running               */
+  CMD_SHOW_RUN_TPORTS   = 43, /* show running transport [T] */
+  CMD_SHOW_RUN_SVCS     = 44, /* show running service [S]   */
+  CMD_SHOW_RUN_USERS    = 45, /* show running user [U]      */
+  CMD_SHOW_RUN_GROUPS   = 46, /* show running group [G]     */
+  CMD_SHOW_RUN_PARAM    = 47, /* show running parameter [P] */
+  CMD_SHOW_START        = 48, /* show startup               */
+  CMD_SHOW_START_TPORTS = 49, /* show startup transport [T] */
+  CMD_SHOW_START_SVCS   = 50, /* show startup service [S]   */
+  CMD_SHOW_START_USERS  = 51, /* show startup user [U]      */
+  CMD_SHOW_START_GROUPS = 52, /* show startup group [G]     */
+  CMD_SHOW_START_PARAM  = 53, /* show startup parameter [P] */
+  CMD_CONNECT           = 54, /* connect [T]                */
+  CMD_LISTEN            = 55, /* listen [T]                 */
+  CMD_SHUTDOWN          = 56, /* shutdown [T]               */
+  CMD_NETWORK           = 57, /* network svc network        */
+  CMD_CONFIGURE         = 58, /* configure                  */
+  CMD_CONFIGURE_TPORT   = 59, /* configure transport T      */
+  CMD_CONFIGURE_PARAM   = 60, /* configure parameter P V    */
+  CMD_SAVE              = 61, /* save                       */
+  CMD_SUB_START         = 62, /* sub subject [file]         */
+  CMD_SUB_STOP          = 63, /* unsub subject [file]       */
+  CMD_PSUB_START        = 64, /* psub rv-wildcard [file]    */
+  CMD_PSUB_STOP         = 65, /* punsub rv-wildcard [file]  */
+  CMD_GSUB_START        = 66, /* gsub glob-wildcard [file]  */
+  CMD_GSUB_STOP         = 67, /* gunsub glob-wildcard [file]*/
+  CMD_PUBLISH           = 68, /* pub subject msg            */
+  CMD_TRACE             = 69, /* trace subject msg          */
+  CMD_PUB_ACK           = 70, /* ack subject msg            */
+  CMD_RPC               = 71, /* rpc subject msg            */
+  CMD_ANY               = 72, /* any subject msg            */
+  CMD_RESEED            = 73, /* reseed bloom filters       */
+  CMD_DEBUG             = 74, /* debug ival                 */
+  CMD_CANCEL            = 75, /* cancel                     */
+  CMD_MUTE_LOG          = 76, /* mute                       */
+  CMD_UNMUTE_LOG        = 77, /* unmute                     */
+  CMD_WEVENTS           = 78, /* write events to file       */
+  CMD_DIE               = 79, /* die, exit 1                */
+  CMD_QUIT              = 80, /* quit/exit                  */
 
 #define CMD_TPORT_BASE ( (int) CMD_QUIT + 1 )
   CMD_TPORT_ENUM /* config_const.h */
@@ -977,6 +979,7 @@ static const ConsoleCmdString show_cmd[] = {
   { CMD_SHOW_GRAPH     , "graph"         ,0,0}, /* show graph */
   { CMD_SHOW_CACHE     , "cache"         ,0,0}, /* show cache */
   { CMD_SHOW_POLL      , "poll"          ,0,0}, /* show poll */
+  { CMD_SHOW_HOSTS     , "hosts"         ,0,0}, /* show hosts */
   { CMD_SHOW_RUN       , "running"       ,0,0}, /* show running */
   { CMD_SHOW_START     , "startup"       ,0,0}  /* show startup */
 };
@@ -1041,6 +1044,7 @@ static const ConsoleCmdString help_cmd[] = {
   { CMD_SHOW_GRAPH       , "show graph", "",     "Show network description for node graph"           },
   { CMD_SHOW_CACHE       , "show cache", "",     "Show routing cache geom, hits and misses"          },
   { CMD_SHOW_POLL        , "show poll", "",      "Show poll dispatch latency"                        },
+  { CMD_SHOW_HOSTS       , "show hosts", "",     "Show rv hosts and services"                        },
   { CMD_SHOW_RUN         , "show running", "",   "Show current config running"                       },
   { CMD_SHOW_RUN_TPORTS  , "show running transport","[T]", "Show transports running, T or all"       },
   { CMD_SHOW_RUN_SVCS    , "show running service","[S]",   "Show services running config, S or all"  },

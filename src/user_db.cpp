@@ -1832,7 +1832,6 @@ UserDB::add_inbox_route( UserBridge &n,  UserRoute *primary ) noexcept
       n.bloom_rt[ 0 ] = NULL;
       inbox->rte.sub_route.del_pattern_route_str( ibx.buf, (uint16_t) ibx.len(),
                                                   inbox->inbox_fd );
-      inbox->rte.primary_count--;
       inbox->clear( INBOX_ROUTE_STATE );
     }
   }
@@ -1864,7 +1863,6 @@ UserDB::add_inbox_route( UserBridge &n,  UserRoute *primary ) noexcept
     primary->rte.sub_route.do_notify_bloom_ref( n.bloom );
     primary->rte.sub_route.add_pattern_route_str( ibx.buf, (uint16_t) ibx.len(),
                                                   primary->inbox_fd );
-    primary->rte.primary_count++;
   }
   /* already routing */
   else {
@@ -1900,7 +1898,6 @@ UserDB::remove_inbox_route( UserBridge &n ) noexcept
               u_ptr->mcast_fd );
     u_ptr->rte.sub_route.del_pattern_route_str( ibx.buf, (uint16_t) ibx.len(),
                                                 u_ptr->inbox_fd );
-    u_ptr->rte.primary_count--;
   }
   if ( n.test_clear( INBOX_ROUTE_STATE ) ) {
     uint32_t seed = u_ptr->rte.sub_route.prefix_seed( ibx.len() ),

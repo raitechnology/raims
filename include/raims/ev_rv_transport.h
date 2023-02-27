@@ -37,10 +37,10 @@ struct RvHostRoute {
                         * back;
   sassrv::RvHost        * host;       /* service/network pair */
   TransportRoute        * rte;        /* route for host */
-  ConfigTree::Transport * cfg;
-  uint64_t                last_active_mono;
-  bool                    is_active,
-                          tport_exists;
+  ConfigTree::Transport * cfg;        /* config for the host */
+  uint64_t                last_active_mono; /* start or stop time */
+  bool                    is_active,    /* is running */
+                          tport_exists; /* whether network exists */
 
   void * operator new( size_t, void *ptr ) { return ptr; }
   void operator delete( void *ptr ) { ::free( ptr ); }
@@ -77,14 +77,14 @@ struct RvHostTab {
 
 struct RvTransportService : public kv::EvTimerCallback {
   TransportRoute & rte;
-  sassrv::RvHostDB db;
-  RvHostTab        tab;
-  uint64_t         last_active_mono;
-  uint32_t         active_cnt,
-                   start_cnt;
-  bool             no_mcast,
-                   no_permanent,
-                   no_fakeip;
+  sassrv::RvHostDB db;               /* tables of rv hosts, rv daemons */
+  RvHostTab        tab;              /* connect the host to the network (rte) */
+  uint64_t         last_active_mono; /* time started or stopped */
+  uint32_t         active_cnt,       /* number of clients connected any rv */
+                   start_cnt;        /* start ref count, keep host alive */
+  bool             no_mcast,         /* config no_mcast setting */
+                   no_permanent,     /* command line -no-perm */
+                   no_fakeip;        /* whether to use real ip addresses */
 
   void * operator new( size_t, void *ptr ) { return ptr; }
   RvTransportService( TransportRoute &r ) noexcept;
@@ -106,7 +106,7 @@ struct RvTransportService : public kv::EvTimerCallback {
 
 struct EvRvTransportListen : public sassrv::EvRvListen {
   TransportRoute     & rte;
-  RvTransportService & svc;
+  RvTransportService & svc;   /* the host and daemons */
   EvRvTransportListen( kv::EvPoll &p,  TransportRoute &r,
                        RvTransportService &s ) noexcept;
   /* sassrv rv listen */

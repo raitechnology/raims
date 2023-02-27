@@ -487,7 +487,7 @@ body.book #toc,body.book #preamble,body.book h1.sect0,body.book .sect1>h2{page-b
 <li><a href="#_open_pgm">Open PGM</a></li>
 <li><a href="#_tcp_mesh">TCP Mesh</a></li>
 <li><a href="#_tcp_point_to_point">TCP Point-to-point</a></li>
-<li><a href="#_tib_rv">Tib RV</a></li>
+<li><a href="#Tib_RV">Tib RV</a></li>
 <li><a href="#_nats">NATS</a></li>
 <li><a href="#_redis">Redis</a></li>
 <li><a href="#telnet">Telnet</a></li>
@@ -2353,7 +2353,7 @@ the address configured on the eth0 device.</p>
 </div>
 </div>
 <div class="sect2">
-<h3 id="_tib_rv">Tib RV</h3>
+<h3 id="Tib_RV">Tib RV</h3>
 <div class="paragraph">
 <p>The RV protocol supports both the RV5 and RV6+ styles of clients.  The RV6+
 clients use the daemon for the inbox endpoint and don&#8217;t create sessions, the
@@ -4680,6 +4680,10 @@ transport test</code> command.</p>
 <td class="tableblock halign-left valign-top"><p class="tableblock">Show poll dispatch latency</p></td>
 </tr>
 <tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="#show_hosts">show hosts</a></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Show rv hosts and services</p></td>
+</tr>
+<tr>
 <td class="tableblock halign-left valign-top"><p class="tableblock"><a href="#conf_tran">show running</a></p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">Show current config running</p></td>
 </tr>
@@ -6859,6 +6863,98 @@ the read buffer is full or the fd has no more data to read.  The <code>wr_hi</co
 the number of times that the write buffer is full.  The <code>wr_poll</code> state is the
 number of times that the fd is part of the poll set because there is back
 pressure on the connection.</p>
+</div>
+<div id="show_hosts" class="ulist">
+<ul>
+<li>
+<p>show hosts</p>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p>Show the RV host services.</p>
+</div>
+<div class="paragraph">
+<p>Example:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight nowrap"><code>chex.rvd[UjD6fIiAd1lXaCPmnarXUg]@chex[129]&gt; show hosts
+ svc |  session |   session ip  | port |        start      | cl |     bs     |      br     |    ms    |     mr    | idl | odl
+-----+----------+---------------+------+-------------------+----+------------+-------------+----------+-----------+-----+----
+7500 | 5230FA7C | 82.48.250.124 | 7500 | 0226 22:38:27.401 |  2 | 6448254563 | 28658399876 | 26756243 | 113590979 |   0 |   0</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>The <code>svc</code> is the service number, <code>session</code> is the session identifier, <code>session ip</code> is the IPv4 address, <code>port</code> is the daemon
+port number, <code>start</code> is when the host started.  The <code>cl</code> is the active number of clients.  If the number of clients is zero
+then the host service is not active, it doesn&#8217;t publish any <code>_RV</code> system subjects.  The <code>bs</code>, <code>br</code>, <code>ms</code>, <code>mr</code>, <code>idl</code>, <code>odl</code> are
+the same stats published with the <code>_RV.INFO.SYSTEM.HOST.STATUS.5230FA7C</code> message.</p>
+</div>
+<table class="tableblock frame-all grid-cols stripes-even fit-content">
+<colgroup>
+<col>
+<col>
+</colgroup>
+<thead>
+<tr>
+<th class="tableblock halign-left valign-top">Field</th>
+<th class="tableblock halign-left valign-top">Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">svc</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Service number</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">session</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Session identifier</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">session ip</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Session identifier in IPv4 address format</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">port</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Daemon port number</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">start</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Start time of the host</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">cl</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Number of clients connected to service</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">bs</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Bytes sent</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">br</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Bytes received</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">ms</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Messages sent</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">mr</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Messagtes received</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">idl</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Inbound data loss, messages lost by subscriptions</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">odl</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Outbound data loss, messsages lost by publishers</p></td>
+</tr>
+</tbody>
+</table>
+<div class="paragraph">
+<p>The <code>session ip</code> will be a random address unless configured with the <code>no_fakeip</code> setting, described in <a href="#Tib_RV">Tib RV</a>.</p>
 </div>
 </div>
 <div class="sect2">

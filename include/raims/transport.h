@@ -40,14 +40,14 @@ struct ConnectCtx : public kv::EvConnectionNotify,
     CONN_SHUTDOWN    = 4
   };
   ConnectDB        & db;
-  kv::CaresAddrInfo  addr_info;
-  kv::EvConnection * client;
-  const uint64_t     event_id;
-  uint64_t           start_mono_time;
-  uint32_t           connect_tries,
-                     timeout;
-  int                opts;
-  ConnectState       state;
+  kv::CaresAddrInfo  addr_info;      /* connect dns resolve */
+  kv::EvConnection * client;         /* the socket connection */
+  const uint64_t     event_id;       /* which transport client belongs to */
+  uint64_t           start_mono_time;/* when connect started  */
+  uint32_t           connect_tries,  /* how many times since start */
+                     timeout;        /* config parameter timeout seconds */
+  int                opts;           /* tcp connect sock options */
+  ConnectState       state;          /* state enum above */
 
   void * operator new( size_t, void *ptr ) { return ptr; }
   ConnectCtx( kv::EvPoll &poll,  ConnectDB &d,  uint64_t id )
@@ -75,8 +75,8 @@ struct ConnectCtx : public kv::EvConnectionNotify,
 
 struct ConnectDB {
   kv::EvPoll & poll;
-  kv::ArrayCount<ConnectCtx *, 16> ctx_array;
-  const uint8_t sock_type;
+  kv::ArrayCount<ConnectCtx *, 16> ctx_array; /* tcp connect contexts */
+  const uint8_t sock_type;                    /* the client sock type */
 
   ConnectDB( kv::EvPoll &p,  uint8_t st ) : poll( p ), sock_type( st ) {}
   ConnectCtx *create( uint64_t id ) noexcept;
@@ -92,7 +92,7 @@ struct ConnectDB {
 struct ConnectMgr : public ConnectDB {
   SessionMgr & mgr;
   UserDB     & user_db;
-  uint64_t     next_timer;
+  uint64_t     next_timer; /* timer_ids used by connections */
 
   ConnectMgr( SessionMgr &m,  UserDB &u,  kv::EvPoll &p,  uint8_t st )
     : ConnectDB( p, st ), mgr( m ), user_db( u ),
@@ -117,7 +117,7 @@ enum TransportRouteState {
   TPORT_IS_SHUTDOWN   = 128, /* not running, disconnect or shutdown */
   TPORT_IS_DEVICE     = 256, /* uses name + dev multicast */
   TPORT_IS_INPROGRESS = 512, /* connect in progress */
-  TPORT_HAS_TIMER     = 1024
+  TPORT_HAS_TIMER     = 1024 /* if timer_id of rte is used */
 };
 
 enum RvOptions {
@@ -129,8 +129,8 @@ enum RvOptions {
 struct IpcRte {
   IpcRte                * next,
                         * back;
-  ConfigTree::Transport & transport;
-  kv::EvTcpListen       * listener;       /* the listener if svc */
+  ConfigTree::Transport & transport; /* the config for listener */
+  kv::EvTcpListen       * listener;  /* the listener if ipc type (rv,nats,..) */
 
   void * operator new( size_t, void *ptr ) { return ptr; }
   void operator delete( void *ptr ) { ::free( ptr ); }
@@ -140,8 +140,8 @@ struct IpcRte {
 };
 
 struct IpcRteList : public kv::RouteNotify {
-  TransportRoute      & rte;
-  kv::DLinkList<IpcRte> list;
+  TransportRoute      & rte;  /* usually rte tport_id = 0 */
+  kv::DLinkList<IpcRte> list; /* list of ipc listeners */
 
   void * operator new( size_t, void *ptr ) { return ptr; }
   void operator delete( void *ptr ) { ::free( ptr ); }
@@ -168,8 +168,8 @@ struct IpcRteList : public kv::RouteNotify {
 };
 
 struct BitRefCount {
-  kv::BitSpace      bits;
-  kv::UIntHashTab * ht;
+  kv::BitSpace      bits; /* one bit for first ref count */
+  kv::UIntHashTab * ht;   /* more counter bits if ref count > 1 */
   BitRefCount() : ht( 0 ) {}
   ~BitRefCount() { if ( this->ht != NULL ) delete this->ht; }
 
@@ -181,8 +181,8 @@ struct BitRefCount {
 };
 
 struct MeshCsumCache {
-  uint32_t uid;
-  Nonce    csum;
+  uint32_t uid;  /* which uid sent hb */
+  Nonce    csum; /* ths mesh csum the uid sent */
 
   void * operator new( size_t, void *ptr ) { return ptr; }
   void operator delete( void *ptr ) { ::free( ptr ); }
@@ -204,14 +204,14 @@ struct TransportRoute : public kv::EvSocket, public kv::EvConnectionNotify,
                         * uid_in_mesh,    /* all tports point to one mesh */
                         * uid_in_device;  /* all tports point to one device */
   AdjacencySpace          uid_connected;  /* which uids are connected */
-  Nonce                 * mesh_csum,
+  Nonce                 * mesh_csum,      /* ptr to mesh_csum2 of listener */
                           mesh_csum2,     /* mesh csum of nodes connected */
                           hb_cnonce;      /* the last cnonce used for hb */
   uint64_t                hb_time,        /* last hb time usecs */
                           hb_mono_time,   /* last hb time monotonic usecs */
                           hb_seqno,       /* last hb seqno */
-                          stats_seqno,
-                          timer_id;
+                          stats_seqno,    /* seqno for _N.PORT msgs */
+                          timer_id;       /* unique timer id serial */
   StageAuth               auth[ 3 ];      /* history of last 3 hb */
   uint32_t                tport_id,       /* index in transport_tab[] */
                           hb_count,       /* count of new hb recvd */
@@ -226,7 +226,7 @@ struct TransportRoute : public kv::EvSocket, public kv::EvConnectionNotify,
                         * notify_ctx;     /* if accept drop, notify reconnect */
   EvPgmTransport        * pgm_tport;      /* if pgm mcast */
   EvInboxTransport      * ibx_tport;      /* if pgm, point-to-point ucast */
-  RvTransportService    * rv_svc;
+  RvTransportService    * rv_svc;         /* host db for ipc transport */
   StringVal               ucast_url,      /* url address of ucast ptp */
                           mesh_url,       /* url address of mesh listener */
                           conn_url;       /* url address of connection */
@@ -235,10 +235,9 @@ struct TransportRoute : public kv::EvSocket, public kv::EvConnectionNotify,
                           mesh_url_hash,  /* hash of mesh_url */
                           conn_hash,      /* hash of connecting url */
                           ucast_url_hash, /* hash of outgoing inbox url */
-                          oldest_uid,     /* which uid is oldest connect */
-                          primary_count;
-  IpcRteList            * ext;      
-  MeshCsumCache         * mesh_cache;
+                          oldest_uid;     /* which uid is oldest connect */
+  IpcRteList            * ext;            /* list of ipc listeners */
+  MeshCsumCache         * mesh_cache;     /* cache of hb mesh csum */
   ConfigTree::Service   & svc;            /* service definition */
   ConfigTree::Transport & transport;      /* transport definition */
 

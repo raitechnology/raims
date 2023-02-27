@@ -44,7 +44,7 @@ TransportRoute::TransportRoute( kv::EvPoll &p,  SessionMgr &m,
       connect_ctx( 0 ), notify_ctx( 0 ), pgm_tport( 0 ), ibx_tport( 0 ),
       rv_svc( 0 ), inbox_fd( -1 ), mcast_fd( -1 ), mesh_url_hash( 0 ),
       conn_hash( 0 ), ucast_url_hash( 0 ), oldest_uid( 0 ),
-      primary_count( 0 ), ext( 0 ), mesh_cache( 0 ), svc( s ), transport( t )
+      ext( 0 ), mesh_cache( 0 ), svc( s ), transport( t )
 {
   uint8_t i;
   this->uid_connected.tport      = t.tport;

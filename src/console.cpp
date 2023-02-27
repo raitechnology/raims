@@ -15,6 +15,7 @@
 #define IMPORT_CONSOLE_CONST
 #include <raims/session.h>
 #include <raims/ev_tcp_transport.h>
+#include <raims/ev_rv_transport.h>
 #include <raims/ev_telnet.h>
 #include <raims/ev_web.h>
 #include <raims/ev_name_svc.h>
@@ -2154,6 +2155,7 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
     case CMD_SHOW_GRAPH:     this->show_graph( p ); break;
     case CMD_SHOW_CACHE:     this->show_cache( p ); break;
     case CMD_SHOW_POLL:      this->show_poll( p ); break;
+    case CMD_SHOW_HOSTS:     this->show_hosts( p ); break;
 
     case CMD_DEBUG: {
       int    dist_dbg = 0;
@@ -5930,6 +5932,44 @@ Console::show_poll( ConsoleOutput *p ) noexcept
   static const char *hdr[ ncols ] =
     { "timer_lat", "timer_cnt", "read_lat", "read_cnt", "rd_lo",
       "route_lat", "route_cnt", "write_lat", "write_cnt", "wr_poll", "wr_hi" };
+  this->print_table( p, hdr, ncols );
+}
+
+void
+Console::show_hosts( ConsoleOutput *p ) noexcept
+{
+  static const size_t ncols = 12;
+  TabOut out( this->table, this->tmp, ncols );
+
+  if ( this->user_db.transport_tab.count > 0 &&
+       this->user_db.transport_tab.ptr[ 0 ]->rv_svc != NULL) {
+    RvTransportService * rv_svc =
+      this->user_db.transport_tab.ptr[ 0 ]->rv_svc;
+    if ( rv_svc->db.host_tab != NULL ) {
+      for ( uint32_t i = 0; i < rv_svc->db.host_tab->count; i++ ) {
+        if ( rv_svc->db.host_tab->ptr[ i ] == NULL )
+          continue;
+
+        sassrv::RvHost & host = *rv_svc->db.host_tab->ptr[ i ];
+        out.add_row()
+           .set( host.service, host.service_len )
+           .set( host.session_ip, host.session_ip_len )
+           .set( host.sess_ip, host.sess_ip_len )
+           .set_int( ntohs( host.ipport ) )
+           .set_time( host.start_stamp )
+           .set_int( host.active_clients )
+           .set_long( host.stat.bs )
+           .set_long( host.stat.br )
+           .set_long( host.stat.ms )
+           .set_long( host.stat.mr )
+           .set_long( host.stat.idl )
+           .set_long( host.stat.odl );
+      }
+    }
+  }
+  const char *hdr[ ncols ] =
+   { "svc", "session", "session ip", "port", "start", "cl", "bs", "br", "ms",
+     "mr", "idl", "odl" };
   this->print_table( p, hdr, ncols );
 }
 
