@@ -265,7 +265,8 @@ UserDB::add_unknown_adjacency( UserBridge *n,  Nonce *b_nonce ) noexcept
                    m->link_state_seqno, p->link_state_seqno,
                    m->unknown_link_seqno );
       }
-      m->unknown_adj_refs = 0;
+      m->unknown_link_seqno = 0;
+      m->unknown_adj_refs   = 0;
       this->adjacency_unknown.pop( p );
       this->remove_pending_peer( NULL, p->pending_seqno );
       delete p;
@@ -292,7 +293,8 @@ UserDB::clear_unknown_adjacency( UserBridge &n ) noexcept
       delete p;
     }
   }
-  n.unknown_adj_refs = 0;
+  n.unknown_link_seqno = 0;
+  n.unknown_adj_refs   = 0;
 }
 
 void
@@ -669,8 +671,7 @@ UserDB::recv_adjacency_change( const MsgFramePublish &pub,  UserBridge &n,
     else {
       if ( link_state == n.unknown_link_seqno + 1 ) {
         unknown = this->apply_adjacency_change( n, rec_list );
-        this->save_unknown_adjacency( n, pub.rte, link_state,
-                                      unknown, true );
+        this->save_unknown_adjacency( n, pub.rte, link_state, unknown, true );
       }
       else {
         if ( debug_lnk )
