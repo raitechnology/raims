@@ -1985,6 +1985,7 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
   const char    * arg;   /* arg after command */
   size_t          len;   /* len of arg */
   ConsoleOutput * sub_output = p;
+  uint32_t        count;
 
   cmd = (ConsoleCmd)
     this->parse_command( buf, &buf[ buflen ], arg, len, args, arglen, argc );
@@ -1999,6 +2000,7 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
       case CMD_SUB_START:
       case CMD_PSUB_START:
       case CMD_GSUB_START:
+      case CMD_SNAP:
         sub_output = this->json_files.open( args[ 2 ], arglen[ 2 ] );
         if ( sub_output == NULL ) {
           this->outf( p, "output (%.*s) file open error %d",
@@ -2061,12 +2063,11 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
     case CMD_CONNECT:  this->connect( arg, len ); break;
     case CMD_LISTEN:   this->listen( arg, len ); break;
     case CMD_SHUTDOWN: this->shutdown( arg, len ); break;
-    case CMD_NETWORK:
-      if ( len == 0 || argc < 3 )
+    case CMD_NETWORK: {
+      if ( ! this->mgr.add_network( args[ 2 ], arglen[ 2 ], arg, len, true ) )
         goto help;
-      this->mgr.add_network( args[ 2 ], arglen[ 2 ], arg, len );
       break;
-
+    }
     case CMD_CONFIGURE_TPORT:
       if ( ! this->config_transport( args, arglen, argc ) )
         goto help;
@@ -2156,6 +2157,7 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
     case CMD_SHOW_CACHE:     this->show_cache( p ); break;
     case CMD_SHOW_POLL:      this->show_poll( p ); break;
     case CMD_SHOW_HOSTS:     this->show_hosts( p ); break;
+    case CMD_SHOW_RPCS:      this->show_rpcs( p ); break;
 
     case CMD_DEBUG: {
       int    dist_dbg = 0;
@@ -2193,18 +2195,23 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
       break;
     }
     case CMD_CANCEL: {
-      uint32_t pcount = 0, scount = 0;
+      uint32_t pcount = 0, scount = 0, xcount = 0;
       for ( ConsoleRPC *rpc = this->rpc_list.hd; rpc != NULL; rpc = rpc->next ){
-        if ( ! rpc->complete ) {
+        if ( ! rpc->is_complete ) {
           if ( rpc->type == PING_RPC ) {
-            rpc->complete = true;
+            rpc->is_complete = true;
             this->on_ping( *(ConsolePing *) rpc );
             pcount++;
           }
           else if ( rpc->type == SUBS_RPC ) {
-            rpc->complete = true;
+            rpc->is_complete = true;
             this->on_subs( *(ConsoleSubs *) rpc );
             scount++;
+          }
+          else if ( rpc->type == SNAP_RPC ) {
+            rpc->is_complete = true;
+            this->snap_stop( (ConsoleSnap *) rpc );
+            xcount++;
           }
         }
       }
@@ -2212,7 +2219,9 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
         this->outf( p, "%u ping canceled", pcount );
       if ( scount > 0 )
         this->outf( p, "%u subs canceled", pcount );
-      if ( pcount + scount == 0 )
+      if ( xcount > 0 )
+        this->outf( p, "%u snaps canceled", xcount );
+      if ( pcount + scount + xcount == 0 )
         this->outf( p, "nothing to cancel" );
       break;
     }
@@ -2227,107 +2236,35 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
     case CMD_MPING:     this->mcast_ping( p, int_arg( arg, len ), false ); break;
 
     case CMD_SUB_START: /* sub */
-    case CMD_SUB_STOP: {/* unsub */
       if ( len == 0 )
-        goto help;
-      ConsoleSubStart * sub = NULL;
-      for (;;) {
-        sub = this->find_rpc<ConsoleSubStart>( sub, SUB_START );
-        if ( sub == NULL || sub->matches( arg, len ) )
-          break;
-      }
-      if ( sub == NULL ) {
-        if ( cmd == CMD_SUB_START ) {
-          uint32_t h = kv_crc_c( arg, len, 0 );
-          sub = this->create_rpc<ConsoleSubStart>( sub_output, SUB_START );
-          sub->set_sub( arg, len );
-          sub->start_seqno =
-            this->sub_db.console_sub_start( arg, len, sub );
-          this->outf( p, "start(%.*s,h=0x%x,s=%u) seqno = %" PRIu64,
-                      (int) sub->sublen, sub->sub, h, caba_hash_to_path( h ),
-                      sub->start_seqno );
-        }
-        else {
-          this->outf( p, "start(%.*s) not found", (int) len, arg );
-        }
-      }
-      else {
-        if ( cmd == CMD_SUB_STOP ) {
-          if ( sub->out.remove( sub_output ) ) {
-            if ( sub->out.count == 0 ) {
-              this->outf( p, "stop(%.*s) seqno = %" PRIu64, (int) len, arg,
-                this->sub_db.console_sub_stop( arg, (uint16_t) len ) );
-              sub->complete = true;
-            }
-            else {
-              this->outf( p, "stop(%.*s) rem from existing", (int) len, arg );
-            }
-          }
-          else {
-            this->outf( p, "stop(%.*s) not found", (int) len, arg );
-          }
-        }
-        else {
-          if ( sub->out.add( sub_output ) )
-            this->outf( p, "sub(%.*s) added to existing", (int) len, arg );
-          else
-            this->outf( p, "sub(%.*s) exists", (int) len, arg );
-        }
-      }
+        goto help; /* FALLTHRU */
+    case CMD_SUB_STOP: /* unsub */
+      count = this->do_sub( p, sub_output, arg, len, cmd == CMD_SUB_START );
+      if ( cmd == CMD_SUB_STOP && len == 0 )
+        count += this->do_psub( p, sub_output, NULL, 0, RV_PATTERN_FMT, false );
+      if ( count == 0 )
+        this->outf( p, "no matches (%.*s)", (int) len, arg );
       break;
-    }
     case CMD_PSUB_START: /* psub */
     case CMD_GSUB_START: /* gsub */
+      if ( len == 0 )
+        goto help; /* FALLTHRU */
     case CMD_PSUB_STOP:  /* pstop */
     case CMD_GSUB_STOP: {/* gstop */
-      if ( len == 0 )
-        goto help;
       kv::PatternFmt fmt = ( cmd == CMD_PSUB_START || cmd == CMD_PSUB_STOP )
                            ? RV_PATTERN_FMT : GLOB_PATTERN_FMT;
-      ConsolePSubStart * sub = NULL;
-      for (;;) {
-        sub = this->find_rpc<ConsolePSubStart>( sub, PSUB_START );
-        if ( sub == NULL || sub->matches( arg, len, fmt ) )
-          break;
-      }
-      if ( sub == NULL ) {
-        if ( cmd == CMD_PSUB_START || cmd == CMD_GSUB_START ) {
-          sub = this->create_rpc<ConsolePSubStart>( sub_output, PSUB_START );
-          sub->set_psub( arg, len, fmt );
-          sub->start_seqno =
-            this->sub_db.console_psub_start( arg, len, fmt, sub );
-          this->outf( p, "pstart(%.*s) seqno = %" PRIu64,
-            (int) sub->psublen, sub->psub, sub->start_seqno );
-        }
-        else {
-          this->outf( p, "pstart(%.*s) not found", (int) len, arg );
-        }
-      }
-      else {
-        if ( cmd == CMD_PSUB_STOP || cmd == CMD_GSUB_STOP ) {
-          if ( sub->out.remove( sub_output ) ) {
-            if ( sub->out.count == 0 ) {
-              this->outf( p, "pstop(%.*s) seqno = %" PRIu64, (int) len, arg,
-                this->sub_db.console_psub_stop( arg, len, fmt ) );
-              sub->complete = true;
-            }
-            else {
-              this->outf( p, "pstop(%.*s) rem from existing", (int) len, arg );
-            }
-          }
-          else {
-            this->outf( p, "pstop(%.*s) not found", (int) len, arg );
-          }
-        }
-        else {
-          if ( sub->out.add( sub_output ) )
-            this->outf( p, "psub(%.*s) added to existing", (int) len, arg );
-          else
-            this->outf( p, "psub(%.*s) exists", (int) len, arg );
-        }
-      }
+      bool is_start = ( cmd == CMD_PSUB_START || cmd == CMD_GSUB_START );
+      count = this->do_psub( p, sub_output, arg, len, fmt, is_start );
+      if ( count == 0 )
+        this->outf( p, "no matches (%.*s)", (int) len, arg );
       break;
     }
+    case CMD_SNAP:
+      if ( len == 0 )
+        goto help;
+      this->do_snap( p, sub_output, arg, len );
+      break;
+
     case CMD_REMOTE:
     case CMD_RPC:
     case CMD_ANY:
@@ -2381,19 +2318,351 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
 }
 
 void
+Console::do_snap( ConsoleOutput *p,  ConsoleOutput *sub_output,
+                  const char *arg,  size_t len ) noexcept
+{
+  ConsoleSnap *sub = NULL;
+  uint32_t h   = kv_crc_c( arg, len, 0 ),
+           ibx = 0;
+  char     inbox[ EvSocket::MAX_SESSION_LEN + 64 ];
+  size_t   inbox_len = 0;
+  uint16_t svc = SessionMgr::sub_has_rv_service( arg, len );
+
+  if ( svc == 0 ) {
+    this->outf( p, "No rv service (%.*s)", (int) len, arg );
+    return;
+  }
+  for (;;) {
+    sub = this->find_rpc<ConsoleSnap>( sub, SNAP_RPC );
+    if ( sub == NULL || sub->matches( arg, len ) )
+      break;
+  }
+  if ( sub == NULL )
+    sub = this->create_rpc<ConsoleSnap>( sub_output, SNAP_RPC );
+  ibx = this->start_rv_inbox( svc, sub, inbox, inbox_len );
+  sub->set_snap( arg, len, h, ibx );
+
+  PubMcastData mc( arg, len, NULL, 0, MD_NODATA );
+  mc.inbox = inbox;
+  mc.inbox_len = inbox_len;
+  this->mgr.publish( mc );
+}
+
+uint32_t
+Console::do_snap_stop( ConsoleOutput *p,  ConsoleOutput *sub_output,
+                       const char *arg,  size_t len ) noexcept
+{
+  ConsoleSnap * sub = NULL;
+  for ( uint32_t count = 0; ; ) {
+    for (;;) {
+      sub = this->find_rpc<ConsoleSnap>( sub, SNAP_RPC );
+      if ( sub == NULL || len == 0 || sub->matches( arg, len ) )
+        break;
+    }
+    if ( sub == NULL )
+      return count;
+    if ( sub->out.remove( sub_output ) ) {
+      count++;
+      if ( sub->out.count == 0 ) {
+        this->snap_stop( sub );
+        this->outf( p, "done(%.*s)", (int) sub->sublen, sub->sub );
+      }
+    }
+    if ( len != 0 )
+      return count;
+  }
+}
+
+uint32_t
+Console::do_sub( ConsoleOutput *p,  ConsoleOutput *sub_output,
+                 const char *arg,  size_t len,  bool is_start ) noexcept
+{
+  ConsoleSubStart * sub = NULL;
+  for ( uint32_t count = 0; ; ) {
+    for (;;) {
+      sub = this->find_rpc<ConsoleSubStart>( sub, SUB_START );
+      if ( sub == NULL || len == 0 || sub->matches( arg, len ) )
+        break;
+    }
+    if ( sub == NULL ) {
+      if ( is_start ) {
+        count++;
+        sub = this->sub_start( sub_output, arg, len );
+        this->outf( p, "start(%.*s,h=0x%x,s=%u) seqno = %" PRIu64,
+                    (int) sub->sublen, sub->sub, sub->hash,
+                    caba_hash_to_path( sub->hash ), sub->start_seqno );
+      }
+      return count;
+    }
+    if ( is_start ) {
+      if ( sub->out.add( sub_output ) ) {
+        count++;
+        this->outf( p, "start(%.*s) add to existing stream",
+                    (int) sub->sublen, sub->sub );
+      }
+      return count;
+    }
+    /* unsub */
+    if ( sub->out.remove( sub_output ) ) {
+      count++;
+      if ( sub->out.count == 0 ) {
+        this->sub_stop( sub );
+        this->outf( p, "stop(%.*s) seqno = %" PRIu64,
+                    (int) sub->sublen, sub->sub, sub->start_seqno );
+      }
+      else {
+        this->outf( p, "stop(%.*s) remove from existing stream",
+                    (int) sub->sublen, sub->sub );
+      }
+    }
+    if ( len != 0 ) /* if no arg, unsub all */
+      return count;
+  }
+}
+
+uint32_t
+Console::do_psub( ConsoleOutput *p,  ConsoleOutput *sub_output,
+                  const char *arg,  size_t len,  kv::PatternFmt fmt,
+                  bool is_start ) noexcept
+{
+  ConsolePSubStart * sub = NULL;
+  for ( uint32_t count = 0; ; ) {
+    for (;;) {
+      sub = this->find_rpc<ConsolePSubStart>( sub, PSUB_START );
+      if ( sub == NULL || sub->matches( arg, len, fmt ) )
+        break;
+    }
+    if ( sub == NULL ) {
+      if ( is_start ) {
+        count++;
+        sub = this->psub_start( sub_output, arg, len, fmt );
+        this->outf( p, "pstart(%.*s) seqno = %" PRIu64,
+          (int) sub->psublen, sub->psub, sub->start_seqno );
+      }
+      return count;
+    }
+    if ( is_start ) {
+      if ( sub->out.add( sub_output ) ) {
+        count++;
+        this->outf( p, "pstart(%.*s) add to existing stream",
+                    (int) sub->psublen, sub->psub );
+      }
+      return count;
+    }
+    /* punsub */
+    if ( sub->out.remove( sub_output ) ) {
+      count++;
+      if ( sub->out.count == 0 ) {
+        this->psub_stop( sub );
+        this->outf( p, "pstop(%.*s) seqno = %" PRIu64,
+                    (int) sub->psublen, sub->psub, sub->start_seqno );
+      }
+      else {
+        this->outf( p, "pstop(%.*s) remove from existing stream",
+                    (int) sub->psublen, sub->psub );
+      }
+    }
+    if ( len != 0 ) /* if no arg, unsub all */
+      return count;
+  }
+}
+
+ConsoleSubStart *
+Console::sub_start( ConsoleOutput *sub_output,
+                    const char *arg,  size_t len ) noexcept
+{
+  ConsoleSubStart *sub;
+  uint32_t h   = kv_crc_c( arg, len, 0 ),
+           ibx = 0;
+  char     inbox[ EvSocket::MAX_SESSION_LEN + 64 ];
+  size_t   inbox_len = 0;
+  uint16_t svc = SessionMgr::sub_has_rv_service( arg, len );
+
+  sub = this->create_rpc<ConsoleSubStart>( sub_output, SUB_START );
+  if ( svc != 0 )
+    ibx = this->start_rv_inbox( svc, sub, inbox, inbox_len );
+  sub->set_sub( arg, len, h, ibx );
+  sub->start_seqno = this->sub_db.console_sub_start( arg, len, inbox,
+                                                     inbox_len, sub );
+  return sub;
+}
+
+uint32_t
+Console::start_rv_inbox( uint16_t svc,  SubOnMsg *sub,
+                         char *inbox,  size_t &inbox_len ) noexcept
+{
+  RvSvc *rv_svc = this->mgr.get_rv_session( svc, true );
+  if ( rv_svc == NULL )
+    return 0;
+  rv_svc->ref_count++;
+  /* _7500._INBOX.<session>.<num> */
+  CatPtr p( inbox );
+  p.c( '_' ).u( svc, uint16_digits( svc ) )
+   .s( "._INBOX." )
+   .x( rv_svc->session, rv_svc->session_len )
+   .c( '.' );
+  uint32_t h = kv_crc_c( inbox, p.len(), 0 );
+
+  RouteLoc loc;
+  ConsoleInboxRoute * rt = this->inbox_tab.upsert( h, inbox, p.len(), loc );
+  if ( loc.is_new ) {
+    inbox[ p.len() ] = '>';
+    inbox[ p.len() + 1 ] = '\0';
+    rt->start_seqno =
+      this->sub_db.console_psub_start( inbox, p.len() + 1, RV_PATTERN_FMT,
+                                       &this->inbox_tab );
+    rt->ref_count = 0;
+  }
+  rt->ref_count++;
+  uint32_t i;
+  if ( this->inbox_tab.free_inbox > 0 ) {
+    for ( i = 1; i < this->inbox_tab.cb.count; i++ ) {
+      if ( this->inbox_tab.cb.ptr[ i ] == NULL ) {
+        this->inbox_tab.free_inbox--;
+        break;
+      }
+    }
+  }
+  else {
+    i = ++this->inbox_tab.next_inbox;
+  }
+  this->inbox_tab.cb[ i ] = sub;
+  p.u( i, uint32_digits( i ) );
+  inbox_len = p.end();
+  return i;
+}
+
+void
+Console::sub_stop( ConsoleSubStart *sub ) noexcept
+{
+  uint16_t svc = SessionMgr::sub_has_rv_service( sub->sub, sub->sublen );
+
+  this->sub_db.console_sub_stop( sub->sub, (uint16_t) sub->sublen );
+  sub->is_complete = true;
+  if ( svc != 0 )
+    this->stop_rv_inbox( svc, sub->inbox, sub );
+  while ( sub->out.pop() )
+    ;
+}
+
+void
+Console::snap_stop( ConsoleSnap *sub ) noexcept
+{
+  uint16_t svc = SessionMgr::sub_has_rv_service( sub->sub, sub->sublen );
+
+  sub->is_complete = true;
+  if ( svc != 0 )
+    this->stop_rv_inbox( svc, sub->inbox, sub );
+  while ( sub->out.pop() )
+    ;
+}
+
+void
+Console::stop_rv_inbox( uint16_t svc,  uint32_t &ibx,  SubOnMsg *sub ) noexcept
+{
+  RvSvc *rv_svc = this->mgr.get_rv_session( svc, false );
+  if ( rv_svc == NULL )
+    return;
+
+  if ( this->inbox_tab.cb[ ibx ] != sub )
+    return;
+  this->inbox_tab.cb[ ibx ] = NULL;
+  ibx = 0;
+  this->inbox_tab.free_inbox++;
+
+  char   inbox[ EvSocket::MAX_SESSION_LEN + 64 ];
+  CatPtr p( inbox );
+  p.c( '_' ).u( svc, uint16_digits( svc ) )
+   .s( "._INBOX." )
+   .x( rv_svc->session, rv_svc->session_len )
+   .c( '.' );
+  uint32_t h = kv_crc_c( inbox, p.len(), 0 );
+
+  RouteLoc loc;
+  ConsoleInboxRoute * rt = this->inbox_tab.find( h, inbox, p.len(), loc );
+  if ( rt == NULL )
+    return;
+  if ( --rt->ref_count == 0 ) {
+    this->inbox_tab.remove( loc );
+    inbox[ p.len() ] = '>';
+    this->sub_db.console_psub_stop( inbox, p.len() + 1, RV_PATTERN_FMT );
+  }
+  if ( --rv_svc->ref_count == 0 )
+    this->mgr.stop_rv_session( rv_svc );
+}
+
+void
+ConsoleInboxTab::on_data( const SubMsgData &val ) noexcept
+{
+  const MsgHdrDecoder & dec = val.pub.dec;
+  size_t       sublen = val.pub.subject_len;
+  const char * sub    = val.pub.subject;
+  uint32_t     inbox  = 0;
+
+  if ( dec.test( FID_SUBJECT ) ) {
+    sublen = dec.mref[ FID_SUBJECT ].fsize;
+    sub    = (const char *) dec.mref[ FID_SUBJECT ].fptr;
+  }
+  for ( size_t i = sublen; i > 0; i-- ) {
+    if ( sub[ i - 1 ] < '0' || sub[ i - 1 ] > '9' )
+      break;
+    inbox = inbox * 10 + (uint32_t) (uint8_t) ( sub[ i - 1 ] - '0' );
+  }
+  if ( inbox >= this->cb.count || this->cb.ptr[ inbox ] == NULL )
+    return;
+  this->cb.ptr[ inbox ]->on_data( val );
+}
+
+ConsolePSubStart *
+Console::psub_start( ConsoleOutput *sub_output,  const char *arg,  size_t len,
+                     PatternFmt fmt ) noexcept
+{
+  ConsolePSubStart *sub;
+  uint16_t svc = SessionMgr::sub_has_rv_service( arg, len );
+
+  sub = this->create_rpc<ConsolePSubStart>( sub_output, PSUB_START );
+  sub->set_psub( arg, len, fmt );
+  if ( svc != 0 ) {
+    RvSvc *rv_svc = this->mgr.get_rv_session( svc, true );
+    if ( rv_svc != NULL )
+      rv_svc->ref_count++;
+  }
+  sub->start_seqno = this->sub_db.console_psub_start( arg, len, fmt, sub );
+  return sub;
+}
+
+void
+Console::psub_stop( ConsolePSubStart *sub ) noexcept
+{
+  uint16_t svc = SessionMgr::sub_has_rv_service( sub->psub, sub->psublen );
+
+  this->sub_db.console_psub_stop( sub->psub, sub->psublen, sub->pat_fmt );
+  sub->is_complete = true;
+  if ( svc != 0 ) {
+    RvSvc *rv_svc = this->mgr.get_rv_session( svc, false );
+    if ( rv_svc != NULL ) {
+      if ( --rv_svc->ref_count == 0 )
+        this->mgr.stop_rv_session( rv_svc );
+    }
+  }
+  while ( sub->out.pop() )
+    ;
+}
+
+void
 Console::stop_rpc( ConsoleOutput *p,  ConsoleRPC *rpc ) noexcept
 {
   if ( rpc->out.remove( p ) && rpc->out.count == 0 ) {
     if ( rpc->type == SUB_START ) {
       this->sub_db.console_sub_stop( ((ConsoleSubStart *) rpc)->sub,
                                      ((ConsoleSubStart *) rpc)->sublen );
-      rpc->complete = true;
+      rpc->is_complete = true;
     }
     else if ( rpc->type == PSUB_START ) {
       this->sub_db.console_psub_stop( ((ConsolePSubStart *) rpc)->psub,
                                       ((ConsolePSubStart *) rpc)->psublen,
                                       ((ConsolePSubStart *) rpc)->pat_fmt );
-      rpc->complete = true;
+      rpc->is_complete = true;
     }
   }
 }
@@ -2805,7 +3074,7 @@ Console::show_subs( ConsoleOutput *p,  const char *arg,
     }
   }
   if ( rpc->count == 0 ) {
-    rpc->complete = true;
+    rpc->is_complete = true;
     this->on_subs( *(ConsoleSubs *) rpc );
   }
 }
@@ -2854,7 +3123,7 @@ Console::send_remote_request( ConsoleOutput *p,  const char *arg,
     }
   }
   if ( rpc->count == 0 ) {
-    rpc->complete = true;
+    rpc->is_complete = true;
     if ( rpc->show_self )
       this->on_remote( *rpc );
     else if ( arglen > 0 )
@@ -2952,7 +3221,7 @@ Console::ping_peer( ConsoleOutput *p,  const char *arg,
     }
   }
   if ( rpc->count == 0 ) {
-    rpc->complete = true;
+    rpc->is_complete = true;
     if ( arglen > 0 )
       this->outf( p, "no users matched: %.*s", (int) arglen, arg );
     else
@@ -2971,7 +3240,7 @@ Console::mcast_ping( ConsoleOutput *p,  uint8_t path,  bool add_trace ) noexcept
 
   rpc->count = this->user_db.uid_auth_count;
   if ( rpc->count == 0 ) {
-    rpc->complete = true;
+    rpc->is_complete = true;
     this->outf( p, "no users" );
   }
   else {
@@ -5973,6 +6242,134 @@ Console::show_hosts( ConsoleOutput *p ) noexcept
   this->print_table( p, hdr, ncols );
 }
 
+void
+Console::show_rpcs( ConsoleOutput *p ) noexcept
+{
+  static const size_t ncols = 4;
+  TabOut out( this->table, this->tmp, ncols );
+  ConsoleRemote    * rem;
+  ConsoleSubs      * subs;
+  ConsoleSubStart  * sub;
+  ConsolePSubStart * psub;
+  ConsoleSnap      * snap;
+
+  for ( ConsoleRPC *rpc = this->rpc_list.hd; rpc != NULL; rpc = rpc->next ) {
+    if ( rpc->is_complete )
+      continue;
+    switch ( rpc->type ) {
+      case PING_RPC:
+        out.add_row()
+           .set( "ping" )
+           .set_null()
+           .set_int( rpc->total_recv )
+           .set_int( rpc->count );
+        break;
+      case REMOTE_RPC:
+        rem = (ConsoleRemote *) rpc;
+        out.add_row()
+           .set( "remote" )
+           .set( rem->cmd, rem->cmd_len )
+           .set_int( rem->total_recv )
+           .set_int( rem->count );
+        break;
+      case SUBS_RPC:
+        subs = (ConsoleSubs *) rpc;
+        out.add_row()
+           .set( "show subs" )
+           .set( subs->match, subs->match_len )
+           .set_int( subs->total_recv )
+           .set_int( subs->count );
+        break;
+      case SUB_START:
+        sub = (ConsoleSubStart *) rpc;
+        out.add_row()
+           .set( "sub" )
+           .set( sub->sub, sub->sublen )
+           .set_int( sub->total_recv )
+           .set_null();
+        break;
+      case PSUB_START:
+        psub = (ConsolePSubStart *) rpc;
+        out.add_row()
+           .set( "psub" )
+           .set( psub->psub, psub->psublen )
+           .set_int( psub->total_recv )
+           .set_null();
+        break;
+      case SNAP_RPC:
+        snap = (ConsoleSnap *) rpc;
+        out.add_row()
+           .set( "snap" )
+           .set( snap->sub, snap->sublen )
+           .set_int( snap->total_recv )
+           .set_int( 1 );
+        break;
+      default: break;
+    }
+  }
+  const char *hdr[ ncols ] =
+   { "type", "arg", "recv", "count" };
+  this->print_table( p, hdr, ncols );
+}
+
+size_t
+Console::get_subscriptions( uint16_t svc,  SubRouteDB &subs ) noexcept
+{
+  RouteLoc loc;
+  char     pre[ 8 ];
+  size_t   cnt = 0;
+  CatPtr p( pre );
+  p.c( '_' ).u( svc, uint16_digits( svc ) ).c( '.' );
+  size_t   prelen = p.len();
+
+  for ( ConsoleRPC *rpc = this->rpc_list.hd; rpc != NULL; rpc = rpc->next ) {
+    if ( rpc->is_complete )
+      continue;
+    if ( rpc->type != SUB_START )
+      continue;
+    ConsoleSubStart * sub = (ConsoleSubStart *) rpc;
+    if ( sub->sublen > prelen && ::memcmp( sub->sub, pre, prelen ) == 0 ) {
+      const char * val = &sub->sub[ prelen ];
+      size_t       len = sub->sublen - prelen;
+      uint32_t     h   = kv_crc_c( val, len, 0 );
+      subs.upsert( h, val, len, loc );
+      if ( loc.is_new )
+        cnt++;
+    }
+  }
+  return cnt;
+}
+
+size_t
+Console::get_patterns( uint16_t svc,  int pat_fmt,  SubRouteDB &pats ) noexcept
+{
+  RouteLoc loc;
+  char     pre[ 8 ];
+  size_t   cnt = 0;
+  CatPtr   p( pre );
+  p.c( '_' ).u( svc, uint16_digits( svc ) ).c( '.' );
+  size_t   prelen = p.len();
+
+  for ( ConsoleRPC *rpc = this->rpc_list.hd; rpc != NULL; rpc = rpc->next ) {
+    if ( rpc->is_complete )
+      continue;
+    if ( rpc->type != PSUB_START )
+      continue;
+    ConsolePSubStart * sub = (ConsolePSubStart *) rpc;
+    if ( (int) sub->pat_fmt != pat_fmt )
+      continue;
+    if ( sub->psublen > prelen && ::memcmp( sub->psub, pre, prelen ) == 0 ) {
+      const char * val = &sub->psub[ prelen ];
+      size_t       len = sub->psublen - prelen;
+      uint32_t     h   = kv_crc_c( val, len, 0 );
+      pats.upsert( h, val, len, loc );
+      if ( loc.is_new )
+        cnt++;
+    }
+  }
+  return cnt;
+}
+
 int
 Console::puts( const char *s ) noexcept
 {
@@ -6131,6 +6528,20 @@ ConsoleOutArray::remove( ConsoleOutput *p ) noexcept
   return false;
 }
 
+bool
+ConsoleOutArray::pop( void ) noexcept
+{
+  if ( this->count > 0 ) {
+    ConsoleOutput *p = this->ptr[ --this->count ];
+    if ( p != NULL ) {
+      p->rpc = NULL;
+      p->on_remove();
+    }
+    return true;
+  }
+  return false;
+}
+
 void
 ConsoleRPC::on_data( const SubMsgData &val ) noexcept
 {
@@ -6140,7 +6551,7 @@ ConsoleRPC::on_data( const SubMsgData &val ) noexcept
 void
 ConsolePing::on_data( const SubMsgData &val ) noexcept
 {
-  if ( this->complete || val.token != this->token || val.src_bridge == NULL )
+  if ( this->is_complete || val.token != this->token || val.src_bridge == NULL )
     return;
   if ( val.ref_seqno != 0 ) {
     this->console.print_data( NULL, val );
@@ -6149,7 +6560,7 @@ ConsolePing::on_data( const SubMsgData &val ) noexcept
   uint32_t i = this->total_recv++;
   PingReply &reply = this->reply[ i ];
   if ( this->total_recv >= this->count )
-    this->complete = true;
+    this->is_complete = true;
 
   reply.uid       = val.src_bridge->uid;
   reply.tid       = val.pub.rte.tport_id;
@@ -6157,14 +6568,14 @@ ConsolePing::on_data( const SubMsgData &val ) noexcept
   reply.sent_time = val.stamp;
   reply.recv_time = current_realtime_ns();
 
-  if ( this->complete )
+  if ( this->is_complete )
     this->console.on_ping( *this );
 }
 
 void
 ConsoleSubs::on_data( const SubMsgData &val ) noexcept
 {
-  if ( this->complete || val.token != this->token || val.src_bridge == NULL )
+  if ( this->is_complete || val.token != this->token || val.src_bridge == NULL )
     return;
   const MsgHdrDecoder & dec = val.pub.dec;
   const char * str = NULL;
@@ -6185,7 +6596,7 @@ ConsoleSubs::on_data( const SubMsgData &val ) noexcept
     cvt_number<uint64_t>( dec.mref[ FID_END ], end );
     if ( end >= val.src_bridge->sub_seqno ) {
       if ( ++this->total_recv >= this->count )
-        this->complete = true;
+        this->is_complete = true;
     }
   }
   if ( len > 0 ) {
@@ -6203,7 +6614,7 @@ ConsoleSubs::on_data( const SubMsgData &val ) noexcept
     reply.sub_len    = (uint16_t) len;
     reply.is_pattern = is_pattern;
   }
-  if ( this->complete )
+  if ( this->is_complete )
     this->console.on_subs( *this );
 }
 
@@ -6228,7 +6639,7 @@ ConsoleRemote::append_data( uint32_t uid,  const char *str,
 void
 ConsoleRemote::on_data( const SubMsgData &val ) noexcept
 {
-  if ( this->complete || val.token != this->token || val.src_bridge == NULL )
+  if ( this->is_complete || val.token != this->token || val.src_bridge == NULL )
     return;
   const char * str = (const char *) val.data;
   size_t       len = val.datalen;
@@ -6237,26 +6648,28 @@ ConsoleRemote::on_data( const SubMsgData &val ) noexcept
     this->append_data( val.src_bridge->uid, str, len );
 
   if ( ++this->total_recv >= this->count )
-    this->complete = true;
-  if ( this->complete )
+    this->is_complete = true;
+  if ( this->is_complete )
     this->console.on_remote( *this );
 }
 
 void
 ConsoleSubStart::on_data( const SubMsgData &val ) noexcept
 {
+  this->total_recv++;
   for ( size_t i = 0; i < this->out.count; i++ ) {
     ConsoleOutput * p = this->out.ptr[ i ];
     if ( p->is_json )
-      this->console.print_json_data( p, val );
+      this->console.print_json_data( p, val, this->sub, this->sublen );
     else
-      this->console.print_data( p, val );
+      this->console.print_data( p, val, this->sub, this->sublen );
   }
 }
 
 void
 ConsolePSubStart::on_data( const SubMsgData &val ) noexcept
 {
+  this->total_recv++;
   for ( size_t i = 0; i < this->out.count; i++ ) {
     ConsoleOutput * p = this->out.ptr[ i ];
     if ( p->is_json )
@@ -6267,13 +6680,30 @@ ConsolePSubStart::on_data( const SubMsgData &val ) noexcept
 }
 
 void
-Console::print_json_data( ConsoleOutput *p,  const SubMsgData &val ) noexcept
+ConsoleSnap::on_data( const SubMsgData &val ) noexcept
 {
-  size_t       sublen = val.pub.subject_len;
-  const char * sub    = val.pub.subject;
+  this->total_recv++;
+  for ( size_t i = 0; i < this->out.count; i++ ) {
+    ConsoleOutput * p = this->out.ptr[ i ];
+    if ( p->is_json )
+      this->console.print_json_data( p, val, this->sub, this->sublen );
+    else
+      this->console.print_data( p, val, this->sub, this->sublen );
+  }
+  this->console.snap_stop( this );
+}
+
+void
+Console::print_json_data( ConsoleOutput *p,  const SubMsgData &val,
+                          const char *sub,  size_t sublen ) noexcept
+{
   MDMsg      * m      = NULL;
   MDMsgMem     mem;
 
+  if ( sublen == 0 ) {
+    sublen = val.pub.subject_len;
+    sub    = val.pub.subject;
+  }
   if ( val.datalen > 0 ) {
     if ( val.fmt != 0 )
       m = MDMsg::unpack( (void *) val.data, 0, val.datalen, val.fmt,
@@ -6305,10 +6735,13 @@ Console::on_data( const SubMsgData &val ) noexcept
 }
 
 void
-Console::print_data( ConsoleOutput *p,  const SubMsgData &val ) noexcept
+Console::print_data( ConsoleOutput *p,  const SubMsgData &val,
+                     const char *sub,  size_t sublen ) noexcept
 {
-  size_t       sublen = val.pub.subject_len;
-  const char * sub    = val.pub.subject;
+  if ( sublen == 0 ) {
+    sublen = val.pub.subject_len;
+    sub    = val.pub.subject;
+  }
   if ( val.stamp != 0 ) {
     uint64_t delta = current_realtime_ns() - val.stamp;
     this->printf( "%.*sdelta %.1f usecs%.*s\n",

@@ -204,6 +204,8 @@ main( int argc, const char *argv[] )
     fprintf( stderr, "found inconsistency\n" );
     return 1;
   }
+  /*for ( path_sel = 0; path_sel < COST_PATH_COUNT; path_sel++ )
+    peer_dist.calc_coverage( 0, path_sel );*/
 
   if ( show_path_cost ) {
     printf( "start %s\n", user_db.user.user.val );

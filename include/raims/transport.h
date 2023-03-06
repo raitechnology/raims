@@ -162,9 +162,9 @@ struct IpcRteList : public kv::RouteNotify {
   virtual void on_repsub( kv::NotifyPattern &pat ) noexcept;
   virtual void on_reassert( uint32_t fd,  kv::RouteVec<kv::RouteSub> &sub_db,
                             kv::RouteVec<kv::RouteSub> &pat_db ) noexcept;
-  void send_listen( void *src,  char src_type,  const char *subj,  size_t sublen,
+  void send_listen( kv::EvSocket *src,  const char *subj,  size_t sublen,
                     const char *reply,  size_t replen,  uint32_t refcnt,
-                    bool is_start ) noexcept;
+                    int sub_flags ) noexcept;
 };
 
 struct BitRefCount {
@@ -280,6 +280,13 @@ struct TransportRoute : public kv::EvSocket, public kv::EvConnectionNotify,
   virtual void process( void ) noexcept;
   virtual void release( void ) noexcept;
   virtual bool on_msg( kv::EvPublish &pub ) noexcept;
+  virtual size_t get_userid( char userid[ MAX_USERID_LEN ] ) noexcept;
+  virtual size_t get_session( uint16_t svc,
+                              char session[ MAX_SESSION_LEN ] ) noexcept;
+  virtual size_t get_subscriptions( uint16_t svc,
+                                    kv::SubRouteDB &subs ) noexcept;
+  virtual size_t get_patterns( uint16_t svc,  int pat_fmt,  
+                               kv::SubRouteDB &pats ) noexcept;
   /*virtual bool timer_expire( uint64_t tid, uint64_t eid ) noexcept;*/
   virtual void on_write_ready( void ) noexcept;
 
@@ -362,13 +369,10 @@ struct EvRedisService;
 }
 namespace ms {
 struct TransportRvHost {
-  TransportRoute        & rte;
-  kv::EvSocket          & conn;
-  natsmd::EvNatsService * nats_service;
-  ds::EvRedisService    * redis_service;
-  sassrv::RvHost       ** rv_host;
-  const char            * proto;
-  uint16_t                rv_service;
+  TransportRoute  & rte;
+  kv::EvSocket    & conn;
+  sassrv::RvHost ** rv_host;
+  uint16_t          rv_service;
 
   TransportRvHost( TransportRoute &r,  kv::EvSocket &c ) noexcept;
   int start_session( void ) noexcept;

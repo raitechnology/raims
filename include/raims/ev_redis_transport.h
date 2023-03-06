@@ -25,6 +25,7 @@ struct EvRedisTransportListen : public ds::EvRedisListen {
 
   virtual kv::EvSocket *accept( void ) noexcept;
   virtual int listen( const char *ip,  int port,  int opts ) noexcept;
+  virtual bool get_service( void *host,  uint16_t &svc ) noexcept;
 };
 
 }

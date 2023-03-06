@@ -254,7 +254,7 @@ WebService::process_wsmsg( WSMsg &wmsg ) noexcept
       data.template_len = size - 9;
       data.paren = '{';
       q->template_substitute( data );
-      if ( q->rpc != NULL && ! q->rpc->complete ) {
+      if ( q->rpc != NULL && ! q->rpc->is_complete ) {
         if ( data.trail_len != 0 ) {
           q->trail = (char *) ::malloc( data.trail_len );
           ::memcpy( q->trail, data.trail, data.trail_len );
@@ -265,7 +265,7 @@ WebService::process_wsmsg( WSMsg &wmsg ) noexcept
     else {
       this->console->on_input( q, cmd, size );
     }
-    if ( q->rpc != NULL && ! q->rpc->complete ) {
+    if ( q->rpc != NULL && ! q->rpc->is_complete ) {
       q->is_local_cmd = false;
       return;
     }
@@ -355,7 +355,7 @@ SubOutput::on_output( const char *buf,  size_t buflen ) noexcept
   this->StreamBuf::BufQueue::reset();
   this->svc.msgs_sent++;
 
-  if ( this->rpc->complete )
+  if ( this->rpc->is_complete )
     this->svc.free_list.push_hd( this );
   return this->svc.idle_push_write();
 }
@@ -505,7 +505,7 @@ WebService::process_get_file2( WebReqData &data ) noexcept
       this->msgs_sent++;
       return true;
     }
-    if ( this->out.rpc == NULL || this->out.rpc->complete )
+    if ( this->out.rpc == NULL || this->out.rpc->is_complete )
       return false;
     this->out.in_progress = true;
     return true;
@@ -624,7 +624,7 @@ WebService::template_substitute( WebReqData &data ) noexcept
 {
   this->out.init( data.mime_len == 9 ? W_HTML : W_JSON /* text/html */);
   this->out.template_substitute( data );
-  if ( this->out.rpc == NULL || this->out.rpc->complete ) {
+  if ( this->out.rpc == NULL || this->out.rpc->is_complete ) {
     this->out.add_http_header( data.mime, data.mime_len );
     this->append_iov( this->out );
     this->out.reset();
@@ -763,7 +763,7 @@ WebOutput::template_substitute( WebReqData &data ) noexcept
           }
           if ( run_var ) {
             this->svc.console->on_input( this, var, varlen );
-            if ( this->rpc != NULL && ! this->rpc->complete ) {
+            if ( this->rpc != NULL && ! this->rpc->is_complete ) {
               data.trail = &s[ 1 ];
               data.trail_len = e - data.trail;
               return;

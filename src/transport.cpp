@@ -256,10 +256,15 @@ TransportRoute::update_cost( UserBridge &n,  StringVal &tport,  uint32_t *cost,
 
   if ( 0 ) {
 invalid_cost:;
+    uint32_t cost3[ 4 ];
+    if ( cost == NULL )
+      ::memset( cost3, 0, sizeof( cost3 ) );
+    else
+      ::memcpy( cost3, cost, sizeof( cost3 ) );
     n.printe( "conflicting tport[%.*s] cost[%u,%u,%u,%u] (advert)"
               " != tport[%.*s] [%u,%u,%u,%u] rte=%s remote=%u (%s)\n",
                 tport.len, tport.val,
-                cost[ 0 ], cost[ 1 ], cost[ 2 ], cost[ 3 ],
+                cost3[ 0 ], cost3[ 1 ], cost3[ 2 ], cost3[ 3 ],
                 my_tport.len, my_tport.val,
                 cost2[ 0 ], cost2[ 1 ], cost2[ 2 ], cost2[ 3 ],
                 this->name, rem_tport_id, s );
@@ -745,17 +750,8 @@ TransportRoute::get_tport_service( ConfigTree::Transport &tport,
   service_len = ::strlen( tmp );
 
   if ( service_len > 0 ) {
-    uint64_t svc = 0;
-    size_t   i;
-    for ( i = 1; i < service_len - 1; i++ ) {
-      if ( service[ i ] < '0' || service[ i ] > '9' )
-        break;
-      svc = svc * 10 + ( service[ i ] - '0' );
-      if ( svc > (size_t) 0xffffU )
-        break;
-    }
-    if ( svc > 0 && svc <= (size_t) 0xffffU )
-      rv_service = (uint16_t) svc;
+    rv_service = SessionMgr::sub_has_rv_service( service, service_len );
+
     this->printf( "%s.%s service: %.*s\n", tport.type.val, tport.tport.val,
                   (int) service_len - 2, &service[ 1 ] );
     if ( rv_service != 0 ) {
@@ -767,7 +763,7 @@ TransportRoute::get_tport_service( ConfigTree::Transport &tport,
 
   if ( tport.get_route_str( R_NETWORK, net ) ) {
     this->mgr.add_network( net, ::strlen( net ), &service[ 1 ],
-                           service_len - 2 );
+                           service_len - 2, false );
   }
 }
 
@@ -977,121 +973,171 @@ IpcRteList::IpcRteList( TransportRoute &r ) noexcept
 {
   r.sub_route.add_route_notify( *this );
 }
-/* src_type : 'M' = console, 'V' = RV, ''N' = NATS, 'R' = redis, 'K' = kv */
+namespace {
+enum {
+  IS_SUB     = 1,
+  IS_UNSUB   = 2,
+  IS_PAT     = 4,
+  IS_PSUB    = IS_PAT | IS_SUB,
+  IS_PUNSUB  = IS_PAT | IS_UNSUB,
+  IS_REPEAT  = 8,
+  IS_RESUB   = IS_SUB | IS_REPEAT,
+  IS_REPSUB  = IS_PSUB | IS_REPEAT,
+  IS_CONSOLE = 16,
+  IS_SESSION = 32,
+  IS_RV      = 64,
+  IS_NATS    = 128,
+  IS_REDIS   = 256,
+  IS_KV      = 512,
+};
+}
+/* src_type :
+ * 'C' = console, 'M' : session, 'V' = RV, ''N' = NATS, 'R' = redis, 'K' = kv */
+static inline int src_type_flag( char src_type ) {
+  switch ( src_type ) {
+    case 'C': return IS_CONSOLE;
+    case 'M': return IS_SESSION;
+    case 'V': return IS_RV;
+    case 'N': return IS_NATS;
+    case 'R': return IS_REDIS;
+    case 'K': return IS_KV;
+    default : return 0;
+  }
+}
+
 void
 IpcRteList::on_sub( NotifySub &sub ) noexcept
 {
-  if ( sub.src_type != 'M' ) {
+  int flags = IS_SUB | src_type_flag( sub.src_type );
+  if ( ( flags & ( IS_CONSOLE | IS_SESSION ) ) == 0 )
     this->rte.mgr.sub_db.ipc_sub_start( sub, this->rte.tport_id );
-    this->send_listen( sub.src, sub.src_type, sub.subject, sub.subject_len,
-                       (const char *) sub.reply, sub.reply_len, 1, true );
-    d_tran( "on_sub(%.*s) rcnt=%u src_type=%c\n", (int) sub.subject_len,
-            sub.subject, sub.sub_count, sub.src_type );
-  }
+
+  if ( ( flags & ( IS_SESSION | IS_RV ) ) == 0 )
+    this->send_listen( sub.src, sub.subject, sub.subject_len,
+                       (const char *) sub.reply, sub.reply_len, 1, flags );
+  d_tran( "on_sub(%.*s) rcnt=%u src_type=%c\n", (int) sub.subject_len,
+          sub.subject, sub.sub_count, sub.src_type );
 }
 
 void
 IpcRteList::on_unsub( NotifySub &sub ) noexcept
 {
-  if ( sub.src_type != 'M' ) {
-    this->send_listen( sub.src, sub.src_type, sub.subject, sub.subject_len,
-                       NULL, 0, 0, false );
-    if ( sub.sub_count == 0 ) {
+  int flags = IS_UNSUB | src_type_flag( sub.src_type );
+  if ( ( flags & ( IS_SESSION | IS_RV ) ) == 0 )
+    this->send_listen( sub.src, sub.subject, sub.subject_len, NULL, 0, 0,
+                       flags );
+  if ( ( flags & ( IS_CONSOLE | IS_SESSION ) ) == 0 ) {
+    if ( sub.sub_count == 0 )
       this->rte.mgr.sub_db.ipc_sub_stop( sub, this->rte.tport_id );
-    }
-    d_tran( "on_unsub(%.*s) rcnt=%u src_type=%c\n", (int) sub.subject_len,
-            sub.subject, sub.sub_count, sub.src_type );
   }
+  d_tran( "on_unsub(%.*s) rcnt=%u src_type=%c\n", (int) sub.subject_len,
+          sub.subject, sub.sub_count, sub.src_type );
 }
 
 void
 IpcRteList::on_resub( NotifySub &sub ) noexcept
 {
-  if ( sub.src_type != 'M' )
-    this->send_listen( sub.src, sub.src_type, sub.subject, sub.subject_len,
-                 (const char *) sub.reply, sub.reply_len, sub.sub_count, true );
+  int flags = IS_RESUB | src_type_flag( sub.src_type );
+  if ( ( flags & ( IS_SESSION | IS_RV ) ) == 0 )
+    this->send_listen( sub.src, sub.subject, sub.subject_len,
+                       (const char *) sub.reply, sub.reply_len, sub.sub_count,
+                       flags );
 }
 
 void
 IpcRteList::on_psub( NotifyPattern &pat ) noexcept
 {
-  if ( pat.src_type != 'M' ) {
+  int flags = IS_PSUB | src_type_flag( pat.src_type );
+  if ( ( flags & ( IS_CONSOLE | IS_SESSION ) ) == 0 )
     this->rte.mgr.sub_db.ipc_psub_start( pat, this->rte.tport_id );
-    if ( pat.src_type != 'R' )
-      this->send_listen( pat.src, pat.src_type, pat.pattern, pat.pattern_len,
-                         NULL, 0, 1, true );
-    d_tran( "on_psub(%.*s) rcnt=%u src_type=%c\n", (int) pat.pattern_len,
-          pat.pattern, pat.sub_count, pat.src_type );
-  }
+
+  if ( ( flags & ( IS_SESSION | IS_RV ) ) == 0 )
+    this->send_listen( pat.src, pat.pattern, pat.pattern_len, NULL, 0, 1,
+                       flags );
+  d_tran( "on_psub(%.*s) rcnt=%u src_type=%c\n", (int) pat.pattern_len,
+        pat.pattern, pat.sub_count, pat.src_type );
 }
 
 void
 IpcRteList::on_punsub( NotifyPattern &pat ) noexcept
 {
-  if ( pat.src_type != 'M' ) {
-    if ( pat.src_type != 'R' )
-      this->send_listen( pat.src, pat.src_type, pat.pattern, pat.pattern_len,
-                         NULL, 0, 0, false );
+  int flags = IS_PUNSUB | src_type_flag( pat.src_type );
+  if ( ( flags & ( IS_SESSION | IS_RV ) ) == 0 )
+    this->send_listen( pat.src, pat.pattern, pat.pattern_len, NULL, 0, 0,
+                       flags );
+  if ( ( flags & ( IS_CONSOLE | IS_SESSION ) ) == 0 ) {
     if ( pat.sub_count == 0 )
       this->rte.mgr.sub_db.ipc_psub_stop( pat, this->rte.tport_id );
-    d_tran( "on_punsub(%.*s) rcnt=%u src_type=%c\n", (int) pat.pattern_len,
-          pat.pattern, pat.sub_count, pat.src_type );
   }
+  d_tran( "on_punsub(%.*s) rcnt=%u src_type=%c\n", (int) pat.pattern_len,
+        pat.pattern, pat.sub_count, pat.src_type );
 }
 
 void
 IpcRteList::on_repsub( NotifyPattern &pat ) noexcept
 {
-  if ( pat.src_type != 'M' ) {
-    if ( pat.src_type != 'R' )
-      this->send_listen( pat.src, pat.src_type, pat.pattern, pat.pattern_len,
-                         NULL, 0, pat.sub_count, true );
-  }
+  int flags = IS_REPSUB | src_type_flag( pat.src_type );
+  if ( ( flags & ( IS_SESSION | IS_RV ) ) == 0 )
+    this->send_listen( pat.src, pat.pattern, pat.pattern_len, NULL, 0,
+                       pat.sub_count, flags );
 }
 
 void
-IpcRteList::send_listen( void *src,  char src_type,
-                         const char *subj,  size_t sublen,
+IpcRteList::send_listen( EvSocket *src,  const char *subj,  size_t sublen,
                          const char *reply,  size_t replen,
-                         uint32_t refcnt,  bool is_start ) noexcept
+                         uint32_t refcnt,  int sub_flags ) noexcept
 {
-  RvHost     * host        = NULL;
-  const char * session     = NULL;
-  size_t       session_len = 0;
+  RvSvc   * rv_svc  = NULL;
+  RvHost ** host    = NULL;
+  char      session[ EvSocket::MAX_SESSION_LEN ];
+  size_t    session_len;
+  uint16_t  match_svc, svc;
+  bool      is_sub = ( sub_flags & IS_SUB ) != 0;
 
-  if ( src_type == 'N' ) {
-    EvNatsService * nats_service = (EvNatsService *) src;
-    if ( nats_service != NULL )
-      host = ((EvNatsTransportListen &) nats_service->listen).rv_host;
-    if ( host != NULL ) {
-      session     = nats_service->session;
-      session_len = nats_service->session_len;
-    }
+  match_svc = SessionMgr::sub_has_rv_service( subj, sublen );
+  if ( match_svc == 0 )
+    return;
+  if ( ( sub_flags & IS_CONSOLE ) != 0 ) {
+    if ( (rv_svc = this->rte.mgr.get_rv_session( match_svc, is_sub )) == NULL )
+      return;
+    host = &rv_svc->host;
+    session_len = rv_svc->session_len;
+    ::memcpy( session, rv_svc->session, session_len );
+    session[ session_len ] = '\0';
   }
-  else if ( src_type == 'R' ) {
-    EvRedisService * redis_service = (EvRedisService *) src;
-    if ( redis_service != NULL )
-      host = ((EvRedisTransportListen &) redis_service->listen).rv_host;
-    if ( host != NULL ) {
-      session     = redis_service->session;
-      session_len = redis_service->session_len;
+  else {
+    if ( src == NULL )
+      return;
+    /* redis patterns are different beats, need a conversion */
+    if ( ( sub_flags & IS_PAT ) != 0 ) {
+      if ( ::strcmp( src->kind, "redis" ) == 0 )
+        return; /* convert to rv wildcard ? */
     }
+    /* needs a host and a service */
+    if ( ! src->get_service( &host, svc ) || svc == 0 )
+      return;
+    if ( (uint32_t) svc != match_svc || host == NULL || *host == NULL )
+      return;
+    /* needs a session */
+    session_len = src->get_session( svc, session );
+    if ( session_len == 0 )
+      return;
   }
+  size_t service_len = (*host)->service_len; /* strip _7500. */
+  if ( sublen > service_len + 2 ) {
+    subj   = &subj[ service_len + 2 ];
+    sublen = sublen - ( service_len + 2 );
 
-  if ( host != NULL && session_len != 0 &&
-       sublen > (size_t) host->service_len + 2 ) {
-    subj   = &subj[ host->service_len + 2 ];
-    sublen = sublen - ( host->service_len + 2 );
-    if ( is_start ) {
-      if ( replen > (size_t) host->service_len + 2 ) {
-        reply   = &reply[ host->service_len + 2 ];
-        replen -= host->service_len + 2;
+    if ( ( sub_flags & IS_SUB ) != 0 ) {
+      if ( replen > service_len + 2 ) {
+        reply   = &reply[ service_len + 2 ];
+        replen -= service_len + 2;
       }
-      host->send_listen_start( session, session_len, subj, sublen,
-                               reply, replen, refcnt );
+      (*host)->send_listen_start( session, session_len, subj, sublen,
+                                  reply, replen, refcnt );
     }
     else {
-      host->send_listen_stop( session, session_len, subj, sublen, refcnt );
+      (*host)->send_listen_stop( session, session_len, subj, sublen, refcnt );
     }
   }
 }

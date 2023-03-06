@@ -45,3 +45,11 @@ EvNatsTransportListen::listen( const char *ip,  int port,  int opts ) noexcept
   return res;
 }
 
+bool
+EvNatsTransportListen::get_service( void *host,  uint16_t &svc ) noexcept
+{
+  svc = this->rv_service;
+  if ( host != NULL )
+    *(void **) host = &this->rv_host;
+  return this->rv_service != 0;
+}

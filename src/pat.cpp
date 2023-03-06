@@ -217,7 +217,7 @@ SubDB::fwd_psub( PatternArgs &ctx ) noexcept
     rte = this->user_db.ipc_transport;
     if ( rte != NULL ) {
       NotifyPattern npat( ctx.cvt, ctx.pat, ctx.patlen, ctx.hash,
-                          this->my_src_fd, false, 'M' );
+                          this->my_src_fd, false, 'C' );
       npat.bref = &this->console;
       if ( ctx.is_start )
         rte->sub_route.do_notify_psub( npat );

@@ -219,7 +219,8 @@ SessionMgr::add_ipc_transport( void ) noexcept
 
 bool
 SessionMgr::add_network( const char *net,  size_t net_len,
-                         const char *svc,  size_t svc_len ) noexcept
+                         const char *svc,  size_t svc_len,
+                         bool start_host ) noexcept
 {
   ConfigTree::Transport * t;
   ConfigTree & tree = this->tree;
@@ -227,86 +228,94 @@ SessionMgr::add_network( const char *net,  size_t net_len,
   RvMcast2     mc;
   char         svc_buf[ 1024 ];
   int          svc_buf_len;
+  uint16_t     num;
   bool is_listener = true;
 
   if ( mc.parse_network2( net, net_len ) != sassrv::HOST_OK )
     return false;
-  if ( mc.type == NET_NONE )
-    return false;
+  /*if ( mc.type == NET_NONE )
+    return false;*/
 
-  /*t = tree.find_transport( svc, svc_len );
-  if ( t != NULL ) {*/
-  for ( int i = 0; ; i++ ) {
-    if ( i == 0 )
-      svc_buf_len = ::snprintf( svc_buf, sizeof( svc_buf ), "net_%.*s",
-                                (int) svc_len, svc );
-    else
-      svc_buf_len = ::snprintf( svc_buf, sizeof( svc_buf ), "net%d_%.*s", i,
-                                (int) svc_len, svc );
-    svc_buf_len = min_int( svc_buf_len, (int) sizeof( svc_buf ) - 1 );
-    t = tree.find_transport( svc_buf, svc_buf_len );
-    if ( t == NULL )
-      break;
-  }
-  t = stab.make<ConfigTree::Transport>();
-  stab.ref_string( svc_buf, svc_buf_len, t->tport );
-  t->tport_id = tree.transport_cnt++;
-  tree.transports.push_tl( t );
-
-  char host_ip[ 64 ];
-  int  host_ip_len;
-  host_ip_len = mc.ip4_string( mc.host_ip, host_ip );
-  switch ( mc.type ) {
-    default: return false;
-    case NET_ANY:
-      stab.reref_string( T_ANY, T_ANY_SZ, t->type );
-      tree.set_route_str( *t, stab, R_DEVICE,
-                          host_ip, host_ip_len );
-      break;
-
-    case NET_MESH_CONNECT:
-      is_listener = false; /* FALLTHRU */
-    case NET_MESH:
-    case NET_MESH_LISTEN:
-      stab.reref_string( T_MESH, T_MESH_SZ, t->type );
-      tree.set_route_str( *t, stab, R_DEVICE,
-                          host_ip, host_ip_len );
-      break;
-
-    case NET_TCP_CONNECT:
-      is_listener = false; /* FALLTHRU */
-    case NET_TCP:
-    case NET_TCP_LISTEN:
-      stab.reref_string( T_TCP, T_TCP_SZ, t->type );
-      tree.set_route_str( *t, stab, R_DEVICE,
-                          host_ip, host_ip_len );
-      break;
-
-    case NET_MCAST: {
-      size_t i, port_len = 0;
-      const char * port = NULL;
-      char port_hash[ 16 ];
-      for ( i = 0; i < svc_len && svc[ i ] >= '0' && svc[ i ] <= '9'; i++ )
-        ;
-      if ( i == svc_len ) {
-        port     = svc;
-        port_len = svc_len;
-      }
-      else {
-        port_len = uint32_to_string(
-          ( kv_crc_c( svc, svc_len, 0 ) & 0x7fff ) + 0x8000, port_hash );
-        port = port_hash;
-        port_hash[ port_len ] = '\0';
-      }
-      stab.reref_string( "pgm", 3, t->type );
-      tree.set_route_str( *t, stab, R_LISTEN, net, net_len );
-      if ( port_len > 0 )
-        tree.set_route_str( *t, stab, R_PORT, port, port_len );
-      tree.set_route_str( *t, stab, R_MCAST_LOOP, "2", 1 );
-      break;
+  if ( mc.type != NET_NONE ) {
+    for ( int i = 0; ; i++ ) {
+      if ( i == 0 )
+        svc_buf_len = ::snprintf( svc_buf, sizeof( svc_buf ), "net_%.*s",
+                                  (int) svc_len, svc );
+      else
+        svc_buf_len = ::snprintf( svc_buf, sizeof( svc_buf ), "net%d_%.*s", i,
+                                  (int) svc_len, svc );
+      svc_buf_len = min_int( svc_buf_len, (int) sizeof( svc_buf ) - 1 );
+      t = tree.find_transport( svc_buf, svc_buf_len );
+      if ( t == NULL )
+        break;
     }
+    t = stab.make<ConfigTree::Transport>();
+    stab.ref_string( svc_buf, svc_buf_len, t->tport );
+    t->tport_id = tree.transport_cnt++;
+    tree.transports.push_tl( t );
+
+    char host_ip[ 64 ];
+    int  host_ip_len;
+    host_ip_len = mc.ip4_string( mc.host_ip, host_ip );
+    switch ( mc.type ) {
+      default: return false;
+      case NET_ANY:
+        stab.reref_string( T_ANY, T_ANY_SZ, t->type );
+        tree.set_route_str( *t, stab, R_DEVICE,
+                            host_ip, host_ip_len );
+        break;
+
+      case NET_MESH_CONNECT:
+        is_listener = false; /* FALLTHRU */
+      case NET_MESH:
+      case NET_MESH_LISTEN:
+        stab.reref_string( T_MESH, T_MESH_SZ, t->type );
+        tree.set_route_str( *t, stab, R_DEVICE,
+                            host_ip, host_ip_len );
+        break;
+
+      case NET_TCP_CONNECT:
+        is_listener = false; /* FALLTHRU */
+      case NET_TCP:
+      case NET_TCP_LISTEN:
+        stab.reref_string( T_TCP, T_TCP_SZ, t->type );
+        tree.set_route_str( *t, stab, R_DEVICE,
+                            host_ip, host_ip_len );
+        break;
+
+      case NET_MCAST: {
+        size_t i, port_len = 0;
+        const char * port = NULL;
+        char port_hash[ 16 ];
+        for ( i = 0; i < svc_len && svc[ i ] >= '0' && svc[ i ] <= '9'; i++ )
+          ;
+        if ( i == svc_len ) {
+          port     = svc;
+          port_len = svc_len;
+        }
+        else {
+          port_len = uint32_to_string(
+            ( kv_crc_c( svc, svc_len, 0 ) & 0x7fff ) + 0x8000, port_hash );
+          port = port_hash;
+          port_hash[ port_len ] = '\0';
+        }
+        stab.reref_string( "pgm", 3, t->type );
+        tree.set_route_str( *t, stab, R_LISTEN, net, net_len );
+        if ( port_len > 0 )
+          tree.set_route_str( *t, stab, R_PORT, port, port_len );
+        tree.set_route_str( *t, stab, R_MCAST_LOOP, "2", 1 );
+        break;
+      }
+    }
+    if ( ! this->add_transport( *t, is_listener ) )
+      return false;
   }
-  return this->add_transport( *t, is_listener );
+  if ( (num = SessionMgr::parse_rv_service( svc, svc_len )) != 0 ) {
+    RvSvc *rv_svc = this->get_rv_session( num, start_host );
+    if ( rv_svc != NULL )
+      rv_svc->ref_count++;
+  }
+  return true;
 }
 
 bool

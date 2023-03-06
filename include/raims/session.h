@@ -120,8 +120,10 @@ struct SubMsgData {
 };
 /* a publish sent to all subscribers */
 struct PubMcastData {
-  const char * sub;       /* subject to publish */
+  const char * sub,       /* subject to publish */
+             * inbox;
   uint16_t     sublen,    /* subject length */
+               inbox_len,
                option;    /* message options for the opt field */
   uint8_t      path,      /* path specified */
                path_select; /* path taken */
@@ -136,11 +138,13 @@ struct PubMcastData {
 
   PubMcastData( const char *s,  size_t sl,  const void *d,  size_t dl,
                 uint32_t f,  uint32_t rep = 0 )
-    : sub( s ), sublen( (uint16_t) sl ), option( 0 ), path( 255 ),
-      path_select( 0 ), fmt( f ), reply( rep ), subj_hash( 0 ),
-      seqno( 0 ), stamp( 0 ), token( 0 ), data( d ), datalen( dl ) {}
+    : sub( s ), inbox( 0 ), sublen( (uint16_t) sl ), inbox_len( 0 ),
+      option( 0 ), path( 255 ), path_select( 0 ), fmt( f ), reply( rep ),
+      subj_hash( 0 ), seqno( 0 ), stamp( 0 ), token( 0 ),
+      data( d ), datalen( dl ) {}
   PubMcastData( const PubMcastData &mc )
-    : sub( mc.sub ), sublen( mc.sublen ), option( mc.option ), path( mc.path ),
+    : sub( mc.sub ), inbox( mc.inbox ), sublen( mc.sublen ),
+      inbox_len( mc.inbox_len ), option( mc.option ), path( mc.path ),
       path_select( mc.path_select ), fmt( mc.fmt ), reply( mc.reply ),
       subj_hash( mc.subj_hash ), seqno( mc.seqno ), stamp( mc.stamp ),
       token( mc.token ), data( mc.data ), datalen( mc.datalen ) {}
@@ -173,7 +177,7 @@ struct IpcRoute : public kv::EvSocket, public kv::BPData {
   IpcRoute( kv::EvPoll &p,  SessionMgr &m ) noexcept;
   /* EvSocket */
   virtual bool on_msg( kv::EvPublish &pub ) noexcept;
-  bool on_inbox( const MsgFramePublish &pub,  UserBridge &n,
+  bool on_inbox( MsgFramePublish &pub,  UserBridge &n,
                  MsgHdrDecoder &dec ) noexcept;
   virtual void write( void ) noexcept;
   virtual void read( void ) noexcept;
@@ -234,7 +238,16 @@ struct UnrouteableList : public kv::ArrayCount<Unrouteable, 4> {
   }
 };
 
+struct RvSvc {
+  sassrv::RvHost * host;
+  uint64_t         ref_count;
+  char             session[ kv::EvSocket::MAX_SESSION_LEN ];
+  size_t           session_len;
+  uint16_t         svc;
+};
+
 struct NameSvcArray : public kv::ArrayCount< NameSvc *, 2 > {};
+struct RvSvcArray : public kv::ArrayCount< RvSvc, 2 > {};
 
 struct SessionMgr : public kv::EvSocket, public kv::BPData {
   IpcRoute              ipc_rt;         /* network -> rv sub, ds sub, etc */
@@ -265,6 +278,7 @@ struct SessionMgr : public kv::EvSocket, public kv::BPData {
   SessionStats          stats;
   UnrouteableList       unrouteable;
   ConnectMgr            connect_mgr;
+  RvSvcArray            rv_svc_db;
   uint64_t              pub_window_mono_time, /* when pub window expires */
                         sub_window_mono_time, /* when sub window expires */
                         name_svc_mono_time;
@@ -292,7 +306,8 @@ struct SessionMgr : public kv::EvSocket, public kv::BPData {
                        TransportRoute *&rte ) noexcept;
   bool add_ipc_transport( void ) noexcept;
   bool add_network( const char *net,  size_t net_len, 
-                    const char *svc,  size_t svc_len ) noexcept;
+                    const char *svc,  size_t svc_len,
+                    bool start_host ) noexcept;
   bool start_transport( TransportRoute &rte,  bool is_listener ) noexcept;
   bool add_startup_transports( void ) noexcept;
   bool add_startup_transports( const char *name,  size_t name_sz,
@@ -341,6 +356,8 @@ struct SessionMgr : public kv::EvSocket, public kv::BPData {
   virtual void process( void ) noexcept;
   virtual void release( void ) noexcept;
   virtual void on_write_ready( void ) noexcept;
+  void dispatch_console( MsgFramePublish &fpub,  UserBridge &n,
+                         MsgHdrDecoder &dec ) noexcept;
   MsgFrameStatus parse_msg_hdr( MsgFramePublish &fpub,  bool is_ipc ) noexcept;
   void ignore_msg( const MsgFramePublish &fpub ) noexcept;
   void show_debug_msg( const MsgFramePublish &fpub,
@@ -373,6 +390,10 @@ struct SessionMgr : public kv::EvSocket, public kv::BPData {
   uint32_t shutdown_telnet( ConfigTree::Transport &tport ) noexcept;
   uint32_t shutdown_web( ConfigTree::Transport &tport ) noexcept;
   uint32_t shutdown_name( ConfigTree::Transport &tport ) noexcept;
+  static uint16_t parse_rv_service( const char *svc, size_t svclen ) noexcept;
+  static uint16_t sub_has_rv_service( const char *sub, size_t sublen ) noexcept;
+  RvSvc *get_rv_session( uint16_t svc,  bool is_sub ) noexcept;
+  void stop_rv_session( RvSvc *rv_svc ) noexcept;
 };
 
 }

@@ -366,21 +366,26 @@ main( int argc, char *argv[] )
   if ( ! sess.init_param() || ! sess.add_ipc_transport() )
     status = -1;
   if ( status == 0 && nets != NULL ) {
-    const char * p = ::strchr( nets, '.' );
-    if ( p == NULL ) {
-      fprintf( stderr, "Expecting svc.network (%s)\n", nets );
-      status = -1;
+    const char * n     = ::strchr( nets, '.' ),
+               * s     = nets;
+    size_t       s_len = ::strlen( nets ),
+                 n_len = 0;
+    if ( n != NULL ) {
+      s_len = n++ - nets;
+      n_len = ::strlen( n );
     }
     for ( int i = 2; status == 0; i++ ) {
-      if ( ! sess.add_network( p+1, ::strlen( p ) - 1, nets, p - nets ) )
+      if ( ! sess.add_network( n, n_len, s, s_len, false ) )
         status = -1;
       nets = get_arg( argc, argv, i, "-n", NULL );
       if ( nets == NULL || nets[ 0 ] == '-' )
         break;
-      p = ::strchr( nets, '.' );
-      if ( p == NULL ) {
-        fprintf( stderr, "Expecting svc.network (%s)\n", nets );
-        status = -1;
+      n     = ::strchr( s = nets, '.' );
+      s_len = ::strlen( s );
+      n_len = 0;
+      if ( n != NULL ) {
+        s_len = n++ - nets;
+        n_len = ::strlen( n );
       }
     }
   }

@@ -421,7 +421,10 @@ SessionMgr::start( void ) noexcept
   printf( "%s: %s\n", P_TCP_NOENCRYPT, this->tcp_noencrypt ? "true" : "false" );
 
   uint64_t cur_time = this->poll.current_coarse_ns(),
-           cur_mono = this->poll.mono_ns;
+           cur_mono = this->poll.mono_ns,
+           ival_ns  = sec_to_ns( this->user_db.hb_interval );
+  size_t   i, count;
+
   this->timer_id             = ++this->next_timer;
   this->timer_mono_time      = cur_mono;
   this->timer_time           = cur_time;
@@ -429,27 +432,33 @@ SessionMgr::start( void ) noexcept
   this->converge_seqno       = seqno_init( cur_time );
   this->timer_start_mono     = cur_mono;
   this->timer_start          = cur_time;
-  this->stats.mono_time  = cur_mono;
-  this->stats.mono_time -= cur_time % sec_to_ns( STATS_INTERVAL );
-  this->stats.mono_time += sec_to_ns( STATS_INTERVAL );
+  this->stats.mono_time      = cur_mono;
+  this->stats.mono_time     -= cur_time % sec_to_ns( STATS_INTERVAL );
+  this->stats.mono_time     += sec_to_ns( STATS_INTERVAL );
   this->pub_window_mono_time = cur_mono + this->pub_window_ival;
   this->sub_window_mono_time = cur_mono + this->sub_window_ival;
+
   this->sub_db.seqno_tab.flip_time     = cur_time;
   this->sub_db.seqno_tab.trailing_time = cur_time - this->sub_window_ival;
   this->sub_db.pub_tab.flip_time       = cur_time;
   this->sub_db.pub_tab.trailing_time   = cur_time - this->pub_window_ival;
   this->sub_db.any_tab.gc_time         = cur_time;
-  uint64_t ival = sec_to_ns( this->user_db.hb_interval );
-  this->timer_ival         = (uint32_t) ( ival / 250 );
-  this->user_db.hb_ival_ns = ival;
-  this->user_db.hb_ival_mask = ival;
-  for ( int i = 1; i <= 32; i *= 2 )
-    this->user_db.hb_ival_mask |= ( this->user_db.hb_ival_mask >> i );
+
+  this->timer_ival         = (uint32_t) ( ival_ns / 250 );
+  this->user_db.hb_ival_ns = ival_ns;
+  for ( i = 1; i <= 32; i *= 2 )
+    ival_ns |= ( ival_ns >> i );
+  this->user_db.hb_ival_mask = ival_ns;
   this->poll.timer.add_timer_nanos( this->fd, (uint32_t) this->timer_ival,
                                     this->timer_id, 0 );
   this->session_started = true;
   this->user_db.hello_hb();
   this->name_hb( cur_mono );
+  count = this->rv_svc_db.count;
+  for ( i = 0; i < count; i++ ) {
+    RvSvc *rv_svc = this->get_rv_session( this->rv_svc_db.ptr[ i ].svc, true );
+    rv_svc->ref_count++;
+  }
 }
 
 void
@@ -959,7 +968,7 @@ ConsoleRoute::fwd_console( EvPublish &pub,  bool is_caba ) noexcept
 /* decapsulate a message published to my inbox subscribed by an ipc route,
  * usually an _INBOX subject */
 bool
-IpcRoute::on_inbox( const MsgFramePublish &fpub,  UserBridge &n,
+IpcRoute::on_inbox( MsgFramePublish &fpub,  UserBridge &n,
                     MsgHdrDecoder &dec ) noexcept
 {
   if ( ! dec.test( FID_SUBJECT ) ) {
@@ -987,14 +996,31 @@ IpcRoute::on_inbox( const MsgFramePublish &fpub,  UserBridge &n,
   d_sess( "on_inbox(%.*s)\n", (int) subjlen, subject );
   bool b = true;
   size_t i, count = this->user_db.transport_tab.count;
+  uint32_t rcnt = 0;
   for ( i = 0; i < count; i++ ) {
     TransportRoute *rte = this->user_db.transport_tab.ptr[ i ];
     if ( &fpub.rte != rte && rte->is_set( TPORT_IS_IPC ) ) {
       EvPublish pub( subject, subjlen, reply, replylen,
                      data, datalen, rte->sub_route, fpub.src_route, h, fmt, 'p',
                      0, n.bridge_nonce_int, dec.seqno );
-      b &= rte->sub_route.forward_except( pub, this->mgr.router_set,
-                                          &this->mgr );
+      b &= rte->sub_route.forward_except_with_cnt( pub, this->mgr.router_set,
+                                                   rcnt, &this->mgr );
+      if ( rcnt != 0 ) {
+        d_sess( "rte %s\n", rte->name );
+        break;
+      }
+    }
+  }
+  if ( rcnt == 0 ) {
+    SubOnMsg * cb = this->sub_db.match_any_sub( subject, subjlen );
+    if ( cb != NULL ) {
+      SubMsgData val( fpub, &n, data, datalen );
+      val.seqno = dec.seqno;
+      val.fmt   = fmt;
+      cb->on_data( val );
+    }
+    else {
+      d_sess( "no inbox sub (%.*s)\n", (int) subjlen, subject );
     }
   }
   return this->mgr.check_flow_control( b );
@@ -1254,109 +1280,116 @@ SessionMgr::on_msg( EvPublish &pub ) noexcept
     case U_INBOX_TRACE:   /* _I.Nonce.trace */
     case U_INBOX_ACK:     /* _I.Nonce.ack */
     case U_INBOX_ANY:     /* _I.Nonce.any */
-    case MCAST_SUBJECT: { /* SUBJECT */
-      void * data    = NULL;
-      size_t datalen = 0;
-      if ( dec.test( FID_DATA ) ) {
-        data    = dec.mref[ FID_DATA ].fptr;
-        datalen = dec.mref[ FID_DATA ].fsize;
-      }
-      SubMsgData val( fpub, &n, data, datalen );
-      SeqnoArgs  seq( this->timer_time );
-
-      val.seqno = dec.seqno;
-      dec.get_ival<uint64_t>( FID_CHAIN_SEQNO, seq.chain_seqno );
-      dec.get_ival<uint64_t>( FID_STAMP,       val.stamp );
-      dec.get_ival<uint64_t>( FID_TOKEN,       val.token );
-      dec.get_ival<uint64_t>( FID_REF_SEQNO,   val.ref_seqno );
-      dec.get_ival<uint32_t>( FID_RET,         val.reply );
-      dec.get_ival<uint32_t>( FID_FMT,         val.fmt );
-      dec.get_ival<uint32_t>( FID_TPORTID,     val.tport_id );
-      dec.get_ival<uint64_t>( FID_TIME,        seq.time );
-
-      /* if _I.Nonce.<inbox_ret>, find the inbox_ret */
-      if ( dec.inbox_ret != 0 || type == U_INBOX_ANY ) {
-        if ( n.inbox.recv_seqno != 0 && dec.seqno != n.inbox.recv_seqno + 1 ) {
-          n.printf( "%.*s missing inbox return seqno %" PRIu64 " -> %" PRIu64 " (%s)\n",
-                    (int) fpub.subject_len, fpub.subject,
-                    n.inbox.recv_seqno, dec.seqno, fpub.rte.name );
-        }
-        /* these should be in order, otherwise message loss occurred */
-        n.inbox.set_recv( dec.seqno, type );
-        if ( type != U_INBOX_ANY ) {
-          const char * num = &fpub.subject[ this->ibx.len ];
-          size_t       len = fpub.subject_len - this->ibx.len;
-          InboxSub   * ibx = this->sub_db.inbox_tab.find(
-                                     kv_hash_uint( dec.inbox_ret ), num, len );
-          if ( ibx == NULL ) {
-            n.printf( "%.*s inbox not found (%s)\n", (int) fpub.subject_len,
-                      fpub.subject, fpub.rte.name );
-            return true;
-          }
-          seq.cb = ibx->on_data;
-        }
-        else if ( dec.test( FID_SUBJECT ) ) {
-          const char * sub    = (const char *) dec.mref[ FID_SUBJECT ].fptr;
-          uint16_t     sublen = (uint16_t) dec.mref[ FID_SUBJECT ].fsize;
-          seq.cb = this->sub_db.match_any_sub( sub, sublen );
-          if ( seq.cb == NULL ) {
-            n.printf( "%.*s any match not found (%s)\n", (int) sublen, sub,
-                      fpub.rte.name );
-            return true;
-          }
-        }
-      }
-      /* find the subject and matching subscription */
-      else {
-        SeqnoStatus status = this->sub_db.match_seqno( fpub, seq );
-
-        if ( status > SEQNO_UID_NEXT ) {
-          if ( status != SEQNO_NOT_SUBSCR ) {
-            if ( status > SEQNO_UID_SKIP )
-              fpub.status = FRAME_STATUS_DUP_SEQNO;
-          }
-          if ( status == SEQNO_UID_REPEAT ) {
-            if ( debug_sess_repeat )
-              this->show_seqno_status( fpub, n, dec, seq, status, true );
-            n.msg_repeat_count++;
-            n.msg_repeat_time = this->timer_time;
-          }
-          else if ( status == SEQNO_NOT_SUBSCR ) {
-            if ( debug_sess_not_sub )
-              this->show_seqno_status( fpub, n, dec, seq, status, true );
-            n.msg_not_subscr_count++;
-            n.msg_not_subscr_time = this->timer_time;
-          }
-          else if ( status == SEQNO_UID_SKIP ) {
-            if ( debug_sess_loss )
-              this->show_seqno_status( fpub, n, dec, seq, status, true );
-            n.msg_loss_time = this->timer_time;
-            if ( seq.msg_loss <= MAX_MSG_LOSS )
-              n.msg_loss_count += seq.msg_loss;
-            else
-              n.msg_loss_count++;
-          }
-          else if ( debug_sess )
-            this->show_seqno_status( fpub, n, dec, seq, status, true );
-          if ( status > SEQNO_UID_SKIP )
-            return true;
-        }
-      }
-      if ( seq.cb != NULL )
-        seq.cb->on_data( val );
-      else {
-        n.printf( "Not subscribed: %.*s seqno %" PRIu64 " (%s)\n",
-                  (int) fpub.subject_len, fpub.subject, dec.seqno,
-                  fpub.rte.name );
-      }
+    case MCAST_SUBJECT:   /* SUBJECT */
+      this->dispatch_console( fpub, n, dec );
       break;
-    }
     default:
       n.printf( "no sub type\n" );
       break;
   }
   return true;
 }
+/* send message to console callback */
+void
+SessionMgr::dispatch_console( MsgFramePublish &fpub,  UserBridge &n,
+                              MsgHdrDecoder &dec ) noexcept
+{
+  void * data    = NULL;
+  size_t datalen = 0;
+  if ( dec.test( FID_DATA ) ) {
+    data    = dec.mref[ FID_DATA ].fptr;
+    datalen = dec.mref[ FID_DATA ].fsize;
+  }
+  SubMsgData val( fpub, &n, data, datalen );
+  SeqnoArgs  seq( this->timer_time );
+
+  val.seqno = dec.seqno;
+  dec.get_ival<uint64_t>( FID_CHAIN_SEQNO, seq.chain_seqno );
+  dec.get_ival<uint64_t>( FID_STAMP,       val.stamp );
+  dec.get_ival<uint64_t>( FID_TOKEN,       val.token );
+  dec.get_ival<uint64_t>( FID_REF_SEQNO,   val.ref_seqno );
+  dec.get_ival<uint32_t>( FID_RET,         val.reply );
+  dec.get_ival<uint32_t>( FID_FMT,         val.fmt );
+  dec.get_ival<uint32_t>( FID_TPORTID,     val.tport_id );
+  dec.get_ival<uint64_t>( FID_TIME,        seq.time );
+
+  /* if _I.Nonce.<inbox_ret>, find the inbox_ret */
+  if ( dec.inbox_ret != 0 || dec.type == U_INBOX_ANY ) {
+    if ( n.inbox.recv_seqno != 0 && dec.seqno != n.inbox.recv_seqno + 1 ) {
+      n.printf( "%.*s missing inbox return seqno %" PRIu64 " -> %" PRIu64 " (%s)\n",
+                (int) fpub.subject_len, fpub.subject,
+                n.inbox.recv_seqno, dec.seqno, fpub.rte.name );
+    }
+    /* these should be in order, otherwise message loss occurred */
+    n.inbox.set_recv( dec.seqno, dec.type );
+    if ( dec.type != U_INBOX_ANY ) {
+      const char * num = &fpub.subject[ this->ibx.len ];
+      size_t       len = fpub.subject_len - this->ibx.len;
+      InboxSub   * ibx = this->sub_db.inbox_tab.find(
+                                 kv_hash_uint( dec.inbox_ret ), num, len );
+      if ( ibx == NULL ) {
+        n.printf( "%.*s inbox not found (%s)\n", (int) fpub.subject_len,
+                  fpub.subject, fpub.rte.name );
+        return;
+      }
+      seq.cb = ibx->on_data;
+    }
+    else if ( dec.test( FID_SUBJECT ) ) {
+      const char * sub    = (const char *) dec.mref[ FID_SUBJECT ].fptr;
+      uint16_t     sublen = (uint16_t) dec.mref[ FID_SUBJECT ].fsize;
+      seq.cb = this->sub_db.match_any_sub( sub, sublen );
+      if ( seq.cb == NULL ) {
+        n.printf( "%.*s any match not found (%s)\n", (int) sublen, sub,
+                  fpub.rte.name );
+        return;
+      }
+    }
+  }
+  /* find the subject and matching subscription */
+  else {
+    SeqnoStatus status = this->sub_db.match_seqno( fpub, seq );
+
+    if ( status > SEQNO_UID_NEXT ) {
+      if ( status != SEQNO_NOT_SUBSCR ) {
+        if ( status > SEQNO_UID_SKIP )
+          fpub.status = FRAME_STATUS_DUP_SEQNO;
+      }
+      if ( status == SEQNO_UID_REPEAT ) {
+        if ( debug_sess_repeat )
+          this->show_seqno_status( fpub, n, dec, seq, status, true );
+        n.msg_repeat_count++;
+        n.msg_repeat_time = this->timer_time;
+      }
+      else if ( status == SEQNO_NOT_SUBSCR ) {
+        if ( debug_sess_not_sub )
+          this->show_seqno_status( fpub, n, dec, seq, status, true );
+        n.msg_not_subscr_count++;
+        n.msg_not_subscr_time = this->timer_time;
+      }
+      else if ( status == SEQNO_UID_SKIP ) {
+        if ( debug_sess_loss )
+          this->show_seqno_status( fpub, n, dec, seq, status, true );
+        n.msg_loss_time = this->timer_time;
+        if ( seq.msg_loss <= MAX_MSG_LOSS )
+          n.msg_loss_count += seq.msg_loss;
+        else
+          n.msg_loss_count++;
+      }
+      else if ( debug_sess )
+        this->show_seqno_status( fpub, n, dec, seq, status, true );
+      if ( status > SEQNO_UID_SKIP )
+        return;
+    }
+  }
+  if ( seq.cb != NULL )
+    seq.cb->on_data( val );
+  else {
+    n.printf( "Not subscribed: %.*s seqno %" PRIu64 " (%s)\n",
+              (int) fpub.subject_len, fpub.subject, dec.seqno,
+              fpub.rte.name );
+  }
+}
+
 /* publish a mcast message, usually from console */
 bool
 SessionMgr::publish( PubMcastData &mc ) noexcept
@@ -1426,6 +1459,7 @@ SessionMgr::publish( PubMcastData &mc ) noexcept
   e.seqno       ()
    .chain_seqno ()
    .ret         ()
+   .reply       ( mc.inbox_len )
    .time        ()
    .stamp       ()
    .token       ()
@@ -1442,6 +1476,8 @@ SessionMgr::publish( PubMcastData &mc ) noexcept
     m.chain_seqno( chain_seqno );
   if ( mc.reply != 0 )
     m.ret( mc.reply );
+  if ( mc.inbox_len != 0 )
+    m.reply( mc.inbox, mc.inbox_len );
   if ( time != 0 )
     m.time( time );
   if ( mc.stamp != 0 )
@@ -1481,8 +1517,8 @@ SessionMgr::publish( PubMcastData &mc ) noexcept
     } while ( forward.next( tport_id ) );
   }
   if ( (rte = this->user_db.ipc_transport) != NULL ) {
-    EvPublish pub( mc.sub, mc.sublen, NULL, 0, mc.data, mc.datalen,
-                   rte->sub_route, this->fd, h, 
+    EvPublish pub( mc.sub, mc.sublen, mc.inbox, mc.inbox_len,
+                   mc.data, mc.datalen, rte->sub_route, this->fd, h, 
                    ( mc.fmt ? mc.fmt : (uint32_t) MD_STRING ), 'p' );
     b &= rte->sub_route.forward_except( pub, this->router_set );
   }

@@ -984,24 +984,26 @@ UserDB::recv_pong_result( MsgFramePublish &pub,  UserBridge &n,
     if ( debug_hb )
       n.printf( "pong idl_svc %u idl_loss %u\n", idl_svc, idl_loss );
 
-    if ( n.inbound_svc_loss->find( idl_svc, pos, loss ) ) {
-      if ( idl_loss >= loss ) {
-        if ( n.inbound_svc_loss->elem_count == 1 ) {
-          delete n.inbound_svc_loss;
-          n.inbound_svc_loss = NULL;
-          n.inbound_msg_loss = 0;
+    if ( n.inbound_svc_loss != NULL ) {
+      if ( n.inbound_svc_loss->find( idl_svc, pos, loss ) ) {
+        if ( idl_loss >= loss ) {
+          if ( n.inbound_svc_loss->elem_count == 1 ) {
+            delete n.inbound_svc_loss;
+            n.inbound_svc_loss = NULL;
+            n.inbound_msg_loss = 0;
+          }
+          else {
+            n.inbound_svc_loss->remove( pos );
+          }
         }
         else {
-          n.inbound_svc_loss->remove( pos );
+          loss -= idl_loss;
+          n.inbound_svc_loss->set( idl_svc, pos, loss );
         }
       }
-      else {
-        loss -= idl_loss;
-        n.inbound_svc_loss->set( idl_svc, pos, loss );
-      }
+      if ( n.inbound_msg_loss != 0 )
+        this->uid_rtt.add( n.uid );
     }
-    if ( n.inbound_msg_loss != 0 )
-      this->uid_rtt.add( n.uid );
   }
 
   if ( debug_hb )

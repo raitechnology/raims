@@ -545,29 +545,34 @@ struct UserDB {
   }
   TransportRoute *add_link( UserBridge *n,  uint32_t cost[ COST_PATH_COUNT ],
                             const char *type,  const char *name,
-                            ms::StringTab &st ) {
+                            ms::StringTab &st,  AdjacencySpace *&spc ) {
     TransportRoute * t = this->add_tport( cost, type, name, st );
     t->uid_connected.add( n->uid );
-    n->add_link( (uint32_t) 0, cost, type, name, st );
+    spc = n->add_link( (uint32_t) 0, cost, type, name, st );
     this->peer_dist.update_seqno++;
     return t;
   }
   void make_link( UserBridge *x,  UserBridge *y,
                   uint32_t cost[ COST_PATH_COUNT ],
                   const char *type,  const char *name,  ms::StringTab &st ) {
-    if ( x == NULL )
-      this->add_link( y, cost, type, name, st );
-    else if ( y == NULL )
-      this->add_link( x, cost, type, name, st );
+    AdjacencySpace *spc1, *spc2;
+    TransportRoute * t;
+    if ( x == NULL ) { /* me -> y */
+      t = this->add_link( y, cost, type, name, st, spc2 );
+      spc1 = &t->uid_connected;
+    }
+    else if ( y == NULL ) { /* x -> me */
+      t = this->add_link( x, cost, type, name, st, spc1 );
+      spc2 = &t->uid_connected;
+    }
     else {
-      AdjacencySpace *spc1, *spc2;
       spc1 = x->add_link( y, cost, type, name, st );
       spc2 = y->add_link( x, cost, type, name, st );
-      spc1->rem_tport_id = spc2->tport_id;
-      spc1->rem_uid      = spc2->uid;
-      spc2->rem_tport_id = spc1->tport_id;
-      spc2->rem_uid      = spc1->uid;
     }
+    spc1->rem_tport_id = spc2->tport_id;
+    spc1->rem_uid      = spc2->uid;
+    spc2->rem_tport_id = spc1->tport_id;
+    spc2->rem_uid      = spc1->uid;
   }
   bool load_users( const char *fn,  ms::StringTab &st,
                    uint32_t &start_uid ) noexcept;

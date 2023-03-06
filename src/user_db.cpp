@@ -629,7 +629,7 @@ UserDB::check_user_timeout( uint64_t current_mono_time,
       break;
     this->events.hb_timeout( n->uid );
     n->hb_miss++;
-    n->printf( "no heartbeat detected in interval %u (%.1fsecs), dropping\n",
+    n->printe( "no heartbeat detected in interval %u (%.1fsecs), dropping\n",
                n->hb_interval,
                (double) ( current_mono_time - n->hb_mono_time ) / SEC_TO_NS );
     n->clear( IN_HB_QUEUE_STATE );

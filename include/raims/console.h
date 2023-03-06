@@ -43,6 +43,7 @@ struct ConsoleOutArray   : public kv::ArrayCount< ConsoleOutput *, 2 > {
   bool add( ConsoleOutput *p ) noexcept;
   bool replace( ConsoleOutput *p,  ConsoleOutput *p2 ) noexcept;
   bool remove( ConsoleOutput *p ) noexcept;
+  bool pop( void ) noexcept;
 };
 
 struct JsonFileOutput : public ConsoleOutput {
@@ -274,7 +275,8 @@ enum ConsRpcType {
   REMOTE_RPC = 1,
   SUBS_RPC   = 2,
   SUB_START  = 3,
-  PSUB_START = 4
+  PSUB_START = 4,
+  SNAP_RPC   = 5
 };
 
 struct Console;
@@ -288,18 +290,18 @@ struct ConsoleRPC : public SubOnMsg {
                   total_recv,
                   count;
   ConsRpcType     type;
-  bool            complete;
+  bool            is_complete;
   ConsoleRPC( Console &c,  ConsRpcType t )
     : next( 0 ), back( 0 ), console( c ), out( this ), token( 0 ),
       inbox_num( 0 ), total_recv( 0 ), count( 0 ), type( t ),
-      complete( false ) {}
+      is_complete( false ) {}
   virtual void on_data( const SubMsgData &val ) noexcept;
   virtual void init( void ) noexcept {
     this->token++;
-    this->out.count  = 0;
-    this->total_recv = 0;
-    this->count      = 0;
-    this->complete   = false;
+    this->out.count   = 0;
+    this->total_recv  = 0;
+    this->count       = 0;
+    this->is_complete = false;
   }
 };
 
@@ -395,7 +397,8 @@ struct ConsoleSubStart : public ConsoleRPC {
   uint64_t start_seqno;
   char   * sub;
   size_t   sublen;
-
+  uint32_t hash,
+           inbox;
   void * operator new( size_t, void *ptr ) { return ptr; }
   void operator delete( void *ptr ) { ::free( ptr ); }
   ConsoleSubStart( Console &c )
@@ -405,11 +408,13 @@ struct ConsoleSubStart : public ConsoleRPC {
     this->ConsoleRPC::init();
     this->start_seqno = 0;
   }
-  void set_sub( const char *s,  size_t l ) {
+  void set_sub( const char *s,  size_t l,  uint32_t h,  uint32_t i ) {
     this->sub = (char *) ::realloc( this->sub, l + 1 );
     ::memcpy( this->sub, s, l );
     this->sub[ l ] = '\0';
     this->sublen = l;
+    this->hash   = h;
+    this->inbox  = i;
   }
   bool matches( const char *s,  size_t l ) {
     return this->sublen == l && ::memcmp( s, this->sub, l ) == 0;
@@ -445,7 +450,49 @@ struct ConsolePSubStart : public ConsoleRPC {
   }
 };
 
+struct ConsoleSnap : public ConsoleRPC {
+  char   * sub;
+  size_t   sublen;
+  uint32_t hash,
+           inbox;
+  void * operator new( size_t, void *ptr ) { return ptr; }
+  void operator delete( void *ptr ) { ::free( ptr ); }
+  ConsoleSnap( Console &c )
+    : ConsoleRPC( c, SNAP_RPC ), sub( 0 ), sublen( 0 ) {}
+  virtual void on_data( const SubMsgData &val ) noexcept;
+  virtual void init( void ) noexcept {
+    this->ConsoleRPC::init();
+  }
+  void set_snap( const char *s,  size_t l,  uint32_t h,  uint32_t i ) {
+    this->sub = (char *) ::realloc( this->sub, l + 1 );
+    ::memcpy( this->sub, s, l );
+    this->sub[ l ] = '\0';
+    this->sublen = l;
+    this->hash   = h;
+    this->inbox  = i;
+  }
+  bool matches( const char *s,  size_t l ) {
+    return this->sublen == l && ::memcmp( s, this->sub, l ) == 0;
+  }
+};
+
 struct ConsoleRPCList : public kv::DLinkList< ConsoleRPC > {};
+
+struct ConsoleInboxRoute {
+  uint64_t start_seqno;
+  uint32_t ref_count;
+  uint32_t hash;
+  uint16_t len;
+  char     value[ 2 ];
+};
+
+struct ConsoleInboxTab : public kv::RouteVec<ConsoleInboxRoute>,
+                         public SubOnMsg {
+  kv::ArrayCount< SubOnMsg *, 4 > cb;
+  uint32_t next_inbox, free_inbox;
+  ConsoleInboxTab() : next_inbox( 0 ), free_inbox( 0 ) {}
+  virtual void on_data( const SubMsgData &val ) noexcept;
+};
 
 struct ConfigChange {
   ConfigChange * next,
@@ -557,6 +604,7 @@ struct Console : public md::MDOutput, public SubOnMsg, public ConfigPrinter,
   md::MDMsgMem      tmp;
   TableArray        table;
   JsonOutArray      json_files;
+  ConsoleInboxTab   inbox_tab;
   size_t            max_log,
                     log_index,
                     log_ptr;
@@ -629,8 +677,10 @@ struct Console : public md::MDOutput, public SubOnMsg, public ConfigPrinter,
   virtual bool on_input( ConsoleOutput *p,  const char *buf,
                          size_t buflen ) noexcept;
   virtual void on_data( const SubMsgData &val ) noexcept;
-  void print_data( ConsoleOutput *p,  const SubMsgData &val ) noexcept;
-  void print_json_data( ConsoleOutput *p,  const SubMsgData &val ) noexcept;
+  void print_data( ConsoleOutput *p,  const SubMsgData &val,
+                   const char *sub = NULL,  size_t sublen = 0 ) noexcept;
+  void print_json_data( ConsoleOutput *p,  const SubMsgData &val,
+                        const char *sub = NULL,  size_t sublen = 0 ) noexcept;
   int find_tport( const char *name,  size_t len,
                   ConfigTree::Transport *&tree_idx,
                   uint32_t &tport_id ) noexcept;
@@ -678,6 +728,7 @@ struct Console : public md::MDOutput, public SubOnMsg, public ConfigPrinter,
   void show_peers( ConsoleOutput *p,  const char *name,  size_t len ) noexcept;
   void output_user_route( TabPrint &ptp,  UserRoute &u_rte ) noexcept;
   void show_hosts( ConsoleOutput *p ) noexcept;
+  void show_rpcs( ConsoleOutput *p ) noexcept;
   void show_adjacency( ConsoleOutput *p ) noexcept;
   void show_links( ConsoleOutput *p ) noexcept;
   void show_nodes( ConsoleOutput *p ) noexcept;
@@ -716,13 +767,34 @@ struct Console : public md::MDOutput, public SubOnMsg, public ConfigPrinter,
   virtual bool timer_cb( uint64_t, uint64_t ) noexcept;
   void log_output( int stream,  uint64_t stamp,  size_t len,
                    const char *buf ) noexcept;
+  void do_snap( ConsoleOutput *p,  ConsoleOutput *sub_output,
+                const char *arg,  size_t len ) noexcept;
+  uint32_t do_snap_stop( ConsoleOutput *p,  ConsoleOutput *sub_output,
+                         const char *arg,  size_t len ) noexcept;
+  uint32_t do_sub( ConsoleOutput *p,  ConsoleOutput *sub_output,
+                   const char *arg,  size_t len,  bool is_start ) noexcept;
+  uint32_t do_psub( ConsoleOutput *p,  ConsoleOutput *sub_output,
+                    const char *arg,  size_t len,  kv::PatternFmt fmt,
+                    bool is_start ) noexcept;
+  ConsoleSubStart *sub_start( ConsoleOutput *sub_output,  const char *arg,
+                              size_t len ) noexcept;
+  uint32_t start_rv_inbox( uint16_t svc,  SubOnMsg *sub,
+                           char *inbox,  size_t &inbox_len ) noexcept;
+  void sub_stop( ConsoleSubStart *sub ) noexcept;
+  void snap_stop( ConsoleSnap *sub ) noexcept;
+  void stop_rv_inbox( uint16_t svc,  uint32_t &ibx,  SubOnMsg *sub ) noexcept;
+  ConsolePSubStart *psub_start( ConsoleOutput *sub_output,  const char *arg,
+                                size_t len,  kv::PatternFmt fmt ) noexcept;
+  void psub_stop( ConsolePSubStart *sub ) noexcept;
   void stop_rpc( ConsoleOutput *p,  ConsoleRPC *rpc ) noexcept;
-
+  size_t get_subscriptions( uint16_t svc,  kv::SubRouteDB &subs ) noexcept;
+  size_t get_patterns( uint16_t svc,  int pat_fmt,
+                       kv::SubRouteDB &pats ) noexcept;
   template<class T>
   T * create_rpc( ConsoleOutput *p,  ConsRpcType type ) {
     ConsoleRPC * rpc;
     for ( rpc = this->rpc_list.hd; rpc != NULL; rpc = rpc->next ) {
-      if ( rpc->complete && rpc->type == type )
+      if ( rpc->is_complete && rpc->type == type )
         break;
     }
     if ( rpc == NULL ) {
@@ -742,7 +814,7 @@ struct Console : public md::MDOutput, public SubOnMsg, public ConfigPrinter,
     else
       rpc = sub->next;
     for ( ; rpc != NULL; rpc = rpc->next ) {
-      if ( ! rpc->complete && rpc->type == type )
+      if ( ! rpc->is_complete && rpc->type == type )
         return (T *) rpc;
     }
     return NULL;
@@ -792,45 +864,47 @@ enum ConsoleCmd {
   CMD_SHOW_CACHE        = 39, /* show cache                 */
   CMD_SHOW_POLL         = 40, /* show poll                  */
   CMD_SHOW_HOSTS        = 41, /* show hosts                 */
-  CMD_SHOW_RUN          = 42, /* show running               */
-  CMD_SHOW_RUN_TPORTS   = 43, /* show running transport [T] */
-  CMD_SHOW_RUN_SVCS     = 44, /* show running service [S]   */
-  CMD_SHOW_RUN_USERS    = 45, /* show running user [U]      */
-  CMD_SHOW_RUN_GROUPS   = 46, /* show running group [G]     */
-  CMD_SHOW_RUN_PARAM    = 47, /* show running parameter [P] */
-  CMD_SHOW_START        = 48, /* show startup               */
-  CMD_SHOW_START_TPORTS = 49, /* show startup transport [T] */
-  CMD_SHOW_START_SVCS   = 50, /* show startup service [S]   */
-  CMD_SHOW_START_USERS  = 51, /* show startup user [U]      */
-  CMD_SHOW_START_GROUPS = 52, /* show startup group [G]     */
-  CMD_SHOW_START_PARAM  = 53, /* show startup parameter [P] */
-  CMD_CONNECT           = 54, /* connect [T]                */
-  CMD_LISTEN            = 55, /* listen [T]                 */
-  CMD_SHUTDOWN          = 56, /* shutdown [T]               */
-  CMD_NETWORK           = 57, /* network svc network        */
-  CMD_CONFIGURE         = 58, /* configure                  */
-  CMD_CONFIGURE_TPORT   = 59, /* configure transport T      */
-  CMD_CONFIGURE_PARAM   = 60, /* configure parameter P V    */
-  CMD_SAVE              = 61, /* save                       */
-  CMD_SUB_START         = 62, /* sub subject [file]         */
-  CMD_SUB_STOP          = 63, /* unsub subject [file]       */
-  CMD_PSUB_START        = 64, /* psub rv-wildcard [file]    */
-  CMD_PSUB_STOP         = 65, /* punsub rv-wildcard [file]  */
-  CMD_GSUB_START        = 66, /* gsub glob-wildcard [file]  */
-  CMD_GSUB_STOP         = 67, /* gunsub glob-wildcard [file]*/
-  CMD_PUBLISH           = 68, /* pub subject msg            */
-  CMD_TRACE             = 69, /* trace subject msg          */
-  CMD_PUB_ACK           = 70, /* ack subject msg            */
-  CMD_RPC               = 71, /* rpc subject msg            */
-  CMD_ANY               = 72, /* any subject msg            */
-  CMD_RESEED            = 73, /* reseed bloom filters       */
-  CMD_DEBUG             = 74, /* debug ival                 */
-  CMD_CANCEL            = 75, /* cancel                     */
-  CMD_MUTE_LOG          = 76, /* mute                       */
-  CMD_UNMUTE_LOG        = 77, /* unmute                     */
-  CMD_WEVENTS           = 78, /* write events to file       */
-  CMD_DIE               = 79, /* die, exit 1                */
-  CMD_QUIT              = 80, /* quit/exit                  */
+  CMD_SHOW_RPCS         = 42, /* show rpcs                  */
+  CMD_SHOW_RUN          = 43, /* show running               */
+  CMD_SHOW_RUN_TPORTS   = 44, /* show running transport [T] */
+  CMD_SHOW_RUN_SVCS     = 45, /* show running service [S]   */
+  CMD_SHOW_RUN_USERS    = 46, /* show running user [U]      */
+  CMD_SHOW_RUN_GROUPS   = 47, /* show running group [G]     */
+  CMD_SHOW_RUN_PARAM    = 48, /* show running parameter [P] */
+  CMD_SHOW_START        = 49, /* show startup               */
+  CMD_SHOW_START_TPORTS = 50, /* show startup transport [T] */
+  CMD_SHOW_START_SVCS   = 51, /* show startup service [S]   */
+  CMD_SHOW_START_USERS  = 52, /* show startup user [U]      */
+  CMD_SHOW_START_GROUPS = 53, /* show startup group [G]     */
+  CMD_SHOW_START_PARAM  = 54, /* show startup parameter [P] */
+  CMD_CONNECT           = 55, /* connect [T]                */
+  CMD_LISTEN            = 56, /* listen [T]                 */
+  CMD_SHUTDOWN          = 57, /* shutdown [T]               */
+  CMD_NETWORK           = 58, /* network svc [network]      */
+  CMD_CONFIGURE         = 59, /* configure                  */
+  CMD_CONFIGURE_TPORT   = 60, /* configure transport T      */
+  CMD_CONFIGURE_PARAM   = 61, /* configure parameter P V    */
+  CMD_SAVE              = 62, /* save                       */
+  CMD_SUB_START         = 63, /* sub subject [file]         */
+  CMD_SUB_STOP          = 64, /* unsub subject [file]       */
+  CMD_PSUB_START        = 65, /* psub rv-wildcard [file]    */
+  CMD_PSUB_STOP         = 66, /* punsub rv-wildcard [file]  */
+  CMD_GSUB_START        = 67, /* gsub glob-wildcard [file]  */
+  CMD_GSUB_STOP         = 68, /* gunsub glob-wildcard [file]*/
+  CMD_SNAP              = 69, /* snap subject [file]        */
+  CMD_PUBLISH           = 70, /* pub subject msg            */
+  CMD_TRACE             = 71, /* trace subject msg          */
+  CMD_PUB_ACK           = 72, /* ack subject msg            */
+  CMD_RPC               = 73, /* rpc subject msg            */
+  CMD_ANY               = 74, /* any subject msg            */
+  CMD_RESEED            = 75, /* reseed bloom filters       */
+  CMD_DEBUG             = 76, /* debug ival                 */
+  CMD_CANCEL            = 77, /* cancel                     */
+  CMD_MUTE_LOG          = 78, /* mute                       */
+  CMD_UNMUTE_LOG        = 79, /* unmute                     */
+  CMD_WEVENTS           = 80, /* write events to file       */
+  CMD_DIE               = 81, /* die, exit 1                */
+  CMD_QUIT              = 82, /* quit/exit                  */
 
 #define CMD_TPORT_BASE ( (int) CMD_QUIT + 1 )
   CMD_TPORT_ENUM /* config_const.h */
@@ -876,6 +950,7 @@ static const ConsoleCmdType command_type[] = {
   { CMD_PSUB_STOP         , SUB_ARG    }, /* punsubscribe <rv-pattern> [file] */
   { CMD_GSUB_START        , SUB_ARG    }, /* gsubscribe <glob-pattern> [file] */
   { CMD_GSUB_STOP         , SUB_ARG    }, /* gunsubscribe <glob-pattern> [file] */
+  { CMD_SNAP              , SUB_ARG    }, /* snap <subject> [file] */
   { CMD_PUBLISH           , PUB_ARG    }, /* pub <subject> message */
   { CMD_TRACE             , PUB_ARG    }, /* trace <subject> message */
   { CMD_PUB_ACK           , PUB_ARG    }, /* ack <subject> message */
@@ -918,7 +993,7 @@ static const ConsoleCmdString console_cmd[] = {
   { CMD_CONNECT    , "connect"      ,0,0}, /* connect <tport> */
   { CMD_LISTEN     , "listen"       ,0,0}, /* listen <tport> */
   { CMD_SHUTDOWN   , "shutdown"     ,0,0}, /* shutdown <tport> */
-  { CMD_NETWORK    , "network"      ,0,0}, /* network <svc> <network> */
+  { CMD_NETWORK    , "network"      ,0,0}, /* network <svc> [network] */
   { CMD_CONFIGURE  , "configure"    ,0,0}, /* configure <subcmd> */
   { CMD_SAVE       , "save"         ,0,0}, /* save config */
   { CMD_SUB_START  , "subscribe"    ,0,0}, /* subscribe <subject> */
@@ -927,6 +1002,7 @@ static const ConsoleCmdString console_cmd[] = {
   { CMD_PSUB_STOP  , "punsubscribe" ,0,0}, /* punsubscribe <rv-pattern> */
   { CMD_GSUB_START , "gsubscribe"   ,0,0}, /* gsubscribe <glob-pattern> */
   { CMD_GSUB_STOP  , "gunsubscribe" ,0,0}, /* gunsubscribe <glob-pattern> */
+  { CMD_SNAP       , "snap"         ,0,0}, /* snap <subject> */
   { CMD_PUBLISH    , "publish"      ,0,0}, /* pub <subject> message */
   { CMD_TRACE      , "trace"        ,0,0}, /* trace <subject> message */
   { CMD_PUB_ACK    , "ack"          ,0,0}, /* ack <subject> message */
@@ -980,6 +1056,7 @@ static const ConsoleCmdString show_cmd[] = {
   { CMD_SHOW_CACHE     , "cache"         ,0,0}, /* show cache */
   { CMD_SHOW_POLL      , "poll"          ,0,0}, /* show poll */
   { CMD_SHOW_HOSTS     , "hosts"         ,0,0}, /* show hosts */
+  { CMD_SHOW_RPCS      , "rpcs"          ,0,0}, /* show rpc */
   { CMD_SHOW_RUN       , "running"       ,0,0}, /* show running */
   { CMD_SHOW_START     , "startup"       ,0,0}  /* show startup */
 };
@@ -1008,7 +1085,7 @@ static const ConsoleCmdString help_cmd[] = {
   { CMD_CONNECT          , "connect", "T",       "Start tport connect"                               },
   { CMD_LISTEN           , "listen", "T",        "Start tport listener"                              },
   { CMD_SHUTDOWN         , "shutdown", "T",      "Shutdown tport"                                    },
-  { CMD_NETWORK          , "network", "S N",     "Configure service and join network"                },
+  { CMD_NETWORK          , "network", "S [N]",   "Configure service and join network"                },
   { CMD_CONFIGURE        , "configure", "",      "Configure ..."                                     },
   { CMD_CONFIGURE_TPORT  , "configure transport", "T",  "Configure tport T"                          },
   { CMD_CONFIGURE_PARAM  , "configure parameter", "P V", "Configure parameter P = V"                 },
@@ -1045,6 +1122,7 @@ static const ConsoleCmdString help_cmd[] = {
   { CMD_SHOW_CACHE       , "show cache", "",     "Show routing cache geom, hits and misses"          },
   { CMD_SHOW_POLL        , "show poll", "",      "Show poll dispatch latency"                        },
   { CMD_SHOW_HOSTS       , "show hosts", "",     "Show rv hosts and services"                        },
+  { CMD_SHOW_RPCS        , "show rpcs", "",      "Show rpcs and subs running"                        },
   { CMD_SHOW_RUN         , "show running", "",   "Show current config running"                       },
   { CMD_SHOW_RUN_TPORTS  , "show running transport","[T]", "Show transports running, T or all"       },
   { CMD_SHOW_RUN_SVCS    , "show running service","[S]",   "Show services running config, S or all"  },
@@ -1063,6 +1141,7 @@ static const ConsoleCmdString help_cmd[] = {
   { CMD_PSUB_STOP        , "punsub","W [F]",     "Unsubscribe rv-wildcard W, stop output file F"     },
   { CMD_GSUB_START       , "gsub","W [F]",       "Subscribe glob-wildcard W, output to file F"       },
   { CMD_GSUB_STOP        , "gunsub","W [F]",     "Unsubscribe glob-wildcard W, stop output file F"   },
+  { CMD_SNAP             , "snap","S [F]",       "Publish to subject S with inbox reply"             },
   { CMD_PUBLISH          , "pub","S M",          "Publish msg string M to subject S"                 },
   { CMD_TRACE            , "trace","S M",        "Publish msg string M to subject S, with reply"     },
   { CMD_PUB_ACK          , "ack","S M",          "Publish msg string M to subject S, with ack"       },

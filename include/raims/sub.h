@@ -120,8 +120,10 @@ struct SubRefs {
 };
 
 struct SubArgs {
-  const char * sub;
-  uint16_t     sublen;
+  const char * sub,
+             * inbox;
+  uint16_t     sublen,
+               inbox_len;
   bool         is_start;
   SubOnMsg   * cb;
   uint64_t     seqno;
@@ -137,12 +139,11 @@ struct SubArgs {
   bool         bloom_updated,
                resize_bloom;
 
-  SubArgs( const char *s,  uint16_t len,  bool start,  SubOnMsg *on_msg,
-           uint64_t n,  uint32_t fl,  uint32_t tp,  uint32_t h = 0 ) :
-    sub( s ), sublen( len ), is_start( start ), cb( on_msg ), seqno( n ),
-    flags( fl ), hash( h ), tport_id( tp ),
-    sub_count( 0 ), console_count( 0 ), ipc_count( 0 ),
-    sub_coll( 0 ), console_coll( 0 ), ipc_coll( 0 ),
+  SubArgs( const char *s,  uint16_t len,  const char *i,  uint16_t ilen,  bool start,
+           SubOnMsg *on_msg,  uint64_t n,  uint32_t fl,  uint32_t tp,  uint32_t h = 0 ) :
+    sub( s ), inbox( i ), sublen( len ), inbox_len( ilen ), is_start( start ), cb( on_msg ),
+    seqno( n ), flags( fl ), hash( h ), tport_id( tp ), sub_count( 0 ), console_count( 0 ),
+    ipc_count( 0 ), sub_coll( 0 ), console_coll( 0 ), ipc_coll( 0 ),
     bloom_updated( false ), resize_bloom( false ) {
     if ( h == 0 ) this->hash = kv_crc_c( s, len, 0 );
   }
@@ -725,6 +726,7 @@ struct SubDB {
   void update_bloom( SubArgs &ctx ) noexcept;
   /* start a new sub for this session */
   uint64_t console_sub_start( const char *sub,  uint16_t sublen,
+                              const char *inbox,  uint16_t inbox_len,
                               SubOnMsg *cb ) noexcept;
   uint64_t console_sub_stop( const char *sub,  uint16_t sublen ) noexcept;
   /* start a new pattern sub for this session */

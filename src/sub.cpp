@@ -99,9 +99,11 @@ SubDB::update_bloom( SubArgs &ctx ) noexcept
 /* my subscripion started */
 uint64_t
 SubDB::console_sub_start( const char *sub,  uint16_t sublen,
+                          const char *inbox,  uint16_t inbox_len,
                           SubOnMsg *cb ) noexcept
 {
-  SubArgs ctx( sub, sublen, true, cb, this->sub_seqno + 1, CONSOLE_SUB, 0 );
+  SubArgs ctx( sub, sublen, inbox, inbox_len, true, cb, this->sub_seqno + 1,
+               CONSOLE_SUB, 0 );
   return this->sub_start( ctx );
 }
 
@@ -109,14 +111,15 @@ SubDB::console_sub_start( const char *sub,  uint16_t sublen,
 uint64_t
 SubDB::console_sub_stop( const char *sub,  uint16_t sublen ) noexcept
 {
-  SubArgs ctx( sub, sublen, false, NULL, 0, CONSOLE_SUB, 0 );
+  SubArgs ctx( sub, sublen, NULL, 0, false, NULL, 0, CONSOLE_SUB, 0 );
   return this->sub_stop( ctx );
 }
 /* my subscripion started on an ipc tport */
 uint64_t
 SubDB::ipc_sub_start( NotifySub &sub,  uint32_t tport_id ) noexcept
 {
-  SubArgs ctx( sub.subject, sub.subject_len, true, NULL, this->sub_seqno + 1,
+  SubArgs ctx( sub.subject, sub.subject_len, NULL, 0, true, NULL,
+               this->sub_seqno + 1,
                IPC_SUB, tport_id, sub.subj_hash );
   return this->sub_start( ctx );
 }
@@ -124,7 +127,7 @@ SubDB::ipc_sub_start( NotifySub &sub,  uint32_t tport_id ) noexcept
 uint64_t
 SubDB::ipc_sub_stop( NotifySub &sub,  uint32_t tport_id ) noexcept
 {
-  SubArgs ctx( sub.subject, sub.subject_len, false, NULL, 0, IPC_SUB,
+  SubArgs ctx( sub.subject, sub.subject_len, NULL, 0, false, NULL, 0, IPC_SUB,
                tport_id, sub.subj_hash );
   return this->sub_stop( ctx );
 }
@@ -161,8 +164,8 @@ SubDB::fwd_sub( SubArgs &ctx ) noexcept
   if ( ( ctx.flags & CONSOLE_SUB ) != 0 ) {
     rte = this->user_db.ipc_transport;
     if ( rte != NULL ) {
-      NotifySub nsub( ctx.sub, ctx.sublen, ctx.hash, this->my_src_fd,
-                      false, 'M' );
+      NotifySub nsub( ctx.sub, ctx.sublen, ctx.inbox, ctx.inbox_len, ctx.hash,
+                      this->my_src_fd, false, 'C' );
       nsub.bref = &this->console;
       if ( ctx.is_start )
         rte->sub_route.do_notify_sub( nsub );

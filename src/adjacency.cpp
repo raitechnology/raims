@@ -1424,6 +1424,7 @@ GraphDescription::find_peer_mesh( uint32_t uid,  AdjacencySpace *set ) noexcept
     peer_conn.count = 0;
     for ( ok = graph_mesh.first( mesh_uid ); ok;
           ok = graph_mesh.next( mesh_uid ) ) {
+      /* set is not the mesh_uid set, match by tport name */
       if ( ! this->find_peer_conn( *set, mesh_uid, peer_uid, conn_id ) )
         goto not_mesh_a_member;
       peer_conn.push( conn_id );
@@ -1489,10 +1490,14 @@ GraphDescription::find_peer_conn( AdjacencySpace &set,  uint32_t uid,
         continue;
       if ( peer_set->tport_type.equals( set.tport_type ) &&
            peer_set->is_member( uid ) ) {
-        if ( peer_set->rem_tport_id == set.tport_id )
-          return true;
         if ( peer_set->tport.equals( set.tport ) )
           return true;
+        if ( peer_set->tport_type.equals( T_TCP, T_TCP_SZ ) ) {
+          if ( peer_set->rem_tport_id == set.tport_id )
+            return true;
+        }
+        /*if ( peer_set->tport.equals( set.tport ) )
+          return true;*/
         /* if ports are named differently, use at last resort since we
          * know the two peers are adjacent
         if ( weak_equals == NULL ) {

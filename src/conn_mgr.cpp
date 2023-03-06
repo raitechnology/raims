@@ -42,49 +42,30 @@ TransportRoute::is_self_connect( kv::EvSocket &conn ) noexcept
   return false;
 }
 
-static const char nats_kind[]  = "nats",
-                  redis_kind[] = "redis",
+static const char /*nats_kind[]  = "nats",
+                  redis_kind[] = "redis",*/
                   rv_kind[]    = "rv";
 
 TransportRvHost::TransportRvHost( TransportRoute &r,  kv::EvSocket &c ) noexcept
-                : rte( r ), conn( c ), nats_service( 0 ), redis_service( 0 ),
-                  rv_host( 0 ), proto( 0 ), rv_service( 0 )
+                : rte( r ), conn( c ), rv_host( 0 ), rv_service( 0 )
 {
   if ( r.rv_svc != NULL ) {
-    if ( ::strcmp( c.kind, nats_kind ) == 0 ) {
-      this->nats_service = (EvNatsService *) &c;
-      EvNatsTransportListen & listen =
-        (EvNatsTransportListen &) nats_service->listen;
-      this->rv_service = listen.rv_service;
-      this->rv_host    = &listen.rv_host;
-      this->proto      = nats_kind;
-    }
-    else if ( ::strcmp( c.kind, redis_kind ) == 0 ) {
-      this->redis_service = (EvRedisService *) &c;
-      EvRedisTransportListen & listen =
-        (EvRedisTransportListen &) redis_service->listen;
-      this->rv_service = listen.rv_service;
-      this->rv_host    = &listen.rv_host;
-      this->proto      = redis_kind;
-    }
-    else if ( ::strcmp( c.kind, rv_kind ) == 0 ) {
-      this->rv_host    = &((EvRvService &) c).host;
-      this->rv_service = (*this->rv_host)->get_service();
-      this->proto      = rv_kind;
-    }
+    if ( ! c.get_service( &this->rv_host, this->rv_service ) )
+      this->rv_service = 0;
   }
 }
 
 int
 TransportRvHost::start_session( void ) noexcept
 {
-  if ( this->proto == NULL || this->proto == rv_kind )
+  if ( this->rv_service == 0 || this->rv_host == NULL ||
+       ::strcmp( this->conn.kind, rv_kind ) == 0 )
     return 0;
+
   RvHost  * host;
   RvHostNet hn( this->rv_service, 0, true );
-  uint32_t  delay_secs;
   char      session[ EvSocket::MAX_SESSION_LEN ];
-  size_t    session_len;
+  uint32_t  delay_secs;
   int       status;
 
   *this->rv_host = NULL;
@@ -98,12 +79,9 @@ TransportRvHost::start_session( void ) noexcept
 
   host->active_clients++;
   host->start_host2( 0 );
-  session_len = host->make_session( this->conn.active_ns, session );
+  host->make_session( this->conn.active_ns, session );
 
-  if ( this->nats_service != NULL )
-    this->nats_service->set_session( session, session_len );
-  else if ( this->redis_service != NULL )
-    this->redis_service->set_session( session, session_len );
+  this->conn.set_session( session );
   if ( host->active_clients == 1 )
     host->send_host_start( NULL );
   host->send_session_start( this->conn );
@@ -114,14 +92,147 @@ TransportRvHost::start_session( void ) noexcept
 void
 TransportRvHost::stop_session( void ) noexcept
 {
-  if ( this->proto == NULL || this->proto == rv_kind )
+  if ( this->rv_service == 0 || this->rv_host == NULL ||
+       ::strcmp( this->conn.kind, rv_kind ) == 0 )
     return;
-  if ( this->rv_host != NULL ) {
-    RvHost * host = *this->rv_host;
-    host->send_session_stop( this->conn );
-    if ( host->stop_network() )
-      this->rte.rv_svc->stop_host( *host );
+  RvHost * host = *this->rv_host;
+  host->send_session_stop( this->conn );
+  if ( host->stop_network() )
+    this->rte.rv_svc->stop_host( *host );
+}
+
+uint16_t
+SessionMgr::parse_rv_service( const char *svc,  size_t svclen ) noexcept
+{
+  uint32_t match_svc = 0;
+  if ( svclen < 6 ) {
+    for ( size_t i = 0; i < svclen; i++ ) {
+      if ( svc[ i ] < '0' || svc[ i ] > '9' )
+        return 0;
+      match_svc = match_svc * 10 + (uint32_t) (uint8_t) ( svc[ i ] - '0' );
+    }
+    if ( match_svc > 0xffffU ) /* must be short */
+      match_svc = 0;
   }
+  return (uint16_t) match_svc;
+}
+
+uint16_t
+SessionMgr::sub_has_rv_service( const char *sub,  size_t sublen ) noexcept
+{
+  uint32_t match_svc = 0;
+  if ( sublen < 3 || sub[ 0 ] != '_' )
+    return 0;
+  for ( size_t i = 1; i < sublen; i++ ) {
+    if ( sub[ i ] < '0' || sub[ i ] > '9' ) {
+      if ( i == 1 || i > 6 || sub[ i ] != '.' ) /* look for _<svc>. */
+        return 0;
+      break;
+    }
+    match_svc = match_svc * 10 + (uint32_t) (uint8_t) ( sub[ i ] - '0' );
+  }
+  if ( match_svc > 0xffffU ) /* must be short */
+    return 0;
+  return (uint16_t) match_svc;
+}
+
+RvSvc *
+SessionMgr::get_rv_session( uint16_t svc,  bool start_host ) noexcept
+{
+  size_t i;
+  for ( i = 0; i < this->rv_svc_db.count; i++ ) {
+    if ( this->rv_svc_db.ptr[ i ].svc == svc )
+      break;
+  }
+  RvSvc & x = this->rv_svc_db[ i ];
+  x.svc = svc;
+  if ( x.ref_count == 0 ) {
+    if ( ! start_host || this->user_db.ipc_transport == NULL )
+      return NULL;
+    TransportRoute & ipc_rte = *this->user_db.ipc_transport;
+    if ( ipc_rte.rv_svc == NULL ) {
+      ipc_rte.rv_svc = new ( malloc( sizeof( RvTransportService ) ) )
+        RvTransportService( ipc_rte );
+    }
+    RvHostNet hn( svc, 0, true );
+    uint32_t  delay_secs;
+    int       status;
+
+    status = ipc_rte.rv_svc->db.start_service( x.host, this->poll,
+                                               ipc_rte.sub_route, hn );
+    if ( status != 0 )
+      return NULL;
+    status = ipc_rte.rv_svc->start_host( *x.host, hn, delay_secs );
+    if ( status != 0 )
+      return NULL;
+
+    x.host->active_clients++;
+    x.host->start_host2( 0 );
+    x.session_len = x.host->make_session( this->poll.now_ns, x.session );
+
+    if ( x.host->active_clients == 1 )
+      x.host->send_host_start( NULL );
+    x.host->send_session_start( ipc_rte );
+  }
+  return &x;
+}
+
+void
+SessionMgr::stop_rv_session( RvSvc *rv_svc ) noexcept
+{
+  TransportRoute & ipc_rte = *this->user_db.ipc_transport;
+  rv_svc->host->send_session_stop( ipc_rte );
+  if ( rv_svc->host->stop_network() )
+    ipc_rte.rv_svc->stop_host( *rv_svc->host );
+}
+/* get session name */
+size_t
+TransportRoute::get_userid( char userid[ MAX_USERID_LEN ] ) noexcept
+{
+  if ( ! this->is_ipc() )
+    return 0;
+  size_t len = this->user_db.user.user.len;
+  if ( len > MAX_USERID_LEN - 1 )
+    len = MAX_USERID_LEN - 1;
+  ::memcpy( userid, this->user_db.user.user.val, len );
+  userid[ len ] = '\0';
+  return len;
+}
+/* get session name */
+size_t
+TransportRoute::get_session( uint16_t svc,
+                             char session[ MAX_SESSION_LEN ] ) noexcept
+{
+  if ( ! this->is_ipc() )
+    return 0;
+  size_t i;
+  for ( i = 0;; i++ ) {
+    if ( i == this->mgr.rv_svc_db.count )
+      return 0;
+    if ( this->mgr.rv_svc_db.ptr[ i ].svc == svc )
+      break;
+  }
+  RvSvc & x = this->mgr.rv_svc_db.ptr[ i ];
+  ::memcpy( session, x.session, x.session_len );
+  session[ x.session_len ] = '\0';
+  return x.session_len;
+}
+/* get session name */
+size_t
+TransportRoute::get_subscriptions( uint16_t svc,  SubRouteDB &subs ) noexcept
+{
+  if ( ! this->is_ipc() )
+    return 0;
+  return this->mgr.console.get_subscriptions( svc, subs );
+}
+
+size_t
+TransportRoute::get_patterns( uint16_t svc,  int pat_fmt,
+                              SubRouteDB &pats ) noexcept
+{
+  if ( ! this->is_ipc() )
+    return 0;
+  return this->mgr.console.get_patterns( svc, pat_fmt, pats );
 }
 
 void
@@ -139,7 +250,7 @@ TransportRoute::on_connect( kv::EvSocket &conn ) noexcept
         int status;
         if ( (status = svc.start_session()) != 0 ) {
           this->printf( "status %d, %s connect to service %u\n",
-                        status, svc.proto, svc.rv_service );
+                        status, svc.conn.kind, svc.rv_service );
         }
       }
     }
