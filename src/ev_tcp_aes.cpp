@@ -3,6 +3,7 @@
 #include <string.h>
 #include <stdint.h>
 #include <raims/ev_tcp_aes.h>
+#include <raims/debug.h>
 
 using namespace rai;
 using namespace ms;
@@ -33,7 +34,7 @@ AES_Connection::recv_key( void ) noexcept
   ::memcpy( &check, this->recv, CHECK_SIZE );
   check = kv_bswap64( check );
   if ( ( check >> 32 ) != 0 ) {
-    printf( "ignoring, zero prefix missing\n" );
+    d_tcp( "ignoring, zero prefix missing\n" );
     this->pushpop( EV_CLOSE, EV_PROCESS );
     ok = false;
   }
@@ -45,7 +46,7 @@ AES_Connection::recv_key( void ) noexcept
                        kv_crc_c( ex.recv_nonce.digest(), NONCE_SIZE,
                        kv_crc_c( ex.psk, ex.psk_len, AES_CONN_VER ) ) );
     if ( check != check2 ) {
-      printf( "ignoring, failed crc check\n" );
+      d_tcp( "ignoring, failed crc check\n" );
       this->pushpop( EV_CLOSE, EV_PROCESS );
       ok = false;
     }
@@ -80,6 +81,10 @@ AES_Connection::read( void ) noexcept
   if ( this->exch != NULL ) {
     if ( ! this->recv_key() )
       return;
+    if ( this->have_key ) { /* should make this a callback to ev_tcp_transport*/
+      if ( this->notify != NULL )
+        this->notify->on_connect( *this );
+    }
   }
   if ( this->have_key ) {
     size_t enc_len = this->bytes_recv - this->recv_aes.off;

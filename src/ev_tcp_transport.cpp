@@ -223,8 +223,9 @@ EvTcpTransport::start( uint64_t tid ) noexcept
     uint32_t h = this->rte->sub_route.prefix_seed( 0 );
     this->rte->sub_route.add_pattern_route( h, this->fd, 0 );
   }
-  if ( this->notify != NULL )
+  if ( ! this->encrypt && this->notify != NULL )
     this->notify->on_connect( *this );
+  /* if encrypt, notify after key exchange */
 }
 
 void
@@ -338,10 +339,13 @@ EvTcpTransport::release( void ) noexcept
     this->poll.timer.remove_timer( this->fd, this->timer_id, 0 );
   if ( this->bp_in_list() )
     this->bp_retire( *this );
+  if ( this->notify != NULL ) {
+    /* not notified unless have key */
+    if ( ! this->encrypt || this->AES_Connection::have_key )
+      this->notify->on_shutdown( *this, NULL, 0 );
+  }
   if ( this->encrypt )
     this->AES_Connection::release_aes();
-  if ( this->notify != NULL )
-    this->notify->on_shutdown( *this, NULL, 0 );
   this->EvConnection::release_buffers();
 }
 
