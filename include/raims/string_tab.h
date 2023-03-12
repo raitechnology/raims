@@ -9,8 +9,6 @@
 namespace rai {
 namespace ms {
 
-struct ConfigPrinter;
-
 struct StringVal {
   void * operator new( size_t, void *ptr ) { return ptr; }
   const char * val; /* stirng value */
@@ -42,8 +40,8 @@ struct StringVal {
     this->val = s.val; this->id = s.id; this->len = s.len;
     return *this;
   }
-  void print_js( ConfigPrinter &p ) const noexcept;
-  void print_y( ConfigPrinter &p ) const noexcept;
+  void print_js( md::MDOutput &p ) const noexcept;
+  void print_y( md::MDOutput &p ) const noexcept;
   void zero( void ) { this->val = NULL; this->id = 0; this->len = 0; }
   bool get_int( int &ival ) const {
     if ( this->val[ 0 ] >= '0' && this->val[ 0 ] <= '9' ) {
@@ -83,6 +81,10 @@ struct StringTab {
     uint32_t          id;
     StringCollision() : next( 0 ), str( 0 ), id( 0 ) {}
   };
+  struct FreeObj {
+    FreeObj * next, * back;
+    size_t    size;
+  };
 
   kv::SLinkList<StringArray> str; /* list of strings[32] alloced */
   md::MDMsgMem    & mem;          /* store strings here */
@@ -92,6 +94,8 @@ struct StringTab {
   uint32_t          next_id,      /* next avail str id */
                     small_left;
   char            * small_str;
+  kv::DLinkList<FreeObj> free_list;
+  uint64_t          free_bits;
 
   uint32_t ref_string( const char *str,  size_t len,  StringVal &sv ) noexcept;
   uint32_t add_string( StringVal &sv ) {
@@ -104,15 +108,21 @@ struct StringTab {
       this->ref_string( str, len, sv );
   }
   bool get_string( uint32_t val,  StringVal &sv ) noexcept;
+  void * make_obj( size_t sz ) noexcept;
+  void free_obj( size_t sz,  void *p ) noexcept;
 
   template<class Obj>
   Obj *make( void ) {
-    return new ( this->mem.make( sizeof( Obj ) ) ) Obj();
+    return new ( this->make_obj( sizeof( Obj ) ) ) Obj();
+  }
+  template<class Obj>
+  void release( Obj *o ) {
+    return this->free_obj( sizeof( Obj ), o );
   }
 
   StringTab( md::MDMsgMem &m )
       : mem( m ), id( 0 ), uid( 0 ), str_col( 0 ), next_id( 1 ),
-        small_left( 0 ), small_str( 0 ) {
+        small_left( 0 ), small_str( 0 ), free_bits( 0 ) {
     this->id  = kv::UIntHashTab::resize( NULL );
     this->uid = kv::UIntHashTab::resize( NULL );
   }

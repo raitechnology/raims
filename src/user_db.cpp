@@ -1858,6 +1858,11 @@ UserDB::add_inbox_route( UserBridge &n,  UserRoute *primary ) noexcept
               primary->mcast_fd );
     if ( ! primary->is_set( IN_ROUTE_LIST_STATE ) )
       this->push_user_route( n, *primary );
+    if ( n.bloom_rt[ 0 ] != NULL ) {
+      n.bloom_rt[ 0 ]->del_bloom_ref( &n.bloom );
+      n.bloom_rt[ 0 ]->remove_if_empty();
+      n.bloom_rt[ 0 ] = NULL;
+    }
     n.bloom_rt[ 0 ] = primary->rte.sub_route.create_bloom_route(
                                                primary->mcast_fd, &n.bloom, 0 );
     primary->rte.sub_route.do_notify_bloom_ref( n.bloom );

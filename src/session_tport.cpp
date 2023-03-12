@@ -45,8 +45,8 @@ SessionMgr::add_startup_transports( const char *name,  size_t name_sz,
   ConfigTree::Transport  * tport;
   TransportRoute * rte;
   size_t len;
-  for ( p = this->tree.parameters.hd; p != NULL; p = p->next ) {
-    for ( sp = p->parms.hd; sp != NULL; sp = sp->next ) {
+  for ( p = this->tree.startup.hd; p != NULL; p = p->next ) {
+    for ( sp = p->list.hd; sp != NULL; sp = sp->next ) {
       if ( sp->name.equals( name, name_sz ) ) {
         for ( len = sp->value.len; len > 0 && sp->value.val[ len - 1 ] == ' ';
           len-- ) ;
@@ -109,6 +109,7 @@ SessionMgr::add_rvd_transports( const char *listen,  const char *http,
     }
 
     rvd->tport_id = this->tree.transport_cnt++;
+    rvd->is_temp = true;
     this->tree.transports.push_tl( rvd );
   }
   if ( ! this->add_transport( *rvd, true ) )
@@ -132,7 +133,7 @@ SessionMgr::add_rvd_transports( const char *listen,  const char *http,
       if ( http == NULL ) {
         const char * addr = NULL;
         if ( rvd->get_route_str( R_LISTEN, addr ) ) {
-          int port = web->get_host_port( addr, tmp, len );
+          int port = web->get_host_port( addr, tmp, len, this->tree.hosts );
           if ( port != 0 ) {
             port += 80;
             if ( web->is_wildcard( addr ) )
@@ -151,6 +152,7 @@ SessionMgr::add_rvd_transports( const char *listen,  const char *http,
       web->route.push_tl( p );
 
       web->tport_id = this->tree.transport_cnt++;
+      web->is_temp = true;
       this->tree.transports.push_tl( web );
 
       if ( ! this->add_transport( *web, true ) )
@@ -178,6 +180,7 @@ SessionMgr::add_ipc_transport( void ) noexcept
     stab.ref_string( T_IPC, T_IPC_SZ, tptr->type );
     tptr->tport = tptr->type;
     tptr->tport_id = this->tree.transport_cnt++;
+    tptr->is_temp = true;
     this->tree.transports.push_tl( tptr );
   }
   void * p = aligned_malloc( sizeof( TransportRoute ) );
@@ -195,9 +198,9 @@ SessionMgr::add_ipc_transport( void ) noexcept
              * map_name = NULL,
              * db_num   = NULL;
 
-  this->tree.find_parameter( P_MAP_FILE, map_name, NULL );
-  this->tree.find_parameter( P_IPC_NAME, ipc_name, NULL );
-  this->tree.find_parameter( P_DB_NUM, db_num, NULL );
+  this->tree.parameters.find( P_MAP_FILE, map_name, NULL );
+  this->tree.parameters.find( P_IPC_NAME, ipc_name, NULL );
+  this->tree.parameters.find( P_DB_NUM, db_num, NULL );
 
   shm.ipc_name = ipc_name;
   if ( map_name != NULL ) {
@@ -252,6 +255,7 @@ SessionMgr::add_network( const char *net,  size_t net_len,
     t = stab.make<ConfigTree::Transport>();
     stab.ref_string( svc_buf, svc_buf_len, t->tport );
     t->tport_id = tree.transport_cnt++;
+    t->is_temp = true;
     tree.transports.push_tl( t );
 
     char host_ip[ 64 ];
@@ -373,6 +377,7 @@ SessionMgr::add_transport2( ConfigTree::Transport &t,
       stab.ref_string( "ipc", 3, tptr->type );
       stab.ref_string( svc_name, svc_len, tptr->tport );
       tptr->tport_id = this->tree.transport_cnt++;
+      tptr->is_temp = true;
       this->tree.transports.push_tl( tptr );
     }
   }
@@ -756,7 +761,8 @@ SessionMgr::add_mesh_connect( TransportRoute &mesh_rte,  const char *url,
   uint32_t     count;
   bool         is_new = true;
 
-  port = ConfigTree::Transport::get_host_port( host, host_buf, len );
+  port = ConfigTree::Transport::get_host_port( host, host_buf, len,
+                                               this->tree.hosts );
   opts.parse( mesh_rte.transport, PARAM_NB_CONNECT, *this );
 
   count = (uint32_t) this->user_db.transport_tab.count;
@@ -948,6 +954,7 @@ SessionMgr::start_name_services( ConfigTree::Transport &tport,
       tptr->route.push_tl( p );
 
       tptr->tport_id = this->tree.transport_cnt++;
+      tptr->is_temp = true;
       this->tree.transports.push_tl( tptr );
     }
     Unrouteable *un = this->unrouteable.find( tptr );

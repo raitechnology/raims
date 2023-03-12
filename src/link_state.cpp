@@ -391,7 +391,9 @@ UserDB::push_connected_user_route( UserBridge &n,  UserRoute &u_rte ) noexcept
     if ( debug_lnk )
       printf( "push sys_route %u\n", fd );
     rte.connected_auth.add( fd );
-    rte.sub_route.create_bloom_route( fd, &this->peer_bloom, 0 );
+
+    if ( ! this->peer_bloom.has_link( fd ) )
+      rte.sub_route.create_bloom_route( fd, &this->peer_bloom, 0 );
   }
   if ( this->start_time > n.start_time ) {
     if ( n.start_time == 0 )

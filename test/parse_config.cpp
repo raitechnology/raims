@@ -38,7 +38,7 @@ main( int argc, char *argv[] )
   StringTab        st( mem );
   ConfigErrPrinter err;
   ConfigTree     * tree;
-  ConfigPrinter    p;
+  MDOutput         p;
   os_stat          stbuf;
 
   if ( os_fstat( fn, &stbuf ) < 0 || ( stbuf.st_mode & S_IFDIR ) == 0 )
@@ -47,12 +47,13 @@ main( int argc, char *argv[] )
     tree = ConfigDB::parse_dir( fn, st, err );
 
   if ( tree != NULL ) {
+    ConfigJson json;
+    JsonValue *cfg = json.copy( tree, PRINT_NORMAL );
     if ( j == NULL ) {
-      int did_which;
-      tree->print_y( p, did_which, PRINT_ALL );
+      cfg->print_yaml( &p );
     }
     else {
-      tree->print_js( p );
+      cfg->print_json( &p );
     }
   }
   return 0;

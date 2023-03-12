@@ -51,7 +51,7 @@ struct GenFileTrans {
 };
 
 struct GenFileList : public kv::DLinkList< GenFileTrans > {
-  void print_files( void ) noexcept;
+  size_t print_files( void ) noexcept;
   bool commit_phase1( void ) noexcept;
   bool commit_phase2( void ) noexcept;
   void abort( void ) noexcept;
@@ -100,7 +100,6 @@ struct GenCfg {
   bool revoke_user( const char *user, size_t user_len ) noexcept;
   bool remove_user( const char *di,  const char *user,
                     size_t user_len ) noexcept;
-  void print_files( void ) noexcept;
   void ask_commit( bool auto_yes ) noexcept;
   void abort( void ) {
     this->list.abort();

@@ -133,8 +133,8 @@ main( int argc, char *argv[] )
     if ( tree == NULL )
       return 1;
 
-    tree->find_parameter( "pass", pass_file );
-    tree->find_parameter( "salt", salt_file );
+    tree->parameters.find( "pass", pass_file );
+    tree->parameters.find( "salt", salt_file );
     if ( ! cfg.init_pass_salt( dir_name, pass, pass_file, salt_file, false ) ) {
       fprintf( stderr, "Config exists in \"%s\", but pass/salt do not exist or "
                        "are unreadable, use -f to force\n", dir_name );
@@ -244,30 +244,29 @@ done:;
     tree = ConfigDB::parse_dir( dir_name, st, err );
     if ( tree == NULL )
       return 1;
-    int which = 0;
     const char * salt_file = NULL,
                * pass_file = NULL;
     char salt_path[ 1024 ], pass_path[ 1024 ];
     char * salt_data = NULL, * pass_data = NULL;
     size_t salt_size = 0, pass_size = 0;
 
-    tree->find_parameter( "salt", salt_file, ".salt" );
-    tree->find_parameter( "pass", pass_file, ".pass" );
+    tree->parameters.find( "salt", salt_file, ".salt" );
+    tree->parameters.find( "pass", pass_file, ".pass" );
     ::snprintf( salt_path, sizeof( salt_path ), "%s/%s", dir_name, salt_file );
     ::snprintf( pass_path, sizeof( pass_path ), "%s/%s", dir_name, pass_file );
     if ( load_secure_string( salt_path, salt_data, salt_size ) ) {
-      tree->set_parameter( st, "salt_data", salt_data );
-      tree->remove_parameter( "salt" );
+      tree->parameters.set( st, "salt_data", salt_data );
+      tree->parameters.remove( st, "salt" );
     }
     if ( load_secure_string( pass_path, pass_data, pass_size ) ) {
-      tree->set_parameter( st, "pass_data", pass_data );
-      tree->remove_parameter( "pass" );
+      tree->parameters.set( st, "pass_data", pass_data );
+      tree->parameters.remove( st, "pass" );
     }
     printf( "- Output config to \"%s\"\n", out_file );
     ConfigFilePrinter p;
     if ( p.open( out_file ) != 0 )
       return 1;
-    tree->print_y( p, which, PRINT_ALL );
+    tree->print_y( p, PRINT_NORMAL );
     p.close();
   }
   return 0;

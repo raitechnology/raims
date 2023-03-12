@@ -137,6 +137,7 @@ RvTransportService::get_rv_transport( RvHost &host,  bool create ) noexcept
     t = stab.make<ConfigTree::Transport>();
     stab.ref_string( rv_svc, svc_len, t->tport );
     t->tport_id = tree.transport_cnt++;
+    t->is_temp = true;
     tree.transports.push_tl( t );
   }
   return t;
@@ -333,7 +334,8 @@ RvTransportService::start_host( RvHost &host,  const RvHostNet &hn,
             char         tmp[ 256 ];
             const char * addr = un.web->http_url.val;
             size_t       len  = sizeof( tmp );
-            int          port = un.tport->get_host_port( addr, tmp, len );
+            int          port = un.tport->get_host_port( addr, tmp, len,
+                                                     this->rte.mgr.tree.hosts );
             if ( port != 0 && len > 0 ) {
               AddrInfo info;
               if ( info.get_address(addr, port, OPT_AF_INET|OPT_LISTEN) == 0 ) {

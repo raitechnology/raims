@@ -14,14 +14,14 @@ using namespace md;
 
 void
 EvPgmTransportParameters::parse_tport( const char *name,  ConfigTree::Transport &tport,
-                                       char net_buf[ 1024 ],
-                                       uint32_t reliability ) noexcept
+                                       char net_buf[ 1024 ],  uint32_t reliability,
+                                       SessionMgr &mgr ) noexcept
 {
   size_t len = 1024;
   int    ival;
   tport.get_route_str( name, this->network );
   if ( ! tport.get_route_int( R_PORT, this->port ) )
-    this->port = tport.get_host_port( this->network, net_buf, len );
+    this->port = tport.get_host_port( this->network, net_buf, len, mgr.tree.hosts );
   if ( tport.is_wildcard( this->network ) )
     this->network = NULL;
 

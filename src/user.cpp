@@ -28,22 +28,22 @@ rai::ms::init_pass( ConfigTree *tree,  CryptPass &pass,
     return false;
   if ( dir_name == NULL )
     dir_name = ".";
-  if ( tree->find_parameter( "salt_data", salt_data, NULL ) ) {
+  if ( tree->parameters.find( "salt_data", salt_data, NULL ) ) {
     if ( ! pass.init_salt( salt_data ) )
       return false;
   }
   else {
-    tree->find_parameter( "salt", salt_file, ".salt" );
+    tree->parameters.find( "salt", salt_file, ".salt" );
     if ( ! make_path( path, sizeof( path ), "%s/%s", dir_name, salt_file ) ||
          ! pass.init_salt_file( path ) )
       return false;
   }
-  if ( tree->find_parameter( "pass_data", pass_data, NULL ) ) {
+  if ( tree->parameters.find( "pass_data", pass_data, NULL ) ) {
     if ( ! pass.init_pass( pass_data ) )
       return false;
   }
   else {
-    tree->find_parameter( "pass", pass_file, ".pass" );
+    tree->parameters.find( "pass", pass_file, ".pass" );
     if ( ! make_path( path, sizeof( path ), "%s/%s", dir_name, pass_file ) ||
          ! pass.init_pass_file( path ) )
       return false;

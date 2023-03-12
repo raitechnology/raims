@@ -10,6 +10,7 @@ namespace rai {
 namespace ms {
 
 struct TransportRoute;
+struct SessionMgr;
 
 struct EvPgmTransportParameters {
   const char * network;    /* netork:  interface;recv-mcast[,mc];send-mcast */
@@ -27,7 +28,8 @@ struct EvPgmTransportParameters {
       txw_secs( 15 ), mcast_loop( 2 ) {}
 
   void parse_tport( const char *name,  ConfigTree::Transport &tport,
-                    char net_buf[ 1024 ],  uint32_t reliability ) noexcept;
+                    char net_buf[ 1024 ],  uint32_t reliability,
+                    SessionMgr &mgr ) noexcept;
 };
 
 struct EvPgmTransport : public kv::EvSocket {

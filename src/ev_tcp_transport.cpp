@@ -93,7 +93,7 @@ EvTcpTransportParameters::parse_tport( ConfigTree::Transport &tport,
       hostp = NULL;
     tmp[ 0 ] = '\0';
     size_t len  = sizeof( tmp );
-    int    port = tport.get_host_port( hostp, tmp, len );
+    int    port = tport.get_host_port( hostp, tmp, len, mgr.tree.hosts );
     if ( port == 0 )
       port = port2;
     if ( tport.is_wildcard( hostp ) )

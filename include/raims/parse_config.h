@@ -24,34 +24,23 @@ struct ConfigDB {
   ConfigTree::Service    * s;
   ConfigTree::Transport  * t;
   ConfigTree::Group      * g;
-  /*uint32_t star_id, gt_id;*/
 
   ConfigDB( ConfigTree &t,  md::MDMsgMem &m,  InodeStack *stk,
             StringTab &st )
     : cfg( t ), mem( m ), ino_stk( stk ), str( st ), filename( NULL ),
       u( 0 ), s( 0 ), t( 0 ), g( 0 )/*, star_id( 0 ), gt_id( 0 )*/ {}
-#if 0
-  bool subscribes_everything( const StringVal &str ) {
-    return str.id == this->gt_id;
-  }
-  bool includes_all_users( const StringVal &str ) {
-    return str.id == this->star_id;
-  }
-  bool includes_all_svcs( const StringVal &str ) {
-    return str.id == this->star_id;
-  }
-#endif
+
   template<class Obj, class... Ts> /* node constructor, puts nodes in mem */
   Obj *make( Ts... args ) {
     return new ( this->mem.make( sizeof( Obj ) ) ) Obj( args... );
   }
 
   static ConfigTree * parse_tree( const char *cfg_name,  StringTab &st,
-                                  ConfigPrinter &err ) noexcept;
+                                  md::MDOutput &err ) noexcept;
   static ConfigTree * parse_dir( const char *dir_name,  StringTab &st,
-                                 ConfigPrinter &err ) noexcept;
+                                 md::MDOutput &err ) noexcept;
   static ConfigTree * parse_jsfile( const char *fn,  StringTab &st,
-                                    ConfigPrinter &err ) noexcept;
+                                    md::MDOutput &err ) noexcept;
   int parse_glob( const char *fn,  uint32_t &match ) noexcept;
   int parse_file( const char *fn ) noexcept;
   int parse_jsconfig( const char *buf,  size_t buflen,  const char *fn ) noexcept;
@@ -76,12 +65,17 @@ struct ConfigDB {
   int parse_object_array( const char *where,  md::MDMsg &msg,
                           md::MDReference &mref,
                           const ObjectParse &obj ) noexcept;
+  int parse_object_list( const char *where, md::MDMsg &msg,
+                         md::MDName &name,  md::MDReference &mref,
+                         ConfigTree::ParametersList &parms ) noexcept;
   int parse_include( md::MDMsg &, md::MDName &, md::MDReference & ) noexcept;
   int parse_users( md::MDMsg &, md::MDName &, md::MDReference & ) noexcept;
   int parse_services( md::MDMsg &, md::MDName &, md::MDReference & ) noexcept;
   int parse_transports( md::MDMsg &, md::MDName &, md::MDReference & ) noexcept;
   int parse_groups( md::MDMsg &, md::MDName &, md::MDReference & ) noexcept;
   int parse_parameters( md::MDMsg &, md::MDName &, md::MDReference & ) noexcept;
+  int parse_startup( md::MDMsg &, md::MDName &, md::MDReference & ) noexcept;
+  int parse_hosts( md::MDMsg &, md::MDName &, md::MDReference & ) noexcept;
 
   int parse_users_user( md::MDMsg &, md::MDName &, md::MDReference & ) noexcept;
   int parse_users_svc( md::MDMsg &, md::MDName &, md::MDReference & ) noexcept;
@@ -106,23 +100,23 @@ struct ConfigDB {
 
   void check_null( ConfigTree::PairList &list ) noexcept;
   void check_null( ConfigTree::StrList  &list ) noexcept;
-  bool check_strings( ConfigPrinter &p ) noexcept;
+  bool check_strings( md::MDOutput &p ) noexcept;
   bool check_string( StringVal &s,  StringTab &str,
-                     const char *where,  ConfigPrinter &p ) noexcept;
+                     const char *where,  md::MDOutput &p ) noexcept;
   bool check_strings( ConfigTree::User &u,  StringTab &str,
-                      ConfigPrinter &p ) noexcept;
+                      md::MDOutput &p ) noexcept;
   bool check_strings( ConfigTree::StringPair &pa,  StringTab &str,
-                      const char *where,  ConfigPrinter &p ) noexcept;
+                      const char *where,  md::MDOutput &p ) noexcept;
   bool check_strings( ConfigTree::StringList &l,  StringTab &str,
-                      const char *where,  ConfigPrinter &p ) noexcept;
+                      const char *where,  md::MDOutput &p ) noexcept;
   bool check_strings( ConfigTree::Service &svc,  StringTab &str,
-                      ConfigPrinter &p ) noexcept;
+                      md::MDOutput &p ) noexcept;
   bool check_strings( ConfigTree::Transport &tport,  StringTab &str,
-                      ConfigPrinter &p ) noexcept;
+                      md::MDOutput &p ) noexcept;
   bool check_strings( ConfigTree::Group &grp,  StringTab &str,
-                      ConfigPrinter &p ) noexcept;
+                      md::MDOutput &p ) noexcept;
   bool check_strings( ConfigTree::Parameters &pa,  StringTab &str,
-                      ConfigPrinter &p ) noexcept;
+                      md::MDOutput &p ) noexcept;
 };
 
 struct ArrayParse {

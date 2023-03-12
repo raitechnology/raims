@@ -584,7 +584,7 @@ struct UserBridgeList : public kv::SLinkList<UserBridgeElem> {
                        const UserBridgeElem &e2 ) noexcept;
 };
 
-struct Console : public md::MDOutput, public SubOnMsg, public ConfigPrinter,
+struct Console : public md::MDOutput, public SubOnMsg,
                  public kv::EvTimerCallback {
   SessionMgr      & mgr;
   UserDB          & user_db;
@@ -670,6 +670,7 @@ struct Console : public md::MDOutput, public SubOnMsg, public ConfigPrinter,
   void tab_user_id( uint32_t uid,  TabPrint &pr ) noexcept;
   void tab_concat( const char *s,  size_t sz1,  const char *s2,
                    TabPrint &pr ) noexcept;
+  void tab_string( const char *buf,  size_t len,  TabPrint &pr ) noexcept;
   void tab_string( const char *buf,  TabPrint &pr ) noexcept;
   void tab_concat( const char *s,  const char *s2,  TabPrint &pr ) noexcept;
   void tab_nonce( const Nonce &nonce,  TabPrint &pr ) noexcept;
@@ -728,6 +729,7 @@ struct Console : public md::MDOutput, public SubOnMsg, public ConfigPrinter,
   void show_peers( ConsoleOutput *p,  const char *name,  size_t len ) noexcept;
   void output_user_route( TabPrint &ptp,  UserRoute &u_rte ) noexcept;
   void show_hosts( ConsoleOutput *p ) noexcept;
+  void show_rvsub( ConsoleOutput *p ) noexcept;
   void show_rpcs( ConsoleOutput *p ) noexcept;
   void show_adjacency( ConsoleOutput *p ) noexcept;
   void show_links( ConsoleOutput *p ) noexcept;
@@ -759,7 +761,7 @@ struct Console : public md::MDOutput, public SubOnMsg, public ConfigPrinter,
   void tab_seqno( SubSeqno *sub,  TabOut &out ) noexcept;
   void show_seqno( ConsoleOutput *p, const char *arg,  size_t arglen ) noexcept;
   void config( const char *name,  size_t len ) noexcept;
-  int puts( const char *s ) noexcept;
+  virtual int puts( const char *s ) noexcept;
   void putchar( char c ) noexcept;
   virtual int printf( const char *fmt,  ... ) noexcept final __attribute__((format(printf,2,3)));
   void outf( ConsoleOutput *p,  const char *fmt,  ... ) noexcept __attribute__((format(printf,3,4)));
@@ -864,47 +866,48 @@ enum ConsoleCmd {
   CMD_SHOW_CACHE        = 39, /* show cache                 */
   CMD_SHOW_POLL         = 40, /* show poll                  */
   CMD_SHOW_HOSTS        = 41, /* show hosts                 */
-  CMD_SHOW_RPCS         = 42, /* show rpcs                  */
-  CMD_SHOW_RUN          = 43, /* show running               */
-  CMD_SHOW_RUN_TPORTS   = 44, /* show running transport [T] */
-  CMD_SHOW_RUN_SVCS     = 45, /* show running service [S]   */
-  CMD_SHOW_RUN_USERS    = 46, /* show running user [U]      */
-  CMD_SHOW_RUN_GROUPS   = 47, /* show running group [G]     */
-  CMD_SHOW_RUN_PARAM    = 48, /* show running parameter [P] */
-  CMD_SHOW_START        = 49, /* show startup               */
-  CMD_SHOW_START_TPORTS = 50, /* show startup transport [T] */
-  CMD_SHOW_START_SVCS   = 51, /* show startup service [S]   */
-  CMD_SHOW_START_USERS  = 52, /* show startup user [U]      */
-  CMD_SHOW_START_GROUPS = 53, /* show startup group [G]     */
-  CMD_SHOW_START_PARAM  = 54, /* show startup parameter [P] */
-  CMD_CONNECT           = 55, /* connect [T]                */
-  CMD_LISTEN            = 56, /* listen [T]                 */
-  CMD_SHUTDOWN          = 57, /* shutdown [T]               */
-  CMD_NETWORK           = 58, /* network svc [network]      */
-  CMD_CONFIGURE         = 59, /* configure                  */
-  CMD_CONFIGURE_TPORT   = 60, /* configure transport T      */
-  CMD_CONFIGURE_PARAM   = 61, /* configure parameter P V    */
-  CMD_SAVE              = 62, /* save                       */
-  CMD_SUB_START         = 63, /* sub subject [file]         */
-  CMD_SUB_STOP          = 64, /* unsub subject [file]       */
-  CMD_PSUB_START        = 65, /* psub rv-wildcard [file]    */
-  CMD_PSUB_STOP         = 66, /* punsub rv-wildcard [file]  */
-  CMD_GSUB_START        = 67, /* gsub glob-wildcard [file]  */
-  CMD_GSUB_STOP         = 68, /* gunsub glob-wildcard [file]*/
-  CMD_SNAP              = 69, /* snap subject [file]        */
-  CMD_PUBLISH           = 70, /* pub subject msg            */
-  CMD_TRACE             = 71, /* trace subject msg          */
-  CMD_PUB_ACK           = 72, /* ack subject msg            */
-  CMD_RPC               = 73, /* rpc subject msg            */
-  CMD_ANY               = 74, /* any subject msg            */
-  CMD_RESEED            = 75, /* reseed bloom filters       */
-  CMD_DEBUG             = 76, /* debug ival                 */
-  CMD_CANCEL            = 77, /* cancel                     */
-  CMD_MUTE_LOG          = 78, /* mute                       */
-  CMD_UNMUTE_LOG        = 79, /* unmute                     */
-  CMD_WEVENTS           = 80, /* write events to file       */
-  CMD_DIE               = 81, /* die, exit 1                */
-  CMD_QUIT              = 82, /* quit/exit                  */
+  CMD_SHOW_RVSUB        = 42, /* show rvsub                 */
+  CMD_SHOW_RPCS         = 43, /* show rpcs                  */
+  CMD_SHOW_RUN          = 44, /* show running               */
+  CMD_SHOW_RUN_TPORTS   = 45, /* show running transport [T] */
+  CMD_SHOW_RUN_SVCS     = 46, /* show running service [S]   */
+  CMD_SHOW_RUN_USERS    = 47, /* show running user [U]      */
+  CMD_SHOW_RUN_GROUPS   = 48, /* show running group [G]     */
+  CMD_SHOW_RUN_PARAM    = 49, /* show running parameter [P] */
+  CMD_SHOW_START        = 50, /* show startup               */
+  CMD_SHOW_START_TPORTS = 51, /* show startup transport [T] */
+  CMD_SHOW_START_SVCS   = 52, /* show startup service [S]   */
+  CMD_SHOW_START_USERS  = 53, /* show startup user [U]      */
+  CMD_SHOW_START_GROUPS = 54, /* show startup group [G]     */
+  CMD_SHOW_START_PARAM  = 55, /* show startup parameter [P] */
+  CMD_CONNECT           = 56, /* connect [T]                */
+  CMD_LISTEN            = 57, /* listen [T]                 */
+  CMD_SHUTDOWN          = 58, /* shutdown [T]               */
+  CMD_NETWORK           = 59, /* network svc [network]      */
+  CMD_CONFIGURE         = 60, /* configure                  */
+  CMD_CONFIGURE_TPORT   = 61, /* configure transport T      */
+  CMD_CONFIGURE_PARAM   = 62, /* configure parameter P V    */
+  CMD_SAVE              = 63, /* save                       */
+  CMD_SUB_START         = 64, /* sub subject [file]         */
+  CMD_SUB_STOP          = 65, /* unsub subject [file]       */
+  CMD_PSUB_START        = 66, /* psub rv-wildcard [file]    */
+  CMD_PSUB_STOP         = 67, /* punsub rv-wildcard [file]  */
+  CMD_GSUB_START        = 68, /* gsub glob-wildcard [file]  */
+  CMD_GSUB_STOP         = 69, /* gunsub glob-wildcard [file]*/
+  CMD_SNAP              = 70, /* snap subject [file]        */
+  CMD_PUBLISH           = 71, /* pub subject msg            */
+  CMD_TRACE             = 72, /* trace subject msg          */
+  CMD_PUB_ACK           = 73, /* ack subject msg            */
+  CMD_RPC               = 74, /* rpc subject msg            */
+  CMD_ANY               = 75, /* any subject msg            */
+  CMD_RESEED            = 76, /* reseed bloom filters       */
+  CMD_DEBUG             = 77, /* debug ival                 */
+  CMD_CANCEL            = 78, /* cancel                     */
+  CMD_MUTE_LOG          = 79, /* mute                       */
+  CMD_UNMUTE_LOG        = 80, /* unmute                     */
+  CMD_WEVENTS           = 81, /* write events to file       */
+  CMD_DIE               = 82, /* die, exit 1                */
+  CMD_QUIT              = 83, /* quit/exit                  */
 
 #define CMD_TPORT_BASE ( (int) CMD_QUIT + 1 )
   CMD_TPORT_ENUM /* config_const.h */
@@ -1056,6 +1059,7 @@ static const ConsoleCmdString show_cmd[] = {
   { CMD_SHOW_CACHE     , "cache"         ,0,0}, /* show cache */
   { CMD_SHOW_POLL      , "poll"          ,0,0}, /* show poll */
   { CMD_SHOW_HOSTS     , "hosts"         ,0,0}, /* show hosts */
+  { CMD_SHOW_RVSUB     , "rvsub"         ,0,0}, /* show rvsub */
   { CMD_SHOW_RPCS      , "rpcs"          ,0,0}, /* show rpc */
   { CMD_SHOW_RUN       , "running"       ,0,0}, /* show running */
   { CMD_SHOW_START     , "startup"       ,0,0}  /* show startup */
@@ -1122,6 +1126,7 @@ static const ConsoleCmdString help_cmd[] = {
   { CMD_SHOW_CACHE       , "show cache", "",     "Show routing cache geom, hits and misses"          },
   { CMD_SHOW_POLL        , "show poll", "",      "Show poll dispatch latency"                        },
   { CMD_SHOW_HOSTS       , "show hosts", "",     "Show rv hosts and services"                        },
+  { CMD_SHOW_RVSUB       , "show rvsub", "",     "Show rv subscriptions"                             },
   { CMD_SHOW_RPCS        , "show rpcs", "",      "Show rpcs and subs running"                        },
   { CMD_SHOW_RUN         , "show running", "",   "Show current config running"                       },
   { CMD_SHOW_RUN_TPORTS  , "show running transport","[T]", "Show transports running, T or all"       },

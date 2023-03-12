@@ -253,19 +253,19 @@ main( int argc, char *argv[] )
     return 1;
 
   if ( log_file != NULL )
-    tree->set_parameter( st, P_LOG_FILE, log_file );
+    tree->parameters.set( st, P_LOG_FILE, log_file );
   else
-    tree->find_parameter( P_LOG_FILE, log_file, NULL );
+    tree->parameters.find( P_LOG_FILE, log_file, NULL );
   if ( map_file != NULL )
-    tree->set_parameter( st, P_MAP_FILE, map_file );
+    tree->parameters.set( st, P_MAP_FILE, map_file );
   if ( db_num != NULL )
-    tree->set_parameter( st, P_DB_NUM, db_num );
+    tree->parameters.set( st, P_DB_NUM, db_num );
   if ( ipc_name != NULL )
-    tree->set_parameter( st, P_IPC_NAME, ipc_name );
+    tree->parameters.set( st, P_IPC_NAME, ipc_name );
   if ( reliability != NULL )
-    tree->set_parameter( st, P_RELIABILITY, reliability );
+    tree->parameters.set( st, P_RELIABILITY, reliability );
   if ( pid_file != NULL )
-    tree->set_parameter( st, P_PID_FILE, pid_file );
+    tree->parameters.set( st, P_PID_FILE, pid_file );
 
   ConfigTree::User      * usr   = NULL;
   ConfigTree::Service   * svc   = NULL;
@@ -299,6 +299,7 @@ main( int argc, char *argv[] )
     st.ref_string( user_buf.pri, user_buf.pri_len, usr->pri );
     st.ref_string( user_buf.pub, user_buf.pub_len, usr->pub );
     usr->user_id = tree->user_cnt;
+    usr->is_temp = true;
     tree->users.push_tl( usr );
   }
   else {

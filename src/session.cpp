@@ -115,7 +115,7 @@ SessionMgr::init_param( void ) noexcept
   uint64_t hb_ival, rel_ival, time_val, bytes_val;
   bool ipv4_only = false, ipv6_only = false;
 
-  if ( this->tree.find_parameter( s = P_IDLE_BUSY, val, NULL ) ) {
+  if ( this->tree.parameters.find( s = P_IDLE_BUSY, val, NULL ) ) {
     uint64_t idle = 0;
     if ( ! ConfigTree::string_to_uint( val, idle ) )
       goto fail;
@@ -124,47 +124,47 @@ SessionMgr::init_param( void ) noexcept
     else
       this->idle_busy = (uint32_t) idle;
   }
-  if ( this->tree.find_parameter( s = P_PUB_WINDOW_SIZE, val, NULL ) &&
+  if ( this->tree.parameters.find( s = P_PUB_WINDOW_SIZE, val, NULL ) &&
        ! ConfigTree::string_to_bytes( val, this->pub_window_size ) ) goto fail;
-  if ( this->tree.find_parameter( s = P_SUB_WINDOW_SIZE, val, NULL ) &&
+  if ( this->tree.parameters.find( s = P_SUB_WINDOW_SIZE, val, NULL ) &&
        ! ConfigTree::string_to_bytes( val, this->sub_window_size ) ) goto fail;
-  if ( this->tree.find_parameter( s = P_PUB_WINDOW_TIME, val, NULL ) &&
+  if ( this->tree.parameters.find( s = P_PUB_WINDOW_TIME, val, NULL ) &&
        ! ConfigTree::string_to_nanos( val, this->pub_window_ival ) ) goto fail;
-  if ( this->tree.find_parameter( s = P_SUB_WINDOW_TIME, val, NULL ) &&
+  if ( this->tree.parameters.find( s = P_SUB_WINDOW_TIME, val, NULL ) &&
        ! ConfigTree::string_to_nanos( val, this->sub_window_ival ) ) goto fail;
-  if ( this->tree.find_parameter( s = P_HEARTBEAT, val, NULL ) ) {
+  if ( this->tree.parameters.find( s = P_HEARTBEAT, val, NULL ) ) {
     if ( ! ConfigTree::string_to_secs( val, hb_ival ) ) goto fail;
     this->user_db.hb_interval = (uint32_t) hb_ival;
   }
-  if ( this->tree.find_parameter( s = P_RELIABILITY, val, NULL ) ) {
+  if ( this->tree.parameters.find( s = P_RELIABILITY, val, NULL ) ) {
     if ( ! ConfigTree::string_to_secs( val, rel_ival ) ) goto fail;
     this->user_db.reliability = (uint32_t) rel_ival;
   }
-  if ( this->tree.find_parameter( s = P_TIMESTAMP, val, NULL ) ) {
+  if ( this->tree.parameters.find( s = P_TIMESTAMP, val, NULL ) ) {
     if ( val != NULL &&
          ( ::strcmp( val, "gmt" ) == 0 || ::strcmp( val, "GMT" ) == 0 ) )
       tz_stamp_gmt = true;
   }
-  if ( this->tree.find_parameter( s = P_TCP_NOENCRYPT, val, NULL ) ) {
+  if ( this->tree.parameters.find( s = P_TCP_NOENCRYPT, val, NULL ) ) {
     if ( ! ConfigTree::string_to_bool( val, this->tcp_noencrypt ) ) goto fail;
   }
-  if ( this->tree.find_parameter( s = P_TCP_TIMEOUT, val, NULL ) ) {
+  if ( this->tree.parameters.find( s = P_TCP_TIMEOUT, val, NULL ) ) {
     if ( ! ConfigTree::string_to_secs( val, time_val ) ) goto fail;
     this->tcp_timeout = (int) time_val;
   }
-  if ( this->tree.find_parameter( s = P_TCP_WRITE_TIMEOUT, val, NULL ) ) {
+  if ( this->tree.parameters.find( s = P_TCP_WRITE_TIMEOUT, val, NULL ) ) {
     if ( ! ConfigTree::string_to_nanos( val, time_val ) ) goto fail;
     this->poll.wr_timeout_ns = time_val;
     this->poll.so_keepalive_ns = time_val;
   }
-  if ( this->tree.find_parameter( s = P_TCP_WRITE_HIGHWATER, val, NULL ) ) {
+  if ( this->tree.parameters.find( s = P_TCP_WRITE_HIGHWATER, val, NULL ) ) {
     if ( ! ConfigTree::string_to_bytes( val, bytes_val ) ) goto fail;
     this->poll.send_highwater = (uint32_t) bytes_val;
   }
-  if ( this->tree.find_parameter( s = P_TCP_IPV4ONLY, val, NULL ) ) {
+  if ( this->tree.parameters.find( s = P_TCP_IPV4ONLY, val, NULL ) ) {
     if ( ! ConfigTree::string_to_bool( val, ipv4_only ) ) goto fail;
   }
-  if ( this->tree.find_parameter( s = P_TCP_IPV6ONLY, val, NULL ) ) {
+  if ( this->tree.parameters.find( s = P_TCP_IPV6ONLY, val, NULL ) ) {
     if ( ! ConfigTree::string_to_bool( val, ipv6_only ) ) goto fail;
   }
   if ( ipv4_only && ! ipv6_only ) {
@@ -393,7 +393,7 @@ SessionMgr::fork_daemon( int err_fd ) noexcept
   pid_t pid = ::getpid();
   const char * pidfile = NULL;
   printf( "running background deamon PID: %d\n", pid );
-  if ( this->tree.find_parameter( P_PID_FILE, pidfile, NULL ) &&
+  if ( this->tree.parameters.find( P_PID_FILE, pidfile, NULL ) &&
        pidfile != NULL ) {
     FILE * fp;
     if ( (fp = ::fopen( pidfile, "w" )) != NULL ) {

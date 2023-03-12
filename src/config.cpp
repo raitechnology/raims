@@ -23,19 +23,37 @@ using namespace md;
 using namespace kv;
 using namespace ms;
 #define ASZ( ar ) ( sizeof( ar ) / sizeof( ar[ 0 ] ) )
+#define SZ( s )   s, ( sizeof( s ) - 1 )
 
+static StringVal users_s     ( SZ( "users"      ) ),
+                 services_s  ( SZ( "services"   ) ),
+                 transports_s( SZ( "transports" ) ),
+                 groups_s    ( SZ( "groups"     ) ),
+                 parameters_s( SZ( "parameters" ) ),
+                 startup_s   ( SZ( "startup"    ) ),
+                 hosts_s     ( SZ( "hosts"      ) ),
+                 listen_s    ( R_LISTEN, R_LISTEN_SZ ),
+                 connect_s   ( R_CONNECT, R_CONNECT_SZ );
 static struct ArrayParse top_level[] = {
   { "users",      &ConfigDB::parse_users,      MD_ARRAY },
   { "services",   &ConfigDB::parse_services,   MD_ARRAY },
   { "transports", &ConfigDB::parse_transports, MD_ARRAY },
   { "groups",     &ConfigDB::parse_groups,     MD_ARRAY },
   { "include",    &ConfigDB::parse_include,    MD_STRING },
-  { "parameters", &ConfigDB::parse_parameters, MD_MESSAGE }
+  { "parameters", &ConfigDB::parse_parameters, MD_MESSAGE },
+  { "startup",    &ConfigDB::parse_startup,    MD_MESSAGE },
+  { "hosts",      &ConfigDB::parse_hosts,      MD_MESSAGE }
 };
 static ObjectParse top_obj = {
   top_level, ASZ( top_level ), NULL
 };
-
+static StringVal user_s   ( SZ( "user"    ) ),
+                 svc_s    ( SZ( "svc"     ) ),
+                 create_s ( SZ( "create"  ) ),
+                 expires_s( SZ( "expires" ) ),
+                 revoke_s ( SZ( "revoke"  ) ),
+                 pri_s    ( SZ( "pri"     ) ),
+                 pub_s    ( SZ( "pub"     ) );
 static struct ArrayParse users_fields[] = {
   { "user",    &ConfigDB::parse_users_user,    MD_STRING },
   { "svc",     &ConfigDB::parse_users_svc,     MD_STRING },
@@ -60,7 +78,9 @@ static struct ArrayParse svcs_fields[] = {
 static struct ObjectParse svcs_obj = {
   svcs_fields, ASZ( svcs_fields ), &ConfigDB::create_service
 };
-
+static StringVal tport_s( SZ( "tport" ) ),
+                 type_s ( SZ( "type"  ) ),
+                 route_s( SZ( "route" ) );
 static struct ArrayParse tports_fields[] = {
   { "tport", &ConfigDB::parse_transports_tport, MD_STRING },
   { "type",  &ConfigDB::parse_transports_type,  MD_STRING },
@@ -69,7 +89,7 @@ static struct ArrayParse tports_fields[] = {
 static struct ObjectParse tports_obj = {
   tports_fields, ASZ( tports_fields ), &ConfigDB::create_transport
 };
-
+static StringVal group_s( SZ( "group" ) );
 static struct ArrayParse grps_fields[] = {
   { "group", &ConfigDB::parse_groups_group, MD_STRING },
   { "users", &ConfigDB::parse_groups_users, MD_NODATA }
@@ -77,6 +97,8 @@ static struct ArrayParse grps_fields[] = {
 static struct ObjectParse grps_obj = {
   grps_fields , ASZ( grps_fields ), &ConfigDB::create_group
 };
+#undef SZ
+#undef ASZ
 
 static ObjectParse &
 resolve_obj( MDMsg &msg ) noexcept
@@ -131,7 +153,7 @@ struct ConfigDB::InodeStack {
 
 ConfigTree *
 ConfigDB::parse_tree( const char *cfg_name,  StringTab &st,
-                      ConfigPrinter &err ) noexcept
+                      MDOutput &err ) noexcept
 {
   ConfigTree * tree;
   os_stat      stbuf;
@@ -149,7 +171,7 @@ ConfigDB::parse_tree( const char *cfg_name,  StringTab &st,
  
 ConfigTree *
 ConfigDB::parse_dir( const char *dir_name,  StringTab &st,
-                     ConfigPrinter &err ) noexcept
+                     MDOutput &err ) noexcept
 {
   char path[ 1024 ];
   int  n;
@@ -168,7 +190,7 @@ ConfigDB::parse_dir( const char *dir_name,  StringTab &st,
 
 ConfigTree *
 ConfigDB::parse_jsfile( const char *fn,  StringTab &st,
-                        ConfigPrinter &err ) noexcept
+                        MDOutput &err ) noexcept
 {
   ConfigTree * tree = new ( st.mem.make( sizeof( ConfigTree ) ) ) ConfigTree();
   InodeStack   ino;
@@ -200,7 +222,7 @@ ConfigStartup::copy( ConfigTree &tree,
   ConfigDB     db( *cp, this->mem, NULL, this->str );
 
   for ( ConfigTree::User *u = tree.users.hd; u != NULL; u = u->next ) {
-    if ( u->user_id < tree.user_cnt ) {
+    if ( ! u->is_temp ) {
       ConfigTree::User *u_cp = db.make<ConfigTree::User>( *u );
       cp->users.push_tl( u_cp );
     }
@@ -212,9 +234,11 @@ ConfigStartup::copy( ConfigTree &tree,
     this->copy_pair_list( db, s->revoke, s_cp->revoke );
   }
   for ( ConfigTree::Transport *t = tree.transports.hd; t != NULL; t = t->next ) {
-    ConfigTree::Transport *t_cp = db.make<ConfigTree::Transport>( *t );
-    cp->transports.push_tl( t_cp );
-    this->copy_pair_list( db, t->route, t_cp->route );
+    if ( ! t->is_temp ) {
+      ConfigTree::Transport *t_cp = db.make<ConfigTree::Transport>( *t );
+      cp->transports.push_tl( t_cp );
+      this->copy_pair_list( db, t->route, t_cp->route );
+    }
   }
   for ( ConfigTree::Group *g = tree.groups.hd; g != NULL; g = g->next ) {
     ConfigTree::Group *g_cp = db.make<ConfigTree::Group>( *g );
@@ -222,34 +246,43 @@ ConfigStartup::copy( ConfigTree &tree,
     this->copy_string_list( db, g->users, g_cp->users );
   }
   for ( ConfigTree::Parameters *p = tree.parameters.hd; p != NULL; p = p->next ) {
+    if ( p->list.hd == NULL ) continue;
     ConfigTree::Parameters *p_cp = db.make<ConfigTree::Parameters>();
-    if ( listen != NULL || connect != NULL )
-      this->copy_pair_list2( db, p->parms, p_cp->parms );
-    else
-      this->copy_pair_list( db, p->parms, p_cp->parms );
-    if ( p_cp->parms.hd != NULL )
-      cp->parameters.push_tl( p_cp );
-  }
-  if ( listen != NULL || connect != NULL ) {
-    ConfigTree::Parameters *p_cp = db.make<ConfigTree::Parameters>();
-    StringVal listen_sv( R_LISTEN, R_LISTEN_SZ ),
-              connect_sv( R_CONNECT, R_CONNECT_SZ );
-    uint32_t i;
+    this->copy_pair_list( db, p->list, p_cp->list );
     cp->parameters.push_tl( p_cp );
+  }
+  if ( listen == NULL && connect == NULL ) {
+    for ( ConfigTree::Parameters *p = tree.startup.hd; p != NULL; p = p->next ) {
+      if ( p->list.hd == NULL ) continue;
+      ConfigTree::Parameters *p_cp = db.make<ConfigTree::Parameters>();
+      this->copy_pair_list( db, p->list, p_cp->list );
+      cp->startup.push_tl( p_cp );
+    }
+  }
+  else {
+    ConfigTree::Parameters *p_cp = db.make<ConfigTree::Parameters>();
+    uint32_t i;
+    cp->startup.push_tl( p_cp );
     if ( listen != NULL && listen->count > 0 ) {
       for ( i = 0; i < listen->count; i++ ) {
         ConfigTree::StringPair *p =
-          db.make<ConfigTree::StringPair>( listen_sv, listen->ptr[ i ] );
-        p_cp->parms.push_tl( p );
+          db.make<ConfigTree::StringPair>( listen_s, listen->ptr[ i ] );
+        p_cp->list.push_tl( p );
       }
     }
     if ( connect != NULL && connect->count > 0 ) {
       for ( i = 0; i < connect->count; i++ ) {
         ConfigTree::StringPair *p =
-          db.make<ConfigTree::StringPair>( connect_sv, connect->ptr[ i ] );
-        p_cp->parms.push_tl( p );
+          db.make<ConfigTree::StringPair>( connect_s, connect->ptr[ i ] );
+        p_cp->list.push_tl( p );
       }
     }
+  }
+  for ( ConfigTree::Parameters *p = tree.hosts.hd; p != NULL; p = p->next ) {
+    if ( p->list.hd == NULL ) continue;
+    ConfigTree::Parameters *p_cp = db.make<ConfigTree::Parameters>();
+    this->copy_pair_list( db, p->list, p_cp->list );
+    cp->hosts.push_tl( p_cp );
   }
   cp->user_cnt      = tree.user_cnt;
   cp->service_cnt   = tree.service_cnt;
@@ -272,20 +305,6 @@ ConfigStartup::copy_pair_list( ConfigDB &db,  const ConfigTree::PairList &list,
 }
 
 void
-ConfigStartup::copy_pair_list2( ConfigDB &db,  const ConfigTree::PairList &list,
-                                ConfigTree::PairList &cp_list ) noexcept
-{
-  for ( const ConfigTree::StringPair *sp = list.hd; sp != NULL; sp = sp->next ) {
-    bool is_startup = ( sp->name.equals( R_LISTEN, R_LISTEN_SZ ) ||
-                        sp->name.equals( R_CONNECT, R_CONNECT_SZ ) );
-    if ( ! is_startup ) {
-      ConfigTree::StringPair *p = db.make<ConfigTree::StringPair>( *sp );
-      cp_list.push_tl( p );
-    }
-  }
-}
-
-void
 ConfigStartup::copy_string_list( ConfigDB &db,  const ConfigTree::StrList &list,
                                  ConfigTree::StrList &cp_list ) noexcept
 {
@@ -293,6 +312,248 @@ ConfigStartup::copy_string_list( ConfigDB &db,  const ConfigTree::StrList &list,
     ConfigTree::StringList *p = db.make<ConfigTree::StringList>( *sl );
     cp_list.push_tl( p );
   }
+}
+
+static bool inline pass_filter( const StringVal *filter, const StringVal &val ){
+  return filter == NULL || filter->is_null() || filter->equals( val );
+}
+
+JsonValue *
+ConfigJson::copy( const ConfigTree *tree,  int which,  const StringVal *filter,
+                  const ConfigTree::TransportArray *listen,
+                  const ConfigTree::TransportArray *connect ) noexcept
+{
+  JsonArray  * users      = NULL,
+             * services   = NULL,
+             * transports = NULL,
+             * groups     = NULL;
+  JsonObject * parameters = NULL,
+             * startup    = NULL,
+             * hosts      = NULL,
+             * cfg        = NULL;
+  this->mem.reuse();
+
+  if ( tree == NULL ) {
+    which = 0;
+    if ( listen != NULL || connect != NULL )
+      which |= PRINT_STARTUP;
+  }
+  if ( ( which & PRINT_SERVICES ) != 0 ) {
+    for ( const ConfigTree::Service *s = tree->services.hd; s != NULL; s = s->next ) {
+      if ( pass_filter( filter, s->svc ) )
+        this->push_array( services, this->copy( *s ) );
+    }
+  }
+  if ( ( which & PRINT_USERS ) != 0 ) {
+    for ( const ConfigTree::User *u = tree->users.hd; u != NULL; u = u->next ) {
+      if ( pass_filter( filter, u->user ) ) {
+        if ( ! u->is_temp || ( which & PRINT_EXCLUDE_TEMPORARY ) == 0 ) {
+          this->push_array( users, this->copy( *u ) );
+        }
+      }
+    }
+  }
+  if ( ( which & PRINT_TRANSPORTS ) != 0 ) {
+    for ( const ConfigTree::Transport *t = tree->transports.hd; t != NULL; t = t->next ) {
+      if ( pass_filter( filter, t->tport ) )
+        if ( ! t->is_temp || ( which & PRINT_EXCLUDE_TEMPORARY ) == 0 )
+          this->push_array( transports, this->copy( *t ) );
+    }
+  }
+  if ( ( which & PRINT_GROUPS ) != 0 ) {
+    for ( const ConfigTree::Group *g = tree->groups.hd; g != NULL; g = g->next ) {
+      if ( pass_filter( filter, g->group ) )
+        this->push_array( groups, this->copy( *g ) );
+    }
+  }
+  if ( ( which & PRINT_PARAMETERS ) != 0 ) {
+    parameters = this->copy( tree->parameters );
+  }
+  if ( ( which & PRINT_STARTUP ) != 0 ) {
+    if ( listen == NULL && connect == NULL ) {
+      startup = this->copy( tree->startup );
+    }
+    else {
+      JsonArray *ar;
+      uint32_t i;
+      if ( listen != NULL && listen->count > 0 ) {
+        ar = NULL;
+        for ( i = 0; i < listen->count; i++ )
+          this->push_array( ar, this->copy( listen->ptr[ i ] ) );
+        this->push_field( startup, listen_s, ar );
+      }
+      if ( connect != NULL && connect->count > 0 ) {
+        ar = NULL;
+        for ( i = 0; i < connect->count; i++ )
+          this->push_array( ar, this->copy( connect->ptr[ i ] ) );
+        this->push_field( startup, connect_s, ar );
+      }
+    }
+  }
+
+  if ( ( which & PRINT_HOSTS ) != 0 ) {
+    hosts = this->copy( tree->hosts );
+  }
+  if ( parameters != NULL ) this->push_field( cfg, parameters_s, parameters );
+  if ( services != NULL )   this->push_field( cfg, services_s, services );
+  if ( users != NULL )      this->push_field( cfg, users_s, users );
+  if ( hosts != NULL )      this->push_field( cfg, hosts_s, hosts );
+  if ( transports != NULL ) this->push_field( cfg, transports_s, transports );
+  if ( groups != NULL )     this->push_field( cfg, groups_s, groups );
+  if ( startup != NULL )    this->push_field( cfg, startup_s, startup );
+  return cfg;
+}
+
+JsonObject *
+ConfigJson::copy( const ConfigTree::ParametersList &list ) noexcept
+{
+  JsonObject * o = NULL;
+  for ( const ConfigTree::Parameters *p = list.hd; p != NULL; p = p->next ) {
+    JsonObject *l = (JsonObject *) this->copy( p->list );
+    if ( o == NULL )
+      o = l;
+    else {
+      for ( size_t i = 0; i < l->length; i++ )
+        this->push_field( o, l->val[ i ].name, l->val[ i ].val );
+    }
+  }
+  return o;
+}
+
+JsonValue *
+ConfigJson::copy( const ConfigTree::User &u ) noexcept
+{
+  JsonObject * user = NULL;
+  this->push_field_s( user, user_s, u.user );
+  this->push_field_s( user, svc_s, u.svc );
+  this->push_field_s( user, create_s, u.create );
+  this->push_field_s( user, expires_s, u.expires );
+  this->push_field_s( user, revoke_s, u.revoke );
+  this->push_field_s( user, pri_s, u.pri );
+  this->push_field_s( user, pub_s, u.pub );
+  return user;
+}
+
+JsonValue *
+ConfigJson::copy( const ConfigTree::Service &s ) noexcept
+{
+  JsonObject * svc = NULL;
+  this->push_field_s( svc, svc_s, s.svc );
+  this->push_field_s( svc, create_s, s.create );
+  this->push_field_s( svc, pri_s, s.pri );
+  this->push_field_s( svc, pub_s, s.pub );
+  if ( s.users.hd != NULL )
+    this->push_field( svc, users_s, this->copy( s.users ) );
+  if ( s.revoke.hd != NULL )
+    this->push_field( svc, revoke_s, this->copy( s.revoke ) );
+  return svc;
+}
+
+JsonValue *
+ConfigJson::copy( const ConfigTree::Transport &t ) noexcept
+{
+  JsonObject * tport = NULL;
+  if ( t.is_temp && t.route.hd == NULL )
+    return NULL;
+  this->push_field_s( tport, tport_s, t.tport );
+  this->push_field_s( tport, type_s, t.type );
+  if ( t.route.hd != NULL )
+    this->push_field( tport, route_s, this->copy( t.route ) );
+  return tport;
+}
+
+JsonValue *
+ConfigJson::copy( const ConfigTree::Group &g ) noexcept
+{
+  JsonObject * grp = NULL;
+  this->push_field_s( grp, group_s, g.group );
+  if ( g.users.hd != NULL )
+    this->push_field( grp, users_s, this->copy( g.users ) );
+  return grp;
+}
+
+JsonValue *
+ConfigJson::copy( const ConfigTree::PairList &pl ) noexcept
+{
+  JsonObject * list = NULL;
+  for ( const ConfigTree::StringPair *x = pl.hd; x != NULL; ) {
+    if ( x->next == NULL || ! x->name.equals( x->next->name ) ) {
+      this->push_field( list, x->name, this->copy( x->value ) );
+      x = x->next;
+    }
+    else {
+      JsonArray *ar = this->make<JsonArray>();
+      this->push_array( ar, this->copy( x->value ) );
+      this->push_array( ar, this->copy( x->next->value ) );
+      x = x->next;
+      while ( x->next != NULL && x->name.equals( x->next->name ) ) {
+        this->push_array( ar, this->copy( x->next->value ) );
+        x = x->next;
+      }
+      this->push_field( list, x->name, ar );
+      x = x->next;
+    }
+  }
+  return list;
+}
+
+JsonValue *
+ConfigJson::copy( const ConfigTree::StrList &sl ) noexcept
+{
+  JsonArray * ar = NULL;
+  for ( const ConfigTree::StringList *p = sl.hd; p != NULL; p = p->next ) {
+    this->push_array( ar, this->copy( p->val ) );
+  }
+  return ar;
+}
+
+JsonValue *
+ConfigJson::copy( const StringVal &s ) noexcept
+{
+  JsonString * str = this->make<JsonString>();
+  str->val    = (char *) s.val;
+  str->length = s.len;
+  return str;
+}
+
+void
+ConfigJson::push_array( JsonArray *&a,  JsonValue *v ) noexcept
+{
+  size_t oldsz = 0, newsz;
+  if ( v != NULL ) {
+    if ( a == NULL )
+      a = this->make<JsonArray>();
+    else
+      oldsz = sizeof( a->val[ 0 ] ) * a->length;
+    newsz = oldsz + sizeof( a->val[ 0 ] );
+    this->mem.extend( oldsz, newsz, &a->val );
+    a->val[ a->length++ ] = v;
+  }
+}
+
+void
+ConfigJson::push_field( JsonObject *&o,  const StringVal &s,
+                        JsonValue *v ) noexcept
+{
+  size_t oldsz = 0, newsz;
+  if ( v != NULL ) {
+    if ( o == NULL )
+      o = this->make<JsonObject>();
+    else
+      oldsz = sizeof( o->val[ 0 ] ) * o->length;
+    newsz = oldsz + sizeof( o->val[ 0 ] );
+    this->mem.extend( oldsz, newsz, &o->val );
+    o->val[ o->length ].name.val    = (char *) s.val;
+    o->val[ o->length ].name.length = s.len;
+    o->val[ o->length++ ].val       = v;
+  }
+}
+
+void
+ConfigJson::push_field( JsonObject *&o,  JsonString &s,  JsonValue *v ) noexcept
+{
+  StringVal str( s.val, s.length );
+  this->push_field( o, str, v );
 }
 
 #ifndef _MSC_VER
@@ -510,6 +771,17 @@ ConfigFilePrinter::printf( const char *fmt,  ... ) noexcept
   return n;
 }
 
+int
+ConfigFilePrinter::puts( const char *s ) noexcept
+{
+  if ( s != NULL ) {
+    int n = fputs( s, this->fp );
+    if ( n > 0 )
+      return (int) ::strlen( s );
+  }
+  return 0;
+}
+
 void
 ConfigFilePrinter::close( void ) noexcept
 {
@@ -524,18 +796,6 @@ ConfigFilePrinter::~ConfigFilePrinter() noexcept
   this->close();
 }
 
-struct ConfigDirPrinter : public ConfigPrinter {
-  const StringVal & dir_name;
-  FILE * fp;
-  ConfigDirPrinter( const StringVal &d ) : dir_name( d ), fp( 0 ) {}
-  ~ConfigDirPrinter() {
-    if ( this->fp != NULL )
-      fclose( this->fp );
-  }
-  int open( const char *kind,  const StringVal &sv ) noexcept;
-  virtual int printf( const char *fmt,  ... ) noexcept;
-};
-
 int
 ConfigDirPrinter::open( const char *kind,  const StringVal &sv ) noexcept
 {
@@ -543,30 +803,24 @@ ConfigDirPrinter::open( const char *kind,  const StringVal &sv ) noexcept
   char path[ 1024 ];
   if ( this->dir_name.len == 0 )
     sep = "";
-  int n = ::snprintf( path, sizeof( path ), "%.*s%s%s%.*s.yaml.new",
-                      (int) this->dir_name.len, this->dir_name.val, sep,
-                      kind, (int) sv.len, sv.val );
-  if ( n > 0 && (size_t) n < sizeof( path ) ) {
-    this->fp = fopen( path, "w" );
-    if ( this->fp == NULL ) {
-      fprintf( stderr, "unable to write %s: %d/%s\n", path, errno,
-               strerror( errno ) );
-      return -1;
-    }
-    return 0;
+  if ( this->dir_name.len + sv.len + ::strlen( kind ) + 11 > sizeof( path ) ) {
+    fprintf( stderr, "dir name too long\n" );
+    return -1;
   }
-  fprintf( stderr, "path name too long\n" );
-  return -1;
-}
-
-int
-ConfigDirPrinter::printf( const char *fmt,  ... ) noexcept
-{
-  va_list args;
-  va_start( args, fmt );
-  int n = ::vfprintf( this->fp, fmt, args );
-  va_end( args );
-  return n;
+  CatPtr p( path );
+  p.x( this->dir_name.val, this->dir_name.len )
+   .s( sep )
+   .s( kind )
+   .x( sv.val, sv.len )
+   .s( ".yaml.new" )
+   .end();
+  this->fp = fopen( path, "w" );
+  if ( this->fp == NULL ) {
+    fprintf( stderr, "unable to write %s: %d/%s\n", path, errno,
+             strerror( errno ) );
+    return -1;
+  }
+  return 0;
 }
 
 int
@@ -575,110 +829,76 @@ ConfigTree::save_tport( const ConfigTree::Transport &tport ) const noexcept
   ConfigDirPrinter out( this->cfg_name );
   if ( out.open( "tport_", tport.tport ) != 0 )
     return -1;
-  tport.print_y( out, 0 );
+  ConfigJson cfg;
+  JsonValue *val = cfg.copy( tport );
+  if ( val != NULL )
+    val->print_yaml( &out );
   return 0;
 }
 
 int
-ConfigTree::save_parameters( const TransportArray &listen,
-                             const TransportArray &connect ) const noexcept
+ConfigTree::save_startup( const TransportArray &listen,
+                          const TransportArray &connect ) const noexcept
 {
-  if ( this->is_dir ) {
-    ConfigDirPrinter out( this->cfg_name ),
-                     out2( this->cfg_name );
-    StringVal        mt;
-    TransportArray   mta;
-    int              which;
-    if ( out.open( "param", mt ) != 0 )
-      return -1;
-    which = PRINT_PARAMETERS | PRINT_HDR;
-    this->print_parameters_y( out, which, NULL, 0, mta, mta );
-
-    if ( out2.open( "startup", mt ) != 0 )
-      return -1;
-    which = PRINT_STARTUP | PRINT_HDR;
-    this->print_parameters_y( out2, which, NULL, 0, listen, connect );
-  }
-  else {
-    ConfigFilePrinter out;
-    char path_buf[ 1024 ];
-    int which = 0;
-    int n = ::snprintf( path_buf, sizeof( path_buf ), "%.*s.new",
-                        (int) this->cfg_name.len, this->cfg_name.val );
-    if ( n < 0 || (size_t) n >= sizeof( path_buf ) ) {
-      fprintf( stderr, "path too big\n" );
-      return -1;
-    }
-    if ( out.open( path_buf ) != 0 )
-      return -1;
-    this->print_y( out, which, PRINT_ALL | PRINT_EXCLUDE_TEMPORARY |
-                               PRINT_EXCLUDE_STARTUP );
-    which = PRINT_STARTUP | PRINT_HDR;
-    this->print_parameters_y( out, which, NULL, 0, listen, connect );
-    out.close();
-  }
+  ConfigDirPrinter out( this->cfg_name );
+  StringVal        mt;
+  if ( out.open( "startup", mt ) != 0 )
+    return -1;
+  ConfigJson cfg;
+  JsonValue *val = cfg.copy( NULL, PRINT_STARTUP, NULL, &listen, &connect );
+  if ( val != NULL )
+    val->print_yaml( &out );
   return 0;
 }
 
-void
-ConfigTree::print_parameters_y( ConfigPrinter &p, int which,
-                                const char *name,  size_t namelen,
-                                const TransportArray &listen,
-                                const TransportArray &connect ) const noexcept
+int
+ConfigTree::save_file( const TransportArray &listen,
+                       const TransportArray &connect ) const noexcept
 {
-  size_t n;
-  int i = ( ( which & PRINT_HDR ) != 0 ? 2 : 0 );
-  int did_which = 0;
-  this->print_y( p, did_which, which & ~PRINT_STARTUP, name, namelen );
-  if ( ( did_which & PRINT_PARAMETERS ) == 0 ) {
-    if ( listen.count > 0 || connect.count > 0 )
-      p.printf( "parameters:\n" );
+  ConfigFilePrinter out;
+  char path[ 1024 ];
+  if ( this->cfg_name.len + 5 > sizeof( path ) ) {
+    fprintf( stderr, "cfg name too long\n" );
+    return -1;
   }
-  if ( listen.count > 0 ) {
-    if ( namelen == 0 || ( namelen == R_LISTEN_SZ &&
-          ::memcmp( name, R_LISTEN, R_LISTEN_SZ ) == 0 ) ) {
-      p.printf( "%*slisten:\n", i, "" );
-      for ( n = 0; n < listen.count; n++ ) {
-        p.printf( "  %*s- ", i, "" );
-        listen.ptr[ n ].print_y( p );
-        p.printf( "\n" );
-      }
-    }
-  }
-  if ( connect.count > 0 ) {
-    if ( namelen == 0 || ( namelen == R_CONNECT_SZ &&
-          ::memcmp( name, R_CONNECT, R_CONNECT_SZ ) == 0 ) ) {
-      p.printf( "%*sconnect:\n", i, "" );
-      for ( n = 0; n < connect.count; n++ ) {
-        p.printf( "  %*s- ", i, "" );
-        connect.ptr[ n ].print_y( p );
-        p.printf( "\n" );
-      }
-    }
-  }
+  CatPtr p( path );
+  p.x( this->cfg_name.val, this->cfg_name.len )
+   .s( ".new" )
+   .end();
+  if ( out.open( path ) != 0 )
+    return -1;
+
+  ConfigJson cfg;
+  JsonValue *val = cfg.copy( this, PRINT_EXCLUDE_TEMPORARY | PRINT_NORMAL,
+                             NULL, &listen, &connect );
+  if ( val != NULL )
+    val->print_yaml( &out );
+  return 0;
 }
 
-bool
+int
 ConfigTree::save_new( void ) const noexcept
 {
   GenFileList ops;
   char path_buf[ 1024 ];
+  if ( this->cfg_name.len + 12 > sizeof( path_buf ) ) {
+    fprintf( stderr, "cfg name too long\n" );
+    return -1;
+  }
   if ( this->is_dir ) {
     const char * sep = "/";
-
     if ( this->cfg_name.len == 0 )
       sep = "";
-    int n = ::snprintf( path_buf, sizeof( path_buf ), "%.*s%s*.yaml.new",
-                        (int) this->cfg_name.len, this->cfg_name.val, sep );
-    if ( n < 0 || (size_t) n >= sizeof( path_buf ) ) {
-      fprintf( stderr, "dir path too big\n" );
-      return false;
-    }
+    CatPtr p( path_buf );
+    p.x( this->cfg_name.val, this->cfg_name.len )
+     .s( sep )
+     .s( "*.yaml.new" )
+     .end();
 
     Glob g( path_buf );
     const char *path;
     if ( (path = g.first() ) == NULL )
-      return false;
+      return 0;
 
     do {
       static const char run_file[] = "startup.yaml.new";
@@ -700,23 +920,22 @@ ConfigTree::save_new( void ) const noexcept
     } while ( (path = g.next()) != NULL );
   }
   else {
-    int n = ::snprintf( path_buf, sizeof( path_buf ), "%.*s.new",
-                        (int) this->cfg_name.len, this->cfg_name.val );
-    if ( n < 0 || (size_t) n >= sizeof( path_buf ) ) {
-      fprintf( stderr, "path too big\n" );
-      return false;
-    }
+    CatPtr p( path_buf );
+    p.x( this->cfg_name.val, this->cfg_name.len )
+     .s( ".new" )
+     .end();
+
     GenFileTrans * t =
       GenFileTrans::create_file_path( GEN_OVERWRITE_FILE, path_buf );
     GenFileTrans::trans_if_neq( t, "config file", ops );
   }
-  ops.print_files();
+  size_t count = ops.print_files();
   if ( ops.commit_phase1() ) {
     ops.commit_phase2();
-    return true;
+    return (int) count;
   }
   ops.abort();
-  return false;
+  return 0;
 }
 
 bool
@@ -1010,6 +1229,27 @@ ConfigDB::parse_object_array( const char *where, MDMsg &msg, MDReference &mref,
   }
   return 0;
 }
+int
+ConfigDB::parse_object_list( const char *where,  MDMsg &msg,  MDName &name,
+                 MDReference &mref, ConfigTree::ParametersList &parms ) noexcept
+{
+  MDMsg * smsg;
+  int     status;
+  ConfigTree::Parameters * p = this->make<ConfigTree::Parameters>();
+  if ( mref.ftype == MD_ARRAY )
+    status = this->config_array( where, msg, name, mref, p->list );
+  else if ( mref.ftype != MD_MESSAGE )
+    status = this->config_pair( where, msg, name, mref, p->list );
+  else {
+    status = msg.get_sub_msg( mref, smsg );
+    if ( status == 0 )
+      status = this->parse_pairs( where, *smsg, p->list );
+  }
+  if ( status != 0 )
+    fprintf( stderr, "Expecting an object in %s\n", where );
+  parms.push_tl( p );
+  return status;
+}
 /* parse User { user : u, svc : s, create : t, expires : t, revoke : t,
  *              pri : der, pub : der } */
 int
@@ -1037,26 +1277,21 @@ ConfigDB::parse_groups( MDMsg &msg, MDName &, MDReference &mref ) noexcept
 }
 /* parse Parameters : { parm list } */
 int
-ConfigDB::parse_parameters( MDMsg &msg,  MDName &name,
-                            MDReference &mref ) noexcept
+ConfigDB::parse_parameters( MDMsg &msg,  MDName &name, MDReference &mref ) noexcept
 {
-  const char where[] = "parameters";
-  MDMsg * smsg;
-  int     status;
-  ConfigTree::Parameters * p = this->make<ConfigTree::Parameters>();
-  if ( mref.ftype == MD_ARRAY )
-    status = this->config_array( where, msg, name, mref, p->parms );
-  else if ( mref.ftype != MD_MESSAGE )
-    status = this->config_pair( where, msg, name, mref, p->parms );
-  else {
-    status = msg.get_sub_msg( mref, smsg );
-    if ( status == 0 )
-      status = this->parse_pairs( where, *smsg, p->parms );
-  }
-  if ( status != 0 )
-    fprintf( stderr, "Expecting an object in %s\n", where );
-  this->cfg.parameters.push_tl( p );
-  return status;
+  return this->parse_object_list( "parameters", msg, name, mref, this->cfg.parameters );
+}
+/* parse Startup : { parm list } */
+int
+ConfigDB::parse_startup( MDMsg &msg,  MDName &name, MDReference &mref ) noexcept
+{
+  return this->parse_object_list( "startup", msg, name, mref, this->cfg.startup );
+}
+/* parse Hosts : { parm list } */
+int
+ConfigDB::parse_hosts( MDMsg &msg,  MDName &name, MDReference &mref ) noexcept
+{
+  return this->parse_object_list( "hosts", msg, name, mref, this->cfg.hosts );
 }
 /* parse Route parameters { field : value, ... } */
 int
@@ -1328,7 +1563,6 @@ StringTab::ref_string( const char *str,  size_t len,  StringVal &sv ) noexcept
   this->uid->set( id_h, id_pos, str_id );
   if ( this->uid->need_resize() )
     this->uid = kv::UIntHashTab::resize( this->uid );
-
   /* fill collision */
   if ( col != NULL ) {
     col->id   = str_id;
@@ -1387,6 +1621,41 @@ StringTab::get_string( uint32_t val,  StringVal &sv ) noexcept
   return false;
 }
 
+void *
+StringTab::make_obj( size_t sz ) noexcept
+{
+  size_t min_size = this->mem.align_size( sizeof( FreeObj ) ),
+         size     = this->mem.align_size( sz );
+  if ( size >= min_size ) {
+    uint64_t bit = (uint64_t) 1ULL << ( ( size - min_size ) & 63 );
+    if ( ( this->free_bits & bit ) != 0 ) {
+      for ( FreeObj *o = this->free_list.hd; o != NULL; o = o->next ) {
+        if ( o->size == size ) {
+          this->free_list.pop( o );
+          return (void *) o;
+        }
+      }
+      /* woudld mask out large sizes (>512 bytes), but don't have those yet */
+      this->free_bits &= ~bit;
+    }
+  }
+  return this->mem.make( sz );
+}
+
+void
+StringTab::free_obj( size_t sz,  void *p ) noexcept
+{
+  size_t min_size = this->mem.align_size( sizeof( FreeObj ) ),
+         size     = this->mem.align_size( sz );
+  if ( size >= min_size ) {
+    uint64_t bit = (uint64_t) 1ULL << ( ( size - min_size ) & 63 );
+    this->free_bits |= bit;
+    FreeObj *o = (FreeObj *) p;
+    o->size = size;
+    this->free_list.push_hd( o );
+  }
+}
+
 void
 ConfigDB::check_null( ConfigTree::StrList &list ) noexcept
 {
@@ -1404,16 +1673,6 @@ ConfigDB::check_null( ConfigTree::PairList &list ) noexcept
 }
 
 int
-ConfigPrinter::printf( const char *fmt,  ... ) noexcept
-{
-  va_list args;
-  va_start( args, fmt );
-  int n = ::vprintf( fmt, args );
-  va_end( args );
-  return n;
-}
-
-int
 ConfigErrPrinter::printf( const char *fmt,  ... ) noexcept
 {
   va_list args;
@@ -1423,8 +1682,19 @@ ConfigErrPrinter::printf( const char *fmt,  ... ) noexcept
   return n;
 }
 
+int
+ConfigErrPrinter::puts( const char *s ) noexcept
+{
+  if ( s != NULL ) {
+    int n = fputs( s, stderr );
+    if ( n > 0 )
+      return (int) ::strlen( s );
+  }
+  return 0;
+}
+
 bool
-ConfigDB::check_strings( ConfigPrinter &p ) noexcept
+ConfigDB::check_strings( MDOutput &p ) noexcept
 {
   BitSpace                 bits;
   ConfigTree::User       * u;
@@ -1467,7 +1737,7 @@ ConfigDB::check_strings( ConfigPrinter &p ) noexcept
 
 bool
 ConfigDB::check_string( StringVal &s,  StringTab &str,
-                        const char *where,  ConfigPrinter &p ) noexcept
+                        const char *where,  MDOutput &p ) noexcept
 {
   StringVal ref;
   if ( s.id != 0 )
@@ -1485,7 +1755,7 @@ ConfigDB::check_string( StringVal &s,  StringTab &str,
 
 bool
 ConfigDB::check_strings( ConfigTree::User &u,  StringTab &str,
-                         ConfigPrinter &p ) noexcept
+                         MDOutput &p ) noexcept
 {
   bool b = true;
   b &= this->check_string( u.user, str, "user.user", p );
@@ -1504,17 +1774,12 @@ ConfigDB::check_strings( ConfigTree::User &u,  StringTab &str,
     u.pri.len = 0;
   }
   b &= this->check_string( u.pub, str, "user.pub", p );
-  if ( ! b ) {
-    p.printf( "  \"users\" : [ {\n" );
-    u.print_js( p, 4 );
-    p.printf( "  } ]\n" );
-  }
   return b;
 }
 
 bool
 ConfigDB::check_strings( ConfigTree::StringPair &pa,  StringTab &str,
-                         const char *where,  ConfigPrinter &p ) noexcept
+                         const char *where,  MDOutput &p ) noexcept
 {
   bool b = true;
   b &= this->check_string( pa.name, str, where, p );
@@ -1524,14 +1789,14 @@ ConfigDB::check_strings( ConfigTree::StringPair &pa,  StringTab &str,
 
 bool
 ConfigDB::check_strings( ConfigTree::StringList &l,  StringTab &str,
-                         const char *where,  ConfigPrinter &p ) noexcept
+                         const char *where,  MDOutput &p ) noexcept
 {
   return this->check_string( l.val, str, where, p );
 }
 
 bool
 ConfigDB::check_strings( ConfigTree::Service &svc,
-                         StringTab &str,  ConfigPrinter &p ) noexcept
+                         StringTab &str,  MDOutput &p ) noexcept
 {
   bool b = true;
   b &= this->check_string( svc.svc, str, "service.svc", p );
@@ -1546,739 +1811,84 @@ ConfigDB::check_strings( ConfigTree::Service &svc,
     b &= this->check_strings( *sp, str, "service.users", p );
   for ( sp = svc.revoke.hd; sp != NULL; sp = sp->next )
     b &= this->check_strings( *sp, str, "service.revoke", p );
-  if ( ! b ) {
-    p.printf( "  \"services\" : [ {\n" );
-    svc.print_js( p, 4 );
-    p.printf( "  } ]\n" );
-  }
   return b;
 }
 
 bool
 ConfigDB::check_strings( ConfigTree::Transport &tport,
-                         StringTab &str,  ConfigPrinter &p ) noexcept
+                         StringTab &str,  MDOutput &p ) noexcept
 {
   bool b = true;
   b &= this->check_string( tport.tport, str, "transport.tport", p );
   b &= this->check_string( tport.type, str, "transport.type", p );
   for ( ConfigTree::StringPair *sp = tport.route.hd; sp != NULL; sp = sp->next )
     b &= this->check_strings( *sp, str, "transport.route", p );
-  if ( ! b ) {
-    p.printf( "  \"transports\" : [ {\n" );
-    tport.print_js( p, 4 );
-    p.printf( "  } ]\n" );
-  }
   return b;
 }
 
 bool
 ConfigDB::check_strings( ConfigTree::Group &grp,  StringTab &str,
-                         ConfigPrinter &p ) noexcept
+                         MDOutput &p ) noexcept
 {
   bool b = true;
   b &= this->check_string( grp.group, str, "group.group", p );
   for ( ConfigTree::StringList *sl = grp.users.hd; sl != NULL; sl = sl->next )
     b &= this->check_strings( *sl, str, "group.user", p );
-  if ( ! b ) {
-    p.printf( "  \"groups\" : [ {\n" );
-    grp.print_js( p, 4 );
-    p.printf( "  } ]\n" );
-  }
   return b;
 }
 
 bool
 ConfigDB::check_strings( ConfigTree::Parameters &pa,  StringTab &str,
-                         ConfigPrinter &p ) noexcept
+                         MDOutput &p ) noexcept
 {
   bool b = true;
-  for ( ConfigTree::StringPair *sp = pa.parms.hd; sp != NULL; sp = sp->next )
+  for ( ConfigTree::StringPair *sp = pa.list.hd; sp != NULL; sp = sp->next )
     b &= this->check_strings( *sp, str, "parameters.parm", p );
-  if ( ! b ) {
-    pa.print_js( p, 4 );
-  }
   return b;
 }
 
 void
-ConfigTree::print_js( ConfigPrinter &p ) const noexcept
+ConfigTree::Transport::print_y( MDOutput &p ) const noexcept
 {
-  this->print_js( p, PRINT_NORMAL, NULL, 0 );
+  ConfigJson cfg;
+  JsonValue * val = cfg.copy( *this );
+  if ( val != NULL )
+    val->print_json( &p );
 }
 
 void
-ConfigTree::print_js( ConfigPrinter &p,  int which,
-                      const char *name,  size_t namelen ) const noexcept
+ConfigTree::print_js( MDOutput &p,  int which,  const StringVal *filter,
+                     const ConfigTree::TransportArray *listen,
+                     const ConfigTree::TransportArray *connect ) const noexcept
 {
-  TransportArray listen, connect;
-  this->print_parameters_js( p, which, name, namelen, listen, connect );
+  ConfigJson cfg;
+  JsonValue * val = cfg.copy( this, which, filter, listen, connect );
+  if ( val != NULL )
+    val->print_json( &p );
 }
 
 void
-ConfigTree::print_parameters_js( ConfigPrinter &p, int which,
-                                 const char *name,  size_t namelen,
-                                 const TransportArray &listen,
-                                 const TransportArray &connect ) const noexcept
+ConfigTree::print_y( MDOutput &p,  int which,  const StringVal *filter,
+                     const ConfigTree::TransportArray *listen,
+                     const ConfigTree::TransportArray *connect ) const noexcept
 {
-  const char * nl = "";
-  p.printf( "{\n" );
-  int x = 0;
-  if ( ( which & PRINT_USERS ) != 0 ) {
-    const User *u = this->users.hd;
-    if ( u != NULL ) {
-      x |= PRINT_USERS;
-      p.printf( "  \"users\" : [ {\n" );
-      u->print_js( p, 6 );
-      for ( u = u->next; u != NULL; u = u->next ) {
-        if ( namelen == 0 || u->user.equals( name, namelen ) ) {
-          p.printf( "    }, {\n" );
-          u->print_js( p, 6 );
-        }
-      }
-      p.printf( "    }\n  ]" );
-      nl = ",\n";
-    }
-  }
-  if ( ( which & PRINT_SERVICES ) != 0 ) {
-    const Service *s = this->services.hd;
-    if ( s != NULL ) {
-      x |= PRINT_SERVICES;
-      p.printf( "%s  \"services\" : [ {\n", nl );
-      s->print_js( p, 6 );
-      for ( s = s->next; s != NULL; s = s->next ) {
-        if ( namelen == 0 || s->svc.equals( name, namelen ) ) {
-          p.printf( "    }, {\n" );
-          s->print_js( p, 6 );
-        }
-      }
-      p.printf( "    }\n  ]" );
-      nl = ",\n";
-    }
-  }
-  if ( ( which & PRINT_TRANSPORTS ) != 0 ) {
-    const Transport *t = this->transports.hd;
-    if ( t != NULL ) {
-      x |= PRINT_TRANSPORTS;
-      p.printf( "%s  \"transports\" : [ {\n", nl );
-      t->print_js( p, 6 );
-      for ( t = t->next; t != NULL; t = t->next ) {
-        if ( namelen == 0 || t->tport.equals( name, namelen ) ) {
-          if ( ! t->route.is_empty() ) {
-            p.printf( "    }, {\n" );
-            t->print_js( p, 6 );
-          }
-        }
-      }
-      p.printf( "    }\n  ]" );
-      nl = ",\n";
-    }
-  }
-  if ( ( which & PRINT_GROUPS ) != 0 ) {
-    const Group *g = this->groups.hd;
-    if ( g != NULL ) {
-      x |= PRINT_GROUPS;
-      p.printf( "%s  \"groups\" : [ {\n", nl );
-      g->print_js( p, 6 );
-      for ( g = g->next; g != NULL; g = g->next ) {
-        if ( namelen == 0 || g->group.equals( name, namelen ) ) {
-          p.printf( "    }, {\n" );
-          g->print_js( p, 6 );
-        }
-      }
-      p.printf( "    }\n  ]" );
-      nl = ",\n";
-    }
-  }
-  if ( ( which & PRINT_PARAMETERS ) != 0 ) {
-    const Parameters *pa = this->parameters.hd;
-    if ( pa != NULL ) {
-      p.printf( "%s  \"parameters\" : {\n", nl );
-      x |= PRINT_PARAMETERS;
-      nl = "";
-      for ( ; pa != NULL; pa = pa->next ) {
-        const StringPair *sp = pa->parms.hd;
-        for ( ; sp != NULL; ) {
-          bool matched = false;
-          if ( namelen == 0 || sp->name.equals( name, namelen ) ) {
-            bool is_startup = ( sp->name.equals( R_LISTEN, R_LISTEN_SZ ) ||
-                                sp->name.equals( R_CONNECT, R_CONNECT_SZ ) );
-            if ( is_startup && ( which & PRINT_STARTUP ) != 0 )
-              matched = true;
-          }
-          if ( matched )
-            sp = sp->print_jslist( p, 4, nl );
-          else
-            sp = sp->next;
-        }
-      }
-      if ( ( which & PRINT_STARTUP ) == 0 ) {
-        size_t i;
-        if ( listen.count != 0 ) {
-          p.printf( "%s    \"listen\" : [\n", nl );
-          p.printf( "      \"%s\"", listen.ptr[ 0 ].val );
-          for ( i = 1; i < listen.count; i++ )
-            p.printf( ",\n      \"%s\"", listen.ptr[ i ].val );
-          p.printf( "\n    ]" );
-          nl = ",\n";
-        }
-        if ( connect.count != 0 ) {
-          p.printf( "%s    \"connect\" : [\n", nl );
-          p.printf( "      \"%s\"", connect.ptr[ 0 ].val );
-          for ( i = 1; i < connect.count; i++ )
-            p.printf( ",\n      \"%s\"", connect.ptr[ i ].val );
-          p.printf( "\n    ]" );
-          nl = ",\n";
-        }
-      }
-      p.printf( "%s  }\n", nl[ 0 ] == 0 ? "" : "\n" );
-    }
-    else {
-      p.printf( "\n" );
-    }
-  }
-  p.printf( "}\n" );
-}
-
-const ConfigTree::StringPair *
-ConfigTree::StringPair::print_jslist( ConfigPrinter &p,  int i,
-                                      const char *&nl ) const noexcept
-{
-  const StringPair * end = this;
-  for ( ; ; end = end->next ) {
-    if ( end->next == NULL ||
-         ! end->next->name.equals( this->name ) )
-      break;
-  }
-  if ( this == end ) {
-    p.printf( "%s%*s", nl, i, "" );
-    this->print_js( p );
-    nl = ",\n";
-  }
-  else {
-    p.printf( "%s%*s", nl, i, "" );
-    this->name.print_js( p );
-    p.printf( ": {\n" );
-    nl = "";
-    for ( const StringPair *sp = this; ; sp = sp->next ) {
-      p.printf( "%s%*s", nl, i, "" );
-      sp->value.print_js( p );
-      if ( sp == end )
-        break;
-      nl = ",\n";
-    }
-    p.printf( "%*s}", i, "" );
-  }
-  return end->next;
-}
-
-void
-ConfigTree::print_y( ConfigPrinter &p,  int &did_which,  int which,
-                     const char *name,  size_t namelen ) const noexcept
-{
-  int x = 0;
-  if ( ( which & ( PRINT_USERS | PRINT_ALL ) ) != 0 ) {
-    const User *u = this->users.hd;
-    const bool exclude_gen_user = ( which & PRINT_EXCLUDE_TEMPORARY ) != 0;
-    if ( exclude_gen_user && u != NULL && u->user_id == this->user_cnt )
-      u = u->next;
-    if ( u != NULL || ( which & PRINT_HDR ) ) {
-      p.printf( "users:\n" );
-      x |= PRINT_USERS;
-      for ( ; u != NULL; u = u->next ) {
-        if ( namelen == 0 || u->user.equals( name, namelen ) ) {
-          if ( ! exclude_gen_user || u->user_id < this->user_cnt )
-            u->print_y( p, 4 );
-        }
-      }
-    }
-  }
-  if ( ( which & ( PRINT_SERVICES | PRINT_ALL ) ) != 0 ) {
-    const Service *s = this->services.hd;
-    if ( s != NULL || ( which & PRINT_HDR ) ) {
-      p.printf( "services:\n" );
-      x |= PRINT_SERVICES;
-      for ( ; s != NULL; s = s->next )
-        if ( namelen == 0 || s->svc.equals( name, namelen ) )
-          s->print_y( p, 4 );
-    }
-  }
-  if ( ( which & ( PRINT_TRANSPORTS | PRINT_ALL ) ) != 0 ) {
-    const Transport *t = this->transports.hd;
-    if ( t != NULL || ( which & PRINT_HDR ) ) {
-      p.printf( "transports:\n" );
-      x |= PRINT_TRANSPORTS;
-      for ( ; t != NULL; t = t->next ) {
-        if ( namelen == 0 || t->tport.equals( name, namelen ) ) {
-          if ( ! t->route.is_empty() )
-            t->print_y( p, 4 );
-        }
-      }
-    }
-  }
-  if ( ( which & ( PRINT_GROUPS | PRINT_ALL ) ) != 0 ) {
-    const Group *g = this->groups.hd;
-    if ( g != NULL || ( which & PRINT_HDR ) ) {
-      p.printf( "groups:\n" );
-      x |= PRINT_GROUPS;
-      for ( ; g != NULL; g = g->next )
-        if ( namelen == 0 || g->group.equals( name, namelen ) )
-          g->print_y( p, 4 );
-    }
-  }
-  if ( ( which & ( PRINT_PARAMETERS | PRINT_STARTUP ) ) != 0 ) {
-    const Parameters *pa = this->parameters.hd;
-    if ( pa != NULL || ( which & PRINT_HDR ) ) {
-      p.printf( "parameters:\n" );
-      x |= PRINT_PARAMETERS;
-      for ( ; pa != NULL; pa = pa->next ) {
-        const StringPair *sp = pa->parms.hd;
-        for ( ; sp != NULL; ) {
-          bool matched = false;
-          if ( namelen == 0 || sp->name.equals( name, namelen ) ) {
-            bool is_startup = ( sp->name.equals( R_LISTEN, R_LISTEN_SZ ) ||
-                                sp->name.equals( R_CONNECT, R_CONNECT_SZ ) );
-            if ( which & PRINT_STARTUP )
-              matched = is_startup;
-            else
-              matched = ! is_startup;
-          }
-          if ( matched )
-            sp = sp->print_ylist( p, 2 );
-          else
-            sp = sp->next;
-        }
-      }
-    }
-  }
-  else if ( ( which & PRINT_ALL ) != 0 ) {
-    const Parameters *pa = this->parameters.hd;
-    if ( pa != NULL ) {
-      p.printf( "parameters:\n" );
-      x |= PRINT_PARAMETERS;
-      for ( ; pa != NULL; pa = pa->next ) {
-        const StringPair *sp = pa->parms.hd;
-        for ( ; sp != NULL; ) {
-          bool is_startup = ( sp->name.equals( R_LISTEN, R_LISTEN_SZ ) ||
-                              sp->name.equals( R_CONNECT, R_CONNECT_SZ ) );
-          bool matched    = ( ! is_startup ||
-                              ( which & PRINT_EXCLUDE_STARTUP ) == 0 );
-          if ( matched )
-            sp = sp->print_ylist( p, 2 );
-          else
-            sp = sp->next;
-        }
-      }
-    }
-  }
-  did_which = x;
-}
-
-static const char *
-find_escape_chars( const char *s,  size_t len )
-{
-  for ( size_t i = 0; i < len; i++ ) {
-    switch ( s[ i ] ) {
-      case '\"':
-      case '\\': return &s[ i ];
-      default: break;
-    }
-  }
-  return NULL;
-}
-
-void
-StringVal::print_js( ConfigPrinter &p ) const noexcept
-{
-  const char *v = this->val,
-             *s = find_escape_chars( v, this->len );
-  if ( s == NULL )
-    p.printf( "\"%*s\"", (int) this->len, v );
-  else {
-    const char *e = &this->val[ this->len ];
-    p.printf( "\"%.*s", (int) ( s - v ), v );
-    do {
-      if ( *s == '\\' )
-        p.printf( "\\\\" );
-      else
-        p.printf( "\\\"" );
-      v = &s[ 1 ];
-      s = find_escape_chars( v, e - v );
-      if ( s == NULL ) s = e;
-      p.printf( "%.*s", (int) ( s - v ), v );
-    } while ( s < e );
-    p.printf( "\"" );
-  }
-}
-
-void
-StringVal::print_y( ConfigPrinter &p ) const noexcept
-{
-  bool quote = ( this->len == 0 );
-  if ( ! quote && this->len == 1 ) {
-    switch ( this->val[ 0 ] ) {
-      case 'Y': case 'y': case 'N': case 'n':
-      /*case '0': case '1': case '2': case '3':
-      case '4': case '5': case '6': case '7':
-      case '8': case '9':*/
-        quote = true;
-        break;
-    }
-  }
-  if ( ! quote ) {
-    if ( ispunct( this->val[ 0 ] ) ) {
-      switch ( this->val[ 0 ] ) {
-        case '^': case '(': case ')': case '<': case '.': case ';':
-          break;
-        default:
-          quote = true;
-          break;
-      }
-    }
-    if ( ! quote ) {
-      if ( ::memchr( this->val, '\'', this->len ) != NULL ||
-                ::memchr( this->val, '\"', this->len ) != NULL ||
-                ::memchr( this->val, '\\', this->len ) != NULL )
-        quote = true;
-      /*else if ( ! isalpha( this->val[ 0 ] ) ) {
-        char *end = (char *) this->val;
-        ::strtod( this->val, &end );
-        if ( end == &this->val[ this->len ] )
-          quote = true;
-      }*/
-      else if ( ( this->len == 4 &&
-                  ::strncasecmp( this->val, "true", 4 ) == 0 ) ||
-                ( this->len == 4 &&
-                  ::strncasecmp( this->val, "null", 4 ) == 0 ) ||
-                ( this->len == 5 &&
-                  ::strncasecmp( this->val, "false", 5 ) == 0 ) )
-        quote = true;
-      else if ( this->val[ this->len - 1 ] == ':' )
-        quote = true;
-    }
-  }
-  if ( quote )
-    this->print_js( p );
-  else
-    p.printf( "%*s", (int) this->len, this->val );
-}
-
-void
-ConfigTree::User::print_js( ConfigPrinter &p,  int i,  char c ) const noexcept
-{
-  p.printf( "%*s\"user\" : ", i, "" ); this->user.print_js( p ); p.printf( ",\n" );
-  p.printf( "%*s\"svc\" : ", i, "" ); this->svc.print_js( p ); p.printf( ",\n" );
-  p.printf( "%*s\"create\" : ", i, "" ); this->create.print_js( p ); p.printf( ",\n" );
-  if ( ! this->expires.is_null() ) {
-    p.printf( "%*s\"expires\" : ", i, "" ); this->expires.print_js( p );
-    p.printf( ",\n" );
-  }
-  if ( ! this->revoke.is_null() ) {
-    p.printf( "%*s\"revoke\" : ", i, "" ); this->revoke.print_js( p );
-    p.printf( ",\n" );
-  }
-  if ( ! this->pri.is_null() ) {
-    p.printf( "%*s\"pri\" : ", i, "" ); this->pri.print_js( p );
-    p.printf( ",\n" );
-  }
-  p.printf( "%*s\"pub\" : ", i, "" ); this->pub.print_js( p );
-  if ( c != 0 ) p.printf( "%c", c );
-  p.printf( "\n" );
-}
-
-void
-ConfigTree::User::print_y( ConfigPrinter &p,  int i ) const noexcept
-{
-  if ( i > 0 )
-    p.printf( "%*s- user: ", i - 2, "" );
-  else
-    p.printf( "user: " );
-  this->user.print_y( p ); p.printf( "\n" );
-  p.printf( "%*ssvc: ", i, "" ); this->svc.print_y( p ); p.printf( "\n" );
-  p.printf( "%*screate: ", i, "" ); this->create.print_y( p ); p.printf( "\n" );
-  if ( ! this->expires.is_null() ) {
-    p.printf( "%*sexpires: ", i, "" ); this->expires.print_y( p );
-    p.printf( "\n" );
-  }
-  if ( ! this->revoke.is_null() ) {
-    p.printf( "%*srevoke: ", i, "" ); this->revoke.print_y( p );
-    p.printf( "\n" );
-  }
-  if ( ! this->pri.is_null() ) {
-    p.printf( "%*spri: ", i, "" ); this->pri.print_y( p );
-    p.printf( "\n" );
-  }
-  p.printf( "%*spub: ", i, "" ); this->pub.print_y( p );
-  p.printf( "\n" );
-}
-
-void
-ConfigTree::StringPair::print_js( ConfigPrinter &p ) const noexcept
-{
-  this->name.print_js( p ); p.printf( " : " ); this->value.print_js( p );
-}
-
-const ConfigTree::StringPair *
-ConfigTree::StringPair::print_ylist( ConfigPrinter &p,  int i ) const noexcept
-{
-  const StringPair * end = this;
-  for ( ; ; end = end->next ) {
-    if ( end->next == NULL ||
-         ! end->next->name.equals( this->name ) )
-      break;
-  }
-  if ( this == end ) {
-    p.printf( "%*s", i, "" );
-    this->print_y( p );
-    p.printf( "\n" );
-  }
-  else {
-    p.printf( "%*s", i, "" );
-    this->name.print_y( p );
-    p.printf( ":\n" );
-    for ( const StringPair *sp = this; ; sp = sp->next ) {
-      p.printf( "%*s- ", i+2, "" );
-      sp->value.print_y( p );
-      p.printf( "\n" );
-      if ( sp == end )
-        break;
-    }
-  }
-  return end->next;
-}
-
-void
-ConfigTree::StringPair::print_y( ConfigPrinter &p ) const noexcept
-{
-  this->name.print_y( p ); p.printf( ": " ); this->value.print_y( p );
-}
-
-void
-ConfigTree::StringList::print_js( ConfigPrinter &p ) const noexcept
-{
-  return this->val.print_js( p );
-}
-
-void
-ConfigTree::StringList::print_y( ConfigPrinter &p ) const noexcept
-{
-  return this->val.print_y( p );
-}
-
-void
-ConfigTree::Service::print_js( ConfigPrinter &p,  int i ) const noexcept
-{
-  p.printf( "%*s\"svc\" : ", i, "" ); this->svc.print_js( p ); p.printf( ",\n" );
-  p.printf( "%*s\"create\" : ", i, "" ); this->create.print_js( p ); p.printf( ",\n" );
-  if ( ! this->pri.is_null() ) {
-    p.printf( "%*s\"pri\" : ", i, "" ); this->pri.print_js( p ); p.printf( ",\n" );
-  }
-  p.printf( "%*s\"pub\" : ", i, "" ); this->pub.print_js( p );
-  if ( this->users.hd == NULL && this->revoke.hd == NULL )
-    p.printf( "\n" );
-  else {
-    StringPair *sp = this->users.hd;
-    p.printf( ",\n" );
-    if ( sp != NULL ) {
-      p.printf( "%*s\"users\" : {\n%*s  ", i, "", i, "" );
-      sp->print_js( p );
-      for ( sp = sp->next; sp != NULL; sp = sp->next ) {
-        p.printf( ",\n%*s  ", i, "" );
-        sp->print_js( p );
-      }
-      p.printf( "\n%*s}\n", i, "" );
-    }
-    sp = this->revoke.hd;
-    if ( sp != NULL ) {
-      p.printf( "%*s\"revoke\" : {\n%*s  ", i, "", i, "" );
-      sp->print_js( p );
-      for ( sp = sp->next; sp != NULL; sp = sp->next ) {
-        p.printf( ",\n%*s  ", i, "" );
-        sp->print_js( p );
-      }
-      p.printf( "\n%*s}\n", i, "" );
-    }
-  }
-}
-
-void
-ConfigTree::Service::print_y( ConfigPrinter &p,  int i ) const noexcept
-{
-  if ( i > 0 )
-    p.printf( "%*s- svc: ", i - 2, "" );
-  else
-    p.printf( "svc: " );
-  this->svc.print_y( p ); p.printf( "\n" );
-  p.printf( "%*screate: ", i, "" ); this->create.print_y( p ); p.printf( "\n" );
-  if ( ! this->pri.is_null() ) {
-    p.printf( "%*spri: ", i, "" ); this->pri.print_y( p ); p.printf( "\n" );
-  }
-  p.printf( "%*spub: ", i, "" ); this->pub.print_y( p ); p.printf( "\n" );
-  StringPair *sp = this->users.hd;
-  if ( sp != NULL ) {
-    p.printf( "%*susers:\n", i, "" );
-    for ( ; sp != NULL; sp = sp->next ) {
-      p.printf( "%*s  ", i, "" );
-      sp->print_y( p );
-      p.printf( "\n" );
-    }
-  }
-  sp = this->revoke.hd;
-  if ( sp != NULL ) {
-    p.printf( "%*srevoke:\n", i, "" );
-    for ( ; sp != NULL; sp = sp->next ) {
-      p.printf( "%*s  ", i, "" );
-      sp->print_y( p );
-      p.printf( "\n" );
-    }
-  }
-}
-
-const ConfigTree::StringPair *
-ConfigTree::StringPair::print_jsarr( ConfigPrinter &p,  int i,
-                                     const char *&nl ) const noexcept
-{
-  const StringPair * end = this;
-  for ( ; ; end = end->next ) {
-    if ( end->next == NULL ||
-         ! end->next->name.equals( this->name ) )
-      break;
-  }
-  if ( this == end ) {
-    p.printf( "%s%*s", nl, i, "" );
-    this->print_js( p );
-    nl = ",\n";
-  }
-  else {
-    p.printf( "%s%*s", nl, i, "" );
-    this->name.print_js( p );
-    p.printf( ": [\n" );
-    nl = "";
-    for ( const StringPair *sp = this; ; sp = sp->next ) {
-      p.printf( "%s%*s", nl, i + 2, "" );
-      sp->value.print_js( p );
-      if ( sp == end )
-        break;
-      nl = ",\n";
-    }
-    p.printf( " ]" );
-  }
-  return end->next;
-}
-
-void
-ConfigTree::Transport::print_js( ConfigPrinter &p,  int i ) const noexcept
-{
-  p.printf( "%*s\"tport\" : ", i, "" ); this->tport.print_js( p ); p.printf( ",\n" );
-  p.printf( "%*s\"type\" : ", i, "" ); this->type.print_js( p );
-  const StringPair *sp = this->route.hd;
-  p.printf( "%s\n", sp == NULL ? "" : "," );
-  if ( sp != NULL ) {
-    const char *nl = "";
-    p.printf( "%*s\"route\" : {\n", i, "" );
-    do {
-      sp = sp->print_jsarr( p, i + 2, nl );
-    } while ( sp != NULL );
-    p.printf( "\n%*s}\n", i, "" );
-  }
-}
-
-void
-ConfigTree::Transport::print_y( ConfigPrinter &p,  int i ) const noexcept
-{
-  if ( i > 0 )
-    p.printf( "%*s- tport: ", i - 2, "" );
-  else
-    p.printf( "tport: " );
-  this->tport.print_y( p ); p.printf( "\n" );
-  p.printf( "%*stype: ", i, "" ); this->type.print_y( p ); p.printf( "\n" );
-  const StringPair *sp = this->route.hd;
-  if ( sp != NULL ) {
-    p.printf( "%*sroute:\n", i, "" );
-    while ( sp != NULL ) {
-      /*p.printf( "%*s  ", i, "" );*/
-      sp = sp->print_ylist( p, i + 2 );
-      /*sp->print_y( p );*/
-      /*p.printf( "\n" );*/
-    }
-  }
-}
-
-void
-ConfigTree::Group::print_js( ConfigPrinter &p,  int i ) const noexcept
-{
-  p.printf( "%*s\"group\" : ", i, "" ); this->group.print_js( p ); p.printf( ",\n" );
-  StringList *sl = this->users.hd;
-  if ( sl != NULL ) {
-    p.printf( "%*s\"users\" : [ ", i, "" );
-    sl->print_js( p );
-    for ( sl = sl->next; sl != NULL; sl = sl->next ) {
-      p.printf( ", " );
-      sl->print_js( p );
-    }
-    p.printf( " ]\n" );
-  }
-}
-
-void
-ConfigTree::Group::print_y( ConfigPrinter &p,  int i ) const noexcept
-{
-  if ( i > 0 )
-    p.printf( "%*s- group: ", i - 2, "" );
-  else
-    p.printf( "group: " );
-  this->group.print_y( p ); p.printf( "\n" );
-  StringList *sl = this->users.hd;
-  if ( sl != NULL ) {
-    p.printf( "%*susers:\n", i, "" );
-    for ( ; sl != NULL; sl = sl->next ) {
-      p.printf( "%*s  ", i, "" );
-      sl->print_y( p );
-      p.printf( "\n" );
-    }
-  }
-}
-
-void
-ConfigTree::Parameters::print_js( ConfigPrinter &p,  int i,
-                                  char c ) const noexcept
-{
-  p.printf( "%*s\"parameters\" : {\n%*s  ", i, "", i, "" );
-  StringPair *sp = this->parms.hd;
-  if ( sp != NULL ) {
-    sp->print_js( p );
-    for ( sp = sp->next; sp != NULL; sp = sp->next ) {
-      p.printf( ",\n%*s  ", i, "" );
-      sp->print_js( p );
-    }
-  }
-  p.printf( "\n%*s}", i, "" );
-  if ( c != 0 ) p.printf( "%c", c );
-  p.printf( "\n" );
-}
-
-void
-ConfigTree::Parameters::print_y( ConfigPrinter &p,  int i ) const noexcept
-{
-  /*p.printf( "%*sparameters:\n", i, "" );*/
-  StringPair *sp = this->parms.hd;
-  if ( sp != NULL ) {
-    for ( ; sp != NULL; sp = sp->next ) {
-      p.printf( "%*s", i, "" );
-      sp->print_y( p );
-      p.printf( "\n" );
-    }
-  }
+  ConfigJson cfg;
+  JsonValue * val = cfg.copy( this, which, filter, listen, connect );
+  if ( val != NULL )
+    val->print_yaml( &p );
 }
 
 int
 ConfigTree::Transport::get_host_port( const char *&hostp,  char *host,
-                                      size_t &len ) noexcept
+                                  size_t &len, ParametersList &hosts ) noexcept
 {
-  int port = 0;
+  int port = 0, first = 0;
+  size_t avail = len;
   if ( hostp == NULL ) {
     len = 0;
     return 0;
   }
+repeat_process:;
   size_t i, hlen = ::strlen( hostp );
   if ( len <= hlen ) {
     len = hlen;
@@ -2325,7 +1935,12 @@ ConfigTree::Transport::get_host_port( const char *&hostp,  char *host,
       len -= 2;
     }
   }
+
   host[ len ] = '\0';
+  if ( first++ == 0 && hosts.find( host, hostp, host ) ) {
+    len = avail;
+    goto repeat_process;
+  }
   return port;
 }
 
@@ -2349,10 +1964,12 @@ ConfigTree::Transport::get_route_pairs( const char *name,
     el.push( sp );
     for ( i = 1; ; i++ ) {
       char nbuf[ 64 ]; /* try connect2, connect3, ... */
-      int nlen = ::snprintf( nbuf, sizeof( nbuf ), "%s%d", name, (int) i + 1 );
-      if ( (size_t) nlen >= sizeof( nbuf ) )
+      size_t d = uint64_digits( i + 1 );
+      if ( d + name_len + 1 > sizeof( nbuf ) )
         break;
-      sp2 = this->route.get_pair( nbuf, nlen );
+      CatPtr p( nbuf );
+      p.x( name, name_len ).u( i + 1, d ).end();
+      sp2 = this->route.get_pair( nbuf, p.len() );
       if ( sp2 == NULL )
         break;
       el.push( sp2 );
@@ -2368,21 +1985,6 @@ ConfigTree::Transport::get_route_pairs( const char *name,
   }
 }
 
-
-ConfigTree::StringPair *
-ConfigTree::get_free_pair( StringTab &st ) noexcept
-{
-  ConfigTree::StringPair *sp;
-  if ( this->free_pairs.is_empty() )
-    sp = st.make<ConfigTree::StringPair>();
-  else {
-    sp = this->free_pairs.pop_hd();
-    sp->name.zero();
-    sp->value.zero();
-  }
-  return sp;
-}
-
 void
 ConfigTree::set_route_str( ConfigTree::Transport &t,  StringTab &st,
                            const char *name,  const char *value,
@@ -2391,7 +1993,7 @@ ConfigTree::set_route_str( ConfigTree::Transport &t,  StringTab &st,
   ConfigTree::StringPair * sp;
   size_t name_len = ::strlen( name );
   if ( (sp = t.route.get_pair( name, name_len )) == NULL ) {
-    sp = this->get_free_pair( st );
+    sp = st.make<ConfigTree::StringPair>();
     st.ref_string( name, name_len, sp->name );
     t.route.push_tl( sp );
   }
@@ -2407,12 +2009,14 @@ ConfigTree::Transport::set_route_int( StringTab &st,  const char *name,
   return this->set_route_str( st, name, buf, n );
 }
 #endif
+
 ConfigTree::StringPair *
-ConfigTree::find_parameter_sp( const char *name ) noexcept
+ConfigTree::ParametersList::find_sp( const char *name,
+                                     size_t name_len ) noexcept
 {
-  for ( Parameters *p = this->parameters.hd; p != NULL; p = p->next ) {
-    for ( StringPair *sp = p->parms.hd; sp != NULL; sp = sp->next ) {
-      if ( sp->name.equals( name ) )
+  for ( Parameters *p = this->hd; p != NULL; p = p->next ) {
+    for ( StringPair *sp = p->list.hd; sp != NULL; sp = sp->next ) {
+      if ( sp->name.equals( name, name_len ) )
         return sp;
     }
   }
@@ -2420,10 +2024,10 @@ ConfigTree::find_parameter_sp( const char *name ) noexcept
 }
 
 bool
-ConfigTree::find_parameter( const char *name,  const char *&value,
-                            const char *def_value ) noexcept
+ConfigTree::ParametersList::find( const char *name,  const char *&value,
+                                  const char *def_value ) noexcept
 {
-  StringPair * sp = this->find_parameter_sp( name );
+  StringPair * sp = this->find_sp( name, ::strlen( name ) );
   if ( sp != NULL )
     value = sp->value.val;
   else
@@ -2432,41 +2036,43 @@ ConfigTree::find_parameter( const char *name,  const char *&value,
 }
 
 void
-ConfigTree::set_parameter( StringTab &st,  const char *name,
-                           const char *value ) noexcept
+ConfigTree::ParametersList::set( StringTab &st,  const char *name,
+                                 const char *value ) noexcept
 {
-  StringPair * sp = this->find_parameter_sp( name );
+  size_t name_len = ::strlen( name );
+  StringPair * sp = this->find_sp( name, name_len );
   Parameters * p;
   if ( sp == NULL ) {
-    if ( (p = this->parameters.tl) == NULL ) {
+    if ( (p = this->tl) == NULL ) {
       p = st.make<ConfigTree::Parameters>();
-      this->parameters.push_tl( p );
+      this->push_tl( p );
     }
-    sp = this->get_free_pair( st );
-    p->parms.push_tl( sp );
-    st.ref_string( name, ::strlen( name ), sp->name );
+    sp = st.make<ConfigTree::StringPair>();
+    p->list.push_tl( sp );
+    st.ref_string( name, name_len, sp->name );
   }
   st.ref_string( value, ::strlen( value ), sp->value );
 }
 
 bool
-ConfigTree::remove_parameter( const char *name ) noexcept
+ConfigTree::ParametersList::remove( StringTab &st,  const char *name ) noexcept
 {
-  for ( Parameters *p = this->parameters.hd; p != NULL; p = p->next ) {
+  size_t name_len = ::strlen( name );
+  for ( Parameters *p = this->hd; p != NULL; p = p->next ) {
     StringPair *last = NULL;
-    for ( StringPair *sp = p->parms.hd; sp != NULL; ) {
-      if ( sp->name.equals( name ) ) {
+    for ( StringPair *sp = p->list.hd; sp != NULL; ) {
+      if ( sp->name.equals( name, name_len ) ) {
         if ( last == NULL ) {
-          p->parms.hd = sp->next;
-          if ( p->parms.hd == NULL )
-            p->parms.tl = NULL;
+          p->list.hd = sp->next;
+          if ( p->list.hd == NULL )
+            p->list.tl = NULL;
         }
         else {
           last->next = sp->next;
-          if ( p->parms.tl == sp )
-            p->parms.tl = last;
+          if ( p->list.tl == sp )
+            p->list.tl = last;
         }
-        this->free_pairs.push_tl( sp );
+        st.release( sp );
         return true;
       }
       last = sp;

@@ -881,7 +881,8 @@ TransportRoute::add_tcp_connect( const char *conn_url,
     if ( rte->connect_ctx == NULL )
       rte->connect_ctx = rte->mgr.connect_mgr.create( rte->tport_id );
   }
-  port = ConfigTree::Transport::get_host_port( host, host_buf, len );
+  port = ConfigTree::Transport::get_host_port( host, host_buf, len,
+                                               this->mgr.tree.hosts );
   rte->conn_hash = conn_hash;
   rte->connect_ctx->connect( host, port, opts.opts, opts.timeout );
   return true;
@@ -917,8 +918,8 @@ TransportRoute::create_pgm( int kind,  ConfigTree::Transport &tport ) noexcept
   EvPgmTransportParameters parm;
   char         net_buf[ 1024 ];
   const char * name = ( kind & TPORT_IS_LISTEN ) ? R_LISTEN : R_CONNECT;
-  parm.parse_tport( name, tport, net_buf, this->user_db.reliability );
-
+  parm.parse_tport( name, tport, net_buf,
+                    this->user_db.reliability, this->mgr );
   EvPgmTransport * l;
   if ( this->pgm_tport != NULL )
     l = this->pgm_tport;

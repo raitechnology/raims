@@ -5,6 +5,7 @@
 #include <raikv/util.h>
 #include <raikv/array_space.h>
 #include <raims/string_tab.h>
+#include <raimd/json.h>
 
 namespace rai {
 namespace ms {
@@ -12,21 +13,24 @@ namespace ms {
 #ifdef _MSC_VER
 #define __attribute__(x)
 #endif
-struct ConfigPrinter {
+struct ConfigErrPrinter : public md::MDOutput {
+  virtual int puts( const char *s ) noexcept;
   virtual int printf( const char *fmt,  ... ) noexcept
     __attribute__((format(printf,2,3)));
 };
-struct ConfigErrPrinter : public ConfigPrinter {
-  virtual int printf( const char *fmt,  ... ) noexcept
-    __attribute__((format(printf,2,3)));
-};
-struct ConfigFilePrinter : public ConfigPrinter {
+struct ConfigFilePrinter : public md::MDOutput {
   FILE * fp;
   ConfigFilePrinter() : fp( 0 ) {}
   ~ConfigFilePrinter() noexcept;
   int open( const char *path ) noexcept;
   void close( void ) noexcept;
+  virtual int puts( const char *s ) noexcept;
   virtual int printf( const char *fmt,  ... ) noexcept;
+};
+struct ConfigDirPrinter : public ConfigFilePrinter {
+  const StringVal & dir_name;
+  ConfigDirPrinter( const StringVal &d ) : dir_name( d ) {}
+  int open( const char *kind,  const StringVal &sv ) noexcept;
 };
 
 enum WhichYaml {
@@ -35,13 +39,10 @@ enum WhichYaml {
   PRINT_TRANSPORTS        = 4,
   PRINT_GROUPS            = 8,
   PRINT_PARAMETERS        = 16,
-  PRINT_NORMAL            = 31,
-  PRINT_HDR               = 32,
+  PRINT_HOSTS             = 32,
   PRINT_STARTUP           = 64,
-  PRINT_STARTUP_CONFIG    = 128,
-  PRINT_EXCLUDE_STARTUP   = 256,
   PRINT_EXCLUDE_TEMPORARY = 512,
-  PRINT_ALL               = 1024
+  PRINT_NORMAL            = 1|2|4|8|16|32|64
 };
 
 struct ConfigTree {
@@ -59,13 +60,6 @@ struct ConfigTree {
       value( sp.value ) {}
     StringPair( const StringVal &nm,  const StringVal &val ) : next( 0 ),
       name( nm ), value( val ) {}
-    void print_js( ConfigPrinter &p ) const noexcept;
-    void print_y( ConfigPrinter &p ) const noexcept;
-    const StringPair *print_ylist( ConfigPrinter &p, int i ) const noexcept;
-    const StringPair *print_jslist( ConfigPrinter &p, int i,
-                                    const char *&nl ) const noexcept;
-    const StringPair *print_jsarr( ConfigPrinter &p, int i,
-                                   const char *&nl ) const noexcept;
   };
   struct PairList : public kv::SLinkList<StringPair> {
     StringPair *get_pair( const char *name,  size_t len ) {
@@ -115,8 +109,6 @@ struct ConfigTree {
     StringVal    val;    /* a subject or a user */
     StringList() : next( 0 ) {}
     StringList( const StringList &sl ) : next( 0 ), val( sl.val ) {}
-    void print_js( ConfigPrinter &p ) const noexcept;
-    void print_y( ConfigPrinter &p ) const noexcept;
   };
   typedef kv::SLinkList<StringList> StrList;
 
@@ -131,23 +123,32 @@ struct ConfigTree {
               pri,         /* pri base64 */
               pub;         /* pub base64 */
     uint32_t  user_id;     /* count 0 -> user_cnt */
+    bool      is_temp;
                    /*entitle_cnt;*/ /* count of entitle[] */
     User() : next( 0 ), user_id( 0 ) {}
     User( const User &u ) : next( 0 ), user( u.user ), svc( u.svc ),
       create( u.create ), expires( u.expires ), revoke( u.revoke ),
-      pri( u.pri ), pub( u.pub ), user_id( u.user_id ) {}
-    void print_js( ConfigPrinter &p,  int i,  char c = 0 ) const noexcept;
-    void print_y( ConfigPrinter &p,  int i ) const noexcept;
+      pri( u.pri ), pub( u.pub ), user_id( u.user_id ), is_temp( false ) {}
   };
+  typedef kv::SLinkList< User > UserList;
   /* parameters : { string_pair_list } */
   struct Parameters {
     void * operator new( size_t, void *ptr ) { return ptr; }
     Parameters * next;
-    PairList parms;
+    PairList list;
 
     Parameters() : next( 0 ) {}
-    void print_js( ConfigPrinter &p,  int i,  char c = 0 ) const noexcept;
-    void print_y( ConfigPrinter &p,  int i ) const noexcept;
+  };
+  struct ParametersList : public kv::SLinkList< Parameters > {
+    StringPair* find_sp( const char *name,  size_t name_len ) noexcept;
+    bool find( const char *name,  const char *&value,
+               const char *def_value = NULL ) noexcept;
+    void set( StringTab &st,  const char *name,
+              const char *value ) noexcept;
+    void set( StringTab &st,  const char *name, bool value ) {
+      this->set( st, name, value ? "true" : "false" );
+    }
+    bool remove( StringTab &st,  const char *name ) noexcept;
   };
   /* services : { svc : name, type : t, subject : [ arr ], route : { f:v } } */
   struct Service {
@@ -163,9 +164,8 @@ struct ConfigTree {
     Service() : next( 0 ), service_id( 0 ) {}
     Service( const Service &s ) : next( 0 ), svc( s.svc ), create( s.create ),
       pri( s.pri ), pub( s.pub ), service_id( s.service_id ) {}
-    void print_js( ConfigPrinter &p,  int i ) const noexcept;
-    void print_y( ConfigPrinter &p,  int i ) const noexcept;
   };
+  typedef kv::SLinkList< Service > ServiceList;
   /* transports : { tport : name, type : t, route : { f:v } } */
   struct Transport {
     void * operator new( size_t, void *ptr ) { return ptr; }
@@ -173,12 +173,12 @@ struct ConfigTree {
     StringVal   tport;    /* service name */
     StringVal   type;     /* route type, rv, nats, .. */
     uint32_t    tport_id; /* count 0 -> tport_cnt */
+    bool        is_temp;
     PairList    route;    /* route parameters */
-    Transport() : next( 0 ), tport_id( 0 ) {}
+    Transport() : next( 0 ), tport_id( 0 ), is_temp( false ) {}
     Transport( const Transport &t ) : next( 0 ), tport( t.tport ),
       type( t.type ), tport_id( t.tport_id ) {}
-    void print_js( ConfigPrinter &p,  int i ) const noexcept;
-    void print_y( ConfigPrinter &p,  int i ) const noexcept;
+    void print_y( md::MDOutput &p ) const noexcept;
     bool get_route_str( const char *name,  const char *&value ) {
       return this->route.get_val( name, value );
     }
@@ -189,18 +189,12 @@ struct ConfigTree {
       return this->route.get_bool( name, value );
     }
     void get_route_pairs( const char *name,  StringPairArray &el ) noexcept;
-#if 0
-    void set_route_int( StringTab &st,  const char *name, int value ) noexcept;
-    void set_route_bool( StringTab &st,  const char *name,
-                         bool value ) noexcept {
-      this->set_route_str( st, name, value ? "true" : "false",
-                           value ? 4 : 5 );
-    }
-#endif
-    static int get_host_port( const char *&hostp,  char *host,
-                              size_t &len ) noexcept;
+
+    static int get_host_port( const char *&hostp,  char *host,  size_t &len,
+                              ParametersList &hosts ) noexcept;
     static bool is_wildcard( const char *host ) noexcept;
   };
+  typedef kv::SLinkList< Transport > TransportList;
   /* groups : { group : name, users : [ arr ] } */
   struct Group {
     void * operator new( size_t, void *ptr ) { return ptr; }
@@ -211,15 +205,8 @@ struct ConfigTree {
     Group() : next( 0 ), group_id( 0 ) {}
     Group( const Group &g ) : next( 0 ), group( g.group ),
       group_id( g.group_id ) {}
-    void print_js( ConfigPrinter &p,  int i ) const noexcept;
-    void print_y( ConfigPrinter &p,  int i ) const noexcept;
   };
-
-  typedef kv::SLinkList< User >       UserList;
-  typedef kv::SLinkList< Service >    ServiceList;
-  typedef kv::SLinkList< Transport >  TransportList;
-  typedef kv::SLinkList< Group >      GroupList;
-  typedef kv::SLinkList< Parameters > ParametersList;
+  typedef kv::SLinkList< Group > GroupList;
 
   struct TransportArray : public kv::ArrayCount< StringVal, 8 > {
     void push( const StringVal &tport ) {
@@ -247,8 +234,9 @@ struct ConfigTree {
   ServiceList    services;      /* services : [ Service array ] */
   TransportList  transports;    /* transports : [ Transport array ] */
   GroupList      groups;        /* groups : [ Group array ] */
-  ParametersList parameters;    /* parameters : { string list } */
-  PairList       free_pairs;
+  ParametersList parameters,    /* parameters : { string list } */
+                 startup,       /* startup : { string list } */
+                 hosts;         /* hosts : { string list } */
   uint32_t       user_cnt,      /* count of user[] */
                  service_cnt,   /* count of service[] */
                  transport_cnt, /* count of transport[] */
@@ -259,38 +247,25 @@ struct ConfigTree {
          user_cnt( 0 ), service_cnt( 0 ), transport_cnt( 0 ), group_cnt( 0 ),
          is_dir( false ) {}
   int save_tport( const ConfigTree::Transport &tport ) const noexcept;
-  int save_parameters( const TransportArray &listen,
-                       const TransportArray &connect ) const noexcept;
-  void print_parameters_y( ConfigPrinter &p,
-                           int which,  const char *name,  size_t namelen,
-                           const TransportArray &listen,
-                           const TransportArray &connect ) const noexcept;
-  void print_parameters_js( ConfigPrinter &p,
-                            int which,  const char *name,  size_t namelen,
-                            const TransportArray &listen,
-                            const TransportArray &connect ) const noexcept;
-  bool save_new( void ) const noexcept;
-  void print_js( ConfigPrinter &p ) const noexcept;
-  void print_js( ConfigPrinter &p, int which,
-                 const char *name = NULL,  size_t namelen = 0 ) const noexcept;
-  void print_y( ConfigPrinter &p, int &did_which,  int which = PRINT_NORMAL,
-                const char *name = NULL,  size_t namelen = 0 ) const noexcept;
+  int save_startup( const TransportArray &listen,
+                    const TransportArray &connect ) const noexcept;
+  int save_file( const TransportArray &listen,
+                 const TransportArray &connect ) const noexcept;
+  int save_new( void ) const noexcept;
+  void print_js( md::MDOutput &p, int which, 
+              const StringVal *filter = NULL,
+              const ConfigTree::TransportArray *listen = NULL,
+              const ConfigTree::TransportArray *connect = NULL ) const noexcept;
+  void print_y( md::MDOutput &p, int which, 
+              const StringVal *filter = NULL,
+              const ConfigTree::TransportArray *listen = NULL,
+              const ConfigTree::TransportArray *connect = NULL ) const noexcept;
   bool resolve( const char *us,  User *&usrp,  Service *&svcp ) noexcept;
 
   Service   * find_service( const char *svc,  size_t len ) noexcept;
   User      * find_user( Service &svc,  const char *usr,  size_t len ) noexcept;
   Transport * find_transport( const char *tport,  size_t len,
                               bool *conn = NULL ) noexcept;
-  StringPair* find_parameter_sp( const char *name ) noexcept;
-  bool        find_parameter( const char *name,  const char *&value,
-                              const char *def_value = NULL ) noexcept;
-  void        set_parameter( StringTab &st,  const char *name,
-                             const char *value ) noexcept;
-  void        set_parameter( StringTab &st,  const char *name, bool value ) {
-    this->set_parameter( st, name, value ? "true" : "false" );
-  }
-  bool        remove_parameter( const char *name ) noexcept;
-  StringPair* get_free_pair( StringTab &st ) noexcept;
   void set_route_str( ConfigTree::Transport &t,  StringTab &st,
                       const char *name,  const char *value,
                       size_t value_len ) noexcept;
@@ -313,10 +288,42 @@ struct ConfigStartup {
              ConfigTree::TransportArray *connect = NULL ) noexcept;
   void copy_pair_list( ConfigDB &db,  const ConfigTree::PairList &list,
                        ConfigTree::PairList &cp_list ) noexcept;
-  void copy_pair_list2( ConfigDB &db,  const ConfigTree::PairList &list,
-                        ConfigTree::PairList &cp_list ) noexcept;
   void copy_string_list( ConfigDB &db,  const ConfigTree::StrList &list,
                          ConfigTree::StrList &cp_list ) noexcept;
+};
+
+struct ConfigJson {
+  md::MDMsgMem mem;
+
+  ConfigJson() {}
+
+  template<class Obj, class... Ts> /* node constructor, puts nodes in mem */
+  Obj *make( Ts... args ) {
+    return new ( this->mem.make( sizeof( Obj ) ) ) Obj( args... );
+  }
+  md::JsonValue * copy( const ConfigTree *tree, int which,
+                        const StringVal *filter = NULL,
+                        const ConfigTree::TransportArray *listen = NULL,
+                        const ConfigTree::TransportArray *connect  = NULL) noexcept;
+  md::JsonValue * copy( const ConfigTree::User &u ) noexcept;
+  md::JsonValue * copy( const ConfigTree::Service &s ) noexcept;
+  md::JsonValue * copy( const ConfigTree::Transport &t ) noexcept;
+  md::JsonValue * copy( const ConfigTree::Group &g ) noexcept;
+  md::JsonValue * copy( const ConfigTree::PairList &pl ) noexcept;
+  md::JsonValue * copy( const ConfigTree::StrList &sl ) noexcept;
+  md::JsonValue * copy( const StringVal &s ) noexcept;
+  md::JsonObject * copy( const ConfigTree::ParametersList &list ) noexcept;
+
+  void push_array( md::JsonArray *&a,  md::JsonValue *v ) noexcept;
+  void push_field( md::JsonObject *&o, const StringVal &s,
+                   md::JsonValue *v ) noexcept;
+  void push_field( md::JsonObject *&o, md::JsonString &s,
+                   md::JsonValue *v ) noexcept;
+  void push_field_s( md::JsonObject *&o, const StringVal &s,
+                     const StringVal &v ) {
+    if ( ! v.is_null() )
+      this->push_field( o, s, this->copy( v ) );
+  }
 };
 
 }

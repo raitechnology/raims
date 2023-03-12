@@ -111,6 +111,13 @@ struct AES_Connection : public kv::EvConnection {
     this->exch->init( k, k_len );
     this->have_key = false;
   }
+  void done_exchange( void ) {
+    if ( this->exch != NULL ) {
+      this->exch->release();
+      kv::aligned_free( this->exch );
+      this->exch = NULL;
+    }
+  }
   void init_noencrypt( void ) {
     this->release_aes();
   }

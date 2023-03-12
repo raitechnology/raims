@@ -15,7 +15,7 @@ struct SubElem {
   static const size_t SUB_ELEM_CAP = 64;
   SubElem * next,
           * back;
-  uint8_t   drop,  /* count of dropped */
+  uint16_t  drop,  /* count of dropped */
             count, /* count of elems */
             first, /* first index used */
             last;  /* last index used + 1 */
@@ -39,7 +39,7 @@ struct SubElem {
     if ( this->last == SUB_ELEM_CAP ) {
       if ( this->is_full() )
         return false;
-      uint8_t i, j = 0;
+      uint16_t i, j = 0;
       for ( i = this->first; i < this->last; i++ ) {
         if ( this->seqno[ i ] != 0 ) {
           mask = ~( (uint64_t) 1 << j );
@@ -62,7 +62,7 @@ struct SubElem {
     this->count++;
     return true;
   }
-  bool exists( uint64_t sno,  uint8_t &i ) {
+  bool exists( uint64_t sno,  uint16_t &i ) {
     if ( this->is_empty() || this->seqno[ this->last - 1 ] < sno )
       return false;
     for ( i = this->first; ; ) {
@@ -76,7 +76,7 @@ struct SubElem {
     }
   }
   bool pop( uint64_t sno ) {
-    uint8_t i;
+    uint16_t i;
     if ( ! this->exists( sno, i ) )
       return false;
     this->seqno[ i ] = 0;
@@ -98,11 +98,11 @@ struct SubElem {
     return true;
   }
   /* locate first sequence that is >= sno */
-  bool get_first_seqno( uint8_t &off,  uint64_t &sno,  uint32_t &h,
+  bool get_first_seqno( uint16_t &off,  uint64_t &sno,  uint32_t &h,
                         SubAction &a ) {
     if ( this->is_empty() || this->seqno[ this->last - 1 ] < sno )
       return false;
-    for ( uint8_t i = this->first; ; ) {
+    for ( uint16_t i = this->first; ; ) {
       if ( this->seqno[ i ] >= sno ) {
         off = i;
         sno = this->seqno[ i ];
@@ -115,9 +115,9 @@ struct SubElem {
     }
   }
   /* increment sequence off */
-  bool get_next_seqno( uint8_t &off,  uint64_t &sno,  uint32_t &h,
+  bool get_next_seqno( uint16_t &off,  uint64_t &sno,  uint32_t &h,
                        SubAction &a ) {
-    for ( uint8_t i = off; ; ) {
+    for ( uint16_t i = off; ; ) {
       if ( ++i == this->last  )
         return false;
       if ( this->seqno[ i ] != 0 ) {
@@ -153,7 +153,7 @@ struct SubList {
     return false;
   }
   bool exists( uint64_t sno ) {
-    uint8_t i;
+    uint16_t i;
     for ( SubElem *el = this->list.hd; el != NULL; el = el->next ) {
       if ( el->exists( sno, i ) )
         return true;
@@ -174,7 +174,7 @@ struct SubListIter {
             end;
   uint64_t  seqno;  /* current sequence at el->seqno[ off ] */
   uint32_t  hash;   /* hash at el->hash[ off ] */
-  uint8_t   off;    /* ptr to el */
+  uint16_t  off;    /* ptr to el */
   SubAction action;
 
   SubListIter( SubList &subs,  uint64_t start,  uint64_t end ) :

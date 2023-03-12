@@ -69,7 +69,7 @@ AES_Connection::recv_key( void ) noexcept
             this->bytes_recv, this->bytes_sent,
             this->recv_aes.off, this->send_aes.off );*/
   }
-  delete this->exch;
+  this->done_exchange();
   this->exch = NULL;
   return ok;
 }

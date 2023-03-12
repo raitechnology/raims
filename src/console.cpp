@@ -1162,7 +1162,7 @@ console_complete( struct LineCook_s *state,  const char *buf,  size_t off,
     else if ( type == PARM_ARG ) {
       for ( ConfigTree::Parameters *p = cons->tree.parameters.hd;
             p != NULL; p = p->next ) {
-        for ( ConfigTree::StringPair *sp = p->parms.hd; sp != NULL;
+        for ( ConfigTree::StringPair *sp = p->list.hd; sp != NULL;
               sp = sp->next ) {
           lc_add_completion( state, sp->name.val, sp->name.len );
         }
@@ -1341,13 +1341,18 @@ Console::tab_concat( const char *s,  const char *s2,  TabPrint &pr ) noexcept
 }
 
 void
-Console::tab_string( const char *buf,  TabPrint &pr ) noexcept
+Console::tab_string( const char *buf,  size_t len,  TabPrint &pr ) noexcept
 {
-  size_t len = ::strlen( buf );
   char * str = this->tmp.str_make( len + 1 );
   ::memcpy( str, buf, len );
   str[ len ] = '\0';
   pr.set( str, (uint32_t) len );
+}
+
+void
+Console::tab_string( const char *buf,  TabPrint &pr ) noexcept
+{
+  this->tab_string( buf, ::strlen( buf ), pr );
 }
 
 void
@@ -2076,7 +2081,7 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
       this->config_save();
       break;
     case CMD_TPORT_SHOW:
-      this->cfg_tport->print_y( *this, 0 );
+      this->cfg_tport->print_y( *this );
       break;
     case CMD_TPORT_QUIT:
       this->changes.add( this->cfg_tport );
@@ -2143,20 +2148,21 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
     case CMD_SHOW_RUN:        case CMD_SHOW_START:
       this->show_config( p, cmd>=CMD_SHOW_START, PRINT_NORMAL, arg, len ); break;
     case CMD_SHOW_RUN_TPORTS: case CMD_SHOW_START_TPORTS:
-      this->show_config( p, cmd>=CMD_SHOW_START, PRINT_TRANSPORTS | PRINT_HDR, arg, len ); break;
+      this->show_config( p, cmd>=CMD_SHOW_START, PRINT_TRANSPORTS, arg, len ); break;
     case CMD_SHOW_RUN_SVCS:   case CMD_SHOW_START_SVCS:
-      this->show_config( p, cmd>=CMD_SHOW_START, PRINT_SERVICES | PRINT_HDR, arg, len ); break;
+      this->show_config( p, cmd>=CMD_SHOW_START, PRINT_SERVICES, arg, len ); break;
     case CMD_SHOW_RUN_USERS:  case CMD_SHOW_START_USERS:
-      this->show_config( p, cmd>=CMD_SHOW_START, PRINT_USERS | PRINT_HDR, arg, len ); break;
+      this->show_config( p, cmd>=CMD_SHOW_START, PRINT_USERS, arg, len ); break;
     case CMD_SHOW_RUN_GROUPS: case CMD_SHOW_START_GROUPS:
-      this->show_config( p, cmd>=CMD_SHOW_START, PRINT_GROUPS | PRINT_HDR, arg, len ); break;
+      this->show_config( p, cmd>=CMD_SHOW_START, PRINT_GROUPS, arg, len ); break;
     case CMD_SHOW_RUN_PARAM:  case CMD_SHOW_START_PARAM:
-      this->show_config( p, cmd>=CMD_SHOW_START, PRINT_PARAMETERS | PRINT_HDR, arg, len ); break;
+      this->show_config( p, cmd>=CMD_SHOW_START, PRINT_PARAMETERS, arg, len ); break;
 
     case CMD_SHOW_GRAPH:     this->show_graph( p ); break;
     case CMD_SHOW_CACHE:     this->show_cache( p ); break;
     case CMD_SHOW_POLL:      this->show_poll( p ); break;
     case CMD_SHOW_HOSTS:     this->show_hosts( p ); break;
+    case CMD_SHOW_RVSUB:     this->show_rvsub( p ); break;
     case CMD_SHOW_RPCS:      this->show_rpcs( p ); break;
 
     case CMD_DEBUG: {
@@ -2790,6 +2796,8 @@ Console::get_active_tports( ConfigTree::TransportArray &listen,
             }
           }
           else {
+            if ( tport->is_temp )
+              continue;
             if ( rte->is_set( TPORT_IS_MESH ) ) {
               if ( rte->is_set( TPORT_IS_LISTEN ) )
                 listen.push_unique( tport );
@@ -2810,15 +2818,18 @@ Console::get_active_tports( ConfigTree::TransportArray &listen,
     Unrouteable & un = this->mgr.unrouteable.ptr[ i ];
     if ( un.telnet != NULL ) {
       if ( un.telnet->in_list( IN_ACTIVE_LIST ) )
-        listen.push( un.tport );
+        if ( ! un.tport->is_temp )
+          listen.push( un.tport );
     }
     else if ( un.web != NULL ) {
       if ( un.web->in_list( IN_ACTIVE_LIST ) )
-        listen.push( un.tport );
+        if ( ! un.tport->is_temp )
+          listen.push( un.tport );
     }
     else if ( un.name != NULL ) {
       if ( ! un.name->is_closed )
-        listen.push( un.tport );
+        if ( ! un.tport->is_temp )
+          listen.push( un.tport );
     }
   }
 }
@@ -2827,9 +2838,9 @@ void
 Console::get_startup_tports( ConfigTree::TransportArray &listen,
                              ConfigTree::TransportArray &connect ) noexcept
 {
-  const ConfigTree::Parameters *pa = this->startup.tree->parameters.hd;
+  const ConfigTree::Parameters *pa = this->startup.tree->startup.hd;
   for ( ; pa != NULL; pa = pa->next ) {
-    const ConfigTree::StringPair *sp = pa->parms.hd;
+    const ConfigTree::StringPair *sp = pa->list.hd;
     for ( ; sp != NULL; sp = sp->next ) {
       if ( sp->name.equals( R_LISTEN, R_LISTEN_SZ ) )
         listen.push_unique( sp->value );
@@ -2845,20 +2856,28 @@ Console::config_save( void ) noexcept
   ConfigChange * c;
   ConfigTree::TransportArray listen, connect;
 
+  this->get_active_tports( listen, connect );
   if ( this->tree.is_dir ) {
     for ( c = this->changes.hd; c != NULL; c = c->next ) {
       if ( c->tport != NULL )
         if ( this->tree.save_tport( *c->tport ) != 0 )
           return;
     }
+    this->tree.save_startup( listen, connect );
   }
-  this->get_active_tports( listen, connect );
-  if ( this->tree.save_parameters( listen, connect ) != 0 )
-    return;
-  if ( this->tree.save_new() ) {
+  else {
+    if ( this->tree.save_file( listen, connect ) != 0 )
+      return;
+  }
+  int n = this->tree.save_new();
+  if ( n >= 0 ) {
     this->changes.release();
-    this->printf( "Config saved\n" );
-    this->startup.copy( this->tree, &listen, &connect );
+    if ( n == 0 )
+      this->printf( "No changes\n" );
+    else {
+      this->printf( "Config saved\n" );
+      this->startup.copy( this->tree, &listen, &connect );
+    }
   }
   else {
     this->printf( "Failed to save config updates\n" );
@@ -2872,13 +2891,13 @@ Console::config_param( const char *param, size_t plen,
   ConfigTree::Parameters *p;
   ConfigTree::StringPair *sp;
   for ( p = this->tree.parameters.hd; p != NULL; p = p->next ) {
-    sp = p->parms.get_pair( param, plen );
+    sp = p->list.get_pair( param, plen );
     if ( sp != NULL ) {
       if ( vlen > 0 )
         this->string_tab.reref_string( value, vlen, sp->value );
       else {
-        p->parms.unlink( sp );
-        this->tree.free_pairs.push_tl( sp );
+        p->list.unlink( sp );
+        this->string_tab.release( sp );
         sp = NULL;
         return;
       }
@@ -2890,10 +2909,10 @@ Console::config_param( const char *param, size_t plen,
   }
   else {
     p  = this->string_tab.make<ConfigTree::Parameters>();
-    sp = this->tree.get_free_pair( this->string_tab );
+    sp = this->string_tab.make<ConfigTree::StringPair>();
     this->string_tab.ref_string( param, plen, sp->name );
     this->string_tab.ref_string( value, vlen, sp->value );
-    p->parms.push_tl( sp );
+    p->list.push_tl( sp );
     this->tree.parameters.push_tl( p );
   }
 check_logfile:;
@@ -3008,14 +3027,14 @@ Console::config_transport_route( const char *param, size_t plen,
       if ( vlen != 0 && ( next == NULL || ! next->name.equals( param, plen ) ) )
         break;
       route.unlink( sp );
-      this->tree.free_pairs.push_tl( sp );
+      this->string_tab.release( sp );
       if ( vlen == 0 && ( next == NULL || ! next->name.equals( param, plen ) ) )
         return;
       sp = next;
     }
   }
   if ( sp == NULL ) {
-    sp = this->tree.get_free_pair( this->string_tab );
+    sp = this->string_tab.make<ConfigTree::StringPair>();
     route.push_tl( sp );
   }
   this->string_tab.reref_string( param, plen, sp->name );
@@ -3316,7 +3335,7 @@ Console::on_ping( ConsolePing &ping ) noexcept
 void
 Console::on_subs( ConsoleSubs &subs ) noexcept
 {
-  static const uint32_t ncols = 2;
+  static const uint32_t ncols = 3;
   TabOut out( this->table, this->tmp, ncols );
   TabPrint * tab;
   uint32_t s, i = 0, uid;
@@ -3339,7 +3358,9 @@ Console::on_subs( ConsoleSubs &subs ) noexcept
               tab[ i++ ].set( this->user_db.user.user, PRINT_SELF ); /* user */
             else
               tab[ i++ ].set_null();
+            tab[ i++ ].set_null();
             tab[ i++ ].set( sub->value, sub->len );
+            tab[ i-1 ].typ |= PRINT_LEFT;
           }
         }
       }
@@ -3354,7 +3375,9 @@ Console::on_subs( ConsoleSubs &subs ) noexcept
               tab[ i++ ].set( this->user_db.user.user, PRINT_SELF ); /* user */
             else
               tab[ i++ ].set_null();
-            this->tab_concat( pat->value, pat->len, "p", tab[ i++ ] );
+            tab[ i++ ].set( "p" );
+            tab[ i++ ].set( pat->value, pat->len );
+            tab[ i-1 ].typ |= PRINT_LEFT;
           }
         }
       }
@@ -3386,13 +3409,15 @@ Console::on_subs( ConsoleSubs &subs ) noexcept
         tab[ i++ ].set_null();
       const char *str = &subs.strings.ptr[ reply.sub_off ];
       if ( ! reply.is_pattern )
-        tab[ i++ ].set( str, reply.sub_len );
+        tab[ i++ ].set( "p" );
       else
-        this->tab_concat( str, "p", tab[ i++ ] );
+        tab[ i++ ].set_null();
+      tab[ i++ ].set( str, reply.sub_len );
+      tab[ i-1 ].typ |= PRINT_LEFT;
     }
   }
 
-  static const char *hdr[ ncols ] = { "user", "subject" };
+  static const char *hdr[ ncols ] = { "user", "p", "subject" };
   for ( size_t n = 0; n < subs.out.count; n++ ) {
     ConsoleOutput * p = subs.out.ptr[ n ];
     this->print_table( p, hdr, ncols );
@@ -6049,26 +6074,18 @@ Console::show_config( ConsoleOutput *p,  bool is_start,  int which,
   ConfigTree * t = ( is_start ? this->startup.tree : &this->tree );
   if ( is_html )
     this->puts( "<pre>" );
-  if ( ( which & PRINT_PARAMETERS ) != 0 ) {
-    ConfigTree::TransportArray listen, connect;
-    if ( ! is_start )
-      this->get_active_tports( listen, connect );
-    else
-      this->get_startup_tports( listen, connect );
-    if ( ! is_json )
-      t->print_parameters_y( *this, which, name, namelen, listen,
-                             connect );
-    else
-      t->print_parameters_js( *this, which, name, namelen, listen,
-                              connect );
-  }
-  else {
-    int did_which;
-    if ( ! is_json )
-      t->print_y( *this, did_which, which, name, namelen );
-    else
-      t->print_js( *this, which, name, namelen );
-  }
+
+  ConfigTree::TransportArray listen, connect;
+  StringVal filter( name, namelen );
+
+  if ( ! is_start )
+    this->get_active_tports( listen, connect );
+  else
+    this->get_startup_tports( listen, connect );
+  if ( ! is_json )
+    t->print_y( *this, which, &filter, &listen, &connect );
+  else
+    t->print_js( *this, which, &filter, &listen, &connect );
 }
 
 void
@@ -6215,30 +6232,129 @@ Console::show_hosts( ConsoleOutput *p ) noexcept
     RvTransportService * rv_svc =
       this->user_db.transport_tab.ptr[ 0 ]->rv_svc;
     if ( rv_svc->db.host_tab != NULL ) {
-      for ( uint32_t i = 0; i < rv_svc->db.host_tab->count; i++ ) {
-        if ( rv_svc->db.host_tab->ptr[ i ] == NULL )
+      for ( uint32_t k = 0; k < rv_svc->db.host_tab->count; k++ ) {
+        if ( rv_svc->db.host_tab->ptr[ k ] == NULL )
           continue;
 
-        sassrv::RvHost & host = *rv_svc->db.host_tab->ptr[ i ];
-        out.add_row()
-           .set( host.service, host.service_len )
-           .set( host.session_ip, host.session_ip_len )
-           .set( host.sess_ip, host.sess_ip_len )
-           .set_int( ntohs( host.ipport ) )
-           .set_time( host.start_stamp )
-           .set_int( host.active_clients )
-           .set_long( host.stat.bs )
-           .set_long( host.stat.br )
-           .set_long( host.stat.ms )
-           .set_long( host.stat.mr )
-           .set_long( host.stat.idl )
-           .set_long( host.stat.odl );
+        sassrv::RvHost & host = *rv_svc->db.host_tab->ptr[ k ];
+        PeerMatchArgs ka;
+        PeerMatchIter iter( this->mgr, ka );
+        EvSocket    * sock;
+
+        for ( sock = iter.first(); sock != NULL; sock = iter.next() ) {
+          char sess[ EvSocket::MAX_SESSION_LEN ];
+          size_t n;
+          if ( (n = sock->get_session( host.service_num, sess )) > 0 ) {
+            char   user[ EvSocket::MAX_USERID_LEN ],
+                 * usr,
+                 * str;
+            size_t ulen = sock->get_userid( user );
+
+            str = this->tmp.str_make( n + 1 + ulen + 1 );
+            ::memcpy( str, sess, n );
+            str[ n ] = '\0';
+            usr = &str[ n + 1 ];
+            ::memcpy( usr, user, ulen );
+            usr[ ulen ] = '\0';
+
+            out.add_row()
+               .set( host.service, host.service_len )
+               .set( str, n )
+               .set( usr, ulen )
+               .set_int( ntohs( host.ipport ) )
+               .set_time( host.start_stamp )
+               .set_int( host.active_clients )
+               .set_long( host.stat.bs )
+               .set_long( host.stat.br )
+               .set_long( host.stat.ms )
+               .set_long( host.stat.mr )
+               .set_long( host.stat.idl )
+               .set_long( host.stat.odl );
+          }
+        }
       }
     }
   }
   const char *hdr[ ncols ] =
-   { "svc", "session", "session ip", "port", "start", "cl", "bs", "br", "ms",
-     "mr", "idl", "odl" };
+   { "svc", "session", "user", "port", "start", "cl", "bs", "br", "ms", "mr",
+     "idl", "odl" };
+  this->print_table( p, hdr, ncols );
+}
+
+void
+Console::show_rvsub( ConsoleOutput *p ) noexcept
+{
+  static const size_t ncols = 5;
+  TabOut     out( this->table, this->tmp, ncols );
+  TabPrint * tab;
+  uint32_t   i, k;
+
+  if ( this->user_db.transport_tab.count > 0 &&
+       this->user_db.transport_tab.ptr[ 0 ]->rv_svc != NULL) {
+    RvTransportService * rv_svc =
+      this->user_db.transport_tab.ptr[ 0 ]->rv_svc;
+    if ( rv_svc->db.host_tab != NULL ) {
+      for ( k = 0; k < rv_svc->db.host_tab->count; k++ ) {
+        if ( rv_svc->db.host_tab->ptr[ k ] == NULL )
+          continue;
+
+        sassrv::RvHost & host = *rv_svc->db.host_tab->ptr[ k ];
+        PeerMatchArgs ka;
+        PeerMatchIter iter( this->mgr, ka );
+        EvSocket    * sock;
+
+        for ( sock = iter.first(); sock != NULL; sock = iter.next() ) {
+          char sess[ EvSocket::MAX_SESSION_LEN ];
+          size_t n;
+          if ( (n = sock->get_session( host.service_num, sess )) > 0 ) {
+            SubRouteDB subs, pats;
+            RouteSub * s;
+            RouteLoc   loc;
+            char       user[ EvSocket::MAX_USERID_LEN ];
+            size_t     subcnt, patcnt;
+
+            sock->get_userid( user );
+            subcnt = sock->get_subscriptions( host.service_num, subs );
+            patcnt = sock->get_patterns( host.service_num, RV_PATTERN_FMT, pats );
+
+            tab = out.add_row_p();
+            i = 0;
+            tab[ i++ ].set( host.service, host.service_len );
+            this->tab_string( sess, tab[ i++ ] );
+            this->tab_string( user, tab[ i++ ] );
+            if ( subcnt > 0 ) {
+              for ( s = subs.first( loc ); s != NULL; s = subs.next( loc ) ) {
+                if ( i == 5 ) {
+                  tab = out.add_row_p();
+                  i = 3;
+                  tab[ 0 ].set_null().set_null().set_null();
+                }
+                tab[ i++ ].set_null();
+                this->tab_string( s->value, s->len, tab[ i++ ] );
+                tab[ i-1 ].typ |= PRINT_LEFT;
+              }
+            }
+            if ( patcnt > 0 ) {
+              for ( s = pats.first( loc ); s != NULL; s = pats.next( loc ) ) {
+                if ( i == 5 ) {
+                  tab = out.add_row_p();
+                  i = 3;
+                  tab[ 0 ].set_null().set_null().set_null();
+                }
+                tab[ i++ ].set( "p" );
+                this->tab_string( s->value, s->len, tab[ i++ ] );
+                tab[ i-1 ].typ |= PRINT_LEFT;
+              }
+            }
+            while ( i < 5 )
+              tab[ i++ ].set_null();
+          }
+        }
+      }
+    }
+  }
+  const char *hdr[ ncols ] =
+   { "svc", "session", "user", "p", "subject" };
   this->print_table( p, hdr, ncols );
 }
 

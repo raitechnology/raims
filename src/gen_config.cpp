@@ -755,13 +755,14 @@ GenCfg::remove_user( const char *dir_name,  const char *user,
   return true;
 }
 
-void
+size_t
 GenFileList::print_files( void ) noexcept
 {
   GenFileTrans *t;
-  size_t len = 3;
+  size_t len = 3, count = 0;
   for ( t = this->hd; t != NULL; t = t->next ) {
     len = max_int<size_t>( len, t->len + 3 );
+    count++;
   }
   for ( t = this->hd; t != NULL; t = t->next ) {
     char path_tmp[ GEN_PATH_MAX ];
@@ -772,6 +773,7 @@ GenFileList::print_files( void ) noexcept
       printf( "%s %s %*s%s\n", t->op_str(), opath,
               (int)( len - ::strlen( opath ) ), "-- ", t->descr );
   }
+  return count;
 }
 
 bool
@@ -811,8 +813,8 @@ void
 GenCfg::ask_commit( bool auto_yes ) noexcept
 {
   bool abort = false;
-  this->list.print_files();
-  if ( ! auto_yes ) {
+  size_t count = this->list.print_files();
+  if ( count != 0 && ! auto_yes ) {
     char yn[ 80 ];
     printf( "OK? " ); fflush( stdout );
     abort = ( fgets( yn, sizeof( yn ), stdin ) == NULL );
@@ -822,7 +824,10 @@ GenCfg::ask_commit( bool auto_yes ) noexcept
   if ( ! abort ) {
     if ( this->list.commit_phase1() ) {
       this->list.commit_phase2();
-      printf( "done\n" );
+      if ( count == 0 )
+        printf( "no changes\n" );
+      else
+        printf( "done\n" );
     }
     else {
       abort = true;
