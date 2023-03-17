@@ -212,7 +212,6 @@ UserDB::on_inbox_auth( const MsgFramePublish &pub,  UserBridge &n,
         n.user_route->rte.update_cost( n, tport, NULL, rem_tport_id, "i2" );
       }
     }
-
     if ( ! n.test_set( SENT_ZADD_STATE ) ) {
       this->send_peer_add( n );    /* broadcast _Z.ADD with new peer */
       n.user_route->set( SENT_ZADD_STATE );
@@ -220,7 +219,6 @@ UserDB::on_inbox_auth( const MsgFramePublish &pub,  UserBridge &n,
       if ( ! this->adjacency_change.is_empty() )
         this->send_adjacency_change(); /* broadcast _Z.ADJ with adjacency */
     }
-
     if ( dec.test( FID_LINK_STATE ) ) {
       uint64_t link_state,
                sub_seqno;
@@ -233,6 +231,13 @@ UserDB::on_inbox_auth( const MsgFramePublish &pub,  UserBridge &n,
                     link_state, n.sub_seqno, sub_seqno );
         this->send_adjacency_request( n, AUTH_SYNC_REQ );
       }
+    }
+    if ( ! n.is_set( IN_HB_QUEUE_STATE ) ) {
+      if ( debug_auth )
+        n.printf( "add to hb_queue\n" );
+      this->events.hb_queue( n.uid, 0 );
+      n.set( IN_HB_QUEUE_STATE );
+      this->hb_queue.push( &n );
     }
   }
   return true;

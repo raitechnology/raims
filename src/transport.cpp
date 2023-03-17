@@ -192,6 +192,9 @@ TransportRoute::update_cost( UserBridge &n,  StringVal &tport,  uint32_t *cost,
   uint32_t *cost2 = this->uid_connected.cost;
   StringVal & my_tport = this->transport.tport;
   bool updated = false, cost_updated = false, ok = true;
+  uint32_t cost3[ 4 ] = {0,0,0,0};
+  if ( cost != NULL )
+    ::memcpy( cost3, cost, sizeof( cost3 ) );
 
   if ( this->uid_connected.cost[ 0 ] == COST_BAD )
     return false;
@@ -251,16 +254,11 @@ TransportRoute::update_cost( UserBridge &n,  StringVal &tport,  uint32_t *cost,
     return true;
   if ( debug_tran )
     n.printf( "update cost [%u,%u,%u,%u] on %s (rem=%u) %s (%s)\n",
-              cost[ 0 ], cost[ 1 ], cost[ 2 ], cost[ 3 ], this->name,
+              cost3[ 0 ], cost3[ 1 ], cost3[ 2 ], cost3[ 3 ], this->name,
               rem_tport_id, n.is_set( AUTHENTICATED_STATE ) ? "auth" : "not", s );
 
   if ( 0 ) {
 invalid_cost:;
-    uint32_t cost3[ 4 ];
-    if ( cost == NULL )
-      ::memset( cost3, 0, sizeof( cost3 ) );
-    else
-      ::memcpy( cost3, cost, sizeof( cost3 ) );
     n.printe( "conflicting tport[%.*s] cost[%u,%u,%u,%u] (advert)"
               " != tport[%.*s] [%u,%u,%u,%u] rte=%s remote=%u (%s)\n",
                 tport.len, tport.val,

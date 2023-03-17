@@ -341,6 +341,8 @@ UserDB::push_user_route( UserBridge &n,  UserRoute &u_rte ) noexcept
 
     if ( u_rte.hops() == 0 )
       this->push_connected_user_route( n, u_rte );
+    else if ( debug_lnk )
+      n.printf( "hops not zero, not directly connected\n" );
   }
 }
 

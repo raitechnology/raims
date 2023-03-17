@@ -102,7 +102,7 @@ struct UserRoute : public UserStateTest<UserRoute> {
                     inbox_fd,      /* inbox fd */
                     state,         /* whether in route list */
                     url_hash,      /* hash of ucast_url, mesh_url */
-                    hb_seqno,      /* hb sequence on this transport */
+                    /*hb_seqno,      * hb sequence on this transport */
                     list_id;       /* the user route list ptr */
   uint64_t          bytes_sent,    /* bytes sent ptp */
                     msgs_sent;     /* msgs sent ptp */
@@ -128,7 +128,7 @@ struct UserRoute : public UserStateTest<UserRoute> {
     this->ucast_url.zero();
     this->mesh_url.zero();
     this->url_hash   = 0;
-    this->hb_seqno   = 0;
+    /*this->hb_seqno   = 0;*/
     this->bytes_sent = 0;
     this->msgs_sent  = 0;
     this->ucast_src  = NULL;
@@ -585,7 +585,8 @@ struct UserDB {
                         converge_mono,   /* convergence mono time */
                         net_converge_time, /* time that network agrees */
                         name_send_seqno,
-                        name_send_time;
+                        name_send_time,
+                        last_idle_check_ns;
   kv::rand::xoroshiro128plus rand;       /* used to generate bloom seeds */
 
   /* memory buffers for keys and peer nodes */

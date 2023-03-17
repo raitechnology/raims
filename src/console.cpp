@@ -3941,7 +3941,12 @@ PortOutput::put_show_ports( void ) noexcept
     tab[ i++ ].set_null();
   if ( this->stats.active_ns > 0 )
     tab[ i++ ].set_long( this->cur_time - this->stats.active_ns,
-                         PRINT_LATENCY ); /* idle */
+                         PRINT_LATENCY ); /* wridle */
+  else
+    tab[ i++ ].set_null();
+  if ( this->stats.read_ns > 0 )
+    tab[ i++ ].set_long( this->cur_time - this->stats.read_ns,
+                         PRINT_LATENCY ); /* rdidle */
   else
     tab[ i++ ].set_null();
 
@@ -3971,7 +3976,7 @@ PortOutput::put_show_ports( void ) noexcept
 void
 Console::show_ports( ConsoleOutput *p, const char *name,  size_t len ) noexcept
 {
-  static const uint32_t ncols = 12;
+  static const uint32_t ncols = 13;
   size_t count = this->user_db.transport_tab.count;
 
   if ( len == 1 && name[ 0 ] == '*' )
@@ -3995,7 +4000,7 @@ Console::show_ports( ConsoleOutput *p, const char *name,  size_t len ) noexcept
   }
   static const char *hdr[ ncols ] =
     { "tport", "type", "rem", "fd", "bs", "br",
-      "ms", "mr", "lat", "idle", "fl", "address" };
+      "ms", "mr", "lat", "wridle", "rdidle", "fl", "address" };
   this->print_table( p, hdr, ncols );
 }
 
@@ -5526,9 +5531,10 @@ Console::show_forward( ConsoleOutput *p,  uint8_t path_select ) noexcept
 void
 Console::show_fds( ConsoleOutput *p ) noexcept
 {
-  static const uint32_t ncols = 14;
+  static const uint32_t ncols = 16;
   TabOut out( this->table, this->tmp, ncols );
   EvPoll     & poll = this->mgr.poll;
+  uint64_t     cur_time = poll.now_ns;
   const char * address;
   uint32_t     addr_len;
 
@@ -5562,6 +5568,14 @@ Console::show_fds( ConsoleOutput *p ) noexcept
         tab[ i++ ].set_long( ((EvListen *) s)->accept_cnt );
       else
         tab[ i++ ].set_null();
+      if ( s->active_ns > s->start_ns )
+        tab[ i++ ].set_long( cur_time - s->active_ns, PRINT_LATENCY );
+      else
+        tab[ i++ ].set_null();
+      if ( s->read_ns > s->start_ns )
+        tab[ i++ ].set_long( cur_time - s->read_ns, PRINT_LATENCY );
+      else
+        tab[ i++ ].set_null();
       if ( s->sock_base == EV_CONNECTION_BASE ) {
         tab[ i++ ].set_long( ((EvConnection *) s)->len -
                              ((EvConnection *) s)->off );
@@ -5593,8 +5607,8 @@ Console::show_fds( ConsoleOutput *p ) noexcept
   }
 
   static const char *hdr[ ncols ] =
-    { "fd", "rid", "bs", "br", "ms", "mr", "ac", "rq", "wq", "fl",
-      "type", "kind", "name", "address" };
+    { "fd", "rid", "bs", "br", "ms", "mr", "ac", "wridle", "rdidle",
+      "rq", "wq", "fl", "type", "kind", "name", "address" };
   this->print_table( p, hdr, ncols );
 }
 
@@ -6324,7 +6338,7 @@ Console::show_rvsub( ConsoleOutput *p ) noexcept
             this->tab_string( user, tab[ i++ ] );
             if ( subcnt > 0 ) {
               for ( s = subs.first( loc ); s != NULL; s = subs.next( loc ) ) {
-                if ( i == 5 ) {
+                if ( i == ncols ) {
                   tab = out.add_row_p();
                   i = 3;
                   tab[ 0 ].set_null().set_null().set_null();
@@ -6336,7 +6350,7 @@ Console::show_rvsub( ConsoleOutput *p ) noexcept
             }
             if ( patcnt > 0 ) {
               for ( s = pats.first( loc ); s != NULL; s = pats.next( loc ) ) {
-                if ( i == 5 ) {
+                if ( i == ncols ) {
                   tab = out.add_row_p();
                   i = 3;
                   tab[ 0 ].set_null().set_null().set_null();
@@ -6346,7 +6360,7 @@ Console::show_rvsub( ConsoleOutput *p ) noexcept
                 tab[ i-1 ].typ |= PRINT_LEFT;
               }
             }
-            while ( i < 5 )
+            while ( i < ncols )
               tab[ i++ ].set_null();
           }
         }

@@ -565,7 +565,7 @@ SessionMgr::add_tcp_rte( TransportRoute &src_rte,  uint32_t conn_hash ) noexcept
   ConfigTree::Transport & t = src_rte.transport;
   bool is_new = true;
 
-  uint32_t count = (uint32_t) this->user_db.transport_tab.count;
+  uint32_t count = (uint32_t) this->user_db.transport_tab.count, id;
   if ( conn_hash != 0 ) {
     for ( id = 0; id < count; id++ ) {
       rte = this->user_db.transport_tab.ptr[ id ];
@@ -573,7 +573,7 @@ SessionMgr::add_tcp_rte( TransportRoute &src_rte,  uint32_t conn_hash ) noexcept
         return rte;
     }
   }
-  for ( uint32_t id = 0; id < count; id++ ) {
+  for ( id = 0; id < count; id++ ) {
     rte = this->user_db.transport_tab.ptr[ id ];
     if ( &t == &rte->transport &&
          rte->all_set( TPORT_IS_SHUTDOWN | TPORT_IS_TCP ) &&

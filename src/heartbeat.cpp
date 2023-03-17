@@ -210,10 +210,37 @@ UserDB::interval_hb( uint64_t cur_mono,  uint64_t cur_time ) noexcept
         rte->forward_to_connected( pub );
         hb_cnt++;
       }
+      if ( rte->is_mcast() )
+        continue;
     }
   }
   if ( hb_cnt > 0 )
     this->msg_send_counter[ U_SESSION_HB ]++;
+  if ( cur_mono - this->last_idle_check_ns < ival )
+    return;
+
+  this->last_idle_check_ns = cur_mono;
+  uint64_t max_idle_ns = this->poll.so_keepalive_ns;
+  if ( max_idle_ns < ival )
+    max_idle_ns = ival;
+  max_idle_ns *= 3;
+  for ( uint32_t fd = 0; fd < this->poll.maxfd; fd++ ) {
+    EvSocket *sock;
+    if ( (sock = this->poll.sock[ fd ]) != NULL ) {
+      if ( sock->route_id == 0 || (size_t) sock->route_id > count ) 
+        continue;
+      if ( sock->sock_base == EV_CONNECTION_BASE ) {
+        if ( cur_time > sock->read_ns &&
+             cur_time - sock->read_ns > max_idle_ns ) {
+          printf( "sock %s/fd=%u read idle %.3f > keep_alive*3 %.3f\n",
+                  sock->name, fd,
+                (double) ( cur_time - sock->read_ns ) / (double) SEC_TO_NS,
+                ( (double) max_idle_ns / (double) SEC_TO_NS ) );
+          sock->idle_push( EV_CLOSE );
+        }
+      }
+    }
+  }
 }
 /* _X.HELLO, _X.HB */
 bool
@@ -243,7 +270,7 @@ UserDB::on_heartbeat( const MsgFramePublish &pub,  UserBridge &n,
     n.skew_upd++;
     n.hb_skew_ref = 0;
   }
-
+#if 0
   if ( seqno <= n.user_route->hb_seqno ) {
     if ( seqno == n.user_route->hb_seqno ) {
       n.printe( "peer warp from %s, seqno %lu, uptime %lu\n",
@@ -251,7 +278,7 @@ UserDB::on_heartbeat( const MsgFramePublish &pub,  UserBridge &n,
     }
     return true;
   }
-
+#endif
   TransportRoute & rte = pub.rte;
   if ( pub.status == FRAME_STATUS_OK && n.is_set( AUTHENTICATED_STATE ) ) {
     if ( ! rte.uid_connected.is_member( n.uid ) ) {
@@ -318,6 +345,7 @@ UserDB::on_heartbeat( const MsgFramePublish &pub,  UserBridge &n,
       return true;
     }
   }
+  /* oldest transport hb seqno, reset when primary route changes */
   if ( seqno > n.hb_seqno ) {
     old_hb_seqno      = n.hb_seqno;
     n.hb_seqno        = seqno;
@@ -810,6 +838,8 @@ UserDB::recv_ping_request( MsgFramePublish &pub,  UserBridge &n,
   const char * suf = dec.get_return( ret_buf, _PONG );
   uint64_t     seqno;
 
+  if ( debug_hb )
+    n.printf( "recv_ping request\n" );
   if ( dec.seqno != 0 ) {
     if ( is_mcast_ping ) {
       seqno = n.mcast_recv_seqno;
@@ -924,6 +954,8 @@ bool
 UserDB::recv_pong_result( MsgFramePublish &pub,  UserBridge &n,
                           const MsgHdrDecoder &dec ) noexcept
 {
+  if ( debug_hb )
+    n.printf( "recv_pong result\n" );
   if ( dec.seqno <= n.pong_recv_seqno ) {
     n.printf( "%.*s ignoring pong seqno replay %u -> %" PRIu64 " (%s)\n",
               (int) pub.subject_len, pub.subject,

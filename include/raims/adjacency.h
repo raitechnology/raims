@@ -327,6 +327,7 @@ struct AdjDistance : public md::MDMsgMem {
       }
       this->invalid_src_uid = src_uid;
     }
+    this->inc_run_count = 0;
   }
   bool is_valid( uint64_t seqno ) {
     this->clear_cache_if_dirty();
