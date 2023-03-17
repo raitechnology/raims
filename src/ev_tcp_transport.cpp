@@ -341,7 +341,7 @@ EvTcpTransport::release( void ) noexcept
     this->bp_retire( *this );
   if ( this->notify != NULL ) {
     /* not notified unless have key */
-    if ( ! this->encrypt || this->AES_Connection::have_key )
+    if ( this->is_connect || ! this->encrypt || this->AES_Connection::have_key )
       this->notify->on_shutdown( *this, NULL, 0 );
   }
   if ( this->encrypt )
