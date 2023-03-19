@@ -240,57 +240,89 @@ RvTransportService::make_rv_transport( ConfigTree::Transport *&t,
   is_listener = true;
   host_ip_len = host.mcast.ip4_string( host.mcast.host_ip, host_ip );
   NetTransport type = RvMcast2::net_to_transport( host.network, net_len );
-  if ( type == NET_NONE )
+  if ( type == NET_NONE || ( type == NET_MCAST && this->no_mcast ) ) {
     t = NULL;
-  else {
-    char name[ 256 ];
-    size_t name_len = make_rv_name( host, name, "_old" );
-    for ( ConfigTree::Transport * t = tree.transports.hd; t != NULL;
-          t = t->next ) {
-      if ( t->tport.equals( name, name_len ) ) {
-        if ( net_equals( host, *t ) ) {
-          name_len = make_rv_name( host, name, "" );
-          stab.ref_string( name, name_len, t->tport );
-          break;
-        }
+    return;
+  }
+  uint32_t localhost = htonl( ( 127U << 24 ) | 1 );
+  if ( type == NET_ANY && host.mcast.host_ip == localhost )
+    return;
+  char name[ 256 ];
+  size_t name_len = make_rv_name( host, name, "_old" );
+  for ( ConfigTree::Transport * t = tree.transports.hd; t != NULL;
+        t = t->next ) {
+    if ( t->tport.equals( name, name_len ) ) {
+      if ( net_equals( host, *t ) ) {
+        name_len = make_rv_name( host, name, "" );
+        stab.ref_string( name, name_len, t->tport );
+        break;
       }
     }
+  }
 
-    if ( t == NULL )
-      t = get_rv_transport( host, true );
-    switch ( type ) {
-      default: break;
-      case NET_ANY:
-        stab.reref_string( T_ANY, T_ANY_SZ, t->type );
-        tree.set_route_str( *t, stab, R_DEVICE, host_ip, host_ip_len );
-        break;
+  if ( t == NULL )
+    t = get_rv_transport( host, true );
+  switch ( type ) {
+    default: break;
+    case NET_ANY:
+      stab.reref_string( T_ANY, T_ANY_SZ, t->type );
+      tree.set_route_str( *t, stab, R_DEVICE, host_ip, host_ip_len );
+      break;
 
-      case NET_MESH_CONNECT:
-        is_listener = false; /* FALLTHRU */
-      case NET_MESH:
-      case NET_MESH_LISTEN:
-        stab.reref_string( T_MESH, T_MESH_SZ, t->type );
-        tree.set_route_str( *t, stab, R_DEVICE, host_ip, host_ip_len );
-        break;
+    case NET_MESH_CONNECT:
+      is_listener = false; /* FALLTHRU */
+    case NET_MESH:
+    case NET_MESH_LISTEN:
+      stab.reref_string( T_MESH, T_MESH_SZ, t->type );
+      tree.set_route_str( *t, stab, R_DEVICE, host_ip, host_ip_len );
+      break;
 
-      case NET_TCP_CONNECT:
-        is_listener = false; /* FALLTHRU */
-      case NET_TCP:
-      case NET_TCP_LISTEN:
-        stab.reref_string( T_TCP, T_TCP_SZ, t->type );
-        tree.set_route_str( *t, stab, R_DEVICE, host_ip, host_ip_len );
-        break;
+    case NET_TCP_CONNECT:
+      is_listener = false; /* FALLTHRU */
+    case NET_TCP:
+    case NET_TCP_LISTEN:
+      stab.reref_string( T_TCP, T_TCP_SZ, t->type );
+      tree.set_route_str( *t, stab, R_DEVICE, host_ip, host_ip_len );
+      break;
 
-      case NET_MCAST:
-        if ( ! this->no_mcast ) {
-          stab.reref_string( T_PGM, T_PGM_SZ, t->type );
-          tree.set_route_str( *t, stab, R_LISTEN,
-                              host.network, host.network_len );
-          tree.set_route_str( *t, stab, R_PORT,
-                              host.service, host.service_len );
-          tree.set_route_str( *t, stab, R_MCAST_LOOP, "2", 1 );
+    case NET_MCAST:
+      if ( ! this->no_mcast ) {
+        stab.reref_string( T_PGM, T_PGM_SZ, t->type );
+        tree.set_route_str( *t, stab, R_LISTEN,
+                            host.network, host.network_len );
+        tree.set_route_str( *t, stab, R_PORT,
+                            host.service, host.service_len );
+        tree.set_route_str( *t, stab, R_MCAST_LOOP, "2", 1 );
+      }
+      break;
+  }
+}
+
+void
+RvTransportService::find_host_http( RvHost &host ) noexcept
+{
+  for ( uint32_t i = 0; i < this->rte.mgr.unrouteable.count; i++ ) {
+    Unrouteable & un = this->rte.mgr.unrouteable.ptr[ i ];
+    if ( un.web != NULL ) {
+      char         tmp[ 256 ];
+      const char * addr = un.web->http_url.val;
+      size_t       len  = sizeof( tmp );
+      int          port = un.tport->get_host_port( addr, tmp, len,
+                                               this->rte.mgr.tree.hosts );
+      if ( port != 0 && len > 0 ) {
+        AddrInfo info;
+        if ( info.get_address(addr, port, OPT_AF_INET|OPT_LISTEN) == 0 ) {
+          for ( addrinfo * ai = info.ai; ai != NULL; ai = ai->ai_next ) {
+            if ( ai->ai_family == AF_INET ) {
+              host.http_addr =
+                ((struct sockaddr_in *) ai->ai_addr)->sin_addr.s_addr;
+              host.http_port =
+                ((struct sockaddr_in *) ai->ai_addr)->sin_port;
+              return;
+            }
+          }
         }
-        break;
+      }
     }
   }
 }
@@ -304,7 +336,8 @@ RvTransportService::start_host( RvHost &host,  const RvHostNet &hn,
   if ( hn.has_service_prefix != host.has_service_prefix )
     return ERR_SAME_SVC_TWO_NETS;
   if ( host.network_started ) {
-    if ( hn.network_len == 0 ) /* allow clients to attach to existing */
+    /* allow clients to attach to existing */
+    if ( hn.network_len == 0 || this->no_mcast )
       return HOST_OK;
     if ( host.network_len != 0 ) {
       if ( host.mcast.host_ip == 0 ||
@@ -318,47 +351,25 @@ RvTransportService::start_host( RvHost &host,  const RvHostNet &hn,
          ! host.is_same_network( hn ) ) {
       RvMcast2 mc;
       int status = mc.parse_network2( hn.network, hn.network_len );
-      if ( status == HOST_OK ) {
-        if ( mc.fake_ip == 0 && ! this->no_fakeip )
-          mc.fake_ip = this->rte.mgr.user_db.bridge_nonce_int;
-        host.host_id_len = (uint16_t)
-          min_int( (size_t) this->rte.mgr.user_db.user.user.len,
-                   MAX_RV_HOST_ID_LEN - 1 );
-        ::memcpy( host.host_id, this->rte.mgr.user_db.user.user.val,
-                  host.host_id_len );
-        ::memset( &host.host_id[ host.host_id_len ], 0,
-                  MAX_RV_HOST_ID_LEN - host.host_id_len );
-        for ( uint32_t i = 0; i < this->rte.mgr.unrouteable.count; i++ ) {
-          Unrouteable & un = this->rte.mgr.unrouteable.ptr[ i ];
-          if ( un.web != NULL ) {
-            char         tmp[ 256 ];
-            const char * addr = un.web->http_url.val;
-            size_t       len  = sizeof( tmp );
-            int          port = un.tport->get_host_port( addr, tmp, len,
-                                                     this->rte.mgr.tree.hosts );
-            if ( port != 0 && len > 0 ) {
-              AddrInfo info;
-              if ( info.get_address(addr, port, OPT_AF_INET|OPT_LISTEN) == 0 ) {
-                for ( addrinfo * ai = info.ai; ai != NULL; ai = ai->ai_next ) {
-                  if ( ai->ai_family == AF_INET ) {
-                    host.http_addr =
-                      ((struct sockaddr_in *) ai->ai_addr)->sin_addr.s_addr;
-                    host.http_port =
-                      ((struct sockaddr_in *) ai->ai_addr)->sin_port;
-                    goto break_loop;
-                  }
-                }
-              }
-            }
-          break_loop:;
-            break;
-          }
-        }
-        if ( ! host.network_started )
-          status = host.start_network( mc, hn );
-        else
-          status = host.copy_network( mc, hn );
-      }
+      if ( status != HOST_OK )
+        return status;
+
+      if ( mc.fake_ip == 0 && ! this->no_fakeip )
+        mc.fake_ip = this->rte.mgr.user_db.bridge_nonce_int;
+      host.host_id_len = (uint16_t)
+        min_int( (size_t) this->rte.mgr.user_db.user.user.len,
+                 MAX_RV_HOST_ID_LEN - 1 );
+      ::memcpy( host.host_id, this->rte.mgr.user_db.user.user.val,
+                host.host_id_len );
+      ::memset( &host.host_id[ host.host_id_len ], 0,
+                MAX_RV_HOST_ID_LEN - host.host_id_len );
+
+      this->find_host_http( host );
+
+      if ( ! host.network_started )
+        status = host.start_network( mc, hn );
+      else
+        status = host.copy_network( mc, hn );
       if ( status != HOST_OK )
         return status;
     }
@@ -433,11 +444,14 @@ RvTransportService::start_host( RvHost &host,  const RvHostNet &hn,
     hr->tport_exists = exists;
   }
   if ( not_running ) {
-    printf( "start network: service %.*s, host %.*s (%.*s), \"%.*s\"\n",
+    const char * extra = "";
+    if ( host.network_len > 0 && this->no_mcast )
+      extra = " (no_mcast)";
+    printf( "start network: service %.*s, host %.*s (%.*s), \"%.*s\"%s\n",
             (int) host.service_len, host.service,
             (int) host.session_ip_len, host.session_ip,
             (int) host.sess_ip_len, host.sess_ip,
-            (int) host.network_len, host.network );
+            (int) host.network_len, host.network, extra );
     this->last_active_mono = this->rte.poll.mono_ns;
     if ( hr != NULL ) {
       hr->last_active_mono = this->last_active_mono;
@@ -451,11 +465,14 @@ RvTransportService::start_host( RvHost &host,  const RvHostNet &hn,
 void
 RvTransportService::stop_host( RvHost &host ) noexcept
 {
-  printf( "stop network:  service %.*s, host %.*s (%.*s), \"%.*s\"\n",
+  const char * extra = "";
+  if ( host.network_len > 0 && this->no_mcast )
+    extra = " (no_mcast)";
+  printf( "stop network:  service %.*s, host %.*s (%.*s), \"%.*s\"%s\n",
           (int) host.service_len, host.service,
           (int) host.session_ip_len, host.session_ip,
           (int) host.sess_ip_len, host.sess_ip,
-          (int) host.network_len, host.network );
+          (int) host.network_len, host.network, extra );
   uint64_t cur_mono = this->rte.poll.mono_ns;
   RvHostRoute * hr  = this->tab.find( &host );
   if ( hr != NULL ) {

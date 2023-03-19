@@ -41,8 +41,11 @@ struct ConfigDB {
                                  md::MDOutput &err ) noexcept;
   static ConfigTree * parse_jsfile( const char *fn,  StringTab &st,
                                     md::MDOutput &err ) noexcept;
+  static ConfigTree * parse_fd( int fd,  StringTab &st,  md::MDOutput &err ) noexcept;
+
   int parse_glob( const char *fn,  uint32_t &match ) noexcept;
   int parse_file( const char *fn ) noexcept;
+  int parse_stream( int fd ) noexcept;
   int parse_jsconfig( const char *buf,  size_t buflen,  const char *fn ) noexcept;
   int config_string( const char *what, md::MDMsg &msg,
                      md::MDReference &mref,  StringVal &str ) noexcept;

@@ -156,16 +156,21 @@ ConfigDB::parse_tree( const char *cfg_name,  StringTab &st,
                       MDOutput &err ) noexcept
 {
   ConfigTree * tree;
-  os_stat      stbuf;
-  if ( os_fstat( cfg_name, &stbuf ) < 0 || ( stbuf.st_mode & S_IFDIR ) == 0 ) {
-    tree = ConfigDB::parse_jsfile( cfg_name, st, err );
-    if ( tree != NULL ) {
-      st.ref_string( cfg_name, ::strlen( cfg_name ), tree->cfg_name );
-      tree->is_dir = false;
-    }
+  if ( cfg_name == NULL || ::strcmp( cfg_name, "-" ) == 0 ) {
+    tree = ConfigDB::parse_fd( 0, st, err );
   }
-  else
-    tree = ConfigDB::parse_dir( cfg_name, st, err );
+  else {
+    os_stat      stbuf;
+    if ( os_fstat( cfg_name, &stbuf ) < 0 || ( stbuf.st_mode & S_IFDIR ) == 0 ) {
+      tree = ConfigDB::parse_jsfile( cfg_name, st, err );
+      if ( tree != NULL ) {
+        st.ref_string( cfg_name, ::strlen( cfg_name ), tree->cfg_name );
+        tree->is_dir = false;
+      }
+    }
+    else
+      tree = ConfigDB::parse_dir( cfg_name, st, err );
+  }
   return tree;
 }
  
@@ -189,13 +194,11 @@ ConfigDB::parse_dir( const char *dir_name,  StringTab &st,
 }
 
 ConfigTree *
-ConfigDB::parse_jsfile( const char *fn,  StringTab &st,
-                        MDOutput &err ) noexcept
+ConfigDB::parse_jsfile( const char *fn,  StringTab &st, MDOutput &err ) noexcept
 {
   ConfigTree * tree = new ( st.mem.make( sizeof( ConfigTree ) ) ) ConfigTree();
   InodeStack   ino;
   ConfigDB     db( *tree, st.mem, &ino, st );
-  StringVal    ref;
   uint32_t     match;
 
   db.filename = fn;
@@ -206,6 +209,21 @@ ConfigDB::parse_jsfile( const char *fn,  StringTab &st,
   }
   if ( match == 0 ) {
     fprintf( stderr, "Config not found: \"%s\"\n", fn );
+    return NULL;
+  }
+  return tree;
+}
+
+ConfigTree *
+ConfigDB::parse_fd( int fd,  StringTab &st,  MDOutput &err ) noexcept
+{
+  ConfigTree * tree = new ( st.mem.make( sizeof( ConfigTree ) ) ) ConfigTree();
+  InodeStack   ino;
+  ConfigDB     db( *tree, st.mem, &ino, st );
+
+  db.filename = "(fd-input)";
+  if ( db.parse_stream( fd ) != 0 || ! db.check_strings( err ) ) {
+    fprintf( stderr, "Parse failed, fd %d\n", fd );
     return NULL;
   }
   return tree;
@@ -670,6 +688,26 @@ ConfigDB::parse_file( const char *fn ) noexcept
     }
   }
   return status;
+}
+
+int
+ConfigDB::parse_stream( int fd ) noexcept
+{
+  MDMsgMem   tmp_mem;
+  JsonMsgCtx ctx;
+  int        status;
+
+  status = ctx.parse_fd( fd, NULL, &tmp_mem, true );
+  if ( status != 0 ) {
+    fprintf( stderr, "JSON parse error in fd %d, status %d/%s\n", fd,
+             status, Err::err( status )->descr );
+    if ( ctx.input != NULL ) {
+      fprintf( stderr, "line %u col %u\n", (uint32_t) ctx.input->line_count,
+               (uint32_t) ( ctx.input->offset - ctx.input->line_start + 1 ) );
+    }
+    return status;
+  }
+  return this->parse_object( "(fd-input)", *ctx.msg, resolve_obj( *ctx.msg ) );
 }
 
 int

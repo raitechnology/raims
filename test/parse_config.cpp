@@ -25,7 +25,7 @@ main( int argc, char *argv[] )
   const char * fn = get_arg( argc, argv, 1, "-d", "config" ),
              * j  = get_arg( argc, argv, 0, "-j", 0 ),
              * he = get_arg( argc, argv, 0, "-h", 0 );
-  if ( he != NULL || fn == NULL ) {
+  if ( he != NULL ) {
     printf( "%s -d dir [-j]\n"
             "   -d dir : config file or directory\n"
             "   -j     : print json\n"
@@ -41,7 +41,9 @@ main( int argc, char *argv[] )
   MDOutput         p;
   os_stat          stbuf;
 
-  if ( os_fstat( fn, &stbuf ) < 0 || ( stbuf.st_mode & S_IFDIR ) == 0 )
+  if ( fn == NULL || ::strcmp( fn, "-" ) == 0 )
+    tree = ConfigDB::parse_fd( 0, st, err );
+  else if ( os_fstat( fn, &stbuf ) < 0 || ( stbuf.st_mode & S_IFDIR ) == 0 )
     tree = ConfigDB::parse_jsfile( fn, st, err );
   else
     tree = ConfigDB::parse_dir( fn, st, err );

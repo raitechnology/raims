@@ -271,7 +271,17 @@ main( int argc, char *argv[] )
   ConfigTree::Service   * svc   = NULL;
   ConfigTree::Transport * tport = NULL;
   char host[ 256 ];
-
+  int stdin_fd = STDIN_FILENO;
+#ifndef _MSC_VER
+  /* if parse_config read from stdin, it will be closed */
+  if ( use_console != NULL ) {
+    if ( cfg == NULL || ::strcmp( cfg, "-" ) == 0 ) {
+      stdin_fd = os_open( "/dev/tty", O_RDONLY, 0 );
+      if ( stdin_fd < 0 )
+        use_console = NULL;
+    }
+  }
+#endif
   /* make a user with the hostname */
   if ( user == NULL )
     if ( ::gethostname( host, sizeof( host ) ) == 0 )
@@ -338,7 +348,7 @@ main( int argc, char *argv[] )
     cb.term    = &term;
     cb.console = &sess.console;
     sess.term  = &term;
-    term.stdin_fd  = 0;
+    term.stdin_fd = stdin_fd;
     term.stdout_fd = os_dup( STDOUT_FILENO );
     log.start_ev( poll );
     term.start();

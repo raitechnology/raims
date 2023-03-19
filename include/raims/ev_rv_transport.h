@@ -94,7 +94,7 @@ struct RvTransportService : public kv::EvTimerCallback {
                                            bool create ) noexcept;
   void make_rv_transport( ConfigTree::Transport *&t,  sassrv::RvHost &host,
                           bool &is_listener ) noexcept;
-
+  void find_host_http( sassrv::RvHost &host ) noexcept;
   int start_host( sassrv::RvHost &host, const sassrv::RvHostNet &hn,
                   uint32_t &delay_secs ) noexcept;
   void stop_host( sassrv::RvHost &host ) noexcept;
