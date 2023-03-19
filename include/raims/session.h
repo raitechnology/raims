@@ -335,7 +335,7 @@ struct SessionMgr : public kv::EvSocket, public kv::BPData {
                 PublishType type ) noexcept;
   uint32_t add_wildcard_rte( const char *prefix, size_t pref_len,
                              PublishType type ) noexcept;
-  void fork_daemon( int err_fd ) noexcept;
+  void fork_daemon( int err_fd,  const char *wkdir ) noexcept;
   bool loop( uint32_t &idle ) noexcept;
   void start( void ) noexcept;
   void name_hb( uint64_t cur_mono ) noexcept;

@@ -336,7 +336,7 @@ SessionMgr::add_wildcard_rte( const char *prefix,  size_t pref_len,
 }
 
 void
-SessionMgr::fork_daemon( int err_fd ) noexcept
+SessionMgr::fork_daemon( int err_fd,  const char *wkdir ) noexcept
 {
   if ( err_fd > 0 ) {
     char buf[ 256 ];
@@ -385,7 +385,8 @@ SessionMgr::fork_daemon( int err_fd ) noexcept
   }
   if ( ::fork() > 0 )
     ::exit( 0 );
-  ::chdir( "/" );
+  if ( wkdir != NULL )
+    ::chdir( wkdir );
   ::setsid();
   ::umask( 0 );
   if ( ::fork() > 0 )

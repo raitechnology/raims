@@ -439,8 +439,13 @@ main( int argc, char *argv[] )
     if ( use_console != NULL ) {
       lc_tty_set_prompt( term.term.tty, TTYP_PROMPT1, sess.console.prompt );
     }
-    else if ( is_rvd && foreground == NULL ) {
-      sess.fork_daemon( err_fd );
+    else {
+      bool is_fork_daemon = ( is_rvd && foreground == NULL );
+      if ( is_fork_daemon ) {
+        const char *wkdir = NULL;
+        tree->parameters.find( P_WORKING_DIRECTORY, wkdir, NULL );
+        sess.fork_daemon( err_fd, wkdir );
+      }
     }
     sess.start();
     uint32_t idle = 0;
