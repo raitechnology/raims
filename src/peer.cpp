@@ -1318,7 +1318,7 @@ UserDB::send_mesh_request( UserBridge &n,  MsgHdrDecoder &dec,
                    url_count = 0,
                    tport_count = this->transport_tab.count,
                    tport_id,
-                 * filter;
+                 * filter = NULL;
   Nonce            csum = this->bridge_id.nonce;
   bool             ok;
 

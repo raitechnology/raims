@@ -408,6 +408,7 @@ main( int argc, char *argv[] )
     }
     for ( int i = 2; status == 0; i++ ) {
       if ( ! sess.add_transport( *tport, ! conn ) ) {
+        fprintf( stderr, "Transport %s failed to start\n", tports );
         status = -1;
         break;
       }
@@ -422,18 +423,25 @@ main( int argc, char *argv[] )
     }
   }
   if ( status == 0 ) {
-    if ( ! sess.add_startup_transports() )
+    if ( ! sess.add_startup_transports() ) {
+      fprintf( stderr, "Startup transports failed to start\n" );
       status = -1;
+    }
     if ( is_rvd && status == 0 ) {
       int flags = ( no_perm ? RV_NO_PERMANENT : 0 ) |
                   ( no_http ? RV_NO_HTTP : 0 ) |
                   ( no_mcast ? RV_NO_MCAST : 0 );
-      if ( ! sess.add_rvd_transports( listen, http, flags ) )
+      if ( ! sess.add_rvd_transports( listen, http, flags ) ) {
+        fprintf( stderr, "Rvd transports failed to start\n" );
         status = -1;
+      }
     }
   }
-  if ( status == 0 )
+  if ( status == 0 ) {
     status = sess.init_session( pwd );
+    if ( status != 0 )
+      fprintf( stderr, "Init session status %d\n", status );
+  }
   pwd.clear_pass(); /* no longer need pass */
   if ( status == 0 ) {
     if ( use_console != NULL ) {
@@ -461,16 +469,15 @@ main( int argc, char *argv[] )
   }
   else {
     uint64_t timeout_ns = current_monotonic_time_ns() + sec_to_ns( 1 );
-    uint32_t idle = 0;
-    while ( sess.loop( idle ) ) {
-      if ( sighndl.signaled || current_monotonic_time_ns() > timeout_ns ) {
+    while ( poll.quit < 5 ) {
+      poll.dispatch();
+      poll.wait( 10 );
+      /* wait for log message */
+      if ( sighndl.signaled || current_monotonic_time_ns() > timeout_ns ||
+           sess.console.on_log( sess.log ) ) {
         if ( poll.quit == 0 )
           poll.quit = 1;
       }
-      /* wait for log message */
-      if ( sess.console.on_log( sess.log ) )
-        if ( poll.quit == 0 )
-          poll.quit = 1;
     }
   }
   sess.console.flush_log( log );
