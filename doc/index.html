@@ -460,6 +460,8 @@ body.book #toc,body.book #preamble,body.book h1.sect0,body.book .sect1>h2{page-b
 <li><a href="#_key_configuration">Key Configuration</a></li>
 <li><a href="#_single_file_configuration">Single File Configuration</a></li>
 <li><a href="#parameters">Parameters</a></li>
+<li><a href="#startup">Startup</a></li>
+<li><a href="#hosts">Hosts</a></li>
 </ul>
 </li>
 <li><a href="#authentication">Authentication</a>
@@ -1165,12 +1167,7 @@ section.</p>
   salt: .salt
 heartbeat: 5 secs
 reliability: 10 secs
-tcp_noencrypt: true
-listen:
-  - mymesh
-  - myweb
-connect:
-  - mytcp</pre>
+tcp_noencrypt: true</pre>
 </div>
 </div>
 <div class="paragraph">
@@ -1336,6 +1333,12 @@ connect:
 <td class="tableblock halign-left valign-top"><p class="tableblock">16</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">Busy wait loop count</p></td>
 </tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">working_directory</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">dirname</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">none</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Switch to directory when in daemon mode</p></td>
+</tr>
 </tbody>
 </table>
 <div class="ulist">
@@ -1412,7 +1415,65 @@ back pressure to forwarding sockets.</p>
 looping while idle keeps the process on a CPU for lower latency at the
 expense of wasted CPU cycles.</p>
 </li>
+<li>
+<p>working_directory&#8201;&#8212;&#8201;When running in the background in daemon mode, which is
+without a console using RVD mode without the -foreground argument or with the
+-b argument, then switch to the directory after forking and detaching from
+the terminal.  This directory can be used to store the .console_history files
+or other files that are saved using console subscription commands.  If the
+command line with telnet is not used, then no files are created.</p>
+</li>
 </ul>
+</div>
+</div>
+<div class="sect2">
+<h3 id="startup">Startup</h3>
+<div class="paragraph">
+<p>The startup section can be used to start transports during initialization.
+This syntax is used by the <code>save</code> console command, but can also be edited.  The
+following causes the transports named myweb to start with listen, then start
+mymesh and mytcp with connect.  The listeners are always started before the
+connecters.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre>startup:
+  listen:
+    - myweb
+  connect:
+    - mymesh
+    - mytcp</pre>
+</div>
+</div>
+</div>
+<div class="sect2">
+<h3 id="hosts">Hosts</h3>
+<div class="paragraph">
+<p>The hosts section can be used to assign address strings to names, similar to
+an /etc/hosts configuration.  The values assigned to the names are substituted
+in any connect or listen configuration of a transport.  For example, the
+following hosts are used in the connect and listen portions of the net
+transport.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre>hosts:
+  chex: 192.168.0.16
+  dyna: 192.168.0.18
+transports:
+  - tport: net
+    type: mesh
+    route:
+      connect: chex:5001
+      listen: dyna:5000
+startup:
+  connect:
+    - net</pre>
+</div>
+</div>
+<div class="paragraph">
+<p>A mesh type transport with connect uses both the listen and the connect
+addresses defined, since all peers can both connect and accept connections.</p>
 </div>
 </div>
 </div>
@@ -1620,16 +1681,27 @@ trust ruby.</p>
 <div class="paragraph">
 <p>If a host is compromised and the KDF pre-shared key and service ECDSA_pub key
 are discovered along with a user ECDSA_pri key, then an unauthorized party
-could masquerade as that user.  One way to prevent this is to remove the
-pre-shared 640 byte salt file after starting a server and a unique password
-file used to encrypt the ECDSA keys in the configuration files.  The attacker
-would need to extract these from the process space of the server and design a
-system that uses this data.</p>
+could masquerade as that user.</p>
 </div>
 <div class="paragraph">
-<p>The user ECDSA_pri key is needed to authenticate new peers, so it remains in
-memory for the duration of the process.  A design that drops the private key
-material after this key exchange could prevent this type of attack.</p>
+<p>One way to prevent this is to remove the pre-shared 640 byte salt file after
+starting a server or the unique password file used to encrypt the ECDSA keys in
+the configuration files.  Both the salt and password are needed to decrypt the
+keys.</p>
+</div>
+<div class="paragraph">
+<p>Another option is to use stdin for reading the configuration so that no secrets
+are stored in the filesystem.  For example, this will configure ms_server
+through sending a configuration through ssh to a remote host:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre>$ cat config.yaml | ssh host "bash -c '$( nohup /usr/bin/ms_server -d - -b &gt; /dev/null 2&gt; /dev/null )'"</pre>
+</div>
+</div>
+<div class="paragraph">
+<p>The ms_server running on host will read the configuration from stdin (-d -
+argument) and then fork itself to run in the background (-b argument).</p>
 </div>
 </div>
 <div class="sect2">

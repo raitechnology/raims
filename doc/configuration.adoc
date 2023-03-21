@@ -203,11 +203,6 @@ parameters:
 heartbeat: 5 secs
 reliability: 10 secs
 tcp_noencrypt: true
-listen:
-  - mymesh
-  - myweb
-connect:
-  - mytcp
 ----
 
 The "parameters:" structure is optional and not necessary to define them.
@@ -239,6 +234,7 @@ The "parameters:" structure is optional and not necessary to define them.
 | tcp_write_timeout   | time     | 10 secs | Timeout for TCP write
 | tcp_write_highwater | bytes    | 1 MB    | TCP write buffer size
 | idle_busy           | count    | 16      | Busy wait loop count
+| working_directory   | dirname  | none    | Switch to directory when in daemon mode
 |=============================================
 
 - salt, pass, salt_data, pass_data -- The salt, pass or salt_data, pass_data
@@ -296,3 +292,58 @@ The "parameters:" structure is optional and not necessary to define them.
 - idle_busy -- Number of times to loop while no activity is present.  More
   looping while idle keeps the process on a CPU for lower latency at the
   expense of wasted CPU cycles.
+
+- working_directory -- When running in the background in daemon mode, which is
+  without a console using RVD mode without the -foreground argument or with the
+  -b argument, then switch to the directory after forking and detaching from
+  the terminal.  This directory can be used to store the .console_history files
+  or other files that are saved using console subscription commands.  If the
+  command line with telnet is not used, then no files are created.
+
+[[startup]]
+Startup
+~~~~~~~
+
+The startup section can be used to start transports during initialization.
+This syntax is used by the `save` console command, but can also be edited.  The
+following causes the transports named myweb to start with listen, then start
+mymesh and mytcp with connect.  The listeners are always started before the
+connecters.
+
+----
+startup:
+  listen:
+    - myweb
+  connect:
+    - mymesh
+    - mytcp
+----
+
+[[hosts]]
+Hosts
+~~~~~
+
+The hosts section can be used to assign address strings to names, similar to
+an /etc/hosts configuration.  The values assigned to the names are substituted
+in any connect or listen configuration of a transport.  For example, the
+following hosts are used in the connect and listen portions of the net
+transport.
+
+----
+hosts:
+  chex: 192.168.0.16
+  dyna: 192.168.0.18
+transports:
+  - tport: net
+    type: mesh
+    route:
+      connect: chex:5001
+      listen: dyna:5000
+startup:
+  connect:
+    - net
+----
+
+A mesh type transport with connect uses both the listen and the connect
+addresses defined, since all peers can both connect and accept connections.
+

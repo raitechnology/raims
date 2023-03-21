@@ -101,6 +101,7 @@ main( int argc, char *argv[] )
              * log_max_rot = NULL,
              * no_perm     = NULL,
              * foreground  = NULL,
+             * background  = NULL,
              * listen      = NULL,
              * no_http     = NULL,
              * http        = NULL,
@@ -194,7 +195,8 @@ main( int argc, char *argv[] )
   "   -i name        : connect with ipc name\n" \
   "   -m map         : attach to kv shm map\n" \
   "   -D dbnum       : default db num\n" \
-  "   -c             : run with console\n"
+  "   -c             : run with console\n" \
+  "   -b             : fork and detach from terminal\n"
 
     cfg         = get_arg( argc, argv, 1, "-d", cfg_dir );
     user        = get_arg( argc, argv, 1, "-u", NULL );
@@ -206,7 +208,10 @@ main( int argc, char *argv[] )
     map_file    = get_arg( argc, argv, 1, "-m", NULL );
     db_num      = get_arg( argc, argv, 1, "-D", NULL );
     use_console = get_arg( argc, argv, 0, "-c", NULL );
+    background  = get_arg( argc, argv, 0, "-b", NULL );
     get_help    = get_arg( argc, argv, 0, "-h", NULL );
+    if ( use_console != NULL )
+      background = NULL;
     if ( get_help == NULL )
       get_help = get_arg( argc, argv, 0, "-v", NULL );
   }
@@ -448,12 +453,14 @@ main( int argc, char *argv[] )
       lc_tty_set_prompt( term.term.tty, TTYP_PROMPT1, sess.console.prompt );
     }
     else {
-      bool is_fork_daemon = ( is_rvd && foreground == NULL );
+      bool is_fork_daemon =
+        ( ( is_rvd && foreground == NULL ) || background != NULL );
       if ( is_fork_daemon ) {
         const char *wkdir = NULL;
         tree->parameters.find( P_WORKING_DIRECTORY, wkdir, NULL );
         sess.fork_daemon( err_fd, wkdir );
       }
+      os_close( STDIN_FILENO );
     }
     sess.start();
     uint32_t idle = 0;
