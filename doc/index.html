@@ -4684,6 +4684,14 @@ transport test</code> command.</p>
 <td class="tableblock halign-left valign-top"><p class="tableblock">Show rv hosts and services</p></td>
 </tr>
 <tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="#show_rvsub">show rvsub</a></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Show rv subscriptions</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="#show_rpcs">show rpcs</a></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Show rpcs and subs running</p></td>
+</tr>
+<tr>
 <td class="tableblock halign-left valign-top"><p class="tableblock"><a href="#conf_tran">show running</a></p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">Show current config running</p></td>
 </tr>
@@ -4754,6 +4762,10 @@ transport test</code> command.</p>
 <tr>
 <td class="tableblock halign-left valign-top"><p class="tableblock"><a href="#test_gunsub">gunsub</a> W [F]</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">Unsubscribe glob-wildcard W, stop output file F</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="#test_snap">snap</a> S [F]</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Publish to subject S with inbox reply</p></td>
 </tr>
 <tr>
 <td class="tableblock halign-left valign-top"><p class="tableblock"><a href="#test_pub">pub</a> S M</p></td>
@@ -5326,14 +5338,14 @@ in the link state update.</p>
 </div>
 <div class="listingblock">
 <div class="content">
-<pre class="highlight nowrap"><code>   user    |         bridge         | sub |  seq | link |   lat |   max |   avg |        start      |     tport   | cost
------------+------------------------+-----+------+------+-------+-------+-------+-------------------+-------------+-----
-  pic_a1.* | zD1mbc/elMr2GJ/v+vx9hA |   4 |    2 |    8 |       |       |       | 0224 11:31:35.247 |             |
-  pic_a2.1 | fiZzmz7UlHLLyCEum+mbpQ |   4 |    2 |    8 | 226us | 296us | 182us | 0224 11:31:35.806 | pic_amesh.2 | 1000
-  pic_a3.2 | zv2CyNOl+2TZotZhL3iEwA |  75 | 8617 |    8 | 246us | 409us | 231us | 0224 11:31:36.381 | pic_amesh.3 | 1000
-  pic_a4.3 | JN3DyA6dXDMsh9kOtdFi7Q |  13 | 8553 |    8 | 167us | 288us | 225us | 0224 11:31:36.960 | pic_amesh.4 | 1000
-   pic_a.4 | ikdNy92Qp/gHbBger09G6g |   2 |    0 |   17 | 109us | 538us | 183us | 0224 11:31:36.988 | pic_amesh.5 | 1000
-  robo_a.5 | WnC1wQLMzxxKeP/55Y2cHA |   2 |    0 |   18 | 453us | 708us | 427us | 0224 11:31:27.442 | pic_amesh.5 | 2000
+<pre class="highlight nowrap"><code>   user    |         bridge         | sub |  seq | link |   lat  |   max  |   avg  |        time       |    tport  | cost
+-----------+------------------------+-----+------+------+--------+--------+--------+-------------------+-----------+-----
+    chex.* | VCr9OQDldBjnGLnOXVF7gA |   3 |    3 |    4 |        |        |        | 0320 18:37:34.182 |           |
+   pic_a.1 | YdUS3pecw5BYzlj1Qns0uQ |   2 |    0 |   14 | 4.61ms | 6.55ms | 5.01ms | 0320 11:48:25.118 | pic_tcp.1 | 1000
+   edo_a.2 | KD28fBfgf6SpwPwH7QpwMA |   2 |    0 |   20 | 5.97ms | 7.92ms |  6.3ms | 0320 11:37:32.198 | edo_tcp.2 | 1000
+  pic_a3.3 | x+McKSRvAaAfOuOQEsvX9Q |  81 | 7923 |    8 | 5.57ms | 7.69ms | 5.43ms | 0320 11:48:25.066 | pic_tcp.1 | 2000
+  robo_a.4 | gIBRgIKDPjvTwVVuLxE8vg |   2 |    0 |   16 | 6.74ms | 8.67ms | 6.68ms | 0320 01:24:50.489 | edo_tcp.2 | 2000
+   dex_a.5 | t2M47zbouWPRJHwFFjVROg |   2 |    0 |   12 | 9.84ms | 9.84ms | 6.62ms | 0320 11:47:17.389 | edo_tcp.2 | 2000
 ...</code></pre>
 </div>
 </div>
@@ -5361,7 +5373,7 @@ heartbeat interval to a random peer.  They are tracked for at least an hour
 before being rotated.</p>
 </div>
 <div class="paragraph">
-<p>The <code>start</code> is the start time of the peer.</p>
+<p>The <code>time</code> is the start time of the peer.</p>
 </div>
 <div class="paragraph">
 <p>The <code>tport</code> and <code>cost</code> reference the inbox route to peer.</p>
@@ -6879,17 +6891,22 @@ pressure on the connection.</p>
 </div>
 <div class="listingblock">
 <div class="content">
-<pre class="highlight nowrap"><code>chex.rvd[UjD6fIiAd1lXaCPmnarXUg]@chex[129]&gt; show hosts
- svc |  session |   session ip  | port |        start      | cl |     bs     |      br     |    ms    |     mr    | idl | odl
------+----------+---------------+------+-------------------+----+------------+-------------+----------+-----------+-----+----
-7500 | 5230FA7C | 82.48.250.124 | 7500 | 0226 22:38:27.401 |  2 | 6448254563 | 28658399876 | 26756243 | 113590979 |   0 |   0</code></pre>
+<pre class="highlight nowrap"><code>chex.rvd[VCr9OQDldBjnGLnOXVF7gA]@chex[229]&gt; show hosts
+ svc |         session        |  user  | port |        start      | cl |    bs   |  br  |  ms  | mr | idl | odl
+-----+------------------------+--------+------+-------------------+----+---------+------+------+----+-----+----
+7500 | 542AFD39.5F75F9F9BFDED |   chex | 7500 | 0320 19:15:55.308 |  1 | 2670095 | 1593 | 2438 | 17 |   0 |   0
+7500 | 542AFD39.5F763014D6394 | nobody | 7500 | 0320 19:15:55.308 |  1 | 2670095 | 1593 | 2438 | 17 |   0 |   0
+7501 | 542AFD39.5F76301B06616 | nobody | 7500 | 0320 23:03:15.414 |  1 |       0 | 1572 |    0 | 16 |   0 |   0</code></pre>
 </div>
 </div>
 <div class="paragraph">
-<p>The <code>svc</code> is the service number, <code>session</code> is the session identifier, <code>session ip</code> is the IPv4 address, <code>port</code> is the daemon
-port number, <code>start</code> is when the host started.  The <code>cl</code> is the active number of clients.  If the number of clients is zero
-then the host service is not active, it doesn&#8217;t publish any <code>_RV</code> system subjects.  The <code>bs</code>, <code>br</code>, <code>ms</code>, <code>mr</code>, <code>idl</code>, <code>odl</code> are
-the same stats published with the <code>_RV.INFO.SYSTEM.HOST.STATUS.5230FA7C</code> message.</p>
+<p>The <code>svc</code> is the service number, <code>session</code> is the session identifier, <code>user</code> is
+the user name associated with the session, <code>port</code> is the daemon port number,
+<code>start</code> is when the host started.  The <code>cl</code> is the active number of clients.
+If the number of clients is zero then the host service is not active, it
+doesn&#8217;t publish any <code>_RV</code> system subjects.  The <code>bs</code>, <code>br</code>, <code>ms</code>, <code>mr</code>, <code>idl</code>,
+<code>odl</code> are the same stats published with the
+<code>_RV.INFO.SYSTEM.HOST.STATUS.5230FA7C</code> message.</p>
 </div>
 <table class="tableblock frame-all grid-cols stripes-even fit-content">
 <colgroup>
@@ -6954,7 +6971,78 @@ the same stats published with the <code>_RV.INFO.SYSTEM.HOST.STATUS.5230FA7C</co
 </tbody>
 </table>
 <div class="paragraph">
-<p>The <code>session ip</code> will be a random address unless configured with the <code>no_fakeip</code> setting, described in <a href="#Tib_RV">Tib RV</a>.</p>
+<p>The <code>session ip</code> will be a random address unless configured with the
+<code>no_fakeip</code> setting, described in <a href="#Tib_RV">Tib RV</a>.</p>
+</div>
+<div id="show_rvsub" class="ulist">
+<ul>
+<li>
+<p>show rvsub</p>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p>Show the RV subscriptions, which is any subscription that uses an service
+number.  A service name used by another protocol that is not a valid RV service
+will not have a RV subscriptions.</p>
+</div>
+<div class="paragraph">
+<p>Example:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight nowrap"><code>chex.rvd[VCr9OQDldBjnGLnOXVF7gA]@chex[228]&gt; show rvsub
+ svc |         session        |  user  | p |              subject
+-----+------------------------+--------+---+--------------------------------
+7500 | 542AFD39.5F75F9F9BFDED |   chex |   |
+7500 | 542AFD39.5F762C8EF4C3E | nobody |   | RSF5.REC.EK.N
+     |                        |        |   | RSF5.REC.ITT.NaE
+     |                        |        |   | RSF5.REC.PPW.NaE
+     |                        |        | p | _INBOX.542AFD39.5F762C8EF4C3E.&gt;
+7501 | 542AFD39.5F762CC9F8385 | nobody |   | RSF.REC.TMX.N
+     |                        |        |   | RSF.REC.GLK.NaE
+     |                        |        | p | _INBOX.542AFD39.5F762CC9F8385.&gt;</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>The <code>svc</code> field is the service number, the session is a identifier for the
+connection, which in this case, uses the host prefix and a nanosecond
+resolution timestamp as the unique identifier.  There are other methods used,
+but they usually have host prefix, a timestamp and/or a process id.
+The <code>user</code> is derived from the protocol&#8217;s method of attaching a user name to
+the session.  The user is often a login name when using RV.  The <code>p</code> is set
+when the subscription is a pattern.  The <code>subject</code> is the subscription string.</p>
+</div>
+<div id="show_rpcs" class="ulist">
+<ul>
+<li>
+<p>show rpcs</p>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p>Show the console rpcs that are currently running.  These are created with
+commands entered into the console or the web interface.  These are: "ping",
+"remote", "show subs", "sub &lt;subject&gt;", "psub &lt;subject&gt;", and "snap &lt;subject&gt;".</p>
+</div>
+<div class="paragraph">
+<p>Example:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight nowrap"><code>chex.rvd[VCr9OQDldBjnGLnOXVF7gA]@chex[234]&gt; show rpcs
+type |          arg         | recv | count
+-----+----------------------+------+------
+snap |  _7500.RSF.REC.IBM.N |    0 |     1
+ sub | _7500.RSF.REC.TEST.X |    1 |</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>The <code>type</code> is the command, the <code>arg</code> is a subject or a peer name.  The <code>recv</code>
+is the number of messages received, <code>count</code> is the number expected if it is not
+a subscription type.  The <a href="#test_cancel:">cancel</a> command will stop the
+non-subscription type commands, <a href="#test_unsub">unsub</a> or
+<a href="#test_punsub">punsub</a> commands will stop the subscription type commands.</p>
 </div>
 </div>
 <div class="sect2">
@@ -6986,7 +7074,7 @@ the file instead of printed to the console.</p>
 </div>
 <div class="paragraph">
 <p>Unsubscribe to subject <code>S</code>.  If a file is present, then stop the publishes sent
-to the file.</p>
+to the file.  If only <code>unsub</code> is used, then all subjects are unsubscribed.</p>
 </div>
 <div id="test_psub" class="ulist">
 <ul>
@@ -7008,7 +7096,8 @@ are sent to the file instead of printed to the console.</p>
 </div>
 <div class="paragraph">
 <p>Unsubscribe to RV style wildcard <code>W</code>.  If a file is present, then stop the
-publishes sent to the file.</p>
+publishes sent to the file.  If only <code>punsub</code> is used, then all patterns are
+unsubscribed.</p>
 </div>
 <div id="test_gsub" class="ulist">
 <ul>
@@ -7031,6 +7120,18 @@ are sent to the file instead of printed to the console.</p>
 <div class="paragraph">
 <p>Unsubscribe to glob style wildcard <code>W</code>.  If a file is present, then stop the
 publishes sent to the file.</p>
+</div>
+<div id="test_snap" class="ulist">
+<ul>
+<li>
+<p>snap S [F]</p>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p>Publish an empty message to subject <code>S</code> with an _INBOX reply, then wait for the
+_INBOX subject and print the message received.  The _INBOX used is assigned is
+subscribed by the console automatically.</p>
 </div>
 <div id="test_pub" class="ulist">
 <ul>
