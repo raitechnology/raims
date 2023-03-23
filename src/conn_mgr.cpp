@@ -79,7 +79,7 @@ TransportRvHost::start_session( void ) noexcept
 
   host->active_clients++;
   host->start_host2( 0 );
-  host->make_session( this->conn.active_ns, session );
+  host->make_session( this->conn.start_ns, session );
 
   this->conn.set_session( session );
   if ( host->active_clients == 1 )
@@ -151,7 +151,7 @@ SessionMgr::get_rv_session( uint16_t svc,  bool start_host ) noexcept
       return NULL;
     TransportRoute & ipc_rte = *this->user_db.ipc_transport;
     if ( ipc_rte.rv_svc == NULL ) {
-      ipc_rte.rv_svc = new ( malloc( sizeof( RvTransportService ) ) )
+      ipc_rte.rv_svc = new ( ::malloc( sizeof( RvTransportService ) ) )
         RvTransportService( ipc_rte );
     }
     RvHostNet hn( svc, 0, true );

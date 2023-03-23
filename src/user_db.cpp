@@ -1370,6 +1370,7 @@ UserDB::add_user( TransportRoute &rte,  const UserRoute *src,  uint32_t fd,
   ::memcpy( &nonce_int, user_bridge_id.nonce.digest(), 4 );
   if ( this->host_ht->find( nonce_int, pos ) ) {
     fprintf( stderr, "peer %s host %x exists\n", peer.user.val, nonce_int );
+    exit( 1 );
   }
   uid  = this->new_uid();
   this->host_ht->upsert_rsz( this->host_ht, nonce_int, uid );
@@ -1407,6 +1408,7 @@ UserDB::add_user2( const UserNonce &user_bridge_id,  PeerEntry &peer,
   ::memcpy( &nonce_int, user_bridge_id.nonce.digest(), 4 );
   if ( this->host_ht->find( nonce_int, pos ) ) {
     fprintf( stderr, "peer %s host %x exists\n", peer.user.val, nonce_int );
+    exit( 1 );
   }
   uid  = this->new_uid();
   this->host_ht->upsert_rsz( this->host_ht, nonce_int, uid );

@@ -922,35 +922,45 @@ SessionMgr::start_name_services( ConfigTree::Transport &tport,
 
   tport.get_route_pairs( R_DEVICE, el );
   for ( uint32_t i = 0; i < el.count; i++ ) {
-    const char * dev     = el[ i ]->value.val;
-    uint32_t     dev_len = el[ i ]->value.len;
+    const char * dev = el[ i ]->value.val;
+    char         tmp[ MAX_TCP_HOST_LEN ];
 
-    ConfigTree::Transport *tptr = this->tree.find_transport( dev, dev_len );
+    tmp[ 0 ] = '\0';
+    size_t len  = sizeof( tmp );
+    int    port = tport.get_host_port( dev, tmp, len, this->tree.hosts );
+
     /* tport: lo
        type: name
        route:
          connect: lo;239.23.22.217
          port: 8327 */
+    ConfigTree::Transport *tptr = NULL;
+    if ( port == 0 )
+      tptr = this->tree.find_transport( dev, len );
     if ( tptr == NULL ) {
       StringTab & stab = this->user_db.string_tab;
-      char mcast[ 256 ], port[ 8 ];
+      char mcast[ MAX_TCP_HOST_LEN + 64 ], port_str[ 8 ];
       ConfigTree::StringPair *p;
 
       tptr = stab.make<ConfigTree::Transport>();
       stab.ref_string( T_NAME, T_NAME_SZ, tptr->type );
-      stab.ref_string( dev, dev_len, tptr->tport );
+      stab.ref_string( dev, len, tptr->tport );
 
       p = stab.make<ConfigTree::StringPair>();
       stab.ref_string( R_CONNECT, R_CONNECT_SZ, p->name );
-      ::snprintf( mcast, sizeof( mcast ), "%.*s%s", dev_len, dev,
-                  NameSvc::default_name_mcast() );
-      stab.ref_string( mcast, ::strlen( mcast ), p->value );
+      CatPtr mc( mcast );
+      mc.x( dev, len )
+        .s( NameSvc::default_name_mcast() )
+        .end();
+      stab.ref_string( mcast, mc.len(), p->value );
       tptr->route.push_tl( p );
 
       p = stab.make<ConfigTree::StringPair>();
       stab.ref_string( R_PORT, R_PORT_SZ, p->name );
-      ::snprintf( port, sizeof( port ), "%d", NameSvc::default_name_port() );
-      stab.ref_string( port, ::strlen( port ), p->value );
+      if ( port == 0 )
+        port = NameSvc::default_name_port();
+      size_t n = int32_to_string( port, port_str, int32_digits( port ) );
+      stab.ref_string( port_str, n, p->value );
       tptr->route.push_tl( p );
 
       tptr->tport_id = this->tree.transport_cnt++;

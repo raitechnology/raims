@@ -49,11 +49,17 @@ ConsoleRoute::ConsoleRoute( EvPoll &p,  SessionMgr &m ) noexcept
   this->sock_opts = OPT_NO_POLL;
 }
 
+QueueRoute::QueueRoute( EvPoll &p,  SessionMgr &m ) noexcept
+          : EvSocket( p, p.register_type( "queue_route" ) ),
+            mgr( m ), user_db( m.user_db ), sub_db( m.sub_db ) {
+  this->sock_opts = OPT_NO_POLL;
+}
+
 SessionMgr::SessionMgr( EvPoll &p,  Logger &l,  ConfigTree &c,
                         ConfigTree::User &u,  ConfigTree::Service &s,
                         StringTab &st,  ConfigStartup &start ) noexcept
            : EvSocket( p, p.register_type( "session_mgr" ) ),
-             ipc_rt( p, *this ), console_rt( p, *this ),
+             ipc_rt( p, *this ), console_rt( p, *this ), queue_rt( p, *this ),
              tree( c ), user( u ), svc( s ), startup( start ), timer_id( 0 ),
              timer_mono_time( 0 ), timer_time( 0 ),
              timer_converge_time( 0 ), converge_seqno( 0 ),
@@ -905,6 +911,13 @@ ConsoleRoute::on_msg( EvPublish &pub ) noexcept
   return true;
 }
 
+bool
+QueueRoute::on_msg( EvPublish & ) noexcept
+{
+  /*this->fwd_console( pub, false );*/
+  return true;
+}
+
 uint32_t
 ConsoleRoute::fwd_console( EvPublish &pub,  bool is_caba ) noexcept
 {
@@ -1525,114 +1538,107 @@ SessionMgr::publish( PubMcastData &mc ) noexcept
   }
   return b;
 }
-/* find a peer target for an _INBOX endpoint, and send it direct to the peer */
+
 bool
-SessionMgr::forward_inbox( TransportRoute &src_rte,  EvPublish &fwd ) noexcept
+SessionMgr::forward_uid_inbox( TransportRoute &src_rte,  EvPublish &fwd,
+                               uint32_t uid ) noexcept
 {
-  AnyMatch * any = this->sub_db.any_match( fwd.subject, fwd.subject_len,
-                                           fwd.subj_hash );
-  if ( any->set_count == 0 ) {
-    printf( "no match for %.*s\n", (int) fwd.subject_len, fwd.subject );
-    return true;
-  }
-  BitSetT<uint64_t> set( any->bits() );
-  uint32_t uid, cnt = 0;
-  bool b = true;
   const void * frag = NULL;
   size_t frag_sz = 0;
 
-  set.first( uid, any->max_uid );
-  for (;;) {
-    if ( uid >= this->user_db.next_uid ||
-         this->user_db.bridge_tab[ uid ] == NULL ) {
-      fprintf( stderr, "bad uid %u\n", uid );
-      break;
-    }
-    UserBridge * n = this->user_db.bridge_tab[ uid ];
-    InboxBuf  ibx( n->bridge_id );
-    CabaFlags fl( CABA_INBOX );
+  if ( uid >= this->user_db.next_uid ||
+       this->user_db.bridge_tab[ uid ] == NULL ) {
+    fprintf( stderr, "bad uid %u\n", uid );
+    return true;
+  }
+  UserBridge * n = this->user_db.bridge_tab[ uid ];
+  InboxBuf  ibx( n->bridge_id );
+  CabaFlags fl( CABA_INBOX );
 
-    ibx.s( _ANY );
+  ibx.s( _ANY );
 
-    MsgEst e( ibx.len() );
-    e.seqno  ()
-     .subject( fwd.subject_len )
-     .reply  ( fwd.reply_len )
-     .fmt    ();
+  MsgEst e( ibx.len() );
+  e.seqno  ()
+   .subject( fwd.subject_len )
+   .reply  ( fwd.reply_len )
+   .fmt    ();
 
-    if ( fwd.msg_len != 0 ) {
-      if ( fwd.msg_len <= this->poll.recv_highwater )
-        e.data( fwd.msg_len );
-      else {
-        frag = fwd.msg;
-        frag_sz = fwd.msg_len;
-        e.data_frag();
-      }
-    }
-    MsgCat m;
-    m.reserve( e.sz );
-
-    m.open( this->user_db.bridge_id.nonce, ibx.len() )
-     .seqno ( n->inbox.next_send( U_INBOX_ANY ) );
-
-    m.subject( fwd.subject, fwd.subject_len );
-    if ( fwd.reply_len != 0 )
-      m.reply( (const char *) fwd.reply, fwd.reply_len );
-    if ( fwd.msg_enc != 0 )
-      m.fmt( fwd.msg_enc );
-    fl.set_opt( CABA_OPT_ANY );
-
-    uint32_t h = ibx.hash();
-
-    if ( fwd.msg_len != 0 ) {
-      if ( frag_sz == 0 )
-        m.data( fwd.msg, fwd.msg_len );
-      else
-        m.data_frag( frag_sz );
-    }
-    d_sess( "forward inbox %.*s\n", (int) fwd.subject_len, fwd.subject );
-
-    if ( frag_sz == 0 ) {
-      m.close( e.sz, h, fl );
-      m.sign( ibx.buf, ibx.len(), *this->user_db.session_key );
-    }
+  if ( fwd.msg_len != 0 ) {
+    if ( fwd.msg_len <= this->poll.recv_highwater )
+      e.data( fwd.msg_len );
     else {
-      frag = fwd.msg; frag_sz = fwd.msg_len;
-      m.close_frag( e.sz, fwd.msg_len, h, fl );
-      m.sign_frag( ibx.buf, ibx.len(), frag, frag_sz,
-                   *this->user_db.session_key );
+      frag = fwd.msg;
+      frag_sz = fwd.msg_len;
+      e.data_frag();
     }
-    b &= this->user_db.forward_to_primary_inbox( *n, ibx, h, m.msg, m.len(),
+  }
+  MsgCat m;
+  m.reserve( e.sz );
+
+  m.open( this->user_db.bridge_id.nonce, ibx.len() )
+   .seqno ( n->inbox.next_send( U_INBOX_ANY ) );
+
+  m.subject( fwd.subject, fwd.subject_len );
+  if ( fwd.reply_len != 0 )
+    m.reply( (const char *) fwd.reply, fwd.reply_len );
+  if ( fwd.msg_enc != 0 )
+    m.fmt( fwd.msg_enc );
+  fl.set_opt( CABA_OPT_ANY );
+
+  uint32_t h = ibx.hash();
+
+  if ( fwd.msg_len != 0 ) {
+    if ( frag_sz == 0 )
+      m.data( fwd.msg, fwd.msg_len );
+    else
+      m.data_frag( frag_sz );
+  }
+  d_sess( "forward inbox %.*s\n", (int) fwd.subject_len, fwd.subject );
+
+  if ( frag_sz == 0 ) {
+    m.close( e.sz, h, fl );
+    m.sign( ibx.buf, ibx.len(), *this->user_db.session_key );
+  }
+  else {
+    frag = fwd.msg; frag_sz = fwd.msg_len;
+    m.close_frag( e.sz, fwd.msg_len, h, fl );
+    m.sign_frag( ibx.buf, ibx.len(), frag, frag_sz,
+                 *this->user_db.session_key );
+  }
+  return this->user_db.forward_to_primary_inbox( *n, ibx, h, m.msg, m.len(),
                                                  &src_rte, frag, frag_sz,
                                                  fwd.src_route );
-    if ( ++cnt == any->set_count )
-      break;
-    set.next( uid, any->max_uid );
+}
+
+/* find a peer target for an _INBOX endpoint, and send it direct to the peer */
+bool
+SessionMgr::forward_inbox( TransportRoute &src_rte,  EvPublish &fwd,
+                           const char *host,  size_t host_len ) noexcept
+{
+  uint32_t uid = this->sub_db.host_match( host, host_len );
+  bool     b   = true;
+
+  if ( uid != 0 )
+    b &= this->forward_uid_inbox( src_rte, fwd, uid );
+  else {
+    AnyMatch * any = this->sub_db.any_match( fwd.subject, fwd.subject_len,
+                                             fwd.subj_hash );
+    if ( any->set_count == 0 ) {
+      printf( "no match for %.*s\n", (int) fwd.subject_len, fwd.subject );
+      return true;
+    }
+    BitSetT<uint64_t> set( any->bits() );
+    uint32_t uid, cnt = 0;
+
+    set.first( uid, any->max_uid );
+    for (;;) {
+      b &= this->forward_uid_inbox( src_rte, fwd, uid );
+      if ( ++cnt == any->set_count )
+        break;
+      set.next( uid, any->max_uid );
+    }
   }
   return src_rte.check_flow_control( b );
-}
-/* match _INBOX and _7500._INBOX, these are inbox endpoints */
-static bool
-is_ipc_inbox( const char *subject,  size_t subject_len )
-{
-  static const char    inbox[] = "_INBOX.";
-  static const size_t  inbox_len = sizeof( inbox ) - 1;
-
-  /* check for _INBOX.a or _XYZ._INBOX.a */
-  if ( subject_len > inbox_len + 1 && subject[ 0 ] == '_' ) {
-    subject++; subject_len--;
-    if ( subject[ 0 ] == 'I' ) { /* NBOX. */
-      if ( ::memcmp( &subject[ 1 ], &inbox[ 2 ], inbox_len - 2 ) == 0 )
-        return true;
-    }
-    /* _XYZ._INBOX. */
-    const char *p = (const char *)
-      ::memchr( subject, '.', subject_len - inbox_len );
-    if ( p != NULL )
-      return &subject[ subject_len ] > &p[ inbox_len + 1 ] &&
-             ::memcmp( &p[ 1 ], inbox, inbox_len ) == 0;
-  }
-  return false;
 }
 /* forward a message from local ipc to peers, add subject sequence number */
 bool
@@ -1643,8 +1649,10 @@ SessionMgr::forward_ipc( TransportRoute &src_rte,  EvPublish &pub ) noexcept
   Pub * p = this->sub_db.pub_tab.pub->find( pub.subj_hash, pub.subject,
                                             pub.subject_len, loc );
   if ( p == NULL ) {
-    if ( is_ipc_inbox( pub.subject, pub.subject_len ) )
-      return this->forward_inbox( src_rte, pub );
+    const char * host;
+    size_t       host_len;
+    if ( SubDB::match_inbox( pub.subject, pub.subject_len, host, host_len ) )
+      return this->forward_inbox( src_rte, pub, host, host_len );
     p = this->sub_db.pub_tab.upsert( pub.subj_hash, pub.subject,
                                      pub.subject_len, loc );
     if ( p == NULL ) {
@@ -1925,6 +1933,10 @@ void ConsoleRoute::write( void ) noexcept {}
 void ConsoleRoute::read( void ) noexcept {}
 void ConsoleRoute::process( void ) noexcept {}
 void ConsoleRoute::release( void ) noexcept {}
+void QueueRoute::write( void ) noexcept {}
+void QueueRoute::read( void ) noexcept {}
+void QueueRoute::process( void ) noexcept {}
+void QueueRoute::release( void ) noexcept {}
 
 #if 0
 void

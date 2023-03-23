@@ -349,8 +349,8 @@ struct UserBridge : public UserStateTest<UserBridge> {
   }
   /* when to timeout peer for lack of heartbeats */
   uint64_t hb_timeout( void ) const {
-    uint64_t ival_ns = sec_to_ns( this->hb_interval );
-    return this->hb_mono_time + ival_ns + ival_ns / 2;
+    uint64_t ival_ns = sec_to_ns( this->hb_interval + 1 );
+    return this->hb_mono_time + ival_ns * 2;
   }
   static bool is_heartbeat_older( UserBridge *r1,  UserBridge *r2 ) {
     return r1->hb_timeout() > r2->hb_timeout();

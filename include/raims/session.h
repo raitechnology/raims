@@ -205,6 +205,20 @@ struct ConsoleRoute : public kv::EvSocket {
   virtual void release( void ) noexcept;
 };
 
+struct QueueRoute : public kv::EvSocket {
+  SessionMgr & mgr;
+  UserDB     & user_db;
+  SubDB      & sub_db;
+  QueueRoute( kv::EvPoll &p,  SessionMgr &m ) noexcept;
+  /* EvSocket */
+  virtual bool on_msg( kv::EvPublish &pub ) noexcept;
+  uint32_t fwd_console( kv::EvPublish &pub,  bool is_caba ) noexcept;
+  virtual void write( void ) noexcept;
+  virtual void read( void ) noexcept;
+  virtual void process( void ) noexcept;
+  virtual void release( void ) noexcept;
+};
+
 struct Unrouteable {
   TelnetListen          * telnet;
   WebListen             * web;
@@ -252,6 +266,7 @@ struct RvSvcArray : public kv::ArrayCount< RvSvc, 2 > {};
 struct SessionMgr : public kv::EvSocket, public kv::BPData {
   IpcRoute              ipc_rt;         /* network -> rv sub, ds sub, etc */
   ConsoleRoute          console_rt;     /* rv pub, ds pub -> console sub */
+  QueueRoute            queue_rt;
   ConfigTree          & tree;           /* config db */
   ConfigTree::User    & user;           /* my user */
   ConfigTree::Service & svc;            /* this transport */
@@ -378,7 +393,10 @@ struct SessionMgr : public kv::EvSocket, public kv::BPData {
   bool publish_to( PubPtpData &ptp ) noexcept;
   void send_ack( const MsgFramePublish &pub,  UserBridge &,
                  const MsgHdrDecoder &dec,  const char *suf ) noexcept;
-  bool forward_inbox( TransportRoute &src_rte,  kv::EvPublish &pub ) noexcept;
+  bool forward_uid_inbox( TransportRoute &src_rte,  kv::EvPublish &fwd,
+                          uint32_t uid ) noexcept;
+  bool forward_inbox( TransportRoute &src_rte,  kv::EvPublish &pub,
+                      const char *host,  size_t host_len ) noexcept;
   bool forward_ipc( TransportRoute &src_rte, kv::EvPublish &mc ) noexcept;
   bool listen_start_noencrypt( ConfigTree::Transport &tport,
                                kv::EvTcpListen *l, const char *k ) noexcept;

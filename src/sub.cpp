@@ -18,7 +18,8 @@ SubDB::SubDB( EvPoll &p,  UserDB &udb,  SessionMgr &smg ) noexcept
        pat_tab( this->sub_list, p.sub_route.pre_seed ),
        bloom( (uint32_t) udb.rand.next(), "(node)", p.g_bloom_db ),
        console( (uint32_t) udb.rand.next(), "(console)", p.g_bloom_db ),
-       ipc( (uint32_t) udb.rand.next(), "(ipc)", p.g_bloom_db )
+       ipc( (uint32_t) udb.rand.next(), "(ipc)", p.g_bloom_db ),
+       queue( (uint32_t) udb.rand.next(), "(queue)", p.g_bloom_db )
 {
 }
 
@@ -1132,16 +1133,48 @@ AnyMatch::get_destination( UserDB &user_db ) noexcept
   return NULL;
 }
 
+static inline uint32_t
+hexval( int c )
+{
+  if ( c >= '0' && c <= '9' )
+    return (uint32_t) ( c - '0' );
+  if ( c >= 'A' && c <= 'F' )
+    return (uint32_t) ( c - 'A' + 10 );
+  if ( c >= 'a' && c <= 'f' )
+    return (uint32_t) ( c - 'a' + 10 );
+  return 16;
+}
+
+uint32_t
+SubDB::host_match( const char *host,  size_t host_len ) noexcept
+{
+  if ( host_len != 8 )
+    return 0;
+  uint32_t host_id = 0;
+  for ( int i = 8; i > 0; ) {
+    uint32_t v1 = hexval( host[ --i ] ),
+             v2 = hexval( host[ --i ] );
+    if ( v1 == 16 || v2 == 16 )
+      return 0;
+    host_id = ( host_id << 8 ) | ( v2 << 4 ) | v1;
+  }
+  size_t pos;
+  uint32_t uid;
+  if ( this->user_db.host_ht->find( host_id, pos, uid ) )
+    return uid;
+  return 0;
+}
+
 AnyMatch *
 SubDB::any_match( const char *sub,  uint16_t sublen,  uint32_t h ) noexcept
 {
-  uint32_t     max_uid = this->user_db.next_uid;
+  uint32_t     uid, max_uid = this->user_db.next_uid;
   AnyMatch   * any;
   any = this->any_tab.get_match( sub, sublen, h, this->pat_tab.seed, max_uid );
   if ( any->mono_time < this->sub_update_mono_time ) {
     BitSetT<uint64_t> set( any->bits() );
-    for ( uint32_t uid = 1; uid < max_uid; uid++ ) {
-      UserBridge * n = this->user_db.bridge_tab[ uid ];
+    for ( uid = 1; uid < max_uid; uid++ ) {
+      UserBridge * n = this->user_db.bridge_tab.ptr[ uid ];
       if ( n != NULL && n->is_set( AUTHENTICATED_STATE ) ) {
         if ( any->mono_time < n->sub_recv_mono_time ) {
           if ( any->match.match_sub( h, sub, sublen, n->bloom ) ) {
@@ -1162,4 +1195,91 @@ SubDB::any_match( const char *sub,  uint16_t sublen,  uint32_t h ) noexcept
     any->mono_time = this->sub_update_mono_time;
   }
   return any;
+}
+
+static bool
+match_ipc_subject( const char *str,  size_t str_len,
+                   const char *match,  size_t match_len,
+                   const char *&pre,  size_t &pre_len,
+                   const char *&name,  size_t &name_len,
+                   const char *&subj,  size_t &subj_len ) noexcept
+{
+  const char * p;
+  /* check for _QUEUE.name.xx or _XYZ._QUEUE.name.xx */
+  if ( str_len < match_len + 1 || str[ 0 ] != '_' )
+    return false;
+  if ( ::memcmp( str, match, match_len ) == 0 ) {
+    name     = &str[ match_len ];
+    name_len = str_len - match_len;
+    pre      = NULL;
+    pre_len  = 0;
+  }
+  else {
+    p = (const char *) ::memchr( str, '.', str_len - match_len );
+    if ( p == NULL || &p[ 1 ] >= &str[ str_len ] || p == str )
+      return false;
+    str_len -= ( &p[ 1 ] - str );
+    str      = &p[ 1 ];
+    if ( str_len < match_len + 1 || str[ 0 ] != '_' )
+      return false;
+    pre      = str;
+    pre_len  = p - str;
+    if ( ::memcmp( str, match, match_len ) != 0 )
+      return false;
+    name     = &str[ match_len ];
+    name_len = str_len - match_len;
+  }
+  p = (const char *) ::memchr( name, '.', name_len );
+  if ( p == NULL )
+    return false;
+  subj = &p[ 1 ];
+  if ( subj >= &name[ name_len ] )
+    return false;
+  subj_len = &name[ name_len ] - subj;
+  name_len = p - name;
+  if ( name_len == 0 )
+    return false;
+  return true;
+}
+
+bool
+SubDB::match_queue( const char *str,  size_t str_len,
+                    const char *&pre,  size_t &pre_len,
+                    const char *&name,  size_t &name_len,
+                    const char *&subj,  size_t &subj_len ) noexcept
+{
+  static const char   queue[] = "_QUEUE.";
+  static const size_t queue_len = sizeof( queue ) - 1;
+
+  return match_ipc_subject( str, str_len, queue, queue_len,
+                            pre, pre_len, name, name_len, subj, subj_len );
+}
+
+bool
+SubDB::match_inbox( const char *str,  size_t str_len,
+                    const char *&host,  size_t &host_len ) noexcept
+{
+  static const char   inbox[] = "_INBOX.";
+  static const size_t inbox_len = sizeof( inbox ) - 1;
+  const char * pre, * subj;
+  size_t pre_len, subj_len;
+
+  return match_ipc_subject( str, str_len, inbox, inbox_len,
+                            pre, pre_len, host, host_len, subj, subj_len );
+}
+
+void
+SubDB::queue_sub_update( NotifySub &sub,  uint32_t refcnt ) noexcept
+{
+  printf( "queue_sub_update( %.*s, fd=%u, start=%lx, cnt=%u )\n",
+          (int) sub.subject_len, sub.subject, sub.src->fd,
+          sub.src->start_ns, refcnt );
+}
+
+void
+SubDB::queue_psub_update( NotifyPattern &pat,  uint32_t refcnt ) noexcept
+{
+  printf( "queue_psub_update( %.*s, fd=%u, start=%lx, cnt=%u )\n",
+          (int) pat.pattern_len, pat.pattern, pat.src->fd,
+          pat.src->start_ns, refcnt );
 }

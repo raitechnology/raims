@@ -679,6 +679,25 @@ struct AnyMatchTab {
                        const uint32_t *pre_seed,  uint32_t max_uid ) noexcept;
 };
 
+struct QueueGrp {
+  uint32_t   workers,    /* number of queue workers */
+             hash;       /* hash of gropu name */
+  uint16_t   len;        /* len of group name */
+  char       value[ 2 ]; /* queue group name */
+};
+
+struct QueueSub {
+  uint64_t   start_ns;   /* session id of connection */
+  uint32_t   refcnt,     /* number of queue subscriptions active */
+             fd,         /* connection fd */
+             queue_id,   /* hash of the queue name */
+             hash;       /* hash of queue subscription */
+  uint16_t   len;        /* len of queue subscription */
+  char       value[ 2 ]; /* queue subscription */
+};
+
+typedef kv::RouteVec<QueueSub> QueueSubTab;
+typedef kv::RouteVec<QueueGrp> QueueGrpTab;
 }
 }
 
@@ -703,9 +722,12 @@ struct SubDB {
   PatTab       pat_tab;      /* pattern -> { state, seqno } */
   PubTab       pub_tab;      /* subject -> seqno */
   AnyMatchTab  any_tab;
+  QueueSubTab  queue_sub_tab;
+  QueueGrpTab  queue_grp_tab;
   kv::BloomRef bloom,
                console,
-               ipc;
+               ipc,
+               queue;
 
   SubDB( kv::EvPoll &p,  UserDB &udb,  SessionMgr &smg ) noexcept;
 
@@ -802,7 +824,18 @@ struct SubDB {
                           const MsgHdrDecoder &dec ) noexcept;
   SubOnMsg *match_any_sub( const char *sub,  uint16_t sublen ) noexcept;
 
+  uint32_t host_match( const char *host,  size_t host_len ) noexcept;
+
   AnyMatch *any_match( const char *sub,  uint16_t sublen, uint32_t h ) noexcept;
+
+  static bool match_inbox( const char *str,  size_t str_len,
+                           const char *&host,  size_t &host_len ) noexcept;
+  static bool match_queue( const char *str,  size_t str_len,
+                           const char *&pre,  size_t &pre_len,
+                           const char *&name,  size_t &name_len,
+                           const char *&subj,  size_t &subj_len ) noexcept;
+  void queue_sub_update( kv::NotifySub &sub,  uint32_t refcnt ) noexcept;
+  void queue_psub_update( kv::NotifyPattern &pat,  uint32_t refcnt ) noexcept;
 };
 
 }
