@@ -7,6 +7,7 @@
 #define INCLUDE_PEER_CONST
 #include <raims/user_db.h>
 #include <raims/ev_inbox_transport.h>
+#include <raims/ev_rv_transport.h>
 
 using namespace rai;
 using namespace ms;
@@ -1403,14 +1404,13 @@ UserDB::add_user( TransportRoute &rte,  const UserRoute *src,  uint32_t fd,
 {
   UserBridge * n;
   size_t       size, rtsz, pos;
-  uint32_t     uid,
-               seed,
-               nonce_int;
+  uint32_t     uid, coll_uid, seed, nonce_int;
 
   ::memcpy( &nonce_int, user_bridge_id.nonce.digest(), 4 );
-  if ( this->host_ht->find( nonce_int, pos ) ) {
-    fprintf( stderr, "peer %s host %x exists\n", peer.user.val, nonce_int );
-    exit( 1 );
+  if ( this->host_ht->find( nonce_int, pos, coll_uid ) ) {
+    fprintf( stderr, "peer %s host %x exists uid %u\n", peer.user.val,
+             nonce_int, coll_uid );
+    /*if ( coll_uid == 0 ) exit( 1 );*/
   }
   uid  = this->new_uid();
   this->host_ht->upsert_rsz( this->host_ht, nonce_int, uid );
@@ -1431,6 +1431,8 @@ UserDB::add_user( TransportRoute &rte,  const UserRoute *src,  uint32_t fd,
   this->add_user_route( *n, rte, fd, dec, src );
   this->bridge_tab[ uid ] = n;
   this->node_ht->upsert_rsz( this->node_ht, user_bridge_id.nonce, uid );
+  if ( this->ipc_transport != NULL && this->ipc_transport->rv_svc != NULL )
+    this->ipc_transport->rv_svc->update_host_inbox_patterns( uid );
 
   return n;
 }
@@ -1441,14 +1443,13 @@ UserDB::add_user2( const UserNonce &user_bridge_id,  PeerEntry &peer,
 {
   UserBridge * n;
   size_t       size, rtsz, pos;
-  uint32_t     uid,
-               seed,
-               nonce_int;
+  uint32_t     uid, coll_uid, seed, nonce_int;
 
   ::memcpy( &nonce_int, user_bridge_id.nonce.digest(), 4 );
-  if ( this->host_ht->find( nonce_int, pos ) ) {
-    fprintf( stderr, "peer %s host %x exists\n", peer.user.val, nonce_int );
-    exit( 1 );
+  if ( this->host_ht->find( nonce_int, pos, coll_uid ) ) {
+    fprintf( stderr, "peer %s host %x exists uid %u\n", peer.user.val,
+             nonce_int, coll_uid );
+    /*if ( coll_uid == 0 ) exit( 1 ); */
   }
   uid  = this->new_uid();
   this->host_ht->upsert_rsz( this->host_ht, nonce_int, uid );
@@ -1468,6 +1469,8 @@ UserDB::add_user2( const UserNonce &user_bridge_id,  PeerEntry &peer,
   n->u_buf[ 0 ] = (UserRoute *) (void *) &n[ 1 ];
   this->bridge_tab[ uid ] = n;
   this->node_ht->upsert_rsz( this->node_ht, user_bridge_id.nonce, uid );
+  if ( this->ipc_transport != NULL && this->ipc_transport->rv_svc != NULL )
+    this->ipc_transport->rv_svc->update_host_inbox_patterns( uid );
 
   return n;
 }

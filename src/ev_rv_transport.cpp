@@ -458,6 +458,7 @@ RvTransportService::start_host( RvHost &host,  const RvHostNet &hn,
       hr->is_active = true;
     }
     this->active_cnt++;
+    this->add_host_inbox_patterns( host.service_num );
   }
   return 0;
 }
@@ -479,6 +480,7 @@ RvTransportService::stop_host( RvHost &host ) noexcept
     hr->last_active_mono = cur_mono;
     hr->is_active = false;
   }
+  this->del_host_inbox_patterns( host.service_num );
   if ( --this->active_cnt == 0 && this->no_permanent ) {
     this->last_active_mono = cur_mono;
     this->rte.poll.timer.add_timer_seconds( *this, RV_TIMEOUT_SECS,
@@ -499,4 +501,73 @@ RvTransportService::outbound_data_loss( uint16_t svc,  uint32_t msg_loss,
   }
 }
 
+void
+RvTransportService::add_host_inbox_patterns( uint16_t svc ) noexcept
+{
+  char inbox_buf[ 64 ], host_ip[ 16 ];
+  UserDB & user_db = this->rte.user_db;
+  size_t d = uint16_digits( svc );
+  for ( uint32_t uid = 1; uid < user_db.next_uid; uid++ ) {
+    if ( user_db.bridge_tab.ptr[ uid ] == NULL )
+      continue;
+    uint32_t fake_ip = user_db.bridge_tab.ptr[ uid ]->bridge_nonce_int;
+    RvMcast::ip4_hex_string( fake_ip, host_ip );
+    CatPtr ibx( inbox_buf );
+    ibx.c( '_' ).u( svc, d ).s( "._INBOX." ).s( host_ip ).end();
+    /*uint32_t n =*/
+      this->rte.sub_route.add_pattern_route_str( inbox_buf, ibx.len(),
+                                                 this->rte.fd );
+    /*printf( "add_pattern %s: %u\n", inbox_buf, n );*/
+  }
+}
+
+void
+RvTransportService::update_host_inbox_patterns( uint32_t uid ) noexcept
+{
+  char inbox_buf[ 64 ], host_ip[ 16 ];
+  UserDB & user_db = this->rte.user_db;
+  if ( this->db.host_tab == NULL )
+    return;
+  if ( user_db.bridge_tab.ptr[ uid ] == NULL )
+    return;
+  uint32_t fake_ip = user_db.bridge_tab.ptr[ uid ]->bridge_nonce_int;
+  RvMcast::ip4_hex_string( fake_ip, host_ip );
+  for ( uint32_t k = 0; k < this->db.host_tab->count; k++ ) {
+    if ( this->db.host_tab->ptr[ k ] == NULL )
+      continue;
+
+    sassrv::RvHost & host = *this->db.host_tab->ptr[ k ];
+    if ( host.active_clients > 0 ) {
+      uint16_t svc = host.service_num;
+      size_t d = uint16_digits( svc );
+      CatPtr ibx( inbox_buf );
+      ibx.c( '_' ).u( svc, d ).s( "._INBOX." ).s( host_ip ).end();
+      /*uint32_t n =*/
+        this->rte.sub_route.add_pattern_route_str( inbox_buf, ibx.len(),
+                                                   this->rte.fd );
+      /*printf( "upd_pattern %s: %u\n", inbox_buf, n );*/
+    }
+  }
+}
+
+void
+RvTransportService::del_host_inbox_patterns( uint16_t svc ) noexcept
+{
+  char inbox_buf[ 64 ], host_ip[ 16 ];
+  UserDB & user_db = this->rte.user_db;
+  size_t d = uint16_digits( svc );
+  for ( uint32_t uid = 1; uid < user_db.next_uid; uid++ ) {
+    if ( user_db.bridge_tab.ptr[ uid ] == NULL )
+      continue;
+    uint32_t fake_ip = user_db.bridge_tab.ptr[ uid ]->bridge_nonce_int;
+    RvMcast::ip4_hex_string( fake_ip, host_ip );
+    CatPtr ibx( inbox_buf );
+    ibx.c( '_' ).u( svc, d ).s( "._INBOX." ).s( host_ip ).end();
+
+    /*uint32_t n =*/
+      this->rte.sub_route.del_pattern_route_str( inbox_buf, ibx.len(),
+                                                 this->rte.fd );
+    /*printf( "del_pattern %s: %u\n", inbox_buf, n );*/
+  }
+}
 
