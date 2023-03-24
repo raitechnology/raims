@@ -178,39 +178,7 @@ SubDB::fwd_sub( SubArgs &ctx ) noexcept
   EvPublish pub( s.msg, s.len(), NULL, 0, m.msg, m.len(),
                  rte->sub_route, this->my_src_fd, h,
                  CABA_TYPE_ID, 'p' );
-  if ( ! ctx.is_inbox() || ! ctx.is_start() )
-    this->user_db.mcast_send( pub, 0 );
-  else
-    this->user_db.bcast_send( pub );
-#if 0
-  if ( ! ctx.is_inbox() || ! ctx.is_start() ) {
-    ForwardCache & forward = this->user_db.forward_path[ 0 ];
-    uint32_t       tport_id;
-
-    this->user_db.peer_dist.update_forward_cache( forward, 0, 0 );
-    if ( forward.first( tport_id ) ) {
-      do {
-        rte = this->user_db.transport_tab.ptr[ tport_id ];
-        EvPublish pub( s.msg, s.len(), NULL, 0, m.msg, m.len(),
-                       rte->sub_route, this->my_src_fd, h,
-                       CABA_TYPE_ID, 'p' );
-        rte->sub_route.forward_except( pub, this->mgr.router_set );
-      } while ( forward.next( tport_id ) );
-    }
-  }
-  else {
-    size_t count = this->user_db.transport_tab.count;
-    for ( size_t i = 0; i < count; i++ ) {
-      TransportRoute * rte = this->user_db.transport_tab.ptr[ i ];
-      if ( ! rte->is_set( TPORT_IS_IPC ) ) {
-        EvPublish pub( s.msg, s.len(), NULL, 0, m.msg, m.len(),
-                       rte->sub_route, this->my_src_fd, h,
-                       CABA_TYPE_ID, 'p' );
-        rte->forward_to_connected_auth( pub );
-      }
-    }
-  }
-#endif
+  this->user_db.mcast_send( pub, 0 );
 }
 /* request subs from peer */
 bool
@@ -532,10 +500,7 @@ SubDB::recv_sub_start( const MsgFramePublish &pub,  UserBridge &n,
     }
     if ( debug_sub )
       n.printf( "start %.*s\n", (int) pub.subject_len, pub.subject );
-    if ( SubDB::match_ipc_any( sub, sublen ) == IPC_IS_INBOX )
-      this->user_db.bcast_pub( pub, n, dec );
-    else
-      this->user_db.mcast_pub( pub, n, dec );
+    this->user_db.mcast_pub( pub, n, dec );
   }
   return true;
 }
