@@ -71,7 +71,7 @@ void
 SubDB::update_bloom( SubArgs &ctx ) noexcept
 {
   this->update_seqno++;
-  if ( ctx.is_start ) {
+  if ( ctx.is_start() ) {
     if ( ctx.sub_count == 1 && ctx.sub_coll == 0 ) {
       ctx.resize_bloom  = this->bloom.add( ctx.hash );
       ctx.bloom_updated = true;
@@ -103,8 +103,8 @@ SubDB::console_sub_start( const char *sub,  uint16_t sublen,
                           const char *inbox,  uint16_t inbox_len,
                           SubOnMsg *cb ) noexcept
 {
-  SubArgs ctx( sub, sublen, inbox, inbox_len, true, cb, this->sub_seqno + 1,
-               CONSOLE_SUB, 0 );
+  SubArgs ctx( sub, sublen, inbox, inbox_len, cb, this->sub_seqno + 1,
+               CONSOLE_SUB | IS_SUB_START, 0 );
   return this->sub_start( ctx );
 }
 
@@ -112,23 +112,25 @@ SubDB::console_sub_start( const char *sub,  uint16_t sublen,
 uint64_t
 SubDB::console_sub_stop( const char *sub,  uint16_t sublen ) noexcept
 {
-  SubArgs ctx( sub, sublen, NULL, 0, false, NULL, 0, CONSOLE_SUB, 0 );
+  SubArgs ctx( sub, sublen, NULL, 0, NULL, 0, CONSOLE_SUB, 0 );
   return this->sub_stop( ctx );
 }
 /* my subscripion started on an ipc tport */
 uint64_t
-SubDB::ipc_sub_start( NotifySub &sub,  uint32_t tport_id ) noexcept
+SubDB::ipc_sub_start( NotifySub &sub,  uint32_t tport_id,
+                      bool is_inbox_sub ) noexcept
 {
-  SubArgs ctx( sub.subject, sub.subject_len, NULL, 0, true, NULL,
+  SubArgs ctx( sub.subject, sub.subject_len, NULL, 0, NULL,
                this->sub_seqno + 1,
-               IPC_SUB, tport_id, sub.subj_hash );
+               IPC_SUB | IS_SUB_START | ( is_inbox_sub ? INBOX_SUB : 0 ),
+               tport_id, sub.subj_hash );
   return this->sub_start( ctx );
 }
 /* my subscripion stopped on an ipc tport */
 uint64_t
 SubDB::ipc_sub_stop( NotifySub &sub,  uint32_t tport_id ) noexcept
 {
-  SubArgs ctx( sub.subject, sub.subject_len, NULL, 0, false, NULL, 0, IPC_SUB,
+  SubArgs ctx( sub.subject, sub.subject_len, NULL, 0, NULL, 0, IPC_SUB,
                tport_id, sub.subj_hash );
   return this->sub_stop( ctx );
 }
@@ -137,12 +139,12 @@ SubDB::ipc_sub_stop( NotifySub &sub,  uint32_t tport_id ) noexcept
 void
 SubDB::fwd_sub( SubArgs &ctx ) noexcept
 {
-  const char * sub_prefix = ( ctx.is_start ? S_JOIN : S_LEAVE );
-  size_t       sub_prelen = ( ctx.is_start ? S_JOIN_SZ : S_LEAVE_SZ );
+  const char * sub_prefix = ( ctx.is_start() ? S_JOIN : S_LEAVE );
+  size_t       sub_prelen = ( ctx.is_start() ? S_JOIN_SZ : S_LEAVE_SZ );
   SubjectVar s( sub_prefix, sub_prelen, ctx.sub, ctx.sublen );
-  TransportRoute * rte;
+  TransportRoute * rte = this->user_db.ipc_transport;
 
-  d_sub( "%ssub(%.*s)\n", ( ctx.is_start ? "" : "un" ),
+  d_sub( "%ssub(%.*s)\n", ( ctx.is_start() ? "" : "un" ),
          (int) ctx.sublen, ctx.sub );
   MsgEst e( s.len() );
   e.seqno     ()
@@ -161,32 +163,54 @@ SubDB::fwd_sub( SubArgs &ctx ) noexcept
   m.close( e.sz, h, CABA_RTR_ALERT );
   m.sign( s.msg, s.len(), *this->user_db.session_key );
 
-  this->user_db.msg_send_counter[ ctx.is_start ? U_SUB_JOIN : U_SUB_LEAVE ]++;
+  this->user_db.msg_send_counter[ ctx.is_start() ? U_SUB_JOIN : U_SUB_LEAVE ]++;
   if ( ( ctx.flags & CONSOLE_SUB ) != 0 ) {
-    rte = this->user_db.ipc_transport;
     if ( rte != NULL ) {
       NotifySub nsub( ctx.sub, ctx.sublen, ctx.inbox, ctx.inbox_len, ctx.hash,
                       this->my_src_fd, false, 'C' );
       nsub.bref = &this->console;
-      if ( ctx.is_start )
+      if ( ctx.is_start() )
         rte->sub_route.do_notify_sub( nsub );
       else
         rte->sub_route.do_notify_unsub( nsub );
     }
   }
-  ForwardCache & forward = this->user_db.forward_path[ 0 ];
-  uint32_t       tport_id;
+  EvPublish pub( s.msg, s.len(), NULL, 0, m.msg, m.len(),
+                 rte->sub_route, this->my_src_fd, h,
+                 CABA_TYPE_ID, 'p' );
+  if ( ! ctx.is_inbox() || ! ctx.is_start() )
+    this->user_db.mcast_send( pub, 0 );
+  else
+    this->user_db.bcast_send( pub );
+#if 0
+  if ( ! ctx.is_inbox() || ! ctx.is_start() ) {
+    ForwardCache & forward = this->user_db.forward_path[ 0 ];
+    uint32_t       tport_id;
 
-  this->user_db.peer_dist.update_forward_cache( forward, 0, 0 );
-  if ( forward.first( tport_id ) ) {
-    do {
-      rte = this->user_db.transport_tab.ptr[ tport_id ];
-      EvPublish pub( s.msg, s.len(), NULL, 0, m.msg, m.len(),
-                     rte->sub_route, this->my_src_fd, h,
-                     CABA_TYPE_ID, 'p' );
-      rte->sub_route.forward_except( pub, this->mgr.router_set );
-    } while ( forward.next( tport_id ) );
+    this->user_db.peer_dist.update_forward_cache( forward, 0, 0 );
+    if ( forward.first( tport_id ) ) {
+      do {
+        rte = this->user_db.transport_tab.ptr[ tport_id ];
+        EvPublish pub( s.msg, s.len(), NULL, 0, m.msg, m.len(),
+                       rte->sub_route, this->my_src_fd, h,
+                       CABA_TYPE_ID, 'p' );
+        rte->sub_route.forward_except( pub, this->mgr.router_set );
+      } while ( forward.next( tport_id ) );
+    }
   }
+  else {
+    size_t count = this->user_db.transport_tab.count;
+    for ( size_t i = 0; i < count; i++ ) {
+      TransportRoute * rte = this->user_db.transport_tab.ptr[ i ];
+      if ( ! rte->is_set( TPORT_IS_IPC ) ) {
+        EvPublish pub( s.msg, s.len(), NULL, 0, m.msg, m.len(),
+                       rte->sub_route, this->my_src_fd, h,
+                       CABA_TYPE_ID, 'p' );
+        rte->forward_to_connected_auth( pub );
+      }
+    }
+  }
+#endif
 }
 /* request subs from peer */
 bool
@@ -508,7 +532,10 @@ SubDB::recv_sub_start( const MsgFramePublish &pub,  UserBridge &n,
     }
     if ( debug_sub )
       n.printf( "start %.*s\n", (int) pub.subject_len, pub.subject );
-    this->user_db.mcast_pub( pub, n, dec );
+    if ( SubDB::match_ipc_any( sub, sublen ) == IPC_IS_INBOX )
+      this->user_db.bcast_pub( pub, n, dec );
+    else
+      this->user_db.mcast_pub( pub, n, dec );
   }
   return true;
 }
@@ -1197,9 +1224,12 @@ SubDB::any_match( const char *sub,  uint16_t sublen,  uint32_t h ) noexcept
   return any;
 }
 
-static bool
+static const char   ipc_queue[] = "_QUEUE.";
+static const char   ipc_inbox[] = "_INBOX.";
+static const size_t match_len = sizeof( ipc_inbox ) - 1;
+
+static int
 match_ipc_subject( const char *str,  size_t str_len,
-                   const char *match,  size_t match_len,
                    const char *&pre,  size_t &pre_len,
                    const char *&name,  size_t &name_len,
                    const char *&subj,  size_t &subj_len ) noexcept
@@ -1207,8 +1237,10 @@ match_ipc_subject( const char *str,  size_t str_len,
   const char * p;
   /* check for _QUEUE.name.xx or _XYZ._QUEUE.name.xx */
   if ( str_len < match_len + 1 || str[ 0 ] != '_' )
-    return false;
-  if ( ::memcmp( str, match, match_len ) == 0 ) {
+    return SubDB::IPC_NO_MATCH;
+  bool is_inbox = ::memcmp( str, ipc_inbox, match_len ) == 0,
+       is_queue = ! is_inbox && ::memcmp( str, ipc_queue, match_len ) == 0;
+  if ( is_inbox || is_queue ) {
     name     = &str[ match_len ];
     name_len = str_len - match_len;
     pre      = NULL;
@@ -1217,29 +1249,40 @@ match_ipc_subject( const char *str,  size_t str_len,
   else {
     p = (const char *) ::memchr( str, '.', str_len - match_len );
     if ( p == NULL || &p[ 1 ] >= &str[ str_len ] || p == str )
-      return false;
+      return SubDB::IPC_NO_MATCH;
     str_len -= ( &p[ 1 ] - str );
     str      = &p[ 1 ];
     if ( str_len < match_len + 1 || str[ 0 ] != '_' )
-      return false;
+      return SubDB::IPC_NO_MATCH;
     pre      = str;
     pre_len  = p - str;
-    if ( ::memcmp( str, match, match_len ) != 0 )
-      return false;
+    is_inbox = ::memcmp( str, ipc_inbox, match_len ) == 0;
+    is_queue = ! is_inbox && ::memcmp( str, ipc_queue, match_len ) == 0;
+    if ( ! is_inbox && ! is_queue )
+      return SubDB::IPC_NO_MATCH;
     name     = &str[ match_len ];
     name_len = str_len - match_len;
   }
   p = (const char *) ::memchr( name, '.', name_len );
   if ( p == NULL )
-    return false;
+    return SubDB::IPC_NO_MATCH;
   subj = &p[ 1 ];
   if ( subj >= &name[ name_len ] )
-    return false;
+    return SubDB::IPC_NO_MATCH;
   subj_len = &name[ name_len ] - subj;
   name_len = p - name;
   if ( name_len == 0 )
-    return false;
-  return true;
+    return SubDB::IPC_NO_MATCH;
+  return is_inbox ? SubDB::IPC_IS_INBOX : SubDB::IPC_IS_QUEUE;
+}
+
+int
+SubDB::match_ipc_any( const char *str,  size_t str_len ) noexcept
+{
+  const char * pre, * subj, * name;
+  size_t pre_len, subj_len, name_len;
+  return match_ipc_subject( str, str_len, pre, pre_len, name, name_len,
+                            subj, subj_len );
 }
 
 bool
@@ -1248,24 +1291,18 @@ SubDB::match_queue( const char *str,  size_t str_len,
                     const char *&name,  size_t &name_len,
                     const char *&subj,  size_t &subj_len ) noexcept
 {
-  static const char   queue[] = "_QUEUE.";
-  static const size_t queue_len = sizeof( queue ) - 1;
-
-  return match_ipc_subject( str, str_len, queue, queue_len,
-                            pre, pre_len, name, name_len, subj, subj_len );
+  return match_ipc_subject( str, str_len, pre, pre_len, name, name_len,
+                            subj, subj_len ) == IPC_IS_QUEUE;
 }
 
 bool
 SubDB::match_inbox( const char *str,  size_t str_len,
                     const char *&host,  size_t &host_len ) noexcept
 {
-  static const char   inbox[] = "_INBOX.";
-  static const size_t inbox_len = sizeof( inbox ) - 1;
   const char * pre, * subj;
   size_t pre_len, subj_len;
-
-  return match_ipc_subject( str, str_len, inbox, inbox_len,
-                            pre, pre_len, host, host_len, subj, subj_len );
+  return match_ipc_subject( str, str_len, pre, pre_len, host, host_len,
+                            subj, subj_len ) == IPC_IS_INBOX;
 }
 
 void

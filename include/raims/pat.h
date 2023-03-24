@@ -18,7 +18,6 @@ struct PatRoute;
 struct PatternArgs {
   const char           * pat;
   uint16_t               patlen;
-  bool                   is_start;
   uint32_t               hash,
                          flags,
                          tport_id,
@@ -35,15 +34,21 @@ struct PatternArgs {
                          sub_coll;
 
   PatternArgs( const char *p,  uint16_t len,  const kv::PatternCvt &c,
-               bool start, SubOnMsg *on_msg,  uint64_t n,  uint32_t fl,
-               uint32_t tp,  uint32_t h = 0 ) : 
-    pat( p ), patlen( len ), is_start( start ), hash( h ),
-    flags( fl ), tport_id( tp ), sub_count( 0 ), console_count( 0 ),
-    ipc_count( 0 ), seqno( n ), cvt( c ), rt( 0 ), cb( on_msg ),
+               SubOnMsg *on_msg,  uint64_t n,  uint32_t fl,  uint32_t tp,
+               uint32_t h = 0 ) : 
+    pat( p ), patlen( len ), hash( h ), flags( fl ), tport_id( tp ),
+    sub_count( 0 ), console_count( 0 ), ipc_count( 0 ), seqno( n ),
+    cvt( c ), rt( 0 ), cb( on_msg ),
     bloom_updated( false ), resize_bloom( false ), sub_coll( false ) {}
 
   bool cvt_wild( kv::PatternCvt &cvt,  const uint32_t *seed,
                  kv::PatternFmt fmt ) noexcept;
+  bool is_start( void ) const {
+    return ( this->flags & IS_SUB_START ) != 0;
+  }
+  bool is_inbox( void ) const {
+    return ( this->flags & INBOX_SUB ) != 0;
+  }
 };
 
 struct PatRoute : public kv::BloomDetail {

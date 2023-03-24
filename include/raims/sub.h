@@ -50,8 +50,10 @@ struct SubOnMsg {
 };
 
 enum SubFlags {
-  CONSOLE_SUB = 1,
-  IPC_SUB     = 2
+  CONSOLE_SUB  = 1,
+  IPC_SUB      = 2,
+  INBOX_SUB    = 4,
+  IS_SUB_START = 8
 };
 
 struct SubRefs {
@@ -124,7 +126,6 @@ struct SubArgs {
              * inbox;
   uint16_t     sublen,
                inbox_len;
-  bool         is_start;
   SubOnMsg   * cb;
   uint64_t     seqno;
   uint32_t     flags,
@@ -139,13 +140,21 @@ struct SubArgs {
   bool         bloom_updated,
                resize_bloom;
 
-  SubArgs( const char *s,  uint16_t len,  const char *i,  uint16_t ilen,  bool start,
-           SubOnMsg *on_msg,  uint64_t n,  uint32_t fl,  uint32_t tp,  uint32_t h = 0 ) :
-    sub( s ), inbox( i ), sublen( len ), inbox_len( ilen ), is_start( start ), cb( on_msg ),
-    seqno( n ), flags( fl ), hash( h ), tport_id( tp ), sub_count( 0 ), console_count( 0 ),
+  SubArgs( const char *s,  uint16_t len,  const char *i,  uint16_t ilen, 
+           SubOnMsg *on_msg,  uint64_t n,  uint32_t fl,
+           uint32_t tp,  uint32_t h = 0 ) :
+    sub( s ), inbox( i ), sublen( len ), inbox_len( ilen ),
+    cb( on_msg ), seqno( n ), flags( fl ),
+    hash( h ), tport_id( tp ), sub_count( 0 ), console_count( 0 ),
     ipc_count( 0 ), sub_coll( 0 ), console_coll( 0 ), ipc_coll( 0 ),
     bloom_updated( false ), resize_bloom( false ) {
     if ( h == 0 ) this->hash = kv_crc_c( s, len, 0 );
+  }
+  bool is_start( void ) const {
+    return ( this->flags & IS_SUB_START ) != 0;
+  }
+  bool is_inbox( void ) const {
+    return ( this->flags & INBOX_SUB ) != 0;
   }
 };
 
@@ -766,10 +775,12 @@ struct SubDB {
   void del_bloom( PatternArgs &ctx,  kv::BloomRef &b ) noexcept;
 
   /* start a new sub for ipc tport */
-  uint64_t ipc_sub_start( kv::NotifySub &sub, uint32_t tport_id ) noexcept;
+  uint64_t ipc_sub_start( kv::NotifySub &sub, uint32_t tport_id,
+                          bool is_inbox_sub ) noexcept;
   uint64_t ipc_sub_stop( kv::NotifySub &sub,  uint32_t tport_id ) noexcept;
   /* start a new pattern sub ipc tport */
-  uint64_t ipc_psub_start( kv::NotifyPattern &pat, uint32_t tport_id ) noexcept;
+  uint64_t ipc_psub_start( kv::NotifyPattern &pat, uint32_t tport_id,
+                           bool is_inbox_sub ) noexcept;
   uint64_t ipc_psub_stop( kv::NotifyPattern &pat, uint32_t tport_id ) noexcept;
   SeqnoStatus match_seqno( const MsgFramePublish &pub,SeqnoArgs &ctx ) noexcept;
   bool match_subscription( const kv::EvPublish &pub,  SeqnoArgs &ctx ) noexcept;
@@ -828,6 +839,10 @@ struct SubDB {
 
   AnyMatch *any_match( const char *sub,  uint16_t sublen, uint32_t h ) noexcept;
 
+  enum {
+    IPC_NO_MATCH = 0, IPC_IS_INBOX = 1, IPC_IS_QUEUE = 2
+  };
+  static int match_ipc_any( const char *str,  size_t str_len ) noexcept;
   static bool match_inbox( const char *str,  size_t str_len,
                            const char *&host,  size_t &host_len ) noexcept;
   static bool match_queue( const char *str,  size_t str_len,

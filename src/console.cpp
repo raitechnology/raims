@@ -3408,7 +3408,7 @@ Console::on_subs( ConsoleSubs &subs ) noexcept
       if ( no_user )
         tab[ i++ ].set_null();
       const char *str = &subs.strings.ptr[ reply.sub_off ];
-      if ( ! reply.is_pattern )
+      if ( reply.is_pattern )
         tab[ i++ ].set( "p" );
       else
         tab[ i++ ].set_null();

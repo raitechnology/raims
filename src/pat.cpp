@@ -94,7 +94,7 @@ void
 SubDB::update_bloom( PatternArgs &ctx ) noexcept
 {
   this->update_seqno++;
-  if ( ctx.is_start ) {
+  if ( ctx.is_start() ) {
     if ( ctx.sub_count == 1 ) {
       ctx.resize_bloom  = this->add_bloom( ctx, this->bloom );
       ctx.bloom_updated = true;
@@ -147,8 +147,8 @@ SubDB::console_psub_start( const char *pat,  uint16_t patlen,  PatternFmt fmt,
                            SubOnMsg *cb ) noexcept
 {
   PatternCvt cvt;
-  PatternArgs ctx( pat, patlen, cvt, true, cb, this->sub_seqno + 1,
-                   CONSOLE_SUB, 0 );
+  PatternArgs ctx( pat, patlen, cvt, cb, this->sub_seqno + 1,
+                   CONSOLE_SUB | IS_SUB_START, 0 );
   if ( ! ctx.cvt_wild( cvt, this->pat_tab.seed, fmt ) )
     return 0;
   return this->psub_start( ctx );
@@ -159,25 +159,26 @@ SubDB::console_psub_stop( const char *pat,  uint16_t patlen,
                           PatternFmt fmt ) noexcept
 {
   PatternCvt cvt;
-  PatternArgs ctx( pat, patlen, cvt, false, NULL, 0, CONSOLE_SUB, 0 );
+  PatternArgs ctx( pat, patlen, cvt, NULL, 0, CONSOLE_SUB, 0 );
   if ( ! ctx.cvt_wild( cvt, this->pat_tab.seed, fmt ) )
     return 0;
   return this->psub_stop( ctx );
 }
 
 uint64_t
-SubDB::ipc_psub_start( NotifyPattern &pat,  uint32_t tport_id ) noexcept
+SubDB::ipc_psub_start( NotifyPattern &pat,  uint32_t tport_id,
+                       bool is_inbox_sub ) noexcept
 {
-  PatternArgs ctx( pat.pattern, pat.pattern_len, pat.cvt, true, NULL,
-                   this->sub_seqno + 1, IPC_SUB, tport_id,
-                   pat.prefix_hash );
+  PatternArgs ctx( pat.pattern, pat.pattern_len, pat.cvt, NULL, this->sub_seqno + 1,
+                IPC_SUB | IS_SUB_START | ( is_inbox_sub ? INBOX_SUB : 0 ),
+                tport_id, pat.prefix_hash );
   return this->psub_start( ctx );
 }
 
 uint64_t
 SubDB::ipc_psub_stop( NotifyPattern &pat,  uint32_t tport_id ) noexcept
 {
-  PatternArgs ctx( pat.pattern, pat.pattern_len, pat.cvt, false, NULL, 0,
+  PatternArgs ctx( pat.pattern, pat.pattern_len, pat.cvt, NULL, 0,
                    IPC_SUB, tport_id, pat.prefix_hash );
   return this->psub_stop( ctx );
 }
@@ -185,12 +186,12 @@ SubDB::ipc_psub_stop( NotifyPattern &pat,  uint32_t tport_id ) noexcept
 void
 SubDB::fwd_psub( PatternArgs &ctx ) noexcept
 {
-  const char * sub_prefix = ( ctx.is_start ? P_PSUB : P_PSTOP );
-  size_t       sub_prelen = ( ctx.is_start ? P_PSUB_SZ : P_PSTOP_SZ );
+  const char * sub_prefix = ( ctx.is_start() ? P_PSUB : P_PSTOP );
+  size_t       sub_prelen = ( ctx.is_start() ? P_PSUB_SZ : P_PSTOP_SZ );
   SubjectVar s( sub_prefix, sub_prelen, ctx.pat, ctx.cvt.prefixlen );
-  TransportRoute * rte;
+  TransportRoute * rte = this->user_db.ipc_transport;
 
-  d_sub( "p%ssub(%.*s) prelen=%u\n", ( ctx.is_start ? "" : "un" ),
+  d_sub( "p%ssub(%.*s) prelen=%u\n", ( ctx.is_start() ? "" : "un" ),
           (int) ctx.patlen, ctx.pat, (uint32_t) ctx.cvt.prefixlen );
   MsgEst e( s.len() );
   e.seqno     ()
@@ -212,32 +213,52 @@ SubDB::fwd_psub( PatternArgs &ctx ) noexcept
   m.close( e.sz, h, CABA_RTR_ALERT );
   m.sign( s.msg, s.len(), *this->user_db.session_key );
 
-  this->user_db.msg_send_counter[ ctx.is_start ? U_PSUB_START : U_PSUB_STOP ]++;
+  this->user_db.msg_send_counter[ ctx.is_start() ? U_PSUB_START : U_PSUB_STOP ]++;
   if ( ( ctx.flags & CONSOLE_SUB ) != 0 ) {
-    rte = this->user_db.ipc_transport;
     if ( rte != NULL ) {
       NotifyPattern npat( ctx.cvt, ctx.pat, ctx.patlen, ctx.hash,
                           this->my_src_fd, false, 'C' );
       npat.bref = &this->console;
-      if ( ctx.is_start )
+      if ( ctx.is_start() )
         rte->sub_route.do_notify_psub( npat );
       else
         rte->sub_route.do_notify_punsub( npat );
     }
   }
-  ForwardCache & forward = this->user_db.forward_path[ 0 ];
-  uint32_t       tport_id;
+  EvPublish pub( s.msg, s.len(), NULL, 0, m.msg, m.len(),
+                 rte->sub_route, this->my_src_fd, h, CABA_TYPE_ID, 'p' );
+  if ( ! ctx.is_inbox() || ! ctx.is_start() )
+    this->user_db.mcast_send( pub, 0 );
+  else
+    this->user_db.bcast_send( pub );
+#if 0
+  if ( ! ctx.is_inbox() || ! ctx.is_start() ) {
+    ForwardCache & forward = this->user_db.forward_path[ 0 ];
+    uint32_t       tport_id;
 
-  this->user_db.peer_dist.update_forward_cache( forward, 0, 0 );
-  if ( forward.first( tport_id ) ) {
-    do {
-      rte = this->user_db.transport_tab.ptr[ tport_id ];
-      EvPublish pub( s.msg, s.len(), NULL, 0, m.msg, m.len(),
-                     rte->sub_route, this->my_src_fd, h, CABA_TYPE_ID, 'p' );
+    this->user_db.peer_dist.update_forward_cache( forward, 0, 0 );
+    if ( forward.first( tport_id ) ) {
+      do {
+        rte = this->user_db.transport_tab.ptr[ tport_id ];
+        EvPublish pub( s.msg, s.len(), NULL, 0, m.msg, m.len(),
+                       rte->sub_route, this->my_src_fd, h, CABA_TYPE_ID, 'p' );
 
-      rte->sub_route.forward_except( pub, this->mgr.router_set );
-    } while ( forward.next( tport_id ) );
+        rte->sub_route.forward_except( pub, this->mgr.router_set );
+      } while ( forward.next( tport_id ) );
+    }
   }
+  else {
+    size_t count = this->user_db.transport_tab.count;
+    for ( size_t i = 0; i < count; i++ ) {
+      rte = this->user_db.transport_tab.ptr[ i ];
+      if ( ! rte->is_set( TPORT_IS_IPC ) ) {
+        EvPublish pub( s.msg, s.len(), NULL, 0, m.msg, m.len(),
+                       rte->sub_route, this->my_src_fd, h, CABA_TYPE_ID, 'p' );
+        rte->forward_to_connected_auth( pub );
+      }
+    }
+  }
+#endif
 }
 
 SubStatus
@@ -492,7 +513,7 @@ SubDB::recv_psub_start( const MsgFramePublish &pub,  UserBridge &n,
 
     PatternArgs ctx( (const char *) dec.mref[ FID_PATTERN ].fptr,
                      (uint16_t) dec.mref[ FID_PATTERN ].fsize, cvt,
-                     true, NULL, 0, 0, 0, hash );
+                     NULL, 0, IS_SUB_START, 0, hash );
     if ( ! ctx.cvt_wild( cvt, this->pat_tab.seed, (PatternFmt) fmt ) )
       return true;
     if ( d.from_pattern( ctx.cvt ) ) {
@@ -518,7 +539,10 @@ SubDB::recv_psub_start( const MsgFramePublish &pub,  UserBridge &n,
     }
     if ( debug_sub )
       n.printf( "psub_start %.*s\n", (int) pub.subject_len, pub.subject );
-    this->user_db.mcast_pub( pub, n, dec );
+    if ( SubDB::match_ipc_any( ctx.pat, ctx.patlen ) == IPC_IS_INBOX )
+      this->user_db.bcast_pub( pub, n, dec );
+    else
+      this->user_db.mcast_pub( pub, n, dec );
   }
   return true;
 }
@@ -537,7 +561,7 @@ SubDB::recv_psub_stop( const MsgFramePublish &pub,  UserBridge &n,
 
     PatternArgs ctx( (const char *) dec.mref[ FID_PATTERN ].fptr,
                      (uint16_t) dec.mref[ FID_PATTERN ].fsize, cvt,
-                     false, NULL, 0, 0, 0, hash );
+                     NULL, 0, 0, 0, hash );
     if ( ! ctx.cvt_wild( cvt, this->pat_tab.seed, (PatternFmt) fmt ) )
       return true;
     if ( d.from_pattern( cvt ) ) {

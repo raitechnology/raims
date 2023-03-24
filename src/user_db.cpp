@@ -371,6 +371,46 @@ UserDB::forward_to( UserBridge &n,  const char *sub,  size_t sublen,
 }
 
 bool
+UserDB::bcast_send( EvPublish &pub ) noexcept
+{
+  /* bcast to all connected */
+  bool b = true;
+  size_t count = this->transport_tab.count;
+  if ( count > 1 ) {
+    kv::BitSpace unique;
+    for ( size_t i = 0; i < count; i++ ) {
+      TransportRoute * rte = this->transport_tab.ptr[ i ];
+      if ( rte->connect_count > 0 && ! rte->is_set( TPORT_IS_IPC ) ) {
+        if ( ! unique.superset( rte->uid_connected ) ) {
+          b &= rte->forward_to_connected_auth( pub );
+          unique.add( rte->uid_connected );
+        }
+      }
+    }
+  }
+  return b;
+}
+
+bool
+UserDB::mcast_send( EvPublish &pub,  uint8_t path_select ) noexcept
+{
+  /* mcast using forwarding rules */
+  ForwardCache   & forward = this->forward_path[ path_select ];
+  TransportRoute * rte;
+  uint32_t         tport_id;
+  bool             b = true;
+
+  this->peer_dist.update_forward_cache( forward, 0, path_select );
+  if ( forward.first( tport_id ) ) {
+    do {
+      rte = this->transport_tab.ptr[ tport_id ];
+      b  &= rte->sub_route.forward_except( pub, this->router_set );
+    } while ( forward.next( tport_id ) );
+  }
+  return b;
+}
+
+bool
 UserDB::bcast_pub( const MsgFramePublish &pub,  const UserBridge &n,
                    const MsgHdrDecoder &dec ) noexcept
 {

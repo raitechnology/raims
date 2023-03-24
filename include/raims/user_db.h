@@ -917,6 +917,8 @@ struct UserDB {
     return NULL;
   }
 
+  bool bcast_send( kv::EvPublish &pub ) noexcept;
+  bool mcast_send( kv::EvPublish &pub,  uint8_t path_select ) noexcept;
   bool bcast_pub( const MsgFramePublish &pub, const UserBridge &n,
                   const MsgHdrDecoder &dec ) noexcept;
   bool mcast_pub( const MsgFramePublish &pub, UserBridge &n,

@@ -989,7 +989,8 @@ enum {
   IS_NATS    = 128,
   IS_REDIS   = 256,
   IS_KV      = 512,
-  IS_QUEUE   = 1024
+  IS_INBOX   = 1024,
+  IS_QUEUE   = 2048
 };
 }
 /* src_type :
@@ -1005,25 +1006,22 @@ static inline int src_type_flag( char src_type ) {
     default : return 0;
   }
 }
-/* match _QUEUE.name.xx and _7500._QUEUE.name.xx, these are inbox endpoints */
-static bool
-is_ipc_queue( const char *subject,  size_t subject_len )
-{
-  const char *pre, * name, * subj;
-  size_t pre_len, name_len, subj_len;
-  return SubDB::match_queue( subject, subject_len, pre, pre_len, name, name_len,
-                             subj, subj_len );
-}
 static inline int src_type_flag( NotifySub &sub ) {
   int fl = src_type_flag( sub.src_type );
-  if ( is_ipc_queue( sub.subject, sub.subject_len ) )
-    fl |= IS_QUEUE;
+  switch ( SubDB::match_ipc_any( sub.subject, sub.subject_len ) ) {
+    default: break;
+    case SubDB::IPC_IS_INBOX: fl |= IS_INBOX; break;
+    case SubDB::IPC_IS_QUEUE: fl |= IS_QUEUE; break;
+  }
   return fl;
 }
 static inline int src_type_flag( NotifyPattern &pat ) {
   int fl = src_type_flag( pat.src_type );
-  if ( is_ipc_queue( pat.pattern, pat.pattern_len ) )
-    fl |= IS_QUEUE;
+  switch ( SubDB::match_ipc_any( pat.pattern, pat.pattern_len ) ) {
+    default: break;
+    case SubDB::IPC_IS_INBOX: fl |= IS_INBOX; break;
+    case SubDB::IPC_IS_QUEUE: fl |= IS_QUEUE; break;
+  }
   return fl;
 }
 
@@ -1032,7 +1030,8 @@ IpcRteList::on_sub( NotifySub &sub ) noexcept
 {
   int flags = IS_SUB | src_type_flag( sub );
   if ( ( flags & ( IS_CONSOLE | IS_SESSION ) ) == 0 ) {
-    this->rte.mgr.sub_db.ipc_sub_start( sub, this->rte.tport_id );
+    this->rte.mgr.sub_db.ipc_sub_start( sub, this->rte.tport_id,
+                                        ( flags & IS_INBOX ) != 0 );
     if ( ( flags & IS_QUEUE ) != 0 )
       this->rte.mgr.sub_db.queue_sub_update( sub, 1 );
   }
@@ -1081,7 +1080,8 @@ IpcRteList::on_psub( NotifyPattern &pat ) noexcept
 {
   int flags = IS_PSUB | src_type_flag( pat );
   if ( ( flags & ( IS_CONSOLE | IS_SESSION ) ) == 0 ) {
-    this->rte.mgr.sub_db.ipc_psub_start( pat, this->rte.tport_id );
+    this->rte.mgr.sub_db.ipc_psub_start( pat, this->rte.tport_id,
+                                        ( flags & IS_INBOX ) != 0 );
     if ( ( flags & IS_QUEUE ) != 0 )
       this->rte.mgr.sub_db.queue_psub_update( pat, 1 );
   }
