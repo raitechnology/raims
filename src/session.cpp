@@ -536,6 +536,7 @@ SessionMgr::timer_expire( uint64_t tid,  uint64_t ) noexcept
     }
   }
   this->sub_db.any_tab.gc( cur_time );
+  this->sub_db.gc_memo( cur_mono );
 
   if ( cur_mono < this->stats.mono_time )
     return true;
@@ -771,17 +772,23 @@ IpcRoute::on_msg( EvPublish &pub ) noexcept
     this->mgr.ignore_msg( fpub );
     return true;
   }
-  void * data     = NULL,
-       * reply    = NULL;
-  size_t datalen  = 0,
-         replylen = 0;
+  void       * data     = NULL;
+  const char * reply    = NULL;
+  size_t       datalen  = 0,
+               replylen = 0;
   if ( dec.test( FID_DATA ) ) {
     data    = dec.mref[ FID_DATA ].fptr;
     datalen = dec.mref[ FID_DATA ].fsize;
   }
   if ( dec.test( FID_REPLY ) ) {
-    reply    = dec.mref[ FID_REPLY ].fptr;
+    const char * host;
+    size_t       host_len;
+    reply    = (const char *) dec.mref[ FID_REPLY ].fptr;
     replylen = dec.mref[ FID_REPLY ].fsize;
+
+    if ( SubDB::match_inbox( reply, replylen, host, host_len ) )
+      this->sub_db.reply_memo( reply, replylen, host, host_len, n,
+                               this->poll.mono_ns );
   }
   SeqnoArgs seq( this->mgr.timer_time );
   uint32_t  fmt = 0;
@@ -811,8 +818,7 @@ IpcRoute::on_msg( EvPublish &pub ) noexcept
           "(len=%u, from %s, fd %d, msg_enc %x)\n",
           (int) fpub.subject_len, fpub.subject,
           seqno_frame( dec.seqno ), seqno_base( dec.seqno ),
-          seqno_status_string( status ),
-          (int) replylen, (char *) reply,
+          seqno_status_string( status ), (int) replylen, reply,
           fpub.msg_len, fpub.rte.name, fpub.src_route, fmt );
 
   if ( status > SEQNO_UID_NEXT ) {
@@ -1609,7 +1615,6 @@ SessionMgr::forward_uid_inbox( TransportRoute &src_rte,  EvPublish &fwd,
                                                  &src_rte, frag, frag_sz,
                                                  fwd.src_route );
 }
-
 /* find a peer target for an _INBOX endpoint, and send it direct to the peer */
 bool
 SessionMgr::forward_inbox( TransportRoute &src_rte,  EvPublish &fwd,
@@ -1618,6 +1623,12 @@ SessionMgr::forward_inbox( TransportRoute &src_rte,  EvPublish &fwd,
   uint32_t uid = this->sub_db.host_match( host, host_len );
   bool     b   = true;
 
+  if ( uid == 0 ) {
+    uid = this->sub_db.lookup_memo( fwd.subj_hash, fwd.subject,
+                                    fwd.subject_len );
+    d_sess( "reply.lookup( %.*s ) = %u\n",
+            (int) fwd.subject_len, fwd.subject, uid );
+  }
   if ( uid != 0 )
     b &= this->forward_uid_inbox( src_rte, fwd, uid );
   else {

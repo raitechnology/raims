@@ -292,6 +292,7 @@ struct UserBridge : public UserStateTest<UserBridge> {
   RttHistory         rtt;
   ThrottleState      adj_req_throttle,
                      mesh_req_throttle;
+  uint16_t           reply_prefix;
 
   void * operator new( size_t, void *ptr ) { return ptr; }
 
@@ -311,6 +312,7 @@ struct UserBridge : public UserStateTest<UserBridge> {
               (char *) (void *) &this->inbox -
               (char *) (void *) &this->user_route );
     this->hb_interval = HB_DEFAULT_INTERVAL;
+    this->reply_prefix = kv::MAX_RTE;
   }
   static const uint32_t USER_ROUTE_SHIFT = 4,
                         USER_ROUTE_BASE  = ( 1U << USER_ROUTE_SHIFT );

@@ -166,12 +166,10 @@ SubDB::console_psub_stop( const char *pat,  uint16_t patlen,
 }
 
 uint64_t
-SubDB::ipc_psub_start( NotifyPattern &pat,  uint32_t tport_id,
-                       bool is_inbox_sub ) noexcept
+SubDB::ipc_psub_start( NotifyPattern &pat,  uint32_t tport_id ) noexcept
 {
   PatternArgs ctx( pat.pattern, pat.pattern_len, pat.cvt, NULL, this->sub_seqno + 1,
-                IPC_SUB | IS_SUB_START | ( is_inbox_sub ? INBOX_SUB : 0 ),
-                tport_id, pat.prefix_hash );
+                IPC_SUB | IS_SUB_START, tport_id, pat.prefix_hash );
   return this->psub_start( ctx );
 }
 

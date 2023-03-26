@@ -458,7 +458,7 @@ RvTransportService::start_host( RvHost &host,  const RvHostNet &hn,
       hr->is_active = true;
     }
     this->active_cnt++;
-    this->add_host_inbox_patterns( host.service_num );
+    /*this->add_host_inbox_patterns( host.service_num );*/
   }
   return 0;
 }
@@ -480,7 +480,7 @@ RvTransportService::stop_host( RvHost &host ) noexcept
     hr->last_active_mono = cur_mono;
     hr->is_active = false;
   }
-  this->del_host_inbox_patterns( host.service_num );
+  /*this->del_host_inbox_patterns( host.service_num );*/
   if ( --this->active_cnt == 0 && this->no_permanent ) {
     this->last_active_mono = cur_mono;
     this->rte.poll.timer.add_timer_seconds( *this, RV_TIMEOUT_SECS,

@@ -46,9 +46,6 @@ struct PatternArgs {
   bool is_start( void ) const {
     return ( this->flags & IS_SUB_START ) != 0;
   }
-  bool is_inbox( void ) const {
-    return ( this->flags & INBOX_SUB ) != 0;
-  }
 };
 
 struct PatRoute : public kv::BloomDetail {

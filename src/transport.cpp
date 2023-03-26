@@ -1010,6 +1010,7 @@ static inline int src_type_flag( NotifySub &sub ) {
   int fl = src_type_flag( sub.src_type );
   switch ( SubDB::match_ipc_any( sub.subject, sub.subject_len ) ) {
     default: break;
+    case SubDB::IPC_IS_INBOX_PREFIX:
     case SubDB::IPC_IS_INBOX: fl |= IS_INBOX; break;
     case SubDB::IPC_IS_QUEUE: fl |= IS_QUEUE; break;
   }
@@ -1019,6 +1020,7 @@ static inline int src_type_flag( NotifyPattern &pat ) {
   int fl = src_type_flag( pat.src_type );
   switch ( SubDB::match_ipc_any( pat.pattern, pat.pattern_len ) ) {
     default: break;
+    case SubDB::IPC_IS_INBOX_PREFIX:
     case SubDB::IPC_IS_INBOX: fl |= IS_INBOX; break;
     case SubDB::IPC_IS_QUEUE: fl |= IS_QUEUE; break;
   }
@@ -1030,8 +1032,7 @@ IpcRteList::on_sub( NotifySub &sub ) noexcept
 {
   int flags = IS_SUB | src_type_flag( sub );
   if ( ( flags & ( IS_CONSOLE | IS_SESSION ) ) == 0 ) {
-    this->rte.mgr.sub_db.ipc_sub_start( sub, this->rte.tport_id,
-                                        ( flags & IS_INBOX ) != 0 );
+    this->rte.mgr.sub_db.ipc_sub_start( sub, this->rte.tport_id );
     if ( ( flags & IS_QUEUE ) != 0 )
       this->rte.mgr.sub_db.queue_sub_update( sub, 1 );
   }
@@ -1080,8 +1081,7 @@ IpcRteList::on_psub( NotifyPattern &pat ) noexcept
 {
   int flags = IS_PSUB | src_type_flag( pat );
   if ( ( flags & ( IS_CONSOLE | IS_SESSION ) ) == 0 ) {
-    this->rte.mgr.sub_db.ipc_psub_start( pat, this->rte.tport_id,
-                                        ( flags & IS_INBOX ) != 0 );
+    this->rte.mgr.sub_db.ipc_psub_start( pat, this->rte.tport_id );
     if ( ( flags & IS_QUEUE ) != 0 )
       this->rte.mgr.sub_db.queue_psub_update( pat, 1 );
   }

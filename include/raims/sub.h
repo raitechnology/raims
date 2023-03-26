@@ -2,8 +2,11 @@
 #define __rai_raims__sub_h__
 
 #include <raikv/route_ht.h>
+#include <raikv/route_db.h>
 #include <raikv/key_hash.h>
 #include <raikv/ev_publish.h>
+#include <raikv/uint_ht.h>
+#include <raikv/array_space.h>
 #include <raims/sub_list.h>
 
 namespace rai {
@@ -52,8 +55,7 @@ struct SubOnMsg {
 enum SubFlags {
   CONSOLE_SUB  = 1,
   IPC_SUB      = 2,
-  INBOX_SUB    = 4,
-  IS_SUB_START = 8
+  IS_SUB_START = 4
 };
 
 struct SubRefs {
@@ -152,9 +154,6 @@ struct SubArgs {
   }
   bool is_start( void ) const {
     return ( this->flags & IS_SUB_START ) != 0;
-  }
-  bool is_inbox( void ) const {
-    return ( this->flags & INBOX_SUB ) != 0;
   }
 };
 
@@ -654,8 +653,7 @@ struct AnyMatch {
   uint32_t       bits_off;
   kv::BloomMatch match;
 
-  void init_any( const char *s,  uint16_t sublen,  const uint32_t *pre_seed,
-                 uint32_t uid_cnt ) noexcept;
+  void init_any( const char *s,  uint16_t sublen,  uint32_t uid_cnt ) noexcept;
   UserBridge * get_destination( UserDB &user_db ) noexcept;
   static size_t any_size( uint16_t sublen,  uint32_t uid_cnt ) noexcept;
   const char *sub( void ) {
@@ -685,7 +683,7 @@ struct AnyMatchTab {
     }
   }
   AnyMatch *get_match( const char *sub,  uint16_t sublen,  uint32_t h,
-                       const uint32_t *pre_seed,  uint32_t max_uid ) noexcept;
+                       uint32_t max_uid ) noexcept;
 };
 
 struct QueueGrp {
@@ -707,6 +705,32 @@ struct QueueSub {
 
 typedef kv::RouteVec<QueueSub> QueueSubTab;
 typedef kv::RouteVec<QueueGrp> QueueGrpTab;
+
+struct ReplyMissing {
+  uint64_t mono_ns;
+  uint32_t hash, uid, ref;
+  uint16_t len;
+  char     value[ 2 ];
+};
+
+struct ReplyCache {
+  kv::UIntHashTab          * exists_ht;
+  kv::RouteVec<ReplyMissing> missing;
+  uint64_t gc_time;
+
+  ReplyCache() : gc_time( 0 ) {
+    this->exists_ht = kv::UIntHashTab::resize( NULL );
+  }
+  void add_exists( uint32_t h,  uint32_t uid ) noexcept;
+  uint32_t add_missing( uint32_t h,  uint32_t uid,  const char *sub,
+                        size_t sublen,  uint64_t cur_mono ) noexcept;
+  bool gc( uint64_t cur_mono ) {
+    this->gc_time = cur_mono;
+    if ( this->exists_ht->elem_count > 0 )
+      this->exists_ht->clear_all();
+    return ! this->missing.is_empty();
+  }
+};
 }
 }
 
@@ -731,6 +755,7 @@ struct SubDB {
   PatTab       pat_tab;      /* pattern -> { state, seqno } */
   PubTab       pub_tab;      /* subject -> seqno */
   AnyMatchTab  any_tab;
+  ReplyCache   reply;
   QueueSubTab  queue_sub_tab;
   QueueGrpTab  queue_grp_tab;
   kv::BloomRef bloom,
@@ -775,12 +800,10 @@ struct SubDB {
   void del_bloom( PatternArgs &ctx,  kv::BloomRef &b ) noexcept;
 
   /* start a new sub for ipc tport */
-  uint64_t ipc_sub_start( kv::NotifySub &sub, uint32_t tport_id,
-                          bool is_inbox_sub ) noexcept;
+  uint64_t ipc_sub_start( kv::NotifySub &sub, uint32_t tport_id ) noexcept;
   uint64_t ipc_sub_stop( kv::NotifySub &sub,  uint32_t tport_id ) noexcept;
   /* start a new pattern sub ipc tport */
-  uint64_t ipc_psub_start( kv::NotifyPattern &pat, uint32_t tport_id,
-                           bool is_inbox_sub ) noexcept;
+  uint64_t ipc_psub_start( kv::NotifyPattern &pat, uint32_t tport_id ) noexcept;
   uint64_t ipc_psub_stop( kv::NotifyPattern &pat, uint32_t tport_id ) noexcept;
   SeqnoStatus match_seqno( const MsgFramePublish &pub,SeqnoArgs &ctx ) noexcept;
   bool match_subscription( const kv::EvPublish &pub,  SeqnoArgs &ctx ) noexcept;
@@ -839,9 +862,23 @@ struct SubDB {
 
   AnyMatch *any_match( const char *sub,  uint16_t sublen, uint32_t h ) noexcept;
 
+  void reply_memo( const char *sub,  size_t sublen,  const char *host,
+                   size_t hostlen,  UserBridge &n, uint64_t cur_mono ) noexcept;
+  uint32_t lookup_memo( uint32_t h,  const char *sub,  size_t sublen ) noexcept;
+  void clear_memo( uint64_t cur_mono ) noexcept;
+  void gc_memo( uint64_t cur_mono ) {
+    if ( this->reply.gc( cur_mono ) )
+      this->clear_memo( cur_mono );
+  }
+
   enum {
-    IPC_NO_MATCH = 0, IPC_IS_INBOX = 1, IPC_IS_QUEUE = 2
+  IPC_NO_MATCH = 0, IPC_IS_QUEUE = 1, IPC_IS_INBOX = 2, IPC_IS_INBOX_PREFIX = 3
   };
+  static int match_ipc_subject( const char *str,  size_t str_len,
+                                const char *&pre,  size_t &pre_len,
+                                const char *&name,  size_t &name_len,
+                                const char *&subj,  size_t &subj_len,
+              const int match_flag /* IPC_IS_QUEUE | IPC_IS_INBOX */ ) noexcept;
   static int match_ipc_any( const char *str,  size_t str_len ) noexcept;
   static bool match_inbox( const char *str,  size_t str_len,
                            const char *&host,  size_t &host_len ) noexcept;

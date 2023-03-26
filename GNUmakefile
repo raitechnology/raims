@@ -482,6 +482,18 @@ $(bind)/aestest: $(aestest_objs) $(aestest_libs) $(lnk_dep)
 all_exes    += $(bind)/aestest
 all_depends += $(aestest_deps)
 
+matchtest_files := matchtest
+matchtest_cfile := test/matchtest.cpp
+matchtest_objs  := $(addprefix $(objd)/, $(addsuffix .o, $(matchtest_files)))
+matchtest_deps  := $(addprefix $(dependd)/, $(addsuffix .d, $(matchtest_files)))
+matchtest_libs  :=
+matchtest_lnk   := $(lnk_lib)
+
+$(bind)/matchtest: $(matchtest_objs) $(matchtest_libs) $(lnk_dep)
+
+all_exes    += $(bind)/matchtest
+all_depends += $(matchtest_deps)
+
 ms_test_adj_files := test_adj
 ms_test_adj_objs  := $(addprefix $(objd)/, $(addsuffix .o, $(ms_test_adj_files)))
 ms_test_adj_deps  := $(addprefix $(dependd)/, $(addsuffix .d, $(ms_test_adj_files)))

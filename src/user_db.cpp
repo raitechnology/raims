@@ -7,7 +7,7 @@
 #define INCLUDE_PEER_CONST
 #include <raims/user_db.h>
 #include <raims/ev_inbox_transport.h>
-#include <raims/ev_rv_transport.h>
+/*#include <raims/ev_rv_transport.h>*/
 
 using namespace rai;
 using namespace ms;
@@ -1431,8 +1431,8 @@ UserDB::add_user( TransportRoute &rte,  const UserRoute *src,  uint32_t fd,
   this->add_user_route( *n, rte, fd, dec, src );
   this->bridge_tab[ uid ] = n;
   this->node_ht->upsert_rsz( this->node_ht, user_bridge_id.nonce, uid );
-  if ( this->ipc_transport != NULL && this->ipc_transport->rv_svc != NULL )
-    this->ipc_transport->rv_svc->update_host_inbox_patterns( uid );
+  /*if ( this->ipc_transport != NULL && this->ipc_transport->rv_svc != NULL )
+    this->ipc_transport->rv_svc->update_host_inbox_patterns( uid );*/
 
   return n;
 }
@@ -1469,8 +1469,8 @@ UserDB::add_user2( const UserNonce &user_bridge_id,  PeerEntry &peer,
   n->u_buf[ 0 ] = (UserRoute *) (void *) &n[ 1 ];
   this->bridge_tab[ uid ] = n;
   this->node_ht->upsert_rsz( this->node_ht, user_bridge_id.nonce, uid );
-  if ( this->ipc_transport != NULL && this->ipc_transport->rv_svc != NULL )
-    this->ipc_transport->rv_svc->update_host_inbox_patterns( uid );
+  /*if ( this->ipc_transport != NULL && this->ipc_transport->rv_svc != NULL )
+    this->ipc_transport->rv_svc->update_host_inbox_patterns( uid );*/
 
   return n;
 }

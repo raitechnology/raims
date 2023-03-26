@@ -117,12 +117,10 @@ SubDB::console_sub_stop( const char *sub,  uint16_t sublen ) noexcept
 }
 /* my subscripion started on an ipc tport */
 uint64_t
-SubDB::ipc_sub_start( NotifySub &sub,  uint32_t tport_id,
-                      bool is_inbox_sub ) noexcept
+SubDB::ipc_sub_start( NotifySub &sub,  uint32_t tport_id ) noexcept
 {
   SubArgs ctx( sub.subject, sub.subject_len, NULL, 0, NULL,
-               this->sub_seqno + 1,
-               IPC_SUB | IS_SUB_START | ( is_inbox_sub ? INBOX_SUB : 0 ),
+               this->sub_seqno + 1, IPC_SUB | IS_SUB_START,
                tport_id, sub.subj_hash );
   return this->sub_start( ctx );
 }
@@ -1019,8 +1017,7 @@ SubOnMsg::on_data( const SubMsgData & ) noexcept
 }
 
 void
-AnyMatch::init_any( const char *s,  uint16_t sublen,  const uint32_t *pre_seed,  
-                    uint32_t uid_cnt ) noexcept
+AnyMatch::init_any( const char *s,  uint16_t sublen, uint32_t uid_cnt ) noexcept
 {
   size_t off = sizeof( AnyMatch ) - sizeof( kv::BloomMatch ) +
                kv::BloomMatch::match_size( sublen );
@@ -1037,7 +1034,7 @@ AnyMatch::init_any( const char *s,  uint16_t sublen,  const uint32_t *pre_seed,
   ptr            += ( ( (size_t) sublen + 8 ) & ~(size_t) 7 );
   this->bits_off  = (uint32_t) ( ptr - (char *) (void *) this );
   ::memset( ptr, 0, uid_cnt / 8 );
-  this->match.init_match( sublen, pre_seed );
+  this->match.init_match( sublen );
 }
 
 size_t
@@ -1060,7 +1057,7 @@ AnyMatchTab::reset( void ) noexcept
 
 AnyMatch *
 AnyMatchTab::get_match( const char *sub,  uint16_t sublen,  uint32_t h,
-                        const uint32_t *pre_seed,  uint32_t max_uid ) noexcept
+                        uint32_t max_uid ) noexcept
 {
   AnyMatch * any;
   size_t     pos;
@@ -1077,7 +1074,7 @@ AnyMatchTab::get_match( const char *sub,  uint16_t sublen,  uint32_t h,
   uint64_t * p  = this->tab.resize( this->max_off + sz, false );
 
   any = (AnyMatch *) (void *) &p[ this->max_off ];
-  any->init_any( sub, sublen, pre_seed, max_uid );
+  any->init_any( sub, sublen, max_uid );
   this->ht->set_rsz( this->ht, h, pos, (uint32_t) this->max_off );
   this->max_off += sz;
   return any;
@@ -1160,16 +1157,18 @@ SubDB::host_match( const char *host,  size_t host_len ) noexcept
 AnyMatch *
 SubDB::any_match( const char *sub,  uint16_t sublen,  uint32_t h ) noexcept
 {
-  uint32_t     uid, max_uid = this->user_db.next_uid;
-  AnyMatch   * any;
-  any = this->any_tab.get_match( sub, sublen, h, this->pat_tab.seed, max_uid );
+  uint32_t   uid, max_uid = this->user_db.next_uid;
+  AnyMatch * any;
+
+  any = this->any_tab.get_match( sub, sublen, h, max_uid );
   if ( any->mono_time < this->sub_update_mono_time ) {
+    BloomMatchArgs args( h, sub, sublen, this->pat_tab.seed );
     BitSetT<uint64_t> set( any->bits() );
     for ( uid = 1; uid < max_uid; uid++ ) {
       UserBridge * n = this->user_db.bridge_tab.ptr[ uid ];
       if ( n != NULL && n->is_set( AUTHENTICATED_STATE ) ) {
         if ( any->mono_time < n->sub_recv_mono_time ) {
-          if ( any->match.match_sub( h, sub, sublen, n->bloom ) ) {
+          if ( any->match.match_sub( args, n->bloom ) ) {
             if ( ! set.test_set( uid ) )
               any->set_count++;
           }
@@ -1189,56 +1188,192 @@ SubDB::any_match( const char *sub,  uint16_t sublen,  uint32_t h ) noexcept
   return any;
 }
 
-static const char   ipc_queue[] = "_QUEUE.";
-static const char   ipc_inbox[] = "_INBOX.";
+void
+ReplyCache::add_exists( uint32_t h,  uint32_t uid ) noexcept
+{
+  size_t   pos;
+  uint32_t val;
+  if ( this->exists_ht->find( h, pos, val ) ) {
+    this->exists_ht->remove( pos ); /* collision */
+    return;
+  }
+  this->exists_ht->set( h, pos, uid );
+  this->exists_ht->check_resize( this->exists_ht );
+}
+
+uint32_t
+ReplyCache::add_missing( uint32_t h,  uint32_t uid,  const char *sub,
+                         size_t sublen,  uint64_t cur_mono ) noexcept
+{
+  RouteLoc loc;
+  ReplyMissing * m = this->missing.upsert( h, sub, sublen, loc );
+  if ( loc.is_new ) {
+    m->mono_ns = cur_mono;
+    m->ref     = 0;
+    m->uid     = uid;
+  }
+  return m->ref++;
+}
+
+void
+SubDB::reply_memo( const char *sub,  size_t sublen,  const char *host,
+                   size_t hostlen,  UserBridge &n,  uint64_t cur_mono ) noexcept
+{
+  uint32_t       host_uid = this->host_match( host, hostlen );
+  BloomMatchArgs args( 0, sub, sublen, this->pat_tab.seed );
+  BloomMatch     match;
+
+  match.init_match( sublen );
+  if ( match.test_prefix( args, n.bloom, n.reply_prefix ) != MAX_RTE ) {
+    if ( host_uid == 0 )
+      this->reply.add_exists( args.hash(), n.uid );
+  }
+  else {
+    n.reply_prefix = match.sub_prefix( args, n.bloom );
+    if ( n.reply_prefix != MAX_RTE ) {
+      if ( host_uid == 0 ) {
+        this->reply.add_exists( args.hash(), n.uid );
+      }
+    }
+    else {
+      if ( this->reply.add_missing( args.hash(), n.uid, sub, sublen,
+                                    cur_mono ) == 0 ) {
+        TransportRoute * rte;
+        if ( (rte = this->user_db.ipc_transport) != NULL )
+          rte->sub_route.add_sub_route( args.hash(), rte->fd );
+      }
+    }
+  }
+}
+
+uint32_t
+SubDB::lookup_memo( uint32_t h,  const char *sub,  size_t sublen ) noexcept
+{
+  size_t   pos;
+  uint32_t uid;
+  if ( this->reply.exists_ht->find( h, pos, uid ) ) {
+    this->reply.exists_ht->remove( pos );
+    return uid;
+  }
+  RouteLoc loc;
+  ReplyMissing * m;
+  if ( (m = this->reply.missing.find( h, sub, sublen, loc )) != NULL ) {
+    uid = m->uid;
+    if ( --m->ref == 0 ) {
+      TransportRoute * rte;
+      if ( (rte = this->user_db.ipc_transport) != NULL )
+        rte->sub_route.del_sub_route( h, rte->fd );
+      this->reply.missing.remove( loc );
+    }
+    return uid;
+  }
+  return 0;
+}
+
+void
+SubDB::clear_memo( uint64_t cur_mono ) noexcept
+{
+  RouteLoc loc;
+  TransportRoute * rte = this->user_db.ipc_transport;
+  uint64_t delta = sec_to_ns( 2 );
+  bool has_data = false;
+  if ( rte != NULL ) {
+    for ( ReplyMissing * m = this->reply.missing.first( loc ); m != NULL; ) {
+      if ( m->mono_ns + delta < cur_mono ) {
+        m->ref = 0;
+        rte->sub_route.del_sub_route( m->hash, rte->fd );
+        m = this->reply.missing.remove_and_next( m, loc );
+      }
+      else {
+        m = this->reply.missing.next( loc );
+        has_data = true;
+      }
+    }
+  }
+  if ( ! has_data )
+    this->reply.missing.release();
+}
+
+static const char   ipc_queue[] = "_QUEUE";
+static const char   ipc_inbox[] = "_INBOX";
 static const size_t match_len = sizeof( ipc_inbox ) - 1;
 
-static int
-match_ipc_subject( const char *str,  size_t str_len,
-                   const char *&pre,  size_t &pre_len,
-                   const char *&name,  size_t &name_len,
-                   const char *&subj,  size_t &subj_len ) noexcept
+int
+SubDB::match_ipc_subject( const char *str,  size_t str_len,
+                          const char *&pre,  size_t &pre_len,
+                          const char *&name,  size_t &name_len,
+                          const char *&subj,  size_t &subj_len,
+                          const int match_flag ) noexcept
 {
   const char * p;
   /* check for _QUEUE.name.xx or _XYZ._QUEUE.name.xx */
+  pre_len = name_len = subj_len = 0;
   if ( str_len < match_len + 1 || str[ 0 ] != '_' )
-    return SubDB::IPC_NO_MATCH;
-  bool is_inbox = ::memcmp( str, ipc_inbox, match_len ) == 0,
-       is_queue = ! is_inbox && ::memcmp( str, ipc_queue, match_len ) == 0;
+    return IPC_NO_MATCH;
+  bool is_inbox = ( match_flag & IPC_IS_INBOX ) != 0 &&
+                  ::memcmp( str, ipc_inbox, match_len ) == 0,
+       is_queue = ( match_flag & IPC_IS_QUEUE ) != 0 &&
+                  ! is_inbox && ::memcmp( str, ipc_queue, match_len ) == 0;
   if ( is_inbox || is_queue ) {
-    name     = &str[ match_len ];
-    name_len = str_len - match_len;
-    pre      = NULL;
-    pre_len  = 0;
+    if ( str[ match_len ] == '.' ) {
+      name     = &str[ match_len + 1 ];
+      name_len = str_len - ( match_len + 1 );
+    }
+    else {
+      name     = &str[ match_len ];
+      name_len = str_len - match_len;
+      if ( is_inbox ) /* _INBOX without '.' */
+        return IPC_IS_INBOX_PREFIX;
+      return IPC_NO_MATCH;
+    }
   }
   else {
+    /* skip over service prefix _7500. */
     p = (const char *) ::memchr( str, '.', str_len - match_len );
+    /* if no '.' or terminates with '.' or starts with '.' */
     if ( p == NULL || &p[ 1 ] >= &str[ str_len ] || p == str )
-      return SubDB::IPC_NO_MATCH;
+      return IPC_NO_MATCH;
+    pre      = str;
+    pre_len  = p - str;
     str_len -= ( &p[ 1 ] - str );
     str      = &p[ 1 ];
     if ( str_len < match_len + 1 || str[ 0 ] != '_' )
-      return SubDB::IPC_NO_MATCH;
-    pre      = str;
-    pre_len  = p - str;
-    is_inbox = ::memcmp( str, ipc_inbox, match_len ) == 0;
-    is_queue = ! is_inbox && ::memcmp( str, ipc_queue, match_len ) == 0;
-    if ( ! is_inbox && ! is_queue )
-      return SubDB::IPC_NO_MATCH;
-    name     = &str[ match_len ];
-    name_len = str_len - match_len;
+      return IPC_NO_MATCH;
+    is_inbox = ( match_flag & IPC_IS_INBOX ) != 0 &&
+               ::memcmp( str, ipc_inbox, match_len ) == 0;
+    is_queue = ( match_flag & IPC_IS_QUEUE ) != 0 &&
+               ! is_inbox && ::memcmp( str, ipc_queue, match_len ) == 0;
+    if ( ! is_inbox && ! is_queue ) /* not _INBOX or _QUEUE */
+      return IPC_NO_MATCH;
+    if ( str[ match_len ] == '.' ) { /* matched _INBOX. */
+      name     = &str[ match_len + 1 ];
+      name_len = str_len - ( match_len + 1 );
+    }
+    else { /* match _INBOX with non-'.' suffix */
+      name     = &str[ match_len ];
+      name_len = str_len - match_len;
+      subj_len = 0;
+      if ( is_inbox )
+        return IPC_IS_INBOX_PREFIX;
+      return IPC_NO_MATCH;
+    }
   }
   p = (const char *) ::memchr( name, '.', name_len );
-  if ( p == NULL )
-    return SubDB::IPC_NO_MATCH;
+  if ( p == NULL ) {
+    if ( is_inbox ) { /* _INBOX_xxx without host */
+      subj_len = 0;
+      return IPC_IS_INBOX_PREFIX;
+    }
+    return IPC_NO_MATCH;
+  }
   subj = &p[ 1 ];
-  if ( subj >= &name[ name_len ] )
-    return SubDB::IPC_NO_MATCH;
+  if ( subj >= &name[ name_len ] ) /* _INBOX. without anything */
+    return IPC_NO_MATCH;
   subj_len = &name[ name_len ] - subj;
   name_len = p - name;
-  if ( name_len == 0 )
-    return SubDB::IPC_NO_MATCH;
-  return is_inbox ? SubDB::IPC_IS_INBOX : SubDB::IPC_IS_QUEUE;
+  if ( name_len == 0 ) /* _INBOX..subj ?? */
+    return IPC_NO_MATCH;
+  return is_inbox ? IPC_IS_INBOX : IPC_IS_QUEUE;
 }
 
 int
@@ -1247,7 +1382,7 @@ SubDB::match_ipc_any( const char *str,  size_t str_len ) noexcept
   const char * pre, * subj, * name;
   size_t pre_len, subj_len, name_len;
   return match_ipc_subject( str, str_len, pre, pre_len, name, name_len,
-                            subj, subj_len );
+                            subj, subj_len, IPC_IS_QUEUE | IPC_IS_INBOX );
 }
 
 bool
@@ -1257,7 +1392,7 @@ SubDB::match_queue( const char *str,  size_t str_len,
                     const char *&subj,  size_t &subj_len ) noexcept
 {
   return match_ipc_subject( str, str_len, pre, pre_len, name, name_len,
-                            subj, subj_len ) == IPC_IS_QUEUE;
+                            subj, subj_len, IPC_IS_QUEUE ) == IPC_IS_QUEUE;
 }
 
 bool
@@ -1267,7 +1402,7 @@ SubDB::match_inbox( const char *str,  size_t str_len,
   const char * pre, * subj;
   size_t pre_len, subj_len;
   return match_ipc_subject( str, str_len, pre, pre_len, host, host_len,
-                            subj, subj_len ) == IPC_IS_INBOX;
+                            subj, subj_len, IPC_IS_INBOX ) >= IPC_IS_INBOX;
 }
 
 void
