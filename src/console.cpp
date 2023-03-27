@@ -5871,8 +5871,22 @@ Console::show_blooms( ConsoleOutput *p,  uint8_t path_select,
       else if ( p->r == (uint32_t) rte->fd )
         sys = "route";
 
-      if ( brief && sys != NULL )
-        continue;
+      uint32_t j = 0;
+      BloomRef * ref;
+
+      if ( brief ) {
+        if ( sys != NULL )
+          continue;
+
+        for ( ; j < p->nblooms; j++ ) {
+          ref = p->bloom[ j ];
+          if ( ref == &this->user_db.peer_bloom )
+            continue;
+          break;
+        }
+        if ( j == p->nblooms )
+          continue;
+      }
 
       TabPrint * tab = out.add_row_p();
       uint32_t   i = 0;
@@ -5900,16 +5914,15 @@ Console::show_blooms( ConsoleOutput *p,  uint8_t path_select,
       }
       tab[ i++ ].set( rte->transport.tport, rte->tport_id, PRINT_ID );
       uint64_t pref_mask = 0, detail_mask = 0;
-      uint32_t j, subs = 0, total = 0, last_ref = 0;
+      uint32_t subs = 0, total = 0, last_ref = 0;
       size_t name_len;
-      BloomRef * ref;
       bool overflow = false;
 
       if ( p->r == (uint32_t) rte->fd ) {
         ::strcpy( buf, "(all-peers)" );
       }
       else {
-        for ( j = 0; j < p->nblooms; j++ ) {
+        for ( ; j < p->nblooms; j++ ) {
           ref = p->bloom[ j ];
           if ( brief && ref == &this->user_db.peer_bloom )
             continue;
