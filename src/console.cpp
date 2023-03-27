@@ -2142,7 +2142,11 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
     case CMD_SHOW_FDS:       this->show_fds( p );       break;
     case CMD_SHOW_BUFFERS:   this->show_buffers( p );   break;
     case CMD_SHOW_WINDOWS:   this->show_windows( p );   break;
-    case CMD_SHOW_BLOOMS:    this->show_blooms( p, int_arg( arg, len ) ); break;
+    case CMD_SHOW_BLOOMS: {
+      bool brief = argc > 1 && args[ argc - 1 ][ 0 ] == 'b';
+      this->show_blooms( p, int_arg( arg, len ), brief );
+      break;
+    }
     case CMD_SHOW_MATCH:     this->show_match( p, arg, len ); break;
 
     case CMD_SHOW_RUN:        case CMD_SHOW_START:
@@ -5839,7 +5843,8 @@ Console::show_windows( ConsoleOutput *p ) noexcept
 }
 
 void
-Console::show_blooms( ConsoleOutput *p,  uint8_t path_select ) noexcept
+Console::show_blooms( ConsoleOutput *p,  uint8_t path_select,
+                      bool brief ) noexcept
 {
   static const uint32_t ncols = 8;
   TabOut out( this->table, this->tmp, ncols );
@@ -5854,26 +5859,40 @@ Console::show_blooms( ConsoleOutput *p,  uint8_t path_select ) noexcept
           p != NULL; p = p->next ) {
       size_t sz = 0;
       char   buf[ 80 ];
+      const char * sys = NULL;
+      if ( p->r == (uint32_t) this->mgr.fd )
+        sys = "session";
+      else if ( p->r == (uint32_t) this->mgr.console_rt.fd )
+        sys = "console";
+      else if ( p->r == (uint32_t) this->mgr.ipc_rt.fd )
+        sys = "ipc";
+      else if ( p->r == (uint32_t) this->mgr.queue_rt.fd )
+        sys = "queue";
+      else if ( p->r == (uint32_t) rte->fd )
+        sys = "route";
+
+      if ( brief && sys != NULL )
+        continue;
+
       TabPrint * tab = out.add_row_p();
       uint32_t   i = 0;
       tab[ i++ ].set_int( p->r );
-      if ( p->r == (uint32_t) this->mgr.fd )
-        tab[ i++ ].set( "session" );
-      else if ( p->r == (uint32_t) this->mgr.console_rt.fd )
-        tab[ i++ ].set( "console" );
-      else if ( p->r == (uint32_t) this->mgr.ipc_rt.fd )
-        tab[ i++ ].set( "ipc" );
-      else if ( p->r == (uint32_t) rte->fd )
-        tab[ i++ ].set( "route" );
+      if ( sys != NULL )
+        tab[ i++ ].set( sys );
       else {
+        UserRoute * u_ptr = NULL;
         if ( ! this->user_db.route_list.is_empty( p->r ) ) {
-          UserRoute * u_ptr = this->user_db.route_list[ p->r ].hd;
-          if ( ! u_ptr->rte.is_mcast() ) {
+          u_ptr = this->user_db.route_list[ p->r ].hd;
+          do {
+            if ( u_ptr->hops() == 0 )
+              break;
+          } while ( (u_ptr = u_ptr->next) != NULL );
+        }
+        if ( u_ptr != NULL ) {
+          if ( ! u_ptr->rte.is_mcast() )
             tab[ i++ ].set( u_ptr->n.peer.user, u_ptr->n.uid );
-          }
-          else {
+          else
             tab[ i++ ].set( "(mcast)" );
-          }
         }
         else {
           tab[ i++ ].set_null();
@@ -5892,6 +5911,8 @@ Console::show_blooms( ConsoleOutput *p,  uint8_t path_select ) noexcept
       else {
         for ( j = 0; j < p->nblooms; j++ ) {
           ref = p->bloom[ j ];
+          if ( brief && ref == &this->user_db.peer_bloom )
+            continue;
           pref_mask |= ref->pref_mask;
           detail_mask |= ref->detail_mask;
           total += (uint32_t) ref->bits->count;

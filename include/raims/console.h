@@ -750,7 +750,7 @@ struct Console : public md::MDOutput, public SubOnMsg,
   void show_fds( ConsoleOutput *p ) noexcept;
   void show_buffers( ConsoleOutput *p ) noexcept;
   void show_windows( ConsoleOutput *p ) noexcept;
-  void show_blooms( ConsoleOutput *p,  uint8_t path_select ) noexcept;
+  void show_blooms( ConsoleOutput *p,  uint8_t path_select,  bool brief ) noexcept;
   void show_match( ConsoleOutput *p,  const char *sub,  size_t len ) noexcept;
   void show_config( ConsoleOutput *p, bool is_start,  int which,  const char *name,
                     size_t len ) noexcept;

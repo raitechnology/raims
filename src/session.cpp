@@ -194,37 +194,53 @@ SessionMgr::init_sock( void ) noexcept
 {
   this->events.startup( this->user_db.start_time );
 
-  int efd = this->poll.get_null_fd(),
-      ifd = this->poll.get_null_fd(),
-      pfd = this->poll.get_null_fd();
+  int xfd[ 4 ] = { this->poll.get_null_fd(),
+                   this->poll.get_null_fd(),
+                   this->poll.get_null_fd(),
+                   this->poll.get_null_fd() };
   #define swap( x, y ) { int z = x; x = y; y = z; }
-  if ( pfd < efd ) /* make efd, ifd the lower fd number, dispatched first */
-    swap( pfd, efd );
-  if ( pfd < ifd )
-    swap( pfd, ifd );
+  for ( int i = 0; i < 3; i++ ) {
+    for ( int j = i+1; j < 4; j++ ) {
+      if ( xfd[ i ] > xfd[ j ] )
+        swap( xfd[ i ], xfd[ j ] );
+    }
+  }
   #undef swap
-  this->router_set.add( efd );
+  /* make ipc, queue, console the lower fd number, dispatched first */
+  int ifd = xfd[ 0 ],
+      qfd = xfd[ 1 ],
+      cfd = xfd[ 2 ],
+      sfd = xfd[ 3 ];
   this->router_set.add( ifd );
-  this->router_set.add( pfd );
+  this->router_set.add( qfd );
+  this->router_set.add( cfd );
+  this->router_set.add( sfd );
 
   char buf[ 256 ];
-  int  len;
-  this->ipc_rt.PeerData::init_peer( efd, -1, NULL, "ipc" );
-  len = ::snprintf( buf, sizeof( buf ), "%s.ipc", this->svc.svc.val );
-  this->ipc_rt.PeerData::set_name( buf,
-    min_int( len, (int) sizeof( buf ) - 1 ) );
-  this->console_rt.PeerData::init_peer( ifd, -1, NULL, "console" );
-  len = ::snprintf( buf, sizeof( buf ), "%s.console", this->svc.svc.val );
-  this->console_rt.PeerData::set_name( buf,
-    min_int( len, (int) sizeof( buf ) - 1 ) );
-  this->PeerData::init_peer( pfd, -1, NULL, "session" );
-  len = ::snprintf( buf, sizeof( buf ), "%s.session", this->svc.svc.val );
-  this->PeerData::set_name( buf, 
-    min_int( len, (int) sizeof( buf ) - 1 ) );
+  size_t sz = min_int<size_t>( this->svc.svc.len, sizeof( buf ) - 16 );
+  CatPtr p( buf );
+
+  p.begin().x( this->svc.svc.val, sz ).s( "ipc" ).end();
+  this->ipc_rt.PeerData::set_name( buf, p.len() );
+  this->ipc_rt.PeerData::init_peer( ifd, -1, NULL, "ipc" );
+
+  p.begin().x( this->svc.svc.val, sz ).s( "queue" ).end();
+  this->queue_rt.PeerData::set_name( buf, p.len() );
+  this->queue_rt.PeerData::init_peer( qfd, -1, NULL, "queue" );
+
+  p.begin().x( this->svc.svc.val, sz ).s( "console" ).end();
+  this->console_rt.PeerData::set_name( buf, p.len() );
+  this->console_rt.PeerData::init_peer( cfd, -1, NULL, "console" );
+
+  p.begin().x( this->svc.svc.val, sz ).s( "session" ).end();
+  this->PeerData::set_name( buf, p.len() );
+  this->PeerData::init_peer( sfd, -1, NULL, "session" );
 
   int status = this->poll.add_sock( &this->ipc_rt );
   if ( status == 0 )
     status = this->poll.add_sock( &this->console_rt );
+  if ( status == 0 )
+    status = this->poll.add_sock( &this->queue_rt );
   if ( status == 0 )
     status = this->poll.add_sock( this );
   return status;
