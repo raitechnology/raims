@@ -282,7 +282,7 @@ EvTcpTransport::dispatch_msg( void ) noexcept
   const char * sub    = this->msg_in.msg->sub;
   uint16_t     sublen = this->msg_in.msg->sublen;
   uint32_t     h      = this->msg_in.msg->subhash;
-  MsgFramePublish pub( sub, sublen, this->msg_in.msg, this->fd, h,
+  MsgFramePublish pub( sub, sublen, this->msg_in.msg, *this, h,
                        (uint8_t) CABA_TYPE_ID, *this->rte,
                        this->rte->sub_route );
   d_tcp( "< ev_tcp(%s) dispatch %.*s (%lu)\n", this->rte->name,
@@ -291,8 +291,15 @@ EvTcpTransport::dispatch_msg( void ) noexcept
   BPData * data = NULL;
   if ( ( this->tcp_state & ( TCP_BACKPRESSURE | TCP_BUFFERSIZE ) ) != 0 )
     data = this;
-  if ( this->rte->sub_route.forward_not_fd( pub, this->fd, data ) )
-    return TCP_FLOW_GOOD;
+
+  if ( this->msg_in.msg->caba.get_type() != CABA_MCAST ) {
+    if ( this->rte->sub_route.forward_set( pub, this->rte->mgr.router_set, data ) )
+      return TCP_FLOW_GOOD;
+  }
+  else {
+    if ( this->rte->sub_route.forward_not_fd( pub, this->fd, data ) )
+      return TCP_FLOW_GOOD;
+  }
   if ( ! this->bp_in_list() )
     return TCP_FLOW_BACKPRESSURE;
   return TCP_FLOW_STALLED;
@@ -362,9 +369,22 @@ EvTcpTransport::fwd_msg( EvPublish &pub ) noexcept
   uint32_t idx = 0;
   d_tcp( "> ev_tcp(%s) fwd %.*s (%lu)\n", this->rte->name,
           (int) pub.subject_len, pub.subject, this->msgs_sent + 1 );
+#if 0
+  if ( pub.msg_len > 0x38 ) {
+    if ( ::memcmp( &((char *) pub.msg)[ 0x30 ], "_X.HB", 5 ) == 0 ) {
+      uint32_t id;
+      static uint32_t me;
+      ::memcpy( &id, &((char *) pub.msg)[ 10 ], 4 );
+      if ( me == 0 )
+        me = id;
+      else if ( me != id )
+        printf( "bad hb id %x\n", id );
+    }
+  }
+#endif
   if ( pub.pub_type != 'f' ) {
     if ( pub.msg_len > this->recv_highwater ) {
-      idx = this->poll.zero_copy_ref( pub.src_route, pub.msg, pub.msg_len );
+      idx = this->poll.zero_copy_ref( pub.src_route.fd, pub.msg, pub.msg_len );
       if ( idx != 0 )
         this->append_ref_iov( NULL, 0, pub.msg, pub.msg_len, idx, 0 );
     }
@@ -374,7 +394,7 @@ EvTcpTransport::fwd_msg( EvPublish &pub ) noexcept
   else {
     MsgFragPublish & fpub = (MsgFragPublish &) pub;
     if ( fpub.trail_sz > this->recv_highwater ) {
-      idx = this->poll.zero_copy_ref( fpub.src_route, fpub.trail,
+      idx = this->poll.zero_copy_ref( fpub.src_route.fd, fpub.trail,
                                       fpub.trail_sz );
       if ( idx != 0 )
         this->append_ref_iov( fpub.msg, fpub.msg_len, fpub.trail, fpub.trail_sz,
@@ -392,7 +412,7 @@ EvTcpTransport::fwd_msg( EvPublish &pub ) noexcept
 bool
 EvTcpTransport::on_msg( EvPublish &pub ) noexcept
 {
-  if ( pub.src_route == (uint32_t) this->fd )
+  if ( pub.src_route.equals( *this ) )
     return true;
   return this->fwd_msg( pub );
 }

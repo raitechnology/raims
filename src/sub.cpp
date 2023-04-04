@@ -12,7 +12,7 @@ using namespace kv;
 using namespace md;
 
 SubDB::SubDB( EvPoll &p,  UserDB &udb,  SessionMgr &smg ) noexcept
-     : user_db( udb ), mgr( smg ), my_src_fd( -1 ), next_inbox( 0 ),
+     : user_db( udb ), mgr( smg ), my_src( smg ), next_inbox( 0 ),
        sub_seqno( 0 ), sub_seqno_sum( 0 ), sub_update_mono_time( 0 ),
        sub_tab( this->sub_list ),
        pat_tab( this->sub_list, p.sub_route.pre_seed ),
@@ -165,7 +165,7 @@ SubDB::fwd_sub( SubArgs &ctx ) noexcept
   if ( ( ctx.flags & CONSOLE_SUB ) != 0 ) {
     if ( rte != NULL ) {
       NotifySub nsub( ctx.sub, ctx.sublen, ctx.inbox, ctx.inbox_len, ctx.hash,
-                      this->my_src_fd, false, 'C' );
+                      false, 'C', this->my_src );
       nsub.bref = &this->console;
       if ( ctx.is_start() )
         rte->sub_route.do_notify_sub( nsub );
@@ -174,7 +174,7 @@ SubDB::fwd_sub( SubArgs &ctx ) noexcept
     }
   }
   EvPublish pub( s.msg, s.len(), NULL, 0, m.msg, m.len(),
-                 rte->sub_route, this->my_src_fd, h,
+                 rte->sub_route, this->my_src, h,
                  CABA_TYPE_ID, 'p' );
   this->user_db.mcast_send( pub, 0 );
 }
@@ -491,8 +491,7 @@ SubDB::recv_sub_start( const MsgFramePublish &pub,  UserBridge &n,
     n.bloom.add( hash );
     TransportRoute *rte = this->user_db.ipc_transport;
     if ( rte != NULL ) {
-      UserRoute & u_rte = *n.user_route;
-      NotifySub   nsub( sub, sublen, hash, u_rte.mcast_fd, false, 'M' );
+      NotifySub   nsub( sub, sublen, hash, false, 'M', pub.src_route );
       nsub.bref = &n.bloom;
       rte->sub_route.do_notify_sub( nsub );
     }
@@ -516,8 +515,7 @@ SubDB::recv_sub_stop( const MsgFramePublish &pub,  UserBridge &n,
     n.bloom.del( hash );
     TransportRoute *rte = this->user_db.ipc_transport;
     if ( rte != NULL ) {
-      UserRoute & u_rte = *n.user_route;
-      NotifySub   nsub( sub, sublen, hash, u_rte.mcast_fd, false, 'M' );
+      NotifySub   nsub( sub, sublen, hash, false, 'M', pub.src_route );
       nsub.bref = &n.bloom;
       rte->sub_route.do_notify_unsub( nsub );
     }
@@ -617,7 +615,7 @@ SubDB::reseed_bloom( void ) noexcept
     do {
       TransportRoute *rte = this->user_db.transport_tab.ptr[ tport_id ];
       EvPublish pub( Z_BLM, Z_BLM_SZ, NULL, 0, m.msg, m.len(),
-                     rte->sub_route, this->my_src_fd,
+                     rte->sub_route, this->my_src,
                      blm_h, CABA_TYPE_ID, 'p' );
 
       rte->sub_route.forward_except( pub, this->mgr.router_set );
@@ -688,7 +686,7 @@ SubDB::resize_bloom( void ) noexcept
       do {
         TransportRoute *rte = this->user_db.transport_tab.ptr[ tport_id ];
         EvPublish pub( Z_BLM, Z_BLM_SZ, NULL, 0, m.msg, m.len(),
-                       rte->sub_route, this->my_src_fd,
+                       rte->sub_route, this->my_src,
                        blm_h, CABA_TYPE_ID, 'p' );
 
         rte->sub_route.forward_except( pub, this->mgr.router_set );
@@ -1409,14 +1407,14 @@ void
 SubDB::queue_sub_update( NotifySub &sub,  uint32_t refcnt ) noexcept
 {
   printf( "queue_sub_update( %.*s, fd=%u, start=%lx, cnt=%u )\n",
-          (int) sub.subject_len, sub.subject, sub.src->fd,
-          sub.src->start_ns, refcnt );
+          (int) sub.subject_len, sub.subject, sub.src.fd,
+          sub.src.start_ns, refcnt );
 }
 
 void
 SubDB::queue_psub_update( NotifyPattern &pat,  uint32_t refcnt ) noexcept
 {
   printf( "queue_psub_update( %.*s, fd=%u, start=%lx, cnt=%u )\n",
-          (int) pat.pattern_len, pat.pattern, pat.src->fd,
-          pat.src->start_ns, refcnt );
+          (int) pat.pattern_len, pat.pattern, pat.src.fd,
+          pat.src.start_ns, refcnt );
 }

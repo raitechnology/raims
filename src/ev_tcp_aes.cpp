@@ -2,12 +2,15 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <stdarg.h>
 #include <raims/ev_tcp_aes.h>
 #include <raims/debug.h>
+#include <raimd/md_types.h>
 
 using namespace rai;
 using namespace ms;
 using namespace kv;
+using namespace md;
 
 /*
 #include <raimd/md_msg.h>
@@ -149,7 +152,69 @@ AES_Connection::save_write( void ) noexcept
   }
   this->EvConnection::write();
 }
+#if 0
+struct DBGOutput : public MDOutput {
+  FILE * fp;
+  DBGOutput( FILE *x ) : fp( x ) {}
+  virtual int puts( const char *s ) noexcept;
+  virtual int printf( const char *fmt, ... ) noexcept
+    __attribute__((format(printf,2,3)));
+};
 
+int
+DBGOutput::printf( const char *fmt, ... ) noexcept
+{
+  va_list ap;
+  int n;
+  va_start( ap, fmt );
+  n = vfprintf( this->fp, fmt, ap );
+  va_end( ap );
+  return n;
+}
+
+int
+DBGOutput::puts( const char *s ) noexcept
+{
+  if ( s != NULL ) {
+    int n = fputs( s, this->fp );
+    if ( n > 0 )
+      return (int) ::strlen( s );
+  }
+  return 0;
+}
+
+static void
+debug_aes_write( const char *name,  const char *paddr,  uint64_t &bytes_off,
+                 char *buf,  size_t len ) noexcept
+{
+  if ( len <= 0x38 || ::memcmp( &buf[ 0x30 ], "_X.HB", 5 ) != 0 )
+    return;
+
+  static FILE * ht[ 8 * 1024 ];
+  static uint32_t ht_id[ 8 * 1024 ];
+  char   path[ 256 ];
+  CatPtr p( path );
+  p.s( name ).s( "_" ).s( paddr ).s( ".txt" ).end();
+  uint32_t id, h = kv_crc_c( path, p.len(), 0 ) % ( 8 * 1024 );
+
+  ::memcpy( &id, &buf[ 0xa ], 4 );
+  if ( ht_id[ h ] == 0 ) {
+    ht_id[ h ] = id;
+    return;
+  }
+  if ( ht_id[ h ] != id ) {
+    FILE * fp;
+    if ( (fp = ht[ h ]) == NULL ) {
+      fp = ht[ h ] = ::fopen( path, "w" );
+    }
+    fprintf( fp, "%lu %s\n", bytes_off, path );
+    bytes_off += len;
+    DBGOutput mout( fp );
+    mout.print_hex( buf, len );
+    fflush( fp );
+  }
+}
+#endif
 void
 AES_Connection::write( void ) noexcept
 {
@@ -186,11 +251,13 @@ AES_Connection::write( void ) noexcept
       this->ref_cnt = 0;
     }
     /* encrypt */
+    /*size_t bytes_off = this->bytes_sent;*/
     for ( i = 0; i < this->idx; i++ ) {
       iovec & io = this->iov[ i ];
       char  * base = (char *) io.iov_base;
       if ( io.iov_len > enc_off ) {
         size_t enc_len = io.iov_len - enc_off;
+        /*debug_aes_write( this->name, this->peer_address.buf, bytes_off, &base[ enc_off ], enc_len ); */
         /*print_bytes( "send before_crypt", &base[ enc_off ], enc_len );*/
         this->send_aes.crypt( &base[ enc_off ], enc_len );
         /*print_bytes( "send after_crypt", &base[ enc_off ], enc_len );*/

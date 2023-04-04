@@ -740,33 +740,32 @@ namespace rai {
 namespace ms {
 
 struct SubDB {
-  UserDB     & user_db;
-  SessionMgr & mgr;
-  uint32_t     my_src_fd,    /* subs routed to my_src_fd */
-               next_inbox;   /* next inbox sub free */
-  uint64_t     sub_seqno,    /* sequence number for my subs */
-               sub_seqno_sum,/* sum of all sub_seqno */
-               update_seqno, /* sequence number updated for ext and int subs */
-               sub_update_mono_time; /* last time any sub recvd */
-  SeqnoTab     seqno_tab;    /* sub -> seqno, time */
-  InboxTab     inbox_tab;    /* inbox -> seqno, time */
-  SubList      sub_list;     /* list of { seqno, subscriptions } */
-  SubTab       sub_tab;      /* subject -> { state, seqno } */
-  PatTab       pat_tab;      /* pattern -> { state, seqno } */
-  PubTab       pub_tab;      /* subject -> seqno */
-  AnyMatchTab  any_tab;
-  ReplyCache   reply;
-  QueueSubTab  queue_sub_tab;
-  QueueGrpTab  queue_grp_tab;
-  kv::BloomRef bloom,
-               console,
-               ipc,
-               queue;
+  UserDB           & user_db;
+  SessionMgr       & mgr;
+  const kv::PeerId & my_src;
+  uint32_t           next_inbox;   /* next inbox sub free */
+  uint64_t           sub_seqno,    /* sequence number for my subs */
+                     sub_seqno_sum,/* sum of all sub_seqno */
+                     update_seqno, /* sequence number updated for ext and int subs */
+                     sub_update_mono_time; /* last time any sub recvd */
+  SeqnoTab           seqno_tab;    /* sub -> seqno, time */
+  InboxTab           inbox_tab;    /* inbox -> seqno, time */
+  SubList            sub_list;     /* list of { seqno, subscriptions } */
+  SubTab             sub_tab;      /* subject -> { state, seqno } */
+  PatTab             pat_tab;      /* pattern -> { state, seqno } */
+  PubTab             pub_tab;      /* subject -> seqno */
+  AnyMatchTab        any_tab;
+  ReplyCache         reply;
+  QueueSubTab        queue_sub_tab;
+  QueueGrpTab        queue_grp_tab;
+  kv::BloomRef       bloom,
+                     console,
+                     ipc,
+                     queue;
 
   SubDB( kv::EvPoll &p,  UserDB &udb,  SessionMgr &smg ) noexcept;
 
-  void init( uint32_t src_fd ) {
-    this->my_src_fd = src_fd;
+  void init( void ) {
     this->sub_seqno     = 0;
     this->sub_seqno_sum = 0;
     this->update_seqno  = 0;

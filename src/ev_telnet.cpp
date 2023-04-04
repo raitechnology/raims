@@ -138,7 +138,7 @@ TelnetListen::accept( void ) noexcept
     return NULL;
   c->init_state();
   c->console = &this->console;
-  this->console.term_list.push_tl( c );
+  this->console.add_output( c );
   c->start();
   return c;
 }
@@ -355,6 +355,8 @@ bool
 TelnetService::on_output( const char *buf,  size_t buflen ) noexcept
 {
   if ( this->term_started ) {
+    if ( this->term.tty == NULL )
+      return false;
     lc_tty_clear_line( this->term.tty );
     this->flush_term();
     this->term.tty_write( buf, buflen );
@@ -750,7 +752,7 @@ TelnetService::process_telopt( uint8_t code,  uint8_t opt ) noexcept
 void
 TelnetService::release( void ) noexcept
 {
-  this->console->term_list.pop( this );
+  this->console->remove_output( this );
   if ( this->term_started )
     this->term.tty_release();
   if ( this->line_buf != NULL ) {

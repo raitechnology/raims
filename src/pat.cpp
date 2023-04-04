@@ -215,7 +215,7 @@ SubDB::fwd_psub( PatternArgs &ctx ) noexcept
   if ( ( ctx.flags & CONSOLE_SUB ) != 0 ) {
     if ( rte != NULL ) {
       NotifyPattern npat( ctx.cvt, ctx.pat, ctx.patlen, ctx.hash,
-                          this->my_src_fd, false, 'C' );
+                          false, 'C', this->my_src );
       npat.bref = &this->console;
       if ( ctx.is_start() )
         rte->sub_route.do_notify_psub( npat );
@@ -224,7 +224,7 @@ SubDB::fwd_psub( PatternArgs &ctx ) noexcept
     }
   }
   EvPublish pub( s.msg, s.len(), NULL, 0, m.msg, m.len(),
-                 rte->sub_route, this->my_src_fd, h, CABA_TYPE_ID, 'p' );
+                 rte->sub_route, this->my_src, h, CABA_TYPE_ID, 'p' );
   this->user_db.mcast_send( pub, 0 );
 }
 
@@ -498,9 +498,8 @@ SubDB::recv_psub_start( const MsgFramePublish &pub,  UserBridge &n,
     }
     TransportRoute *rte = this->user_db.ipc_transport;
     if ( rte != NULL ) {
-      UserRoute   & u_rte = *n.user_route;
       NotifyPattern npat( ctx.cvt, ctx.pat, ctx.patlen, ctx.hash,
-                          u_rte.mcast_fd, false, 'M' );
+                          false, 'M', pub.src_route );
       npat.bref = &n.bloom;
       rte->sub_route.do_notify_psub( npat );
     }
@@ -540,9 +539,8 @@ SubDB::recv_psub_stop( const MsgFramePublish &pub,  UserBridge &n,
     }
     TransportRoute *rte = this->user_db.ipc_transport;
     if ( rte != NULL ) {
-      UserRoute   & u_rte = *n.user_route;
       NotifyPattern npat( cvt, ctx.pat, ctx.patlen, ctx.hash,
-                          u_rte.mcast_fd, false, 'M' );
+                          false, 'M', pub.src_route );
       npat.bref = &n.bloom;
       rte->sub_route.do_notify_punsub( npat );
     }

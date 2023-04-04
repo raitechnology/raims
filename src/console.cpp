@@ -29,6 +29,9 @@ namespace rai {
 namespace sassrv {
 extern uint32_t rv_debug;
 }
+namespace natsmd {
+extern uint32_t nats_debug;
+}
 }
 
 using namespace rai;
@@ -220,11 +223,12 @@ void
 Console::parse_debug_flags( const char *arg,  size_t len,
                             int &dist_dbg ) noexcept
 {
-  dbg_flags        = 0;
-  kv_pub_debug     = 0;
-  kv_ps_debug      = 0;
-  sassrv::rv_debug = 0;
-  no_tcp_aes       = 0;
+  dbg_flags          = 0;
+  kv_pub_debug       = 0;
+  kv_ps_debug        = 0;
+  sassrv::rv_debug   = 0;
+  natsmd::nats_debug = 0;
+  no_tcp_aes         = 0;
 
   for ( size_t i = 0; i < debug_str_count; i++ ) {
     size_t dlen = ::strlen( debug_str[ i ] );
@@ -243,6 +247,8 @@ Console::parse_debug_flags( const char *arg,  size_t len,
     kv_ps_debug = 1;
   if ( len >= 2 && ::memmem( arg, len, "rv", 2 ) != NULL )
     sassrv::rv_debug = 1;
+  if ( len >= 2 && ::memmem( arg, len, "nats", 4 ) != NULL )
+    natsmd::nats_debug = 1;
   if ( len >= 5 && ::memmem( arg, len, "noaes", 5 ) != NULL )
     no_tcp_aes = 1;
   if ( dbg_flags == 0 && len > 0 && arg[ 0 ] >= '0' && arg[ 0 ] <= '9' )
@@ -527,6 +533,23 @@ Console::colorize_log( ConsoleOutput *p, const char *buf, size_t len ) noexcept
       b &= p->on_output( "]\n", 2 );
   }
   return b;
+}
+
+void
+Console::add_output( ConsoleOutput *p ) noexcept
+{
+  this->term_list.push_tl( p );
+}
+
+void
+Console::remove_output( ConsoleOutput *p ) noexcept
+{
+  this->term_list.pop( p );
+  for ( ConsoleRPC *rpc = this->rpc_list.hd; rpc != NULL; rpc = rpc->next ) {
+    if ( rpc->is_complete )
+      continue;
+    rpc->out.remove( p );
+  }
 }
 
 bool
@@ -2138,7 +2161,12 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
       break;
     }
     case CMD_SHOW_PATH:      this->show_path( p, int_arg( arg, len ) ); break;
-    case CMD_SHOW_FORWARD:   this->show_forward( p, int_arg( arg, len ) ); break;
+    case CMD_SHOW_FORWARD:
+      if ( len > 0 && arg[ 0 ] == 'a' )
+        this->show_forward_all( p );
+      else
+        this->show_forward( p, int_arg( arg, len ) );
+      break;
     case CMD_SHOW_FDS:       this->show_fds( p );       break;
     case CMD_SHOW_BUFFERS:   this->show_buffers( p );   break;
     case CMD_SHOW_WINDOWS:   this->show_windows( p );   break;
@@ -2200,6 +2228,8 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
         this->outf( p, "kv ps debug on" );
       if ( sassrv::rv_debug )
         this->outf( p, "rv debug on" );
+      if ( natsmd::nats_debug )
+        this->outf( p, "nats debug on" );
       if ( no_tcp_aes )
         this->outf( p, "disable tcp aes" );
       break;
@@ -3816,8 +3846,8 @@ PortOutput::output( void ( PortOutput::*put )( void ) ) noexcept
       (this->*put)();
     }
     else if ( rte->is_mcast() ) {
-      mcast_fd = rte->mcast_fd;
-      ucast_fd = rte->inbox_fd;
+      mcast_fd = rte->mcast.fd;
+      ucast_fd = rte->inbox.fd;
       this->init( rte, P_IS_LOCAL, mcast_fd );
 
       if ( mcast_fd <= poll.maxfd && poll.sock[ mcast_fd ] != NULL ) {
@@ -3844,7 +3874,7 @@ PortOutput::output( void ( PortOutput::*put )( void ) ) noexcept
         continue;
       UserRoute * u_ptr = n->user_route_ptr( this->user_db, this->tport_id );
       if ( rte->is_mcast() ) {
-        ucast_fd = u_ptr->inbox_fd;
+        ucast_fd = (uint32_t) u_ptr->inbox.fd;
         this->init( rte, P_IS_REMOTE | P_IS_INBOX, ucast_fd, n );
         this->stats.bytes_sent = u_ptr->bytes_sent;
         this->stats.msgs_sent  = u_ptr->msgs_sent;
@@ -3860,7 +3890,7 @@ PortOutput::output( void ( PortOutput::*put )( void ) ) noexcept
         (this->*put)();
       }
       else {
-        mcast_fd = u_ptr->mcast_fd;
+        mcast_fd = u_ptr->mcast.fd;
         this->init( rte, P_IS_REMOTE, mcast_fd, n );
         if ( mcast_fd <= poll.maxfd && poll.sock[ mcast_fd ] != NULL ) {
           this->remote_addr( poll.sock[ mcast_fd ]->peer_address.buf );
@@ -4453,7 +4483,7 @@ Console::output_user_route( TabPrint &ptp,  UserRoute &u_rte ) noexcept
   switch ( u_rte.is_set( UCAST_URL_STATE | UCAST_URL_SRC_STATE |
                          MESH_URL_STATE ) ) {
     default: { /* normal tcp */
-      uint32_t ucast_fd = u_rte.inbox_fd;
+      uint32_t ucast_fd = (uint32_t) u_rte.inbox.fd;
       if ( ucast_fd <= poll.maxfd && poll.sock[ ucast_fd ] != NULL ) {
         uint32_t     uid2;
         bool         found    = false;
@@ -4634,7 +4664,7 @@ Console::show_adjacency( ConsoleOutput *p ) noexcept
       this->user_db.peer_dist.found_inconsistency ? "false" : "true" );
 
     UserBridge * from, * to;
-    while ( this->user_db.peer_dist.find_inconsistent( from, to ) ) {
+    while ( this->user_db.peer_dist.find_inconsistent2( from, to ) ) {
       if ( from != NULL ) {
         if ( to != NULL ) {
           this->printf( "find_inconsistent from %s.%u to %s.%u\n",
@@ -4828,7 +4858,7 @@ Console::show_routes( ConsoleOutput *p,  uint8_t path_select ) noexcept
       uint32_t b = 0;
       for ( uint8_t path = 0; path < COST_PATH_COUNT; path++ ) {
         if ( n->bloom_rt[ path ] != NULL &&
-             n->bloom_rt[ path ]->r == u_ptr->mcast_fd ) {
+             n->bloom_rt[ path ]->r == (uint32_t) u_ptr->mcast.fd ) {
           b |= 1U << path;
         }
       }
@@ -4840,7 +4870,7 @@ Console::show_routes( ConsoleOutput *p,  uint8_t path_select ) noexcept
         tab[ i++ ].set_long( n->round_trip_time, PRINT_LATENCY ); /* lat */
       else
         tab[ i++ ].set_null();
-      tab[ i++ ].set_int( u_ptr->mcast_fd );
+      tab[ i++ ].set_int( u_ptr->mcast.fd );
       const char * url_type = u_ptr->rte.transport.type.val;
       switch ( u_ptr->is_set( UCAST_URL_STATE | UCAST_URL_SRC_STATE |
                               MESH_URL_STATE ) ) {
@@ -4853,7 +4883,7 @@ Console::show_routes( ConsoleOutput *p,  uint8_t path_select ) noexcept
         #endif
           /* fall through */
         default: {
-          ucast_fd = u_ptr->inbox_fd;
+          ucast_fd = u_ptr->inbox.fd;
           if ( ucast_fd <= poll.maxfd && poll.sock[ ucast_fd ] != NULL ) {
             uint32_t uid2;
             bool found = false;
@@ -4878,7 +4908,7 @@ Console::show_routes( ConsoleOutput *p,  uint8_t path_select ) noexcept
           tab[ i++ ].set( u_ptr->ucast_url.val, u_ptr->ucast_url.len ); /* ptp */
           tab = out.make_row();
 
-          mcast_fd = rte->mcast_fd;
+          mcast_fd = rte->mcast.fd;
           if ( mcast_fd <= poll.maxfd && poll.sock[ mcast_fd ] != NULL ) {
             for ( uint32_t k = 0; k < ncols - 1; k++ ) {
               tab[ i++ ].set_null();
@@ -5005,7 +5035,7 @@ Console::show_urls( ConsoleOutput *p ) noexcept
         tab[ i++ ].set( rte->mesh_id->transport.tport ); /* mesh */
       else
         tab[ i++ ].set_null();
-      tab[ i++ ].set_int( u_ptr->mcast_fd );
+      tab[ i++ ].set_int( u_ptr->mcast.fd );
 
       const char * url_type = u_ptr->rte.transport.type.val,
                  * address;
@@ -5019,7 +5049,7 @@ Console::show_urls( ConsoleOutput *p ) noexcept
             tab[ i++ ].set( u_ptr->mesh_url.val, u_ptr->mesh_url.len ); /* ptp */
           else
             tab[ i++ ].set_null();
-          ucast_fd = u_ptr->inbox_fd;
+          ucast_fd = (uint32_t) u_ptr->inbox.fd;
           if ( ucast_fd <= poll.maxfd && poll.sock[ ucast_fd ] != NULL &&
                u_ptr->is_set( HAS_HB_STATE ) ) {
             PeerAddrStr paddr;
@@ -5045,7 +5075,7 @@ Console::show_urls( ConsoleOutput *p ) noexcept
             tab[ i++ ].set_url_dest( &u_src.n, NULL, /* ptp */
                         u_src.ucast_url.val, u_src.ucast_url.len, PRINT_UADDR );
           }
-          ucast_fd = u_ptr->inbox_fd;
+          ucast_fd = (uint32_t) u_ptr->inbox.fd;
           if ( ucast_fd <= poll.maxfd && poll.sock[ ucast_fd ] != NULL ) {
             address  = poll.sock[ ucast_fd ]->peer_address.buf;
             addr_len = (uint32_t) get_strlen64( address );
@@ -5301,7 +5331,7 @@ Console::show_skew( ConsoleOutput *p ) noexcept
 void
 Console::show_reachable( ConsoleOutput *p ) noexcept
 {
-  static const uint32_t ncols = 4;
+  static const uint32_t ncols = 5;
   TabOut out( this->table, this->tmp, ncols );
   uint32_t fd;
 
@@ -5318,6 +5348,10 @@ Console::show_reachable( ConsoleOutput *p ) noexcept
       uint32_t     i   = 0;
 
       tab[ i++ ].set( &n, PRINT_USER );
+      if ( u_ptr->hops() == 0 )
+        tab[ i++ ].set( "*" );
+      else
+        tab[ i++ ].set_null();
       uint32_t b = 0;
       for ( uint8_t path = 0; path < COST_PATH_COUNT; path++ ) {
         if ( n.bloom_rt[ path ] != NULL &&
@@ -5340,7 +5374,7 @@ Console::show_reachable( ConsoleOutput *p ) noexcept
       }
     }
   }
-  static const char *hdr[ ncols ] = { "user", "path", "fd", "tport" };
+  static const char *hdr[ ncols ] = { "user", "c", "path", "fd", "tport" };
   this->print_table( p, hdr, ncols );
 }
 
@@ -5533,6 +5567,95 @@ Console::show_forward( ConsoleOutput *p,  uint8_t path_select ) noexcept
 }
 
 void
+Console::show_forward_all( ConsoleOutput *p ) noexcept
+{
+  static const uint32_t ncols = 9;
+  TabOut out( this->table, this->tmp, ncols );
+
+  for ( uint32_t uid = 0; uid < this->user_db.next_uid; uid++ ) {
+    UserBridge * n = NULL;
+    if ( uid != 0 ) {
+      n = this->user_db.bridge_tab[ uid ];
+      if ( n == NULL || ! n->is_set( AUTHENTICATED_STATE ) )
+        continue;
+    }
+    if ( out.table.count > 0 )
+      out.row( ncols - 1 ).typ |= PRINT_SEP;
+
+    TabPrint * tab = out.add_row_p();
+    uint32_t   i = 0;
+    uint8_t    p;
+
+    if ( uid == 0 )
+      tab[ i++ ].set( this->user_db.user.user, PRINT_SELF ); /* user */
+    else
+      tab[ i++ ].set( n, PRINT_USER );  /* user */
+
+    ForwardCache   * forward[ COST_PATH_COUNT ];
+    TransportRoute * rte[ COST_PATH_COUNT ];
+    uint32_t         tport_id[ COST_PATH_COUNT ];
+    bool             b[ COST_PATH_COUNT ];
+    for ( p = 0; p < COST_PATH_COUNT; p++ ) {
+      if ( uid == 0 )
+        forward[ p ] = &this->user_db.forward_path[ p ];
+      else
+        forward[ p ] = &n->forward_path[ p ];
+      this->user_db.peer_dist.update_forward_cache( *forward[ p ], uid, p );
+      rte[ p ]      = NULL;
+      tport_id[ p ] = 0;
+      b[ p ]        = false;
+    }
+
+    for ( uint32_t cnt = 0; ; cnt++ ) {
+      uint32_t k = 0;
+      for ( p = 0; p < COST_PATH_COUNT; p++ ) {
+        if ( cnt == 0 )
+          b[ p ] = forward[ p ]->first( tport_id[ p ] );
+        else if ( b[ p ] )
+          b[ p ] = forward[ p ]->next( tport_id[ p ] );
+
+        if ( b[ p ] ) {
+          rte[ p ] = this->user_db.transport_tab.ptr[ tport_id[ p ] ];
+          k++;
+        }
+      }
+      if ( k == 0 ) {
+        while ( i < ncols )
+          tab[ i++ ].set_null();
+        break;
+      }
+      if ( i == ncols ) {
+        tab = out.add_row_p();
+        i = 0;
+        tab[ i++ ].set_null();
+      }
+      for ( p = 0; p < COST_PATH_COUNT; p++ ) {
+        if ( rte[ p ] != NULL ) {
+          tab[ i++ ].set( rte[ p ]->transport.tport, tport_id[ p ], PRINT_ID );
+          uint32_t u = rte[ p ]->uid_connected.rem_uid,
+                   t = rte[ p ]->uid_connected.rem_tport_id;
+          if ( t != 0 ) {
+            UserBridge *dest = this->user_db.bridge_tab[ u ];
+            if ( dest != NULL )
+              tab[ i++ ].set( dest, PRINT_USER );  /* user */
+            else
+              tab[ i++ ].set_null();
+          }
+        }
+        else {
+          tab[ i++ ].set_null();
+          tab[ i++ ].set_null();
+        }
+      }
+    }
+  }
+
+  static const char *hdr[ ncols ] =
+    { "source", "t0", "d0", "t1", "d1", "t2", "d2", "t3", "d3" };
+  this->print_table( p, hdr, ncols );
+}
+
+void
 Console::show_fds( ConsoleOutput *p ) noexcept
 {
   static const uint32_t ncols = 16;
@@ -5599,7 +5722,11 @@ Console::show_fds( ConsoleOutput *p ) noexcept
       bool has_ptp_link = false;
       if ( ! this->user_db.route_list.is_empty( (uint32_t) fd ) ) {
         UserRoute * u_ptr = this->user_db.route_list[ fd ].hd;
-        if ( ! u_ptr->rte.is_mcast() ) {
+        do {
+          if ( u_ptr->hops() == 0 )
+            break;
+        } while ( (u_ptr = u_ptr->next) != NULL );
+        if ( u_ptr != NULL && ! u_ptr->rte.is_mcast() ) {
           tab[ i++ ].set_url_dest( &u_ptr->n, NULL, address, addr_len,
                                    PRINT_UADDR );
           has_ptp_link = true;

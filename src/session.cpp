@@ -64,7 +64,8 @@ SessionMgr::SessionMgr( EvPoll &p,  Logger &l,  ConfigTree &c,
              timer_mono_time( 0 ), timer_time( 0 ),
              timer_converge_time( 0 ), converge_seqno( 0 ),
              timer_start_mono( 0 ), timer_start( 0 ), timer_ival( 0 ),
-             user_db( p, u, s, this->sub_db, st, this->events,this->router_set),
+             user_db( p, u, s, *this, this->sub_db, st, this->events,
+                      this->router_set ),
              sub_db( p, this->user_db, *this ),
              sys_bloom( 0, "(sys)", p.g_bloom_db ), events( &p.now_ns ),
              console( *this ), log( l ),
@@ -220,21 +221,23 @@ SessionMgr::init_sock( void ) noexcept
   size_t sz = min_int<size_t>( this->svc.svc.len, sizeof( buf ) - 16 );
   CatPtr p( buf );
 
-  p.begin().x( this->svc.svc.val, sz ).s( "ipc" ).end();
+  p.begin().x( this->svc.svc.val, sz ).s( ".ipc" ).end();
+  this->ipc_rt.PeerData::init_peer( this->poll.get_next_id(), ifd, -1, NULL, "ipc" );
   this->ipc_rt.PeerData::set_name( buf, p.len() );
-  this->ipc_rt.PeerData::init_peer( ifd, -1, NULL, "ipc" );
 
-  p.begin().x( this->svc.svc.val, sz ).s( "queue" ).end();
+  p.begin().x( this->svc.svc.val, sz ).s( ".queue" ).end();
+  this->queue_rt.PeerData::init_peer( this->poll.get_next_id(), qfd, -1, NULL,
+                                      "queue" );
   this->queue_rt.PeerData::set_name( buf, p.len() );
-  this->queue_rt.PeerData::init_peer( qfd, -1, NULL, "queue" );
 
-  p.begin().x( this->svc.svc.val, sz ).s( "console" ).end();
+  p.begin().x( this->svc.svc.val, sz ).s( ".console" ).end();
+  this->console_rt.PeerData::init_peer( this->poll.get_next_id(), cfd, -1, NULL,
+                                        "console" );
   this->console_rt.PeerData::set_name( buf, p.len() );
-  this->console_rt.PeerData::init_peer( cfd, -1, NULL, "console" );
 
-  p.begin().x( this->svc.svc.val, sz ).s( "session" ).end();
+  p.begin().x( this->svc.svc.val, sz ).s( ".session" ).end();
+  this->PeerData::init_peer( this->poll.get_next_id(), sfd, -1, NULL, "session" );
   this->PeerData::set_name( buf, p.len() );
-  this->PeerData::init_peer( sfd, -1, NULL, "session" );
 
   int status = this->poll.add_sock( &this->ipc_rt );
   if ( status == 0 )
@@ -254,11 +257,11 @@ SessionMgr::init_session( const CryptPass &pwd ) noexcept
     if ( status != 0 )
       return status;
   }
-  if ( ! this->user_db.init( pwd, this->fd, this->tree ) ) {
+  if ( ! this->user_db.init( pwd, this->tree ) ) {
     fprintf( stderr, "User DB failed to init\n" );
     return -1;
   }
-  this->sub_db.init( this->fd );
+  this->sub_db.init();
   this->console.update_prompt();
   char nonce_buf[ NONCE_B64_LEN + 1 ];
   printf( "session %s.%s[%s] started, start time %" PRIu64 ".%" PRIu64 "\n",
@@ -603,7 +606,7 @@ MsgFramePublish::status_string( void ) const noexcept
 void
 SessionMgr::ignore_msg( const MsgFramePublish &fpub ) noexcept
 {
-  d_sess( "From src_route %d/%s status %d/%s\n", fpub.src_route,
+  d_sess( "From src_route %d/%s status %d/%s\n", fpub.src_route.fd,
            fpub.rte.name, fpub.status, fpub.status_string() );
   if ( debug_sess )
     fpub.print( "Ignoring" );
@@ -626,7 +629,7 @@ SessionMgr::show_debug_msg( const MsgFramePublish &fpub,
               fpub.dec.msg->caba.type_str(),
               fpub.dec.msg->caba.get_opt(),
               publish_type_to_string( fpub.dec.type ),
-              fpub.rte.name, where, fpub.src_route );
+              fpub.rte.name, where, fpub.src_route.fd );
     MDOutput mout( MD_OUTPUT_OPAQUE_TO_B64 );
     fpub.dec.msg->print( &mout, 1, "%19s : ", NULL );
   }
@@ -743,7 +746,7 @@ IpcRoute::on_msg( EvPublish &pub ) noexcept
 {
   this->msgs_recv++;
   this->bytes_recv += pub.msg_len;
-  if ( pub.src_route == (uint32_t) this->fd )
+  if ( this->equals( pub.src_route ) )
     return true;
   if ( pub.pub_type != 'X' ) {
     fprintf( stderr, "IPC publish has no frame %.*s\n",
@@ -835,7 +838,7 @@ IpcRoute::on_msg( EvPublish &pub ) noexcept
           (int) fpub.subject_len, fpub.subject,
           seqno_frame( dec.seqno ), seqno_base( dec.seqno ),
           seqno_status_string( status ), (int) replylen, reply,
-          fpub.msg_len, fpub.rte.name, fpub.src_route, fmt );
+          fpub.msg_len, fpub.rte.name, fpub.src_route.fd, fmt );
 
   if ( status > SEQNO_UID_NEXT ) {
     if ( status != SEQNO_NOT_SUBSCR ) {
@@ -1067,7 +1070,7 @@ SessionMgr::on_msg( EvPublish &pub ) noexcept
 {
   this->msgs_recv++;
   this->bytes_recv += pub.msg_len;
-  if ( pub.src_route == (uint32_t) this->fd )
+  if ( this->equals( pub.src_route ) )
     return true;
   if ( pub.pub_type != 'X' ) {
     fprintf( stderr, "Session publish has no frame %.*s\n",
@@ -1529,9 +1532,8 @@ SessionMgr::publish( PubMcastData &mc ) noexcept
   m.sign( mc.sub, mc.sublen, *this->user_db.session_key );
 
   if ( dest_bridge_id != NULL )
-    return this->user_db.forward_to_primary_inbox( *dest_bridge_id,
-                                                   mc.sub, mc.sublen, h,
-                                                   m.msg, m.len() );
+    return this->user_db.forward_to_primary_inbox( *dest_bridge_id, mc.sub,
+                                                 mc.sublen, h, m.msg, m.len() );
 
   ForwardCache   & forward = this->user_db.forward_path[ mc.path_select ];
   TransportRoute * rte;
@@ -1547,15 +1549,17 @@ SessionMgr::publish( PubMcastData &mc ) noexcept
                  (int) mc.sublen, mc.sub, h, mc.path_select, rte->name );
       }
       EvPublish pub( mc.sub, mc.sublen, NULL, 0, m.msg, m.len(),
-                     rte->sub_route, this->fd, h, CABA_TYPE_ID, 'p' );
+                     rte->sub_route, *this, h, CABA_TYPE_ID, 'p' );
       pub.shard = mc.path_select;
       b &= rte->sub_route.forward_except( pub, this->router_set );
     } while ( forward.next( tport_id ) );
   }
   if ( (rte = this->user_db.ipc_transport) != NULL ) {
+    uint32_t fmt = mc.fmt;
+    if ( fmt == 0 && mc.datalen > 0 )
+      fmt = MD_STRING;
     EvPublish pub( mc.sub, mc.sublen, mc.inbox, mc.inbox_len,
-                   mc.data, mc.datalen, rte->sub_route, this->fd, h, 
-                   ( mc.fmt ? mc.fmt : (uint32_t) MD_STRING ), 'p' );
+                   mc.data, mc.datalen, rte->sub_route, *this, h, fmt, 'p' );
     b &= rte->sub_route.forward_except( pub, this->router_set );
   }
   return b;
@@ -1695,7 +1699,7 @@ SessionMgr::forward_ipc( TransportRoute &src_rte,  EvPublish &pub ) noexcept
           "(len=%u, from %s, fd %d, enc %x)\n",
           (int) pub.subject_len, pub.subject, seqno,
           (int) pub.reply_len, (char *) pub.reply,
-          pub.msg_len, src_rte.name, pub.src_route, pub.msg_enc );
+          pub.msg_len, src_rte.name, pub.src_route.fd, pub.msg_enc );
 
   const void * frag = NULL;
   size_t frag_sz = 0;

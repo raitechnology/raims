@@ -149,12 +149,11 @@ UserDB::hello_hb( void ) noexcept
       this->make_hb( *rte, X_HELLO, X_HELLO_SZ, hello_h, m );
 
       char buf[ HMAC_B64_LEN + 1 ], buf2[ NONCE_B64_LEN + 1 ];
-      d_hb( "hello %s(%u): %s:%s -> %s\n", this->user.user.val, this->my_src_fd,
+      d_hb( "hello %s(%u): %s:%s -> %s\n", this->user.user.val, this->my_src.fd,
              this->bridge_id.hmac.to_base64_str( buf ),
              this->bridge_id.nonce.to_base64_str( buf2 ), rte->name );
       EvPublish pub( X_HELLO, X_HELLO_SZ, NULL, 0, m.msg, m.len(),
-                     rte->sub_route, this->my_src_fd, hello_h,
-                     CABA_TYPE_ID, 'p' );
+                     rte->sub_route, this->my_src, hello_h, CABA_TYPE_ID, 'p' );
       rte->forward_to_connected( pub );
     }
   }
@@ -174,8 +173,7 @@ UserDB::bye_hb( void ) noexcept
       this->make_hb( *rte, X_BYE, X_BYE_SZ, bye_h, m );
       d_hb( "bye\n" );
       EvPublish pub( X_BYE, X_BYE_SZ, NULL, 0, m.msg, m.len(),
-                     rte->sub_route, this->my_src_fd,
-                     bye_h, CABA_TYPE_ID, 'p' );
+                     rte->sub_route, this->my_src, bye_h, CABA_TYPE_ID, 'p' );
       rte->forward_to_connected( pub );
     }
   }
@@ -205,8 +203,7 @@ UserDB::interval_hb( uint64_t cur_mono,  uint64_t cur_time ) noexcept
         this->push_hb_time( *rte, cur_time, cur_mono );
         this->make_hb( *rte, X_HB, X_HB_SZ, hb_h, m );
         EvPublish pub( X_HB, X_HB_SZ, NULL, 0, m.msg, m.len(),
-                       rte->sub_route, this->my_src_fd,
-                       hb_h, CABA_TYPE_ID, 'p' );
+                       rte->sub_route, this->my_src, hb_h, CABA_TYPE_ID, 'p' );
         rte->forward_to_connected( pub );
         hb_cnt++;
       }
@@ -224,10 +221,12 @@ UserDB::interval_hb( uint64_t cur_mono,  uint64_t cur_time ) noexcept
   if ( max_idle_ns < ival )
     max_idle_ns = ival;
   max_idle_ns *= 3;
-  for ( uint32_t fd = 0; fd < this->poll.maxfd; fd++ ) {
+  for ( uint32_t fd = 0; fd <= this->poll.maxfd; fd++ ) {
     EvSocket *sock;
     if ( (sock = this->poll.sock[ fd ]) != NULL ) {
-      if ( sock->route_id == 0 || (size_t) sock->route_id > count ) 
+      if ( sock->route_id == 0 || (size_t) sock->route_id >= count )
+        continue;
+      if ( sock->test( EV_CLOSE ) )
         continue;
       if ( sock->sock_base == EV_CONNECTION_BASE ) {
         if ( cur_time > sock->read_ns &&
@@ -281,9 +280,36 @@ UserDB::on_heartbeat( const MsgFramePublish &pub,  UserBridge &n,
 #endif
   TransportRoute & rte = pub.rte;
   if ( pub.status == FRAME_STATUS_OK && n.is_set( AUTHENTICATED_STATE ) ) {
+    uint32_t cost[ COST_PATH_COUNT ] = { COST_DEFAULT, COST_DEFAULT,
+                                         COST_DEFAULT, COST_DEFAULT },
+             rem_tport_id = 0;
+    StringVal tport;
+    dec.get_ival<uint32_t>( FID_TPORTID, rem_tport_id );
+    if ( dec.test( FID_TPORT ) ) {
+      tport.val = (const char *) dec.mref[ FID_TPORT ].fptr;
+      tport.len = dec.mref[ FID_TPORT ].fsize;
+    }
+    bool adv_cost = false;
+    if ( dec.get_ival<uint32_t>( FID_COST, cost[ 0 ] ) ) {
+      dec.get_ival<uint32_t>( FID_COST2, cost[ 1 ] );
+      dec.get_ival<uint32_t>( FID_COST3, cost[ 2 ] );
+      dec.get_ival<uint32_t>( FID_COST4, cost[ 3 ] );
+      adv_cost = true;
+    }
+
     if ( ! rte.uid_connected.is_member( n.uid ) ) {
       if ( debug_hb )
         n.printf( "authenticated but not a uid member (%s)\n", rte.name );
+      if ( ! rte.is_mcast() ) {
+        if ( rte.uid_connected.rem_uid != 0 &&
+             ( n.uid != rte.uid_connected.rem_uid ||
+               rem_tport_id != rte.uid_connected.rem_tport_id ) ) {
+          n.printe( "uid %u.%u is not uid connected %u.%u %s\n",
+                    n.uid, rem_tport_id, rte.uid_connected.rem_uid,
+                    rte.uid_connected.rem_tport_id, rte.name );
+          return true;
+        }
+      }
       this->set_connected_user_route( n, *n.user_route );
       /*this->pop_user_route( n, *n.user_route );
       n.user_route->connected( 0 );
@@ -298,20 +324,8 @@ UserDB::on_heartbeat( const MsgFramePublish &pub,  UserBridge &n,
       }
       this->uid_hb_count++;
     }
-    uint32_t cost[ COST_PATH_COUNT ] = { COST_DEFAULT, COST_DEFAULT,
-                                         COST_DEFAULT, COST_DEFAULT },
-             rem_tport_id = 0;
-    StringVal tport;
-    dec.get_ival<uint32_t>( FID_TPORTID, rem_tport_id );
-    if ( dec.test( FID_TPORT ) ) {
-      tport.val = (const char *) dec.mref[ FID_TPORT ].fptr;
-      tport.len = dec.mref[ FID_TPORT ].fsize;
-    }
     bool b;
-    if ( dec.get_ival<uint32_t>( FID_COST, cost[ 0 ] ) ) {
-      dec.get_ival<uint32_t>( FID_COST2, cost[ 1 ] );
-      dec.get_ival<uint32_t>( FID_COST3, cost[ 2 ] );
-      dec.get_ival<uint32_t>( FID_COST4, cost[ 3 ] );
+    if ( adv_cost ) {
       b = rte.update_cost( n, tport, cost, rem_tport_id, "hb1" );
     }
     else {
@@ -697,8 +711,7 @@ UserDB::mcast_sync( TransportRoute &rte ) noexcept
   m.sign( m_sync, m_sync_len, *this->session_key );
 
   EvPublish pub( m_sync, m_sync_len, NULL, 0, m.msg, m.len(),
-                 rte.sub_route, this->my_src_fd, h,
-                 CABA_TYPE_ID, 'p' );
+                 rte.sub_route, this->my_src, h, CABA_TYPE_ID, 'p' );
   rte.sub_route.forward_except( pub, this->router_set );
 }
 

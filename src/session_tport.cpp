@@ -136,12 +136,14 @@ SessionMgr::add_rvd_transports( const char *listen,  const char *http,
           int port = web->get_host_port( addr, tmp, len, this->tree.hosts );
           if ( port != 0 ) {
             port += 80;
+            CatPtr p( buf );
             if ( web->is_wildcard( addr ) )
-              ::snprintf( buf, sizeof( buf ), "*:%d", port );
+              p.s( "*:" );
             else if ( ::strchr( tmp, ':' ) != NULL )
-              ::snprintf( buf, sizeof( buf ), "[%s]:%d", addr, port );
+              p.s( "[" ).s( addr ).s( "]:" );
             else
-              ::snprintf( buf, sizeof( buf ), "%s:%d", addr, port );
+              p.s( addr ).s( ":" );
+            p.i( port ).end();
             http = buf;
           }
         }
@@ -229,8 +231,7 @@ SessionMgr::add_network( const char *net,  size_t net_len,
   ConfigTree & tree = this->tree;
   StringTab  & stab = this->user_db.string_tab;
   RvMcast2     mc;
-  char         svc_buf[ 1024 ];
-  int          svc_buf_len;
+  CatMalloc    p( 32 + svc_len );
   uint16_t     num;
   bool is_listener = true;
 
@@ -242,18 +243,15 @@ SessionMgr::add_network( const char *net,  size_t net_len,
   if ( mc.type != NET_NONE ) {
     for ( int i = 0; ; i++ ) {
       if ( i == 0 )
-        svc_buf_len = ::snprintf( svc_buf, sizeof( svc_buf ), "net_%.*s",
-                                  (int) svc_len, svc );
+        p.begin().s( "net_" );
       else
-        svc_buf_len = ::snprintf( svc_buf, sizeof( svc_buf ), "net%d_%.*s", i,
-                                  (int) svc_len, svc );
-      svc_buf_len = min_int( svc_buf_len, (int) sizeof( svc_buf ) - 1 );
-      t = tree.find_transport( svc_buf, svc_buf_len );
+        p.begin().s( "net" ).i( i ).s( "_" );
+      t = tree.find_transport( p.start, p.x( svc, svc_len ).end() );
       if ( t == NULL )
         break;
     }
     t = stab.make<ConfigTree::Transport>();
-    stab.ref_string( svc_buf, svc_buf_len, t->tport );
+    stab.ref_string( p.start, p.len(), t->tport );
     t->tport_id = tree.transport_cnt++;
     t->is_temp = true;
     tree.transports.push_tl( t );
@@ -363,27 +361,24 @@ SessionMgr::add_transport2( ConfigTree::Transport &t,
   }
 
   ConfigTree::Transport * tptr = &t;
-  char svc_name[ 256 ];
+  CatMalloc svc_name( this->svc.svc.len + t.tport.len + 8 );
   if ( t.type.equals( T_RV, T_RV_SZ ) || t.type.equals( T_NATS, T_NATS_SZ ) ||
        t.type.equals( T_REDIS, T_REDIS_SZ ) ) {
     StringTab & stab = this->user_db.string_tab;
     f |= TPORT_IS_IPC;
-    size_t svc_len =
-      ::snprintf( svc_name, sizeof( svc_name ), "%s.ipc", this->svc.svc.val );
-    svc_len = min_int( svc_len, sizeof( svc_name ) - 1 );
-    tptr = this->tree.find_transport( svc_name, svc_len );
+    svc_name.s( this->svc.svc.val ).s( ".ipc" ).end();
+    tptr = this->tree.find_transport( svc_name.start, svc_name.len() );
     if ( tptr == NULL ) {
       tptr = stab.make<ConfigTree::Transport>();
       stab.ref_string( "ipc", 3, tptr->type );
-      stab.ref_string( svc_name, svc_len, tptr->tport );
+      stab.ref_string( svc_name.start, svc_name.len(), tptr->tport );
       tptr->tport_id = this->tree.transport_cnt++;
       tptr->is_temp = true;
       this->tree.transports.push_tl( tptr );
     }
   }
   else {
-    ::snprintf( svc_name, sizeof( svc_name ), "%s.%s", this->svc.svc.val,
-                t.tport.val );
+    svc_name.s( this->svc.svc.val ).s( "." ).s( t.tport.val ).end();
   }
   bool is_new = false;
 
@@ -394,7 +389,7 @@ SessionMgr::add_transport2( ConfigTree::Transport &t,
   if ( rte == NULL ) {
     void * p = aligned_malloc( sizeof( TransportRoute ) );
     rte = new ( p )
-      TransportRoute( this->poll, *this, this->svc, *tptr, svc_name, f );
+      TransportRoute( this->poll, *this, this->svc, *tptr, svc_name.start, f );
     if ( rte->init() != 0 )
       return false;
     if ( ( f & TPORT_IS_IPC ) != 0 ) {
@@ -540,6 +535,7 @@ SessionMgr::add_mesh_accept( TransportRoute &listen_rte,
   conn.rte      = rte;
   conn.notify   = rte;
   conn.route_id = rte->sub_route.route_id;
+  rte->set_peer_name( conn, "tcp_acc" );
 
   PeerAddrStr paddr;
   paddr.set_sock_addr( conn.fd );
@@ -616,6 +612,7 @@ SessionMgr::add_tcp_accept( TransportRoute &listen_rte,
   conn.rte      = rte;
   conn.notify   = rte;
   conn.route_id = rte->sub_route.route_id;
+  rte->set_peer_name( conn, "tcp_acc" );
 
   rte->printf( "add_tcp_accept from %s\n", conn.peer_address.buf );
   this->events.on_connect( rte->tport_id, TPORT_IS_TCP, conn.encrypt );
@@ -852,10 +849,9 @@ SessionMgr::create_telnet( ConfigTree::Transport &tport ) noexcept
     un.telnet = new ( p ) TelnetListen( this->poll, this->console );
   }
   if ( this->listen_start_noencrypt( tport, un.telnet, "telnet_listen" ) ) {
-    char buf[ 256 ];
-    int len = ::snprintf( buf, sizeof( buf ), "%s.%s", tport.type.val,
-                          tport.tport.val );
-    un.telnet->set_name( buf, min_int( len, (int) sizeof( buf ) - 1 ) );
+    CatMalloc p( tport.type.len + tport.tport.len + 1 );
+    p.s( tport.type.val ).s( "." ).s( tport.tport.val ).end();
+    un.telnet->set_name( p.start, p.len() );
     return true;
   }
   return false;
@@ -886,10 +882,9 @@ SessionMgr::create_web( ConfigTree::Transport &tport ) noexcept
     }
   }
   if ( this->listen_start_noencrypt( tport, un.web, "web_listen" ) ) {
-    char buf[ 256 ];
-    int len = ::snprintf( buf, sizeof( buf ), "%s.%s", tport.type.val,
-                          tport.tport.val );
-    un.web->set_name( buf, min_int( len, (int) sizeof( buf ) - 1 ) );
+    CatMalloc p( tport.type.len + tport.tport.len + 1 );
+    p.s( tport.type.val ).s( "." ).s( tport.tport.val ).end();
+    un.web->set_name( p.start, p.len() );
     TransportRoute::make_url_from_sock( this->user_db.string_tab,
                                         un.web->http_url, *un.web, "http" );
     printf( "http_url %s\n", un.web->http_url.val );

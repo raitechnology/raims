@@ -71,7 +71,8 @@ EvPgmTransport::connect( EvPgmTransportParameters &p,
     net = p.network;
   if ( ! this->pgm.start_pgm( net, port, this->fd ) )
     return false;
-  this->PeerData::init_peer( this->fd, this->rte.sub_route.route_id,
+  this->PeerData::init_peer( this->poll.get_next_id(), this->fd,
+                             this->rte.sub_route.route_id,
                              NULL, "pgm" );
   char peer[ 256 ];
   ::snprintf( peer, sizeof( peer ), "%s:%u", net, port );
@@ -103,7 +104,7 @@ EvPgmTransport::start( void ) noexcept
 bool
 EvPgmTransport::on_msg( EvPublish &pub ) noexcept
 {
-  if ( pub.src_route == (uint32_t) this->fd )
+  if ( pub.src_route.equals( *this ) )
     return true;
   d_pgm( "pgm on_msg( %.*s )\n", (int) pub.subject_len, pub.subject );
   this->msgs_sent++;
@@ -306,10 +307,14 @@ EvPgmTransport::dispatch_msg( void ) noexcept
   const char * sub    = this->msg_in.msg->sub;
   uint16_t     sublen = this->msg_in.msg->sublen;
   uint32_t     h      = this->msg_in.msg->subhash;
-  MsgFramePublish pub( sub, sublen, this->msg_in.msg, this->fd, h,
+  MsgFramePublish pub( sub, sublen, this->msg_in.msg, *this, h,
                        CABA_TYPE_ID, this->rte, this->rte.sub_route );
   d_pgm( "pgm dispatch( %.*s )\n", (int) pub.subject_len, pub.subject );
-  this->backpressure = this->rte.sub_route.forward_not_fd( pub, this->fd );
+ bool &b = this->backpressure;
+ if ( this->msg_in.msg->caba.get_type() != CABA_MCAST )
+    b = this->rte.sub_route.forward_set( pub, this->rte.mgr.router_set );
+  else
+    b = this->rte.sub_route.forward_not_fd( pub, this->fd );
 }
 
 /* shutdown pgm */

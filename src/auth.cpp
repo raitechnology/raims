@@ -562,8 +562,7 @@ UserDB::send_trusted( const MsgFramePublish &/*pub*/,  UserBridge &n,
         }
         m.close( e.sz, h, CABA_INBOX );
         m.sign( ibx.buf, ibx.len(), *this->session_key );
-        b |= this->forward_to( n, ibx.buf, ibx.len(), h, m.msg, m.len(),
-                               *u_ptr, NULL );
+        b |= this->forward_to( n, ibx.buf, ibx.len(), h, m.msg, m.len(), u_ptr);
       }
     }
   }

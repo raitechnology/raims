@@ -13,6 +13,7 @@
 #endif
 #include <raims/ev_inbox_transport.h>
 #include <raims/transport.h>
+#include <raims/session.h>
 #include <raikv/ev_publish.h>
 #include <raimd/md_types.h>
 
@@ -334,10 +335,13 @@ EvInboxTransport::dispatch_msg2( const void *msg,  size_t msg_len ) noexcept
     uint16_t     sublen = this->msg_in.msg->sublen;
     uint32_t     h      = this->msg_in.msg->subhash;
     this->msgs_recv++;
-    MsgFramePublish pub( sub, sublen, this->msg_in.msg, this->fd, h,
+    MsgFramePublish pub( sub, sublen, this->msg_in.msg, *this, h,
                          CABA_TYPE_ID, this->rte, this->rte.sub_route );
     d_ibx( "ibx dispatch( %.*s )\n", (int) pub.subject_len, pub.subject );
-    this->rte.sub_route.forward_msg( pub );
+    if ( this->msg_in.msg->caba.get_type() != CABA_MCAST )
+      this->rte.sub_route.forward_set( pub, this->rte.mgr.router_set );
+    else
+      this->rte.sub_route.forward_msg( pub );
   }
 }
 

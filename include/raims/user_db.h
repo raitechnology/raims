@@ -94,22 +94,21 @@ struct UserDB;
 struct NameSvc;
 union  NameInbox;
 struct UserRoute : public UserStateTest<UserRoute> {
-  static const uint32_t NO_RTE  = -1,
-                        NO_HOPS = -1;
-  UserBridge      & n;
-  TransportRoute  & rte;           /* transport */
-  uint32_t          mcast_fd,      /* fd src, tcp fd or pgm fd */
-                    inbox_fd,      /* inbox fd */
-                    state,         /* whether in route list */
-                    url_hash,      /* hash of ucast_url, mesh_url */
-                    /*hb_seqno,      * hb sequence on this transport */
-                    list_id;       /* the user route list ptr */
-  uint64_t          bytes_sent,    /* bytes sent ptp */
-                    msgs_sent;     /* msgs sent ptp */
-  StringVal         ucast_url,
-                    mesh_url;
-  const UserRoute * ucast_src;     /* route through url on another route */
-  UserRoute       * next,          /* link in route list */
+  static const  int32_t NO_RTE  = -1;
+  static const uint32_t NO_HOPS = -1;
+  UserBridge      & n;          /* owner of route */
+  TransportRoute  & rte;        /* transport of route */
+  kv::PeerId        mcast,      /* fd src, tcp fd or pgm fd */
+                    inbox;      /* inbox, may be the same as mcast */
+  uint32_t          state,      /* whether in route list */
+                    url_hash,   /* hash of ucast_url, mesh_url */
+                    list_id;    /* the user route list ptr */
+  uint64_t          bytes_sent, /* bytes sent ptp */
+                    msgs_sent;  /* msgs sent ptp */
+  StringVal         ucast_url,  /* if multicast pgm, ucast has url */
+                    mesh_url;   /* if mesh conn, mesh has url */
+  const UserRoute * ucast_src;  /* route through url on another route */
+  UserRoute       * next,       /* link in route list */
                   * back;
   void * operator new( size_t, void *ptr ) { return ptr; }
   UserRoute( UserBridge &u,  TransportRoute &r )
@@ -128,7 +127,6 @@ struct UserRoute : public UserStateTest<UserRoute> {
     this->ucast_url.zero();
     this->mesh_url.zero();
     this->url_hash   = 0;
-    /*this->hb_seqno   = 0;*/
     this->bytes_sent = 0;
     this->msgs_sent  = 0;
     this->ucast_src  = NULL;
@@ -146,8 +144,8 @@ struct UserRoute : public UserStateTest<UserRoute> {
     return this->is_set( DIRECT_LINK_STATE ) ? 0 : 1;
   }
   void reset( void ) {
-    this->mcast_fd = NO_RTE;
-    this->inbox_fd = NO_RTE;
+    this->mcast.fd = NO_RTE;
+    this->inbox.fd = NO_RTE;
     this->list_id  = NO_RTE;
     this->invalidate();
   }
@@ -562,13 +560,13 @@ struct UserDB {
                         uid_rtt;           /* uids with ping pending */
   /* system subjects after auth */
   kv::BloomRef          peer_bloom;      /* allow after auth (_S.JOIN, _X.HB) */
+  const kv::PeerId    & my_src;
 
   /* counters, seqnos */
   uint32_t              hb_interval,     /* seconds between _X.HB publish */
                         reliability,     /* seconds of send/recv window */
                         next_uid,        /* next_uid available */
                         free_uid_count,  /* num uids freed */
-                        my_src_fd,       /* my src fd */
                         uid_auth_count,  /* total trusted nodes */
                         uid_hb_count,    /* total hb / distance zero nones */
                         uid_ping_count,
@@ -599,7 +597,7 @@ struct UserDB {
   ServiceBuf            my_svc;          /* pub key for service */
 
   UserDB( kv::EvPoll &p,  ConfigTree::User &u, ConfigTree::Service &s,
-          SubDB &sdb,  StringTab &st,  EventRecord &ev,
+          const kv::PeerId &src,  SubDB &sdb,  StringTab &st,  EventRecord &ev,
           kv::BitSpace &rs ) noexcept;
   /* allocate from secure mem */
   void * alloc( size_t size ) {
@@ -635,52 +633,103 @@ struct UserDB {
   uint32_t next_tport_id( void ) const { return this->transport_tab.count; }
   uint32_t next_svc_id( uint32_t f ) const { return ( f & TPORT_IS_IPC ) ? 0 :
                                                     this->next_tport_id(); }
-  bool init( const CryptPass &pwd,  uint32_t my_fd, ConfigTree &tree ) noexcept;
+  bool init( const CryptPass &pwd,  ConfigTree &tree ) noexcept;
 
   void calc_hello_key( uint64_t start_time, const HmacDigest &user_hmac,
                        HashDigest &ha ) noexcept;
   void calc_secret_hmac( UserBridge &n,  PolyHmacDigest &secret_hmac ) noexcept;
 
-  void check_inbox_route( UserBridge &n,  UserRoute &u_rte ) noexcept;
+  void find_inbox_peer( UserBridge &n,  UserRoute &u_rte ) noexcept;
 
+  struct InboxPub {
+    UserBridge       & n;
+    const char       * sub;
+    size_t             sublen;
+    uint32_t           subj_hash;
+    const void       * msg;
+    size_t             msglen;
+    const void       * frag;
+    size_t             frag_size;
+    kv::BPData       * data;
+    const kv::PeerId * src_route;
+    UserRoute        * u_ptr;
+
+    InboxPub( UserBridge &dest,  const char *s,  size_t slen,
+              uint32_t h,  const void *m,  size_t mlen,
+              const void *f = NULL,  size_t fsize = 0 ) :
+      n( dest ), sub( s ), sublen( slen ), subj_hash( h ),
+      msg( m ), msglen( mlen ), frag( f ), frag_size( fsize ),
+      data( 0 ), src_route( 0 ), u_ptr( 0 ) {}
+  };
   /* use primary route for inbox */
   bool forward_to_primary_inbox( UserBridge &n,  InboxBuf &ibx,  uint32_t h,
-                                 const void *msg,  size_t msglen,
-                                 kv::BPData *data = NULL,
-                                 const void *frag = NULL,
-                                 size_t frag_size = 0,
-                                 uint32_t src_route = 0 ) {
-    if ( frag_size == 0 )
-      return this->forward_to_primary_inbox( n, ibx.buf, ibx.len(), h,
-                                             msg, msglen, data );
-    return this->forward_to_primary_inbox( n, ibx.buf, ibx.len(), h,
-                                           msg, msglen, data,
-                                           frag, frag_size, src_route );
+                                 const void *msg,  size_t msglen ) {
+    InboxPub p( n, ibx.buf, ibx.len(), h, msg, msglen );
+    p.src_route = &this->my_src;
+    p.u_ptr = n.primary( *this );
+    return this->forward_to( p );
   }
-  bool forward_to_primary_inbox( UserBridge &n,  const char *sub,  size_t sublen,
-                                 uint32_t h,  const void *msg,  size_t msglen,
-                                 kv::BPData *data = NULL ) noexcept;
-  bool forward_to_primary_inbox( UserBridge &n,  const char *sub,  size_t sublen,
+  bool forward_to_primary_inbox( UserBridge &n,  InboxBuf &ibx,  uint32_t h,
+                                 const void *msg,  size_t msglen,
+                                 const kv::PeerId &src_route  ) {
+    InboxPub p( n, ibx.buf, ibx.len(), h, msg, msglen );
+    p.src_route = &src_route;
+    p.u_ptr = n.primary( *this );
+    return this->forward_to( p );
+  }
+  bool forward_to_primary_inbox( UserBridge &n,  InboxBuf &ibx,  uint32_t h,
+                                 const void *msg,  size_t msglen,
+                                 kv::BPData *data,  const void *frag,
+                              size_t frag_size,  const kv::PeerId &src_route ) {
+    InboxPub p( n, ibx.buf, ibx.len(), h, msg, msglen, frag, frag_size );
+    p.data      = data;
+    p.src_route = &src_route;
+    p.u_ptr = n.primary( *this );
+    return this->forward_to( p );
+  }
+  bool forward_to_primary_inbox( UserBridge &n,  const char *sub, size_t sublen,
+                                uint32_t h,  const void *msg,  size_t msglen ) {
+    InboxPub p( n, sub, sublen, h, msg, msglen );
+    p.src_route = &this->my_src;
+    p.u_ptr = n.primary( *this );
+    return this->forward_to( p );
+  }
+  bool forward_to_primary_inbox( UserBridge &n,  const char *sub, size_t sublen,
                                  uint32_t h,  const void *msg,  size_t msglen,
                                  kv::BPData *data,  const void *frag,
-                               size_t frag_size,  uint32_t src_route ) noexcept;
+                               size_t frag_size, const kv::PeerId &src_route ) {
+    InboxPub p( n, sub, sublen, h, msg, msglen, frag, frag_size );
+    p.data = data;
+    p.src_route = &src_route;
+    p.u_ptr = n.primary( *this );
+    return this->forward_to( p );
+  }
   /* use route that request used (n.user_route) for reply */
   bool forward_to_inbox( UserBridge &n,  InboxBuf &ibx,  uint32_t h,
                          const void *msg, size_t msglen ) {
-    return this->forward_to_inbox( n, ibx.buf, ibx.len(), h, msg, msglen, NULL );
+    InboxPub p( n, ibx.buf, ibx.len(), h, msg, msglen );
+    p.src_route = &this->my_src;
+    p.u_ptr     = n.user_route;
+    return this->forward_to( p );
   }
   bool forward_to_inbox( UserBridge &n,  const char *sub,  size_t sublen,
                          uint32_t h,  const void *msg, size_t msglen,
-                         kv::BPData *data = NULL ) noexcept;
-  /* use u_rte for inbox */
-  bool forward_to( UserBridge &n,  const char *sub,  size_t sublen, 
+                         kv::BPData *data ) {
+    InboxPub p( n, sub, sublen, h, msg, msglen );
+    p.data      = data;
+    p.src_route = &this->my_src;
+    p.u_ptr     = n.user_route;
+    return this->forward_to( p );
+  }
+  bool forward_to( UserBridge &n,  const char *sub,  size_t sublen,
                    uint32_t h,  const void *msg, size_t msglen,
-                   UserRoute &u_rte,  kv::BPData *data ) noexcept;
-  /* use u_rte with fragments for inbox */
-  bool forward_to( UserBridge &n,  const char *sub,  size_t sublen,  uint32_t h,
-                   const void *msg,  size_t msglen,  kv::BPData *data,
-                   const void *frag,  size_t frag_size,
-                   uint32_t src_route ) noexcept;
+                   UserRoute *u_ptr ) {
+    InboxPub p( n, sub, sublen, h, msg, msglen );
+    p.src_route = &this->my_src;
+    p.u_ptr = u_ptr;
+    return this->forward_to( p );
+  }
+  bool forward_to( InboxPub &p ) noexcept;
 
   PeerEntry *make_peer( const StringVal &user, const StringVal &svc,
                         const StringVal &create,
@@ -750,10 +799,10 @@ struct UserDB {
   UserBridge * lookup_user( MsgFramePublish &pub,
                             const MsgHdrDecoder &dec ) noexcept;
   void add_user_route( UserBridge &n,  TransportRoute &rte,
-                       uint32_t fd,  const MsgHdrDecoder &dec,
+                       const kv::PeerId &pid,  const MsgHdrDecoder &dec,
                        const UserRoute *src ) noexcept;
   UserBridge * add_user( TransportRoute &rte,  const UserRoute *src,
-                         uint32_t fd,  const UserNonce &b_nonce,
+                         const kv::PeerId &pid,  const UserNonce &b_nonce,
                          PeerEntry &peer,  uint64_t start,
                          const MsgHdrDecoder &dec,
                          HashDigest &hello ) noexcept;
@@ -797,7 +846,10 @@ struct UserDB {
   UserBridge *close_source_route( uint32_t fd ) noexcept;
   void push_source_route( UserBridge &n ) noexcept;
   void push_user_route( UserBridge &n,  UserRoute &u_rte ) noexcept;
+  bool is_peer_sock_valid( const kv::PeerId &pid ) noexcept;
   void pop_source_route( UserBridge &n ) noexcept;
+  /*bool check_bloom_route( TransportRoute &rte,  uint32_t fd ) noexcept;
+  bool check_bloom_route2( void ) noexcept;*/
   void push_connected_user_route( UserBridge &n,  UserRoute &u_rte ) noexcept;
   void set_connected_user_route( UserBridge &n,  UserRoute &u_rte ) noexcept;
   void pop_user_route( UserBridge &n,  UserRoute &u_rte ) noexcept;

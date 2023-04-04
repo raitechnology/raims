@@ -363,10 +363,11 @@ struct InboxPublish : public MsgFragPublish {
                url_hash;
 
   InboxPublish( const char *subj,  size_t subj_len,  const void *data,
-                size_t data_len,  kv::RoutePublish &src_rt,  uint32_t src_fd,
-                uint32_t hash, uint32_t enc,  const char *url,  uint32_t uid,
-                uint32_t url_h,  const void *tr = NULL,  size_t tsz = 0 ) :
-    MsgFragPublish( subj, subj_len, data, data_len, src_rt, src_fd, hash,
+                size_t data_len,  kv::RoutePublish &src_rt,
+                const kv::PeerId &src, uint32_t hash, uint32_t enc,
+                const char *url,  uint32_t uid,  uint32_t url_h,
+                const void *tr = NULL,  size_t tsz = 0 ) :
+    MsgFragPublish( subj, subj_len, data, data_len, src_rt, src, hash,
                enc, tr, tsz ),
       peer_url( url ), peer_uid( uid ), url_hash( url_h ) {
     this->pub_type = 'I';

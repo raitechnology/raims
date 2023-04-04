@@ -306,6 +306,7 @@ TransportRoute::on_connect( kv::EvSocket &conn ) noexcept
       this->mgr.events.on_connect( this->tport_id, connect_type, is_encrypt );
     if ( ! this->connected.test_set( conn.fd ) )
       this->connect_count++;
+    /*this->user_db.check_bloom_route( *this, 0 );*/
   }
 }
 
@@ -552,8 +553,20 @@ ConnectMgr::connect( ConnectCtx &ctx ) noexcept
   cl->route_id = rte->sub_route.route_id;
   cl->encrypt  = ( ( ctx.opts & TCP_OPT_ENCRYPT ) != 0 );
   ctx.client   = cl;
-  if ( cl->connect( ctx.opts, &ctx, ai, ++this->next_timer ) )
+  if ( cl->connect( ctx.opts, &ctx, ai, ++this->next_timer ) ) {
+    if ( debug_conn ) {
+      uint32_t n = 0;
+      PeerAddrStr paddr;
+      char     url_buf[ 128 ];
+      paddr.set_addr( (struct sockaddr *) ai->ai_addr );
+      ::memcpy( url_buf, "tcp://", 6 );
+      ::memcpy( &url_buf[ 6 ], paddr.buf, paddr.len() );
+      n = 6 + paddr.len();
+      url_buf[ n ] = '\0';
+      rte->printf( "connect url %s\n", url_buf );
+    }
     return true;
+  }
   ctx.client = NULL;
   rte->on_shutdown( *cl, NULL, 0 );
   this->poll.push_free_list( cl );

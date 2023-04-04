@@ -303,6 +303,16 @@ UserDB::remove_adjacency( UserBridge &n ) noexcept
   this->clear_unknown_adjacency( n );
 }
 
+bool
+UserDB::is_peer_sock_valid( const PeerId &pid ) noexcept
+{
+  if ( (uint32_t) pid.fd > this->poll.maxfd )
+    return false;
+  if ( this->poll.sock[ pid.fd ] == NULL )
+    return false;
+  return pid.equals( *this->poll.sock[ pid.fd ] );
+}
+
 void
 UserDB::push_source_route( UserBridge &n ) noexcept
 {
@@ -311,23 +321,23 @@ UserDB::push_source_route( UserBridge &n ) noexcept
   for ( uint32_t i = 0; i < count; i++ ) {
     if ( (u_ptr = n.user_route_ptr( *this, i )) == NULL )
       break;
-    if ( u_ptr->is_valid() )
-      this->push_user_route( n, *u_ptr );
+    if ( u_ptr->is_valid() ) {
+      if ( this->is_peer_sock_valid( u_ptr->mcast ) )
+        this->push_user_route( n, *u_ptr );
+      else
+        this->pop_user_route( n, *u_ptr );
+    }
   }
 }
 
 void
 UserDB::push_user_route( UserBridge &n,  UserRoute &u_rte ) noexcept
 {
-  uint32_t fd = u_rte.mcast_fd;
-  if ( ! u_rte.is_valid() ) {
+  if ( ! u_rte.is_valid() || ! this->is_peer_sock_valid( u_rte.mcast ) ) {
     n.printe( "user route not valid\n" );
     return;
   }
-  if ( fd > this->poll.maxfd ) {
-    n.printe( "fd is invalid, tport %u\n", u_rte.rte.tport_id );
-    return;
-  }
+  uint32_t fd = (uint32_t) u_rte.mcast.fd;
   /* if the bcast route is valid */
   if ( ! u_rte.is_set( IN_ROUTE_LIST_STATE ) ) {
     UserRouteList  & list = this->route_list[ fd ];
@@ -354,13 +364,74 @@ UserDB::pop_source_route( UserBridge &n ) noexcept
   uint32_t count = (uint32_t) this->transport_tab.count;
   for ( uint32_t i = 0; i < count; i++ ) {
     UserRoute * u_ptr = n.user_route_ptr( *this, i );
-    if ( u_ptr == NULL )
-      break;
-    if ( u_ptr->is_valid() )
+    if ( u_ptr != NULL && u_ptr->is_valid() )
       this->pop_user_route( n, *u_ptr );
   }
 }
+#if 0
+bool
+UserDB::check_bloom_route( TransportRoute &rte,  uint32_t fd ) noexcept
+{
+  bool found = false, check_ok = true;
+  BloomRoute * b;
+  for ( b = rte.sub_route.bloom_list.hd( 0 ); b != NULL; b = b->next ) {
+    for ( uint32_t n = 0; n < b->nblooms; n++ ) {
+      if ( b->bloom[ n ] == &this->peer_bloom ) {
+        if ( b->r == fd )
+          found = true;
+        else {
+          rte.printf( "peer_bloom already has a route %u\n", b->r );
+          check_ok = false;
+        }
+      }
+    }
+  }
+  if ( ! found && fd != 0 ) {
+    rte.sub_route.create_bloom_route( fd, &this->peer_bloom, 0 );
+    rte.printf( "add peer bloom fd %u\n", fd );
+  }
+  check_ok &= this->check_bloom_route2();
+  return check_ok;
+}
 
+bool
+UserDB::check_bloom_route2( void ) noexcept
+{
+  uint32_t count = this->transport_tab.count;
+  bool check_ok = true;
+  for ( uint32_t i = 1; i < count; i++ ) {
+    TransportRoute *r = this->transport_tab[ i ];
+    BloomRoute * match_b = NULL, * b;
+    uint32_t     match_n = 0;
+    for ( b = r->sub_route.bloom_list.hd( 0 ); b != NULL; b = b->next ) {
+      if ( b->r > this->poll.maxfd || this->poll.sock[ b->r ] == NULL ) {
+        r->printf( "invalid peer_bloom fd=%u\n", b->r );
+        check_ok = false;
+      }
+      else {
+        uint32_t rid = this->poll.sock[ b->r ]->route_id;
+        if ( rid != (uint32_t) -1 && r->tport_id != rid ) {
+          r->printf( "invalid peer_bloom route_id rid=%u != fd=%u\n",
+                     this->poll.sock[ b->r ]->route_id, b->r );
+          check_ok = false;
+        }
+      }
+      for ( uint32_t n = 0; n < b->nblooms; n++ ) {
+        if ( b->bloom[ n ] == &this->peer_bloom ) {
+          if ( match_b != NULL ) {
+            r->printf( "duplicate peer_bloom fd=%u [ %u ] next=%u [ %u ]\n",
+                       b->r, n, match_b->r, match_n );
+            check_ok = false;
+          }
+          match_b = b;
+          match_n = n;
+        }
+      }
+    }
+  }
+  return check_ok;
+}
+#endif
 void
 UserDB::push_connected_user_route( UserBridge &n,  UserRoute &u_rte ) noexcept
 {
@@ -389,11 +460,12 @@ UserDB::push_connected_user_route( UserBridge &n,  UserRoute &u_rte ) noexcept
     this->adjacency_change.append( n.uid, rte.tport_id,
                                    this->link_state_seqno + 1, true );
   }
+  /*this->check_bloom_route( rte, 0 );*/
   if ( list.sys_route_refs++ == 0 ) {
     if ( debug_lnk )
       printf( "push sys_route %u\n", fd );
     rte.connected_auth.add( fd );
-
+    /*this->check_bloom_route( rte, fd );*/
     if ( ! this->peer_bloom.has_link( fd ) )
       rte.sub_route.create_bloom_route( fd, &this->peer_bloom, 0 );
   }
@@ -415,15 +487,15 @@ UserDB::push_connected_user_route( UserBridge &n,  UserRoute &u_rte ) noexcept
 void
 UserDB::set_connected_user_route( UserBridge &n,  UserRoute &u_rte ) noexcept
 {
-  if ( ! u_rte.is_valid() ) {
+  if ( ! u_rte.is_valid() || ! this->is_peer_sock_valid( u_rte.mcast ) ) {
     n.printe( "user route not valid\n" );
     return;
   }
   if ( u_rte.is_set( IN_ROUTE_LIST_STATE ) ) {
     if ( u_rte.hops() == 0 )
       return;
-    if ( u_rte.list_id != u_rte.mcast_fd ) {
-      uint32_t fd = u_rte.mcast_fd;
+    if ( u_rte.list_id != (uint32_t) u_rte.mcast.fd ) {
+      uint32_t fd = (uint32_t) u_rte.mcast.fd;
       if ( fd > this->poll.maxfd ) {
         n.printe( "fd is invalid, tport %u\n", u_rte.rte.tport_id );
         return;
@@ -482,6 +554,20 @@ UserDB::pop_user_route( UserBridge &n,  UserRoute &u_rte ) noexcept
       if ( --list.sys_route_refs == 0 ) {
         d_lnk( "pop sys_route %u\n", fd );
         rte.connected_auth.remove( fd );
+        BloomRoute *b = this->peer_bloom.get_bloom_by_fd( fd, 0 );
+        if ( b != NULL ) {
+          if ( debug_lnk )
+            rte.printf( "remove peer bloom fd %u\n", fd );
+          b->del_bloom_ref( &this->peer_bloom );
+          b->remove_if_empty();
+        }
+        else if ( debug_lnk ) {
+          rte.printf( "remove peer bloom fd %u not found\n", fd );
+        }
+      }
+      else if ( debug_lnk ) {
+        rte.printf( "pop_user_route fd %u sys_refs %u\n", fd,
+                    list.sys_route_refs );
       }
       if ( rte.oldest_uid == n.uid ) {
         uint64_t t = this->start_time;
@@ -531,6 +617,18 @@ UserDB::close_source_route( uint32_t fd ) noexcept
         return &n;
     }
 #endif
+  }
+  for ( uint32_t uid = 1; uid < this->next_uid; uid++ ) {
+    if ( this->bridge_tab.ptr[ uid ] == NULL )
+      continue;
+    UserBridge & n = *this->bridge_tab.ptr[ uid ];
+    for ( uint8_t i = 0; i < COST_PATH_COUNT; i++ ) {
+      if ( n.bloom_rt[ i ] != NULL && n.bloom_rt[ i ]->r == fd ) {
+        n.bloom_rt[ i ]->del_bloom_ref( &n.bloom );
+        n.bloom_rt[ i ]->remove_if_empty();
+        n.bloom_rt[ i ] = NULL;
+      }
+    }
   }
   return NULL;
 }
@@ -642,7 +740,7 @@ UserDB::send_adjacency_change( void ) noexcept
     if ( rte->connect_count > 0 && ! rte->is_set( TPORT_IS_IPC ) ) {
       if ( ! unique.superset( rte->uid_connected ) ) {
         EvPublish pub( Z_ADJ, Z_ADJ_SZ, NULL, 0, m.msg, m.len(),
-                       rte->sub_route, this->my_src_fd, adj_h,
+                       rte->sub_route, this->my_src, adj_h,
                        CABA_TYPE_ID, 'p' );
         rte->forward_to_connected( pub );
         unique.add( rte->uid_connected );

@@ -460,7 +460,12 @@ main( int argc, char *argv[] )
         tree->parameters.find( P_WORKING_DIRECTORY, wkdir, NULL );
         sess.fork_daemon( err_fd, wkdir );
       }
-      os_close( STDIN_FILENO );
+#ifndef _MSC_VER
+      int fd = ::open( "/dev/null", O_RDONLY );
+      ::dup2( fd, STDIN_FILENO );
+      ::close( fd );
+#endif
+      /*os_close( STDIN_FILENO );*/
     }
     sess.start();
     uint32_t idle = 0;

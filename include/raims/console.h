@@ -645,6 +645,8 @@ struct Console : public md::MDOutput, public SubOnMsg,
   bool on_log( kv::Logger &log ) noexcept;
   void flush_log( kv::Logger &log ) noexcept;
   bool colorize_log( ConsoleOutput *p,  const char *buf,  size_t len ) noexcept;
+  void add_output( ConsoleOutput *p ) noexcept;
+  void remove_output( ConsoleOutput *p ) noexcept;
   bool flush_output( ConsoleOutput *p ) noexcept;
   void get_valid_cmds( const ConsoleCmdString *&cmds, size_t &ncmds ) noexcept;
   void get_valid_help_cmds( const ConsoleCmdString *&cmds,
@@ -747,6 +749,7 @@ struct Console : public md::MDOutput, public SubOnMsg,
                   uint8_t path_select ) noexcept;
   void show_path( ConsoleOutput *p,  uint8_t path_select ) noexcept;
   void show_forward( ConsoleOutput *p,  uint8_t path_select ) noexcept;
+  void show_forward_all( ConsoleOutput *p ) noexcept;
   void show_fds( ConsoleOutput *p ) noexcept;
   void show_buffers( ConsoleOutput *p ) noexcept;
   void show_windows( ConsoleOutput *p ) noexcept;

@@ -162,7 +162,7 @@ struct IpcRteList : public kv::RouteNotify {
   virtual void on_repsub( kv::NotifyPattern &pat ) noexcept;
   virtual void on_reassert( uint32_t fd,  kv::RouteVec<kv::RouteSub> &sub_db,
                             kv::RouteVec<kv::RouteSub> &pat_db ) noexcept;
-  void send_listen( kv::EvSocket *src,  const char *subj,  size_t sublen,
+  void send_listen( const kv::PeerId &src,  const char *subj,  size_t sublen,
                     const char *reply,  size_t replen,  uint32_t refcnt,
                     int sub_flags ) noexcept;
 };
@@ -230,14 +230,15 @@ struct TransportRoute : public kv::EvSocket, public kv::EvConnectionNotify,
   StringVal               ucast_url,      /* url address of ucast ptp */
                           mesh_url,       /* url address of mesh listener */
                           conn_url;       /* url address of connection */
-  uint32_t                inbox_fd,       /* fd of ucast ptp */
-                          mcast_fd,       /* fd of mcast pgm */
-                          mesh_url_hash,  /* hash of mesh_url */
+  kv::PeerId              inbox,          /* fd of ucast ptp */
+                          mcast;          /* fd of mcast pgm */
+  uint32_t                mesh_url_hash,  /* hash of mesh_url */
                           conn_hash,      /* hash of connecting url */
                           ucast_url_hash, /* hash of outgoing inbox url */
                           oldest_uid;     /* which uid is oldest connect */
   IpcRteList            * ext;            /* list of ipc listeners */
   MeshCsumCache         * mesh_cache;     /* cache of hb mesh csum */
+  uint32_t                initial_cost[ COST_PATH_COUNT ];
   ConfigTree::Service   & svc;            /* service definition */
   ConfigTree::Transport & transport;      /* transport definition */
 

@@ -632,11 +632,11 @@ struct MsgFramePublish : public kv::EvPublish {
   MsgHdrDecoder    dec;   /* hdr field decoder */
 
   MsgFramePublish( const char *subj,  size_t subj_len,  CabaMsg *m,
-                   uint32_t src_fd,  uint32_t hash,  uint32_t enc,
+                   const kv::PeerId &src,  uint32_t hash,  uint32_t enc,
                    TransportRoute &r,  kv::RoutePublish &sub_rt ) :
     EvPublish( subj, subj_len, NULL, 0,
                &((uint8_t *) m->msg_buf)[ m->msg_off ], m->msg_end - m->msg_off,
-               sub_rt, src_fd, hash, enc, 'X' ),
+               sub_rt, src, hash, enc, 'X' ),
     n( 0 ), rte( r ), status( FRAME_STATUS_UNKNOWN ), flags( 0 ), dec( m ) {}
 
   MsgFramePublish( kv::EvPublish &pub,  CabaMsg *m, TransportRoute &r ) :
@@ -660,10 +660,11 @@ struct MsgFragPublish : public kv::EvPublish {
   size_t       trail_sz;
 
   MsgFragPublish( const char *subj,  size_t subj_len,  const void *msg,
-                  size_t msg_len,  kv::RoutePublish &sub_rt,  uint32_t src_fd,
-                  uint32_t hash,  uint32_t enc,  const void *tr,  size_t tsz ) :
+                  size_t msg_len,  kv::RoutePublish &sub_rt,
+                  const kv::PeerId &src, uint32_t hash,  uint32_t enc,
+                  const void *tr,  size_t tsz ) :
     EvPublish( subj, subj_len, NULL, 0, msg, msg_len,
-               sub_rt, src_fd, hash, enc, 'f' ),
+               sub_rt, src, hash, enc, 'f' ),
     trail( tr ), trail_sz( tsz ) {}
 };
 

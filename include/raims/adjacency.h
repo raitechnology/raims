@@ -352,12 +352,15 @@ struct AdjDistance : public md::MDMsgMem {
   void calc_forward_cache( ForwardCache &fwd,  uint32_t src_uid,
                            uint8_t path_select ) noexcept;
   bool test_forward_midpt( uint32_t midpt_uid,  uint32_t target_uid,
-                           uint8_t path_select ) noexcept;
+                           uint8_t path_select,  uint32_t cnt ) noexcept;
   uint32_t adjacency_count( uint32_t uid ) const noexcept;
   AdjacencySpace * adjacency_set( uint32_t uid,  uint32_t i ) const noexcept;
   /*uint64_t adjacency_start( uint32_t uid ) const noexcept;*/
   void push_inc_list( uint32_t uid ) noexcept;
-  bool find_inconsistent( UserBridge *&from, UserBridge *&to ) noexcept;
+  bool find_inconsistent( UserBridge *&from,  UserBridge *&to ) noexcept;
+  bool find_inconsistent2( UserBridge *&from,  UserBridge *&to ) noexcept;
+  bool match_target_set( uint32_t source_uid,  uint32_t target_uid,
+                         AdjacencySpace &set ) noexcept;
   uint32_t uid_refs( uint32_t from,  uint32_t to ) noexcept;
   uint32_t inbound_refs( uint32_t to ) noexcept;
   uint32_t outbound_refs( uint32_t from ) noexcept;

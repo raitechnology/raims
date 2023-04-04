@@ -174,6 +174,103 @@ AdjDistance::push_inc_list( uint32_t uid ) noexcept
 }
 
 bool
+AdjDistance::find_inconsistent2( UserBridge *&from,
+                                 UserBridge *&to ) noexcept
+
+{
+  uint32_t uid;
+  this->clear_cache_if_dirty();
+  if ( ! this->inc_running ) {
+    this->inc_tl = this->max_uid;
+    this->inc_hd = this->max_uid;
+    this->miss_tos = 0;
+    this->inc_visit.zero( this->max_uid );
+    this->inc_running = true;
+    this->found_inconsistency = false;
+
+    size_t count = this->user_db.transport_tab.count;
+    for ( size_t i = 0; i < count; i++ ) {
+      AdjacencySpace &set = this->user_db.transport_tab.ptr[ i ]->uid_connected;
+      for ( bool ok = set.first( uid ); ok; ok = set.next( uid ) ) {
+        if ( ! this->inc_visit.test_set( uid ) )
+          this->push_inc_list( uid );
+      }
+    }
+  }
+  while ( this->miss_tos == 0 && this->inc_hd != this->inc_tl ) {
+    uint32_t source_uid = this->inc_list[ --this->inc_tl ];
+    uint32_t count      = this->adjacency_count( source_uid );
+    for ( uint32_t tport_id = 0; tport_id < count; tport_id++ ) {
+      AdjacencySpace *set = this->adjacency_set( source_uid, tport_id );
+      uint32_t target_uid;
+      bool b;
+      if ( set == NULL )
+        continue;
+      for ( b = set->first( target_uid ); b; b = set->next( target_uid ) ) {
+        if ( target_uid == 0 )
+          continue;
+        if ( ! this->inc_visit.test_set( target_uid ) )
+          this->push_inc_list( target_uid );
+        if ( ! this->match_target_set( source_uid, target_uid, *set ) ) {
+          UidMissing & m = this->missing[ this->miss_tos++ ];
+          m.uid  = source_uid;
+          m.uid2 = target_uid;
+        }
+      }
+    }
+  }
+  if ( this->miss_tos > 0 ) { /* missing links */
+    UidMissing & m = this->missing[ --this->miss_tos ];
+    from = this->user_db.bridge_tab.ptr[ m.uid ];
+    to   = this->user_db.bridge_tab.ptr[ m.uid2 ];
+    this->found_inconsistency = true;
+    return true;
+  }
+  while ( this->inc_visit.set_first( uid, this->max_uid ) ) {
+    UserBridge * n = this->user_db.bridge_tab.ptr[ uid ];
+    if ( n == NULL )
+      continue;
+    if ( n->is_set( AUTHENTICATED_STATE ) ) {
+      from = n;
+      to   = NULL;
+      this->found_inconsistency = true;
+      return true;
+    }
+  }
+  from = NULL;
+  to   = NULL;
+  this->inc_running = false;
+  this->inc_run_count++;
+  this->last_run_mono = kv::current_monotonic_time_ns();
+  return false;
+}
+
+bool
+AdjDistance::match_target_set( uint32_t source_uid,  uint32_t target_uid,
+                               AdjacencySpace &set ) noexcept
+{
+  AdjacencySpace *set2;
+  uint32_t count2 = this->adjacency_count( target_uid );
+  if ( target_uid == set.rem_uid ) {
+    if ( set.rem_tport_id < count2 ) {
+      set2 = this->adjacency_set( target_uid, set.rem_tport_id );
+      if ( set2 != NULL && set2->is_member( source_uid ) &&
+           ::memcmp( set.cost, set2->cost, sizeof( set.cost ) ) == 0 )
+        return true;
+    }
+  }
+  else {
+    for ( uint32_t tport_id = 0; tport_id < count2; tport_id++ ) {
+      set2 = this->adjacency_set( target_uid, tport_id );
+      if ( set2 != NULL && set2->is_member( source_uid ) &&
+           ::memcmp( set.cost, set2->cost, sizeof( set.cost ) ) == 0 )
+        return true;
+    }
+  }
+  return false;
+}
+
+bool
 AdjDistance::find_inconsistent( UserBridge *&from,
                                 UserBridge *&to ) noexcept
 {
@@ -809,8 +906,12 @@ AdjDistance::calc_forward_cache( ForwardCache &fwd,  uint32_t src_uid,
  * me(uid:0) -> midpt_uid {tport, tport, tport} -> target_uid */
 bool
 AdjDistance::test_forward_midpt( uint32_t midpt_uid,  uint32_t target_uid,
-                                 uint8_t path_select ) noexcept
+                                 uint8_t path_select,  uint32_t cnt ) noexcept
 {
+  if ( cnt > this->max_uid ) {
+    printf( "test midpt recursion cnt=%u\n", cnt );
+    return false;
+  }
   ForwardCache fwd;
   this->calc_forward_cache( fwd, 0, midpt_uid, path_select );
   if ( fwd.fwd_count == 0 )
@@ -832,7 +933,7 @@ AdjDistance::test_forward_midpt( uint32_t midpt_uid,  uint32_t target_uid,
       }
     }
     for ( ok = set->first( src_uid ); ok; ok = set->next( src_uid ) ) {
-      if ( this->test_forward_midpt( src_uid, target_uid, path_select ) )
+      if ( this->test_forward_midpt( src_uid, target_uid, path_select, cnt+1 ) )
         return true;
     }
   }
@@ -925,13 +1026,13 @@ AdjDistance::calc_path( ForwardCache &fwd,  uint8_t path_select ) noexcept
         }
         tport_id = path[ uid ].tport;
         src_uid  = path[ uid ].src_uid;
-        if ( ! this->test_forward_midpt( src_uid, uid, path_select ) ) {
+        if ( ! this->test_forward_midpt( src_uid, uid, path_select, 0 ) ) {
           d_adj( "  midpoint failed\n" );
           for ( uint32_t i = 0; i < asp.count; i++ ) {
             UidSrcPath & p = asp.ptr[ i ];
             tport_id = p.tport;
             src_uid  = p.src_uid;
-            if ( this->test_forward_midpt( src_uid, uid, path_select ) ) {
+            if ( this->test_forward_midpt( src_uid, uid, path_select, 0 ) ) {
               d_adj( "  mid uid %s.%u path %u tport %u cost %u src_uid %s.%u\n",
                      this->uid_user( uid ), uid, path_select, tport_id, cost,
                      this->uid_user( src_uid ), src_uid );
