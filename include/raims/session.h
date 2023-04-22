@@ -315,7 +315,7 @@ struct SessionMgr : public kv::EvSocket, public kv::BPData {
               ConfigTree::User &u,  ConfigTree::Service &s,
               StringTab &st,  ConfigStartup &start ) noexcept;
   int init_sock( void ) noexcept;
-  bool init_param( void ) noexcept;
+  bool load_parameters( void ) noexcept;
   bool add_transport( ConfigTree::Transport &t,  bool is_listener ) noexcept;
   bool add_transport2( ConfigTree::Transport &t,  bool is_listener,
                        TransportRoute *&rte ) noexcept;

@@ -2,6 +2,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#define __STDC_FORMAT_MACROS
+#include <inttypes.h>
 #include <raims/ev_tcp_transport.h>
 #include <raims/session.h>
 #include <raims/transport.h>
@@ -65,6 +67,31 @@ EvTcpTransportOpts::parse( ConfigTree::Transport &tport,
     this->opts &= ~kv::OPT_CONNECT_NB;
 }
 
+int
+EvTcpTransportParameters::get_listen_port( ConfigTree::Transport &tport ) noexcept
+{
+  ConfigTree::ParametersList no_hosts;
+  char tmp[ MAX_TCP_HOST_LEN ];
+  int  port = 0, default_port = 0;
+
+  tport.get_route_int( R_PORT, default_port );
+
+  ConfigTree::StringPairArray el;
+  tport.get_route_pairs( R_LISTEN, el );
+  if ( el.count == 0 )
+    tport.get_route_pairs( R_DEVICE, el );
+
+  for ( size_t i = 0; i < el.count; i++ ) {
+    const char * hostp = el[ i ]->value.val;
+    size_t len  = sizeof( tmp );
+    port = tport.get_host_port( hostp, tmp, len, no_hosts );
+    if ( port != 0 )
+      return port;
+  }
+  return default_port;
+}
+
+
 void
 EvTcpTransportParameters::parse_tport( ConfigTree::Transport &tport,
                                        int ptype,  SessionMgr &mgr ) noexcept
@@ -86,11 +113,7 @@ EvTcpTransportParameters::parse_tport( ConfigTree::Transport &tport,
   tport.get_route_int( R_PORT, port2 );
   this->default_port = port2;
   for ( size_t i = 0; i < el.count; i++ ) {
-    const char * hostp;
-    if ( i < el.count )
-      hostp = el[ i ]->value.val;
-    else
-      hostp = NULL;
+    const char * hostp = el[ i ]->value.val;
     tmp[ 0 ] = '\0';
     size_t len  = sizeof( tmp );
     int    port = tport.get_host_port( hostp, tmp, len, mgr.tree.hosts );
@@ -285,7 +308,7 @@ EvTcpTransport::dispatch_msg( void ) noexcept
   MsgFramePublish pub( sub, sublen, this->msg_in.msg, *this, h,
                        (uint8_t) CABA_TYPE_ID, *this->rte,
                        this->rte->sub_route );
-  d_tcp( "< ev_tcp(%s) dispatch %.*s (%lu)\n", this->rte->name,
+  d_tcp( "< ev_tcp(%s) dispatch %.*s (%" PRIu64 ")\n", this->rte->name,
          (int) pub.subject_len, pub.subject, this->msgs_recv + 1 );
   this->msgs_recv++;
   BPData * data = NULL;
@@ -367,7 +390,7 @@ bool
 EvTcpTransport::fwd_msg( EvPublish &pub ) noexcept
 {
   uint32_t idx = 0;
-  d_tcp( "> ev_tcp(%s) fwd %.*s (%lu)\n", this->rte->name,
+  d_tcp( "> ev_tcp(%s) fwd %.*s (%" PRIu64 ")\n", this->rte->name,
           (int) pub.subject_len, pub.subject, this->msgs_sent + 1 );
 #if 0
   if ( pub.msg_len > 0x38 ) {

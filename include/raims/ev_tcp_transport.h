@@ -126,6 +126,7 @@ struct EvTcpTransportParameters : public EvTcpTransportOpts {
   EvTcpTransportParameters() : default_port( 0 ) {}
   void parse_tport( ConfigTree::Transport &tport,  int ptype,
                     SessionMgr &mgr ) noexcept;
+  static int get_listen_port( ConfigTree::Transport &tport ) noexcept;
 };
 
 struct EvTcpTransportClient : public EvTcpTransport {

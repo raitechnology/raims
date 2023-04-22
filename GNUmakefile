@@ -1,10 +1,10 @@
-# defines a directory for build, for example, RH6_x86_64
+# raims makefile
 lsb_dist     := $(shell if [ -f /etc/os-release ] ; then \
-		  grep '^NAME=' /etc/os-release | sed 's/.*=\"//' | sed 's/ .*//' ; \
+                  grep '^NAME=' /etc/os-release | sed 's/.*=[\"]*//' | sed 's/[ \"].*//' ; \
                   elif [ -x /usr/bin/lsb_release ] ; then \
                   lsb_release -is ; else echo Linux ; fi)
 lsb_dist_ver := $(shell if [ -f /etc/os-release ] ; then \
-		  grep '^VERSION=' /etc/os-release | sed 's/.*=\"//' | sed 's/ .*//' | sed 's/\"//' ; \
+		  grep '^VERSION=' /etc/os-release | sed 's/.*=[\"]*//' | sed 's/[ \"].*//' ; \
                   elif [ -x /usr/bin/lsb_release ] ; then \
                   lsb_release -rs | sed 's/[.].*//' ; else uname -r | sed 's/[-].*//' ; fi)
 #lsb_dist     := $(shell if [ -x /usr/bin/lsb_release ] ; then lsb_release -is ; else echo Linux ; fi)
@@ -36,281 +36,356 @@ endif
 ifeq (-a,$(findstring -a,$(port_extra)))
   default_cflags := -fsanitize=address -ggdb -O3
 endif
-
+ifeq (-mingw,$(findstring -mingw,$(port_extra)))
+  CC    := /usr/bin/x86_64-w64-mingw32-gcc
+  CXX   := /usr/bin/x86_64-w64-mingw32-g++
+  mingw := true
+endif
+# msys2 using ucrt64
+ifeq (MSYS2,$(lsb_dist))
+  mingw := true
+endif
 CC          ?= gcc
 CXX         ?= g++
-cc          := $(CC)
+cc          := $(CC) -std=c11
 cpp         := $(CXX)
-# if not linking libstdc++
-ifdef NO_STL
-cppflags    := -std=c++11 -fno-rtti -fno-exceptions
-cpplink     := $(CC)
-else
-cppflags    := -std=c++11
-cpplink     := $(CXX)
-endif
 arch_cflags := -mavx -maes -fno-omit-frame-pointer
 gcc_wflags  := -Wall -Wextra -Werror
-fpicflags   := -fPIC
-soflag      := -shared
 
+# if windows cross compile
+ifeq (true,$(mingw))
+dll         := dll
+exe         := .exe
+soflag      := -shared -Wl,--subsystem,windows
+fpicflags   := -fPIC -DMS_SHARED
+sock_lib    := -lcares -lssl -lcrypto -lws2_32 -lwinmm -liphlpapi
+dynlink_lib := -lpcre2-8 -lpcre2-32
+NO_STL      := 1
+else
+dll         := so
+exe         :=
+soflag      := -shared
+fpicflags   := -fPIC
+thread_lib  := -pthread -lrt
+sock_lib    := -lcares -lssl -lcrypto
+dynlink_lib := -lpcre2-8 -lpcre2-32
+endif
+# make apple shared lib
+ifeq (Darwin,$(lsb_dist)) 
+dll         := dylib
+endif
 # rpmbuild uses RPM_OPT_FLAGS
-CFLAGS := $(default_cflags)
-#RPM_OPT_FLAGS ?= $(default_cflags)
-#CFLAGS ?= $(RPM_OPT_FLAGS)
+ifeq ($(RPM_OPT_FLAGS),)
+CFLAGS ?= $(default_cflags)
+else
+CFLAGS ?= $(RPM_OPT_FLAGS)
+endif
 cflags := $(gcc_wflags) $(CFLAGS) $(arch_cflags)
 
-# where to find the raids/xyz.h files
-INCLUDES    ?= -Iinclude -Iraikv/include -Iraimd/include -Iraids/include -Ilinecook/include
-includes    := $(INCLUDES)
-DEFINES     ?=
-defines     := $(DEFINES)
-cpp_lnk     :=
-sock_lib    :=
-math_lib    := -lm
-thread_lib  := -pthread -lrt
+INCLUDES  ?= -Iinclude
+#-Iraikv/include -Iraimd/include -Iraids/include -Ilinecook/include
+DEFINES   ?=
+includes  := $(INCLUDES)
+defines   := $(DEFINES)
+
+# if not linking libstdc++
+ifdef NO_STL
+cppflags  := -std=c++11 -fno-rtti -fno-exceptions
+cpplink   := $(CC)
+else
+cppflags  := -std=c++11
+cpplink   := $(CXX)
+endif
+
+rpath     := -Wl,-rpath,$(pwd)/$(libd)
+math_lib  := -lm
 
 # test submodules exist (they don't exist for dist_rpm, dist_dpkg targets)
-have_md_submodule     := $(shell if [ -f ./raimd/GNUmakefile ]; then echo yes; else echo no; fi )
-have_dec_submodule    := $(shell if [ -f ./raimd/libdecnumber/GNUmakefile ]; then echo yes; else echo no; fi )
-have_kv_submodule     := $(shell if [ -f ./raikv/GNUmakefile ]; then echo yes; else echo no; fi )
-have_ds_submodule     := $(shell if [ -f ./raids/GNUmakefile ]; then echo yes; else echo no; fi )
-have_lc_submodule     := $(shell if [ -f ./linecook/GNUmakefile ]; then echo yes; else echo no; fi )
-have_h3_submodule     := $(shell if [ -f ./raids/h3/GNUmakefile ]; then echo yes; else echo no; fi )
-have_rdb_submodule    := $(shell if [ -f ./raids/rdbparser/GNUmakefile ]; then echo yes; else echo no; fi )
-have_pgm_submodule    := $(shell if [ -f ./openpgm/GNUmakefile ]; then echo yes; else echo no; fi )
-have_sassrv_submodule := $(shell if [ -f ./sassrv/GNUmakefile ]; then echo yes; else echo no; fi )
-have_natsmd_submodule := $(shell if [ -f ./natsmd/GNUmakefile ]; then echo yes; else echo no; fi )
+test_makefile = $(shell if [ -f ./$(1)/GNUmakefile ] ; then echo ./$(1) ; \
+                        elif [ -f ../$(1)/GNUmakefile ] ; then echo ../$(1) ; fi)
+
+md_home     := $(call test_makefile,raimd)
+dec_home    := $(call test_makefile,libdecnumber)
+kv_home     := $(call test_makefile,raikv)
+ds_home     := $(call test_makefile,raids)
+lc_home     := $(call test_makefile,linecook)
+h3_home     := $(call test_makefile,h3)
+rdb_home    := $(call test_makefile,rdbparser)
+pgm_home    := $(call test_makefile,openpgm)
+sassrv_home := $(call test_makefile,sassrv)
+natsmd_home := $(call test_makefile,natsmd)
+lzf_home    := $(call test_makefile,lzf)
+
+ifeq (,$(dec_home))
+dec_home    := $(call test_makefile,$(md_home)/libdecnumber)
+endif
+ifeq (,$(h3_home))
+h3_home     := $(call test_makefile,$(ds_home)/h3)
+endif
+ifeq (,$(rdb_home))
+rdb_home    := $(call test_makefile,$(ds_home)/rdbparser)
+endif
+ifeq (,$(lzf_home))
+lzf_home    := $(call test_makefile,$(rdb_home)/lzf)
+endif
 
 lnk_lib     := $(libd)/libraims.a
 dlnk_lib    :=
 lnk_dep     := $(libd)/libraims.a
 dlnk_dep    :=
 
-ifeq (yes,$(have_ds_submodule))
-ds_lib      := raids/$(libd)/libraids.a
-ds_dll      := raids/$(libd)/libraids.so
+ifneq (,$(ds_home))
+ds_lib      := $(ds_home)/$(libd)/libraids.a
+ds_dll      := $(ds_home)/$(libd)/libraids.$(dll)
 lnk_lib     += $(ds_lib)
 lnk_dep     += $(ds_lib)
-dlnk_lib    += -Lraids/$(libd) -lraids
+dlnk_lib    += -L$(ds_home)/$(libd) -lraids
 dlnk_dep    += $(ds_dll)
-rpath1       = ,-rpath,$(pwd)/raids/$(libd)
+rpath1       = ,-rpath,$(pwd)/$(ds_home)/$(libd)
+ds_includes  = -I$(ds_home)/include
 else
 lnk_lib     += -lraids
 dlnk_lib    += -lraids
 endif
 
-ifeq (yes,$(have_md_submodule))
-md_lib      := raimd/$(libd)/libraimd.a
-md_dll      := raimd/$(libd)/libraimd.so
+ifneq (,$(md_home))
+md_lib      := $(md_home)/$(libd)/libraimd.a
+md_dll      := $(md_home)/$(libd)/libraimd.$(dll)
 lnk_lib     += $(md_lib)
 lnk_dep     += $(md_lib)
-dlnk_lib    += -Lraimd/$(libd) -lraimd
+dlnk_lib    += -L$(md_home)/$(libd) -lraimd
 dlnk_dep    += $(md_dll)
-rpath2       = ,-rpath,$(pwd)/raimd/$(libd)
+rpath2       = ,-rpath,$(pwd)/$(md_home)/$(libd)
+includes    += -I$(md_home)/include
 else
 lnk_lib     += -lraimd
 dlnk_lib    += -lraimd
 endif
 
-ifeq (yes,$(have_dec_submodule))
-dec_lib     := raimd/libdecnumber/$(libd)/libdecnumber.a
-dec_dll     := raimd/libdecnumber/$(libd)/libdecnumber.so
+ifneq (,$(dec_home))
+dec_lib     := $(dec_home)/$(libd)/libdecnumber.a
+dec_dll     := $(dec_home)/$(libd)/libdecnumber.$(dll)
 lnk_lib     += $(dec_lib)
 lnk_dep     += $(dec_lib)
-dlnk_lib    += -Lraimd/libdecnumber/$(libd) -ldecnumber
+dlnk_lib    += -L$(dec_home)/$(libd) -ldecnumber
 dlnk_dep    += $(dec_dll)
-rpath3       = ,-rpath,$(pwd)/raimd/libdecnumber/$(libd)
+rpath3       = ,-rpath,$(pwd)/$(dec_home)/$(libd)
+dec_includes = -I$(dec_home)/include
 else
 lnk_lib     += -ldecnumber
 dlnk_lib    += -ldecnumber
 endif
 
-ifeq (yes,$(have_lc_submodule))
-lc_lib      := linecook/$(libd)/liblinecook.a
-lc_dll      := linecook/$(libd)/liblinecook.so
+ifneq (,$(lc_home))
+lc_lib      := $(lc_home)/$(libd)/liblinecook.a
+lc_dll      := $(lc_home)/$(libd)/liblinecook.$(dll)
 lnk_lib     += $(lc_lib)
 lnk_dep     += $(lc_lib)
-dlnk_lib    += -Llinecook/$(libd) -llinecook
+dlnk_lib    += -L$(lc_home)/$(libd) -llinecook
 dlnk_dep    += $(lc_dll)
-rpath4       = ,-rpath,$(pwd)/linecook/$(libd)
+rpath4       = ,-rpath,$(pwd)/$(lc_home)/$(libd)
+lc_includes  = -I$(lc_home)/include
 else
 lnk_lib     += -llinecook
 dlnk_lib    += -llinecook
 endif
 
-ifeq (yes,$(have_h3_submodule))
-h3_lib      := raids/h3/$(libd)/libh3.a
-h3_dll      := raids/h3/$(libd)/libh3.so
+ifneq (,$(h3_home))
+h3_lib      := $(h3_home)/$(libd)/libh3.a
+h3_dll      := $(h3_home)/$(libd)/libh3.$(dll)
 lnk_lib     += $(h3_lib)
 lnk_dep     += $(h3_lib)
-dlnk_lib    += -Lraids/h3/$(libd) -lh3
+dlnk_lib    += -L$(h3_home)/$(libd) -lh3
 dlnk_dep    += $(h3_dll)
-rpath5       = ,-rpath,$(pwd)/raids/h3/$(libd)
+rpath5       = ,-rpath,$(pwd)/$(h3_home)/$(libd)
+h3_includes  = -I$(h3_home)/src/h3lib/include
 else
 lnk_lib     += -lh3
 dlnk_lib    += -lh3
 endif
 
-ifeq (yes,$(have_rdb_submodule))
-rdb_lib     := raids/rdbparser/$(libd)/librdbparser.a
-rdb_dll     := raids/rdbparser/$(libd)/librdbparser.so
+ifneq (,$(rdb_home))
+rdb_lib     := $(rdb_home)/$(libd)/librdbparser.a
+rdb_dll     := $(rdb_home)/$(libd)/librdbparser.$(dll)
 lnk_lib     += $(rdb_lib)
 lnk_dep     += $(rdb_lib)
-dlnk_lib    += -Lraids/rdbparser/$(libd) -lrdbparser
+dlnk_lib    += -L$(rdb_home)/$(libd) -lrdbparser
 dlnk_dep    += $(rdb_dll)
-rpath6       = ,-rpath,$(pwd)/raids/rdbparser/$(libd)
+rpath6       = ,-rpath,$(pwd)/$(rdb_home)/$(libd)
+rdb_includes = -I$(rdb_home)/include
 else
 lnk_lib     += -lrdbparser
 dlnk_lib    += -lrdbparser
 endif
 
-ifeq (yes,$(have_kv_submodule))
-kv_lib      := raikv/$(libd)/libraikv.a
-kv_dll      := raikv/$(libd)/libraikv.so
+ifneq (,$(kv_home))
+kv_lib      := $(kv_home)/$(libd)/libraikv.a
+kv_dll      := $(kv_home)/$(libd)/libraikv.$(dll)
 lnk_lib     += $(kv_lib)
 lnk_dep     += $(kv_lib)
-dlnk_lib    += -Lraikv/$(libd) -lraikv
+dlnk_lib    += -L$(kv_home)/$(libd) -lraikv
 dlnk_dep    += $(kv_dll)
-rpath7       = ,-rpath,$(pwd)/raikv/$(libd)
+rpath7       = ,-rpath,$(pwd)/$(kv_home)/$(libd)
+includes    += -I$(kv_home)/include
 else
 lnk_lib     += -lraikv
 dlnk_lib    += -lraikv
 endif
 
-ifeq (yes,$(have_pgm_submodule))
-pgm_lib     := openpgm/$(libd)/libopenpgm_st.a
-pgm_dll     := openpgm/$(libd)/libopenpgm_st.so
+ifneq (,$(pgm_home))
+pgm_lib     := $(pgm_home)/$(libd)/libopenpgm_st.a
+pgm_dll     := $(pgm_home)/$(libd)/libopenpgm_st.$(dll)
 lnk_lib     += $(pgm_lib)
 lnk_dep     += $(pgm_lib)
-dlnk_lib    += -Lopenpgm/$(libd) -lopenpgm_st
+dlnk_lib    += -L$(pgm_home)/$(libd) -lopenpgm_st
 dlnk_dep    += $(pgm_dll)
-rpath8       = ,-rpath,$(pwd)/openpgm/$(libd)
-includes    += -Iopenpgm/openpgm/pgm/include
+rpath8       = ,-rpath,$(pwd)/$(pgm_home)/$(libd)
+pgm_includes = -I$(pgm_home)/openpgm/pgm/include
 else
 lnk_lib     += -lopenpgm_st
 dlnk_lib    += -lopenpgm_st
 endif
 
-ifeq (yes,$(have_sassrv_submodule))
-sassrv_lib  := sassrv/$(libd)/libsassrv.a
-sassrv_dll  := sassrv/$(libd)/libsassrv.so
+ifneq (,$(sassrv_home))
+sassrv_lib  := $(sassrv_home)/$(libd)/libsassrv.a
+sassrv_dll  := $(sassrv_home)/$(libd)/libsassrv.$(dll)
 lnk_lib     += $(sassrv_lib)
 lnk_dep     += $(sassrv_lib)
-dlnk_lib    += -Lsassrv/$(libd) -lsassrv
+dlnk_lib    += -L$(sassrv_home)/$(libd) -lsassrv
 dlnk_dep    += $(sassrv_dll)
-rpath9       = ,-rpath,$(pwd)/sassrv/$(libd)
-includes    += -Isassrv/include
+rpath9       = ,-rpath,$(pwd)/$(sassrv_home)/$(libd)
+sassrv_includes = -I$(sassrv_home)/include
 else
 lnk_lib     += -lsassrv
 dlnk_lib    += -lsassrv
 endif
 
-ifeq (yes,$(have_natsmd_submodule))
-natsmd_lib  := natsmd/$(libd)/libnatsmd.a
-natsmd_dll  := natsmd/$(libd)/libnatsmd.so
+ifneq (,$(natsmd_home))
+natsmd_lib  := $(natsmd_home)/$(libd)/libnatsmd.a
+natsmd_dll  := $(natsmd_home)/$(libd)/libnatsmd.$(dll)
 lnk_lib     += $(natsmd_lib)
 lnk_dep     += $(natsmd_lib)
-dlnk_lib    += -Lnatsmd/$(libd) -lnatsmd
+dlnk_lib    += -L$(natsmd_home)/$(libd) -lnatsmd
 dlnk_dep    += $(natsmd_dll)
-rpath10      = ,-rpath,$(pwd)/natsmd/$(libd)
-includes    += -Inatsmd/include
+rpath10      = ,-rpath,$(pwd)/$(natsmd_home)/$(libd)
+natsmd_includes = -I$(natsmd_home)/include
 else
 lnk_lib     += -lnatsmd
 dlnk_lib    += -lnatsmd
 endif
 
-lnk_lib     += -lpcre2-32 -lpcre2-8 -llzf -lssl -lcrypto -lcares
-dlnk_lib    += -lpcre2-32 -lpcre2-8 -llzf -lssl -lcrypto -lcares
-rpath       := -Wl,-rpath,$(pwd)/$(libd)$(rpath1)$(rpath2)$(rpath3)$(rpath4)$(rpath5)$(rpath6)$(rpath7)$(rpath8)$(rpath9)$(rpath10)
+ifneq (,$(lzf_home))
+lzf_lib     := $(lzf_home)/$(libd)/liblzf.a
+lzf_dll     := $(lzf_home)/$(libd)/liblzf.$(dll)
+lnk_lib     += $(lzf_lib)
+lnk_dep     += $(lzf_lib)
+dlnk_lib    += -L$(lzf_home)/$(libd) -llzf
+dlnk_dep    += $(lzf_dll)
+rpath11      = ,-rpath,$(pwd)/$(lzf_home)/$(libd)
+lzf_includes = -I$(lzf_home)/include
+else
+lnk_lib     += -llzf
+dlnk_lib    += -llzf
+includes    += -Iliblzf
+endif
+
+rpath := -Wl,-rpath,$(pwd)/$(libd)$(rpath1)$(rpath2)$(rpath3)$(rpath4)$(rpath5)$(rpath6)$(rpath7)$(rpath8)$(rpath9)$(rpath10)$(rpath11)
 
 .PHONY: everything
-everything: $(kv_lib) $(dec_lib) $(md_lib) $(lc_lib) $(h3_lib) $(rdb_lib) $(ds_lib) $(pgm_lib) $(sassrv_lib) $(natsmd_lib) all
+everything: $(kv_lib) $(dec_lib) $(lzf_lib) $(md_lib) $(lc_lib) $(h3_lib) $(rdb_lib) $(ds_lib) $(pgm_lib) $(sassrv_lib) $(natsmd_lib) all
 
 clean_subs :=
 dlnk_dll_depend :=
 dlnk_lib_depend :=
 
 # build submodules if have them
-ifeq (yes,$(have_kv_submodule))
+ifneq (,$(kv_home))
 $(kv_lib) $(kv_dll):
-	$(MAKE) -C raikv
+	$(MAKE) -C $(kv_home)
 .PHONY: clean_kv
 clean_kv:
-	$(MAKE) -C raikv clean
+	$(MAKE) -C $(kv_home) clean
 clean_subs += clean_kv
 endif
-ifeq (yes,$(have_dec_submodule))
+ifneq (,$(dec_home))
 $(dec_lib) $(dec_dll):
-	$(MAKE) -C raimd/libdecnumber
+	$(MAKE) -C $(dec_home)
 .PHONY: clean_dec
 clean_dec:
-	$(MAKE) -C raimd/libdecnumber clean
+	$(MAKE) -C $(dec_home) clean
 clean_subs += clean_dec
 endif
-ifeq (yes,$(have_md_submodule))
+ifneq (,$(md_home))
 $(md_lib) $(md_dll):
-	$(MAKE) -C raimd
+	$(MAKE) -C $(md_home)
 .PHONY: clean_md
 clean_md:
-	$(MAKE) -C raimd clean
+	$(MAKE) -C $(md_home) clean
 clean_subs += clean_md
 endif
-ifeq (yes,$(have_ds_submodule))
+ifneq (,$(ds_home))
 $(ds_lib) $(ds_dll):
-	$(MAKE) -C raids
+	$(MAKE) -C $(ds_home)
 .PHONY: clean_ds
 clean_ds:
-	$(MAKE) -C raids clean
+	$(MAKE) -C $(ds_home) clean
 clean_subs += clean_ds
 endif
-ifeq (yes,$(have_lc_submodule))
+ifneq (,$(lc_home))
 $(lc_lib) $(lc_dll):
-	$(MAKE) -C linecook
+	$(MAKE) -C $(lc_home)
 .PHONY: clean_lc
 clean_lc:
-	$(MAKE) -C linecook clean
+	$(MAKE) -C $(lc_home) clean
 clean_subs += clean_lc
 endif
-ifeq (yes,$(have_h3_submodule))
+ifneq (,$(h3_home))
 $(h3_lib) $(h3_dll):
-	$(MAKE) -C raids/h3
+	$(MAKE) -C $(h3_home)
 .PHONY: clean_h3
 clean_h3:
-	$(MAKE) -C raids/h3 clean
+	$(MAKE) -C $(h3_home) clean
 clean_subs += clean_h3
 endif
-ifeq (yes,$(have_rdb_submodule))
+ifneq (,$(rdb_home))
 $(rdb_lib) $(rdb_dll):
-	$(MAKE) -C raids/rdbparser
+	$(MAKE) -C $(rdb_home)
 .PHONY: clean_rdb
 clean_rdb:
-	$(MAKE) -C raids/rdbparser clean
+	$(MAKE) -C $(rdb_home) clean
 clean_subs += clean_rdb
 endif
-ifeq (yes,$(have_pgm_submodule))
+ifneq (,$(pgm_home))
 $(pgm_lib) $(pgm_dll):
-	$(MAKE) -C openpgm
+	$(MAKE) -C $(pgm_home)
 .PHONY: clean_pgm
 clean_pgm:
-	$(MAKE) -C openpgm clean
+	$(MAKE) -C $(pgm_home) clean
 clean_subs += clean_pgm
 endif
-ifeq (yes,$(have_sassrv_submodule))
+ifneq (,$(sassrv_home))
 $(sassrv_lib) $(sassrv_dll):
-	$(MAKE) -C sassrv
+	$(MAKE) -C $(sassrv_home)
 .PHONY: clean_sassrv
 clean_sassrv:
-	$(MAKE) -C sassrv clean
+	$(MAKE) -C $(sassrv_home) clean
 clean_subs += clean_sassrv
 endif
-ifeq (yes,$(have_natsmd_submodule))
+ifneq (,$(natsmd_home))
 $(natsmd_lib) $(natsmd_dll):
-	$(MAKE) -C natsmd
+	$(MAKE) -C $(natsmd_home)
 .PHONY: clean_natsmd
 clean_natsmd:
-	$(MAKE) -C natsmd clean
+	$(MAKE) -C $(natsmd_home) clean
 clean_subs += clean_natsmd
+endif
+ifneq (,$(lzf_home))
+$(lzf_lib) $(lzf_dll):
+	$(MAKE) -C $(lzf_home)
+.PHONY: clean_lzf
+clean_lzf:
+	$(MAKE) -C $(lzf_home) clean
+clean_subs += clean_lzf
 endif
 
 # copr/fedora build (with version env vars)
@@ -327,6 +402,21 @@ all_libs    :=
 all_dlls    :=
 all_depends :=
 gen_files   :=
+
+session_includes            := $(ds_includes)
+heartbeat_includes          := $(sassrv_includes)
+ev_rv_transport_includes    := $(sassrv_includes) $(ds_includes)
+ev_nats_transport_includes  := $(natsmd_includes)
+transport_includes          := $(pgm_includes) $(natsmd_includes) $(sassrv_includes) $(ds_includes)
+session_tport_includes      := $(pgm_includes) $(natsmd_includes) $(sassrv_includes) $(ds_includes)
+conn_mgr_includes           := $(pgm_includes) $(natsmd_includes) $(sassrv_includes) $(ds_includes)
+ev_pgm_transport_includes   := $(pgm_includes)
+pgm_sock_includes           := $(pgm_includes)
+console_includes            := $(natsmd_includes) $(sassrv_includes) $(ds_includes) $(lc_includes)
+ev_telnet_includes          := $(ds_includes) $(lc_includes)
+ev_web_includes             := $(ds_includes)
+ev_redis_transport_includes := $(ds_includes)
+server_includes             := $(ds_includes) $(lc_includes)
 
 session_defines := -DMS_VER=$(ver_build)
 libraims_files := session user_db heartbeat auth peer link_state adjacency \
@@ -347,9 +437,9 @@ libraims_spec  := $(version)-$(build_num)_$(git_hash)
 libraims_ver   := $(major_num).$(minor_num)
 
 $(libd)/libraims.a: $(libraims_objs)
-$(libd)/libraims.so: $(libraims_dbjs) $(dlnk_dep)
+$(libd)/libraims.$(dll): $(libraims_dbjs) $(dlnk_dep)
 
-all_libs    += $(libd)/libraims.a $(libd)/libraims.so
+all_libs    += $(libd)/libraims.a $(libd)/libraims.$(dll)
 all_depends += $(libraims_deps)
 
 web_files := $(wildcard web/*)
@@ -370,9 +460,9 @@ ms_gen_key_deps  := $(addprefix $(dependd)/, $(addsuffix .d, $(ms_gen_key_files)
 ms_gen_key_libs  :=
 ms_gen_key_lnk   := $(lnk_lib)
 
-$(bind)/ms_gen_key: $(ms_gen_key_objs) $(ms_gen_key_libs) $(lnk_dep)
+$(bind)/ms_gen_key$(exe): $(ms_gen_key_objs) $(ms_gen_key_libs) $(lnk_dep)
 
-all_exes    += $(bind)/ms_gen_key
+all_exes    += $(bind)/ms_gen_key$(exe)
 all_depends += $(ms_gen_key_deps)
 
 kdftest_files := kdftest
@@ -382,9 +472,9 @@ kdftest_deps  := $(addprefix $(dependd)/, $(addsuffix .d, $(kdftest_files)))
 kdftest_libs  :=
 kdftest_lnk   := $(lnk_lib)
 
-$(bind)/kdftest: $(kdftest_objs) $(kdftest_libs) $(lnk_dep)
+$(bind)/kdftest$(exe): $(kdftest_objs) $(kdftest_libs) $(lnk_dep)
 
-all_exes    += $(bind)/kdftest
+all_exes    += $(bind)/kdftest$(exe)
 all_depends += $(kdftest_deps)
 
 mactest_files := mactest
@@ -394,9 +484,9 @@ mactest_deps  := $(addprefix $(dependd)/, $(addsuffix .d, $(mactest_files)))
 mactest_libs  :=
 mactest_lnk   := $(lnk_lib)
 
-$(bind)/mactest: $(mactest_objs) $(mactest_libs) $(lnk_dep)
+$(bind)/mactest$(exe): $(mactest_objs) $(mactest_libs) $(lnk_dep)
 
-all_exes    += $(bind)/mactest
+all_exes    += $(bind)/mactest$(exe)
 all_depends += $(mactest_deps)
 
 polytest_files := polytest
@@ -406,9 +496,9 @@ polytest_deps  := $(addprefix $(dependd)/, $(addsuffix .d, $(polytest_files)))
 polytest_libs  :=
 polytest_lnk   := $(lnk_lib)
 
-$(bind)/polytest: $(polytest_objs) $(polytest_libs) $(lnk_dep)
+$(bind)/polytest$(exe): $(polytest_objs) $(polytest_libs) $(lnk_dep)
 
-all_exes    += $(bind)/polytest
+all_exes    += $(bind)/polytest$(exe)
 all_depends += $(polytest_deps)
 
 #ecdhtest_files := ecdhtest
@@ -417,9 +507,9 @@ all_depends += $(polytest_deps)
 #ecdhtest_libs  :=
 #ecdhtest_lnk   := $(lnk_lib)
 
-#$(bind)/ecdhtest: $(ecdhtest_objs) $(ecdhtest_libs) $(lnk_dep)
+#$(bind)/ecdhtest$(exe): $(ecdhtest_objs) $(ecdhtest_libs) $(lnk_dep)
 
-#all_exes    += $(bind)/ecdhtest
+#all_exes    += $(bind)/ecdhtest$(exe)
 #all_depends += $(ecdhtest_deps)
 
 curvetest_files := curvetest
@@ -429,9 +519,9 @@ curvetest_deps  := $(addprefix $(dependd)/, $(addsuffix .d, $(curvetest_files)))
 curvetest_libs  :=
 curvetest_lnk   := $(lnk_lib)
 
-$(bind)/curvetest: $(curvetest_objs) $(curvetest_libs) $(lnk_dep)
+$(bind)/curvetest$(exe): $(curvetest_objs) $(curvetest_libs) $(lnk_dep)
 
-all_exes    += $(bind)/curvetest
+all_exes    += $(bind)/curvetest$(exe)
 all_depends += $(curvetest_deps)
 
 dsatest_files := dsatest
@@ -441,9 +531,9 @@ dsatest_deps  := $(addprefix $(dependd)/, $(addsuffix .d, $(dsatest_files)))
 dsatest_libs  :=
 dsatest_lnk   := $(lnk_lib)
 
-$(bind)/dsatest: $(dsatest_objs) $(dsatest_libs) $(lnk_dep)
+$(bind)/dsatest$(exe): $(dsatest_objs) $(dsatest_libs) $(lnk_dep)
 
-all_exes    += $(bind)/dsatest
+all_exes    += $(bind)/dsatest$(exe)
 all_depends += $(dsatest_deps)
 
 sigtest_files := sigtest
@@ -453,9 +543,9 @@ sigtest_deps  := $(addprefix $(dependd)/, $(addsuffix .d, $(sigtest_files)))
 sigtest_libs  :=
 sigtest_lnk   := $(lnk_lib)
 
-$(bind)/sigtest: $(sigtest_objs) $(sigtest_libs) $(lnk_dep)
+$(bind)/sigtest$(exe): $(sigtest_objs) $(sigtest_libs) $(lnk_dep)
 
-all_exes    += $(bind)/sigtest
+all_exes    += $(bind)/sigtest$(exe)
 all_depends += $(sigtest_deps)
 
 shatest_files := shatest
@@ -465,9 +555,9 @@ shatest_deps  := $(addprefix $(dependd)/, $(addsuffix .d, $(shatest_files)))
 shatest_libs  :=
 shatest_lnk   := $(lnk_lib)
 
-$(bind)/shatest: $(shatest_objs) $(shatest_libs) $(lnk_dep)
+$(bind)/shatest$(exe): $(shatest_objs) $(shatest_libs) $(lnk_dep)
 
-all_exes    += $(bind)/shatest
+all_exes    += $(bind)/shatest$(exe)
 all_depends += $(shatest_deps)
 
 aestest_files := aestest
@@ -477,9 +567,9 @@ aestest_deps  := $(addprefix $(dependd)/, $(addsuffix .d, $(aestest_files)))
 aestest_libs  :=
 aestest_lnk   := $(lnk_lib)
 
-$(bind)/aestest: $(aestest_objs) $(aestest_libs) $(lnk_dep)
+$(bind)/aestest$(exe): $(aestest_objs) $(aestest_libs) $(lnk_dep)
 
-all_exes    += $(bind)/aestest
+all_exes    += $(bind)/aestest$(exe)
 all_depends += $(aestest_deps)
 
 matchtest_files := matchtest
@@ -489,9 +579,9 @@ matchtest_deps  := $(addprefix $(dependd)/, $(addsuffix .d, $(matchtest_files)))
 matchtest_libs  :=
 matchtest_lnk   := $(lnk_lib)
 
-$(bind)/matchtest: $(matchtest_objs) $(matchtest_libs) $(lnk_dep)
+$(bind)/matchtest$(exe): $(matchtest_objs) $(matchtest_libs) $(lnk_dep)
 
-all_exes    += $(bind)/matchtest
+all_exes    += $(bind)/matchtest$(exe)
 all_depends += $(matchtest_deps)
 
 ms_test_adj_files := test_adj
@@ -500,9 +590,9 @@ ms_test_adj_deps  := $(addprefix $(dependd)/, $(addsuffix .d, $(ms_test_adj_file
 ms_test_adj_libs  :=
 ms_test_adj_lnk   := $(lnk_lib)
 
-$(bind)/ms_test_adj: $(ms_test_adj_objs) $(ms_test_adj_libs) $(lnk_dep)
+$(bind)/ms_test_adj$(exe): $(ms_test_adj_objs) $(ms_test_adj_libs) $(lnk_dep)
 
-all_exes    += $(bind)/ms_test_adj
+all_exes    += $(bind)/ms_test_adj$(exe)
 all_depends += $(ms_test_adj_deps)
 
 parse_config_files := parse_config
@@ -512,9 +602,9 @@ parse_config_deps  := $(addprefix $(dependd)/, $(addsuffix .d, $(parse_config_fi
 parse_config_libs  :=
 parse_config_lnk   := $(lnk_lib)
 
-$(bind)/parse_config: $(parse_config_objs) $(parse_config_libs) $(lnk_dep)
+$(bind)/parse_config$(exe): $(parse_config_objs) $(parse_config_libs) $(lnk_dep)
 
-all_exes    += $(bind)/parse_config
+all_exes    += $(bind)/parse_config$(exe)
 all_depends += $(parse_config_deps)
 
 test_tcp_aes_files := test_tcp_aes
@@ -524,9 +614,9 @@ test_tcp_aes_deps  := $(addprefix $(dependd)/, $(addsuffix .d, $(test_tcp_aes_fi
 test_tcp_aes_libs  :=
 test_tcp_aes_lnk   := $(lnk_lib)
 
-$(bind)/test_tcp_aes: $(test_tcp_aes_objs) $(test_tcp_aes_libs) $(lnk_dep)
+$(bind)/test_tcp_aes$(exe): $(test_tcp_aes_objs) $(test_tcp_aes_libs) $(lnk_dep)
 
-all_exes    += $(bind)/test_conn
+all_exes    += $(bind)/test_conn$(exe)
 all_depends += $(test_conn_deps)
 
 test_conn_files := test_conn
@@ -536,9 +626,9 @@ test_conn_deps  := $(addprefix $(dependd)/, $(addsuffix .d, $(test_conn_files)))
 test_conn_libs  :=
 test_conn_lnk   := $(lnk_lib)
 
-$(bind)/test_conn: $(test_conn_objs) $(test_conn_libs) $(lnk_dep)
+$(bind)/test_conn$(exe): $(test_conn_objs) $(test_conn_libs) $(lnk_dep)
 
-all_exes    += $(bind)/test_conn
+all_exes    += $(bind)/test_conn$(exe)
 all_depends += $(test_conn_deps)
 
 parse_pcap_files := parse_pcap
@@ -548,9 +638,9 @@ parse_pcap_deps  := $(addprefix $(dependd)/, $(addsuffix .d, $(parse_pcap_files)
 parse_pcap_libs  :=
 parse_pcap_lnk   := $(lnk_lib) -lpcap
 
-$(bind)/parse_pcap: $(parse_pcap_objs) $(parse_pcap_libs) $(lnk_dep)
+$(bind)/parse_pcap$(exe): $(parse_pcap_objs) $(parse_pcap_libs) $(lnk_dep)
 
-#all_exes    += $(bind)/parse_pcap
+#all_exes    += $(bind)/parse_pcap$(exe)
 #all_depends += $(parse_pcap_deps)
 
 ms_server_files := server
@@ -560,9 +650,9 @@ ms_server_deps  := $(addprefix $(dependd)/, $(addsuffix .d, $(ms_server_files)))
 ms_server_libs  :=
 ms_server_lnk   := $(lnk_lib)
 
-$(bind)/ms_server: $(ms_server_objs) $(ms_server_libs) $(lnk_dep)
+$(bind)/ms_server$(exe): $(ms_server_objs) $(ms_server_libs) $(lnk_dep)
 
-all_exes    += $(bind)/ms_server
+all_exes    += $(bind)/ms_server$(exe)
 all_depends += $(ms_server_deps)
 
 all_dirs := $(bind) $(libd) $(objd) $(dependd)
@@ -803,10 +893,10 @@ endif
 
 .PHONY: dist_bins
 dist_bins: $(all_libs) $(bind)/ms_server $(bind)/ms_gen_key $(bind)/ms_test_adj
-	$(remove_rpath) $(libd)/libraims.so
-	$(remove_rpath) $(bind)/ms_server
-	$(remove_rpath) $(bind)/ms_gen_key
-	$(remove_rpath) $(bind)/ms_test_adj
+	$(remove_rpath) $(libd)/libraims.$(dll)
+	$(remove_rpath) $(bind)/ms_server$(exe)
+	$(remove_rpath) $(bind)/ms_gen_key$(exe)
+	$(remove_rpath) $(bind)/ms_test_adj$(exe)
 
 .PHONY: dist_rpm
 dist_rpm: srpm
@@ -833,6 +923,9 @@ install: dist_bins
 	install $$f $(install_prefix)/lib ; \
 	fi ; \
 	done
+	install -m 755 $(bind)/ms_server$(exe) $(install_prefix)/bin
+	install -m 755 $(bind)/ms_gen_key$(exe) $(install_prefix)/bin
+	install -m 755 $(bind)/ms_test_adj$(exe) $(install_prefix)/bin
 	install -m 644 include/raims/*.h $(install_prefix)/include/raims
 
 $(objd)/%.o: src/%.cpp
@@ -856,11 +949,17 @@ $(objd)/%.o: test/%.c
 $(libd)/%.a:
 	ar rc $@ $($(*)_objs)
 
-$(libd)/%.so:
-	$(cpplink) $(soflag) $(rpath) $(cflags) -o $@.$($(*)_spec) -Wl,-soname=$(@F).$($(*)_ver) $($(*)_dbjs) $($(*)_dlnk) $(cpp_dll_lnk) $(sock_lib) $(math_lib) $(thread_lib) $(malloc_lib) $(dynlink_lib) && \
+ifeq (Darwin,$(lsb_dist))
+$(libd)/%.dylib:
+	$(cpplink) -dynamiclib $(cflags) -o $@.$($(*)_dylib).dylib -current_version $($(*)_dylib) -compatibility_version $($(*)_ver) $($(*)_dbjs) $($(*)_dlnk) $(sock_lib) $(math_lib) $(thread_lib) $(malloc_lib) $(dynlink_lib) && \
+	cd $(libd) && ln -f -s $(@F).$($(*)_dylib).dylib $(@F).$($(*)_ver).dylib && ln -f -s $(@F).$($(*)_ver).dylib $(@F)
+else
+$(libd)/%.$(dll):
+	$(cpplink) $(soflag) $(rpath) $(cflags) -o $@.$($(*)_spec) -Wl,-soname=$(@F).$($(*)_ver) $($(*)_dbjs) $($(*)_dlnk) $(sock_lib) $(math_lib) $(thread_lib) $(malloc_lib) $(dynlink_lib) && \
 	cd $(libd) && ln -f -s $(@F).$($(*)_spec) $(@F).$($(*)_ver) && ln -f -s $(@F).$($(*)_ver) $(@F)
+endif
 
-$(bind)/%:
+$(bind)/%$(exe):
 	$(cpplink) $(cflags) $(rpath) -o $@ $($(*)_objs) -L$(libd) $($(*)_lnk) $(cpp_lnk) $(sock_lib) $(math_lib) $(thread_lib) $(malloc_lib) $(dynlink_lib)
 
 $(bind)/%.static:

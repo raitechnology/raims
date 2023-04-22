@@ -63,6 +63,7 @@ UserDB::make_hb( TransportRoute &rte,  const char *sub,  size_t sublen,
    .cost4         ()
    .tportid       ()
    .tport         ( rte.transport.tport.len )
+   .host_id       ()
    .version       ( ver_len )
    .pk_digest     ();
 
@@ -111,6 +112,7 @@ UserDB::make_hb( TransportRoute &rte,  const char *sub,  size_t sublen,
     }
     m.tportid( rte.tport_id );
     m.tport  ( rte.transport.tport.val, rte.transport.tport.len );
+    m.host_id( this->host_id );
     m.version( ver_str, ver_len );
   }
   m.pk_digest();
@@ -343,6 +345,9 @@ UserDB::on_heartbeat( const MsgFramePublish &pub,  UserBridge &n,
       n.printf( "set hb state %s\n", n.user_route->rte.name );
   }
 
+  if ( dec.test( FID_HOST_ID ) )
+    this->update_host_id( n, dec );
+
   if ( dec.test( FID_MESH_URL ) )
     this->set_mesh_url( *n.user_route, dec, "hb" );
 
@@ -382,8 +387,8 @@ UserDB::on_heartbeat( const MsgFramePublish &pub,  UserBridge &n,
       oldest_peer = ( rte.oldest_uid == 0 );
       if ( n.hb_skew < -(int64_t) sec_to_ns( ival ) ||
            n.hb_skew >  (int64_t) sec_to_ns( ival ) ) {
-        n.printe( "heartbeat time skew %ld is greater than the "
-                  "interval(%u), time=%lu cur_time=%lu\n",
+        n.printe( "heartbeat time skew %" PRId64 " is greater than the "
+                  "interval(%u), time=%" PRIu64 " cur_time=%" PRIu64 "\n",
                   n.hb_skew, ival, time, cur_time );
       }
 
@@ -398,7 +403,7 @@ UserDB::on_heartbeat( const MsgFramePublish &pub,  UserBridge &n,
         if ( ( oldest_peer && rte.is_mcast() ) ||
              ( old_hb_seqno > 0 && old_hb_seqno + 1 == seqno &&
                start + sec_to_ns( 1 ) < cur_time ) ) {
-          n.printf( "old_hb_seqno %lu seqno %lu, age %lu\n",
+          n.printf( "old_hb_seqno %" PRIu64 " seqno %" PRIu64 ", age %" PRIu64 "\n",
                     old_hb_seqno, seqno, cur_time - start );
           do_challenge = true;
         }
@@ -447,8 +452,8 @@ UserDB::on_heartbeat( const MsgFramePublish &pub,  UserBridge &n,
     cvt_number<uint64_t>( dec.mref[ FID_SUB_SEQNO ], sub_seqno );
     if ( n.link_state_seqno < link_seqno || n.sub_seqno < sub_seqno ) {
       if ( debug_hb )
-        n.printf( "hb link_state %lu != link_state %lu || "
-                  "hb sub_seqno %lu != sub_seqno %lu\n", n.link_state_seqno,
+        n.printf( "hb link_state %" PRIu64 " != link_state %" PRIu64 " || "
+                  "hb sub_seqno %" PRIu64 " != sub_seqno %" PRIu64 "\n", n.link_state_seqno,
                   link_seqno, n.sub_seqno, sub_seqno );
       sync_adj = true;
       this->send_adjacency_request( n, HB_SYNC_REQ );
@@ -726,8 +731,8 @@ UserDB::hb_adjacency_request( UserBridge &n,  const MsgHdrDecoder &dec,
     cvt_number<uint64_t>( dec.mref[ FID_SUB_SEQNO ], sub_seqno );
     if ( n.link_state_seqno < link_seqno || n.sub_seqno < sub_seqno ) {
       if ( debug_hb )
-        n.printf( "sync link_state %lu != link_state %lu || "
-                  "sync sub_seqno %lu != sub_seqno %lu\n", n.link_state_seqno,
+        n.printf( "sync link_state %" PRIu64 " != link_state %" PRIu64 " || "
+                  "sync sub_seqno %" PRIu64 " != sub_seqno %" PRIu64 "\n", n.link_state_seqno,
                   link_seqno, n.sub_seqno, sub_seqno );
       cnt++;
       return this->send_adjacency_request( n, type );
@@ -954,7 +959,7 @@ UserDB::recv_ping_request( MsgFramePublish &pub,  UserBridge &n,
     for ( size_t i = 0; i < count; i++ ) {
       TransportRoute *rte = this->transport_tab.ptr[ i ];
       if ( rte->is_set( TPORT_IS_IPC ) && rte->rv_svc != NULL ) {
-        rte->rv_svc->outbound_data_loss( idl_svc, idl_loss, n.bridge_nonce_int,
+        rte->rv_svc->outbound_data_loss( idl_svc, idl_loss, n.host_id,
                                          n.peer.user.val );
         break;
       }
@@ -997,7 +1002,7 @@ UserDB::recv_pong_result( MsgFramePublish &pub,  UserBridge &n,
         uint64_t peer_now = reply_stamp + rtt / 2;
         n.pong_skew = (int64_t) cur_time - (int64_t) peer_now;
         if ( debug_hb )
-          n.printf( "pong_skew %ld rtt %lu min %lu\n", n.pong_skew,
+          n.printf( "pong_skew %" PRId64 " rtt %" PRIu64 " min %" PRIu64 "\n", n.pong_skew,
                     rtt, n.min_rtt );
         n.min_rtt = rtt;
         n.skew_upd++;

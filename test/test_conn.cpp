@@ -2,12 +2,18 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdint.h>
+#define __STDC_FORMAT_MACROS
+#include <inttypes.h>
+#if ! defined( _MSC_VER ) && ! defined( __MINGW32__ )
 #include <arpa/inet.h>
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <fcntl.h>
 #include <stdlib.h>
 #include <unistd.h>
+#else
+#include <raikv/win.h>
+#endif
 #include <raims/transport.h>
 #include <raims/ev_tcp_aes.h>
 #include <raikv/ev_cares.h>
@@ -65,7 +71,7 @@ bool
 ConnectPing::on_shutdown( ConnectCtx &ctx,  const char *msg,
                           size_t len ) noexcept
 {
-  printf( "on shutdown %lu %.*s\n", ctx.event_id, (int) len, msg );
+  printf( "on shutdown %" PRIu64 " %.*s\n", ctx.event_id, (int) len, msg );
   return true;
 }
 

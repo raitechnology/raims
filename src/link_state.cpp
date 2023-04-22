@@ -177,7 +177,7 @@ UserDB::save_unknown_adjacency( UserBridge &n,  TransportRoute &rte,
   this->adjacency_unknown.push_tl( p );
 
   if ( debug_lnk ) {
-    n.printf( "save adj p=%lu n=%lu, %s rec_count %u\n", seqno,
+    n.printf( "save adj p=%" PRIu64 " n=%" PRIu64 ", %s rec_count %u\n", seqno,
               n.link_state_seqno, rte.name, p->rec_count );
     AdjacencyRec::print_rec_list( p->rec_list, "save_unknown" );
   }
@@ -241,7 +241,7 @@ UserDB::add_unknown_adjacency( UserBridge *n,  Nonce *b_nonce ) noexcept
         AdjacencyRec::print_rec_list( p->rec_list, "left" );
       }
       if ( fini_recs.hd != NULL ) {
-        m->printf( "apply_recs %u (%s) %lu < %lu\n", applied_cnt,
+        m->printf( "apply_recs %u (%s) %" PRIu64 " < %" PRIu64 "\n", applied_cnt,
                    user, m->link_state_seqno, p->link_state_seqno  );
         AdjacencyRec::print_rec_list( fini_recs.hd, "applied" );
       }
@@ -255,13 +255,13 @@ UserDB::add_unknown_adjacency( UserBridge *n,  Nonce *b_nonce ) noexcept
     if ( discard_pending || p->rec_count == 0 ) {
       if ( ! discard_pending && n != NULL ) {
         if ( debug_lnk )
-          m->printf( "add unknown adj: sync to %lu\n", p->link_state_seqno );
+          m->printf( "add unknown adj: sync to %" PRIu64 "\n", p->link_state_seqno );
         this->update_link_state_seqno( m->link_state_seqno,
                                        p->link_state_seqno );
       }
       if ( n == NULL ) {
-        m->printf( "remove unknown adj refs %u m->ls=%lu,"
-                   "p->ls=%lu,m->unk_ls=%lu\n", m->unknown_adj_refs,
+        m->printf( "remove unknown adj refs %u m->ls=%" PRIu64 ","
+                   "p->ls=%" PRIu64 ",m->unk_ls=%" PRIu64 "\n", m->unknown_adj_refs,
                    m->link_state_seqno, p->link_state_seqno,
                    m->unknown_link_seqno );
       }
@@ -805,7 +805,7 @@ UserDB::recv_adjacency_change( const MsgFramePublish &pub,  UserBridge &n,
     else {
       adj_change = NEED_ADJ_SYNC;
       if ( debug_lnk )
-        n.printf( "recv adj change: unknown_adj_refs %u to %lu\n",
+        n.printf( "recv adj change: unknown_adj_refs %u to %" PRIu64 "\n",
                   n.unknown_adj_refs, link_state );
     }
     this->peer_dist.invalidate( ADJACENCY_CHANGE_INV, n.uid );
@@ -986,7 +986,7 @@ UserDB::send_adjacency_request( UserBridge &n, AdjacencyRequest reas ) noexcept
   m.sign( ibx.buf, ibx.len(), *this->session_key );
 
   if ( debug_lnk )
-    n.printf( "*** send_adj_request ls=%lu %s for %s\n", n.link_state_seqno,
+    n.printf( "*** send_adj_request ls=%" PRIu64 " %s for %s\n", n.link_state_seqno,
               adjacency_request_string( reas ), n.peer.user.val );
   if ( use_primary )
     return this->forward_to_primary_inbox( n, ibx, h, m.msg, m.len() );
@@ -1280,7 +1280,7 @@ UserDB::send_adjacency( UserBridge &n,  UserBridge *sync,  InboxBuf &ibx,
   m.reserve( e.sz );
 
   if ( debug_lnk )
-    n.printf( "++++ send_adjacency( %s, %lu, %lu, %d )\n",
+    n.printf( "++++ send_adjacency( %s, %" PRIu64 ", %" PRIu64 ", %d )\n",
             sync ? sync->peer.user.val : "self", link_seqno, sub_seqno, which );
   m.open( this->bridge_id.nonce, ibx.len() )
    .seqno   ( n.inbox.next_send( U_INBOX_ADJ_RPY ) )
@@ -1384,7 +1384,7 @@ UserDB::recv_adjacency_result( const MsgFramePublish &pub,  UserBridge &n,
       n.adj_req_throttle.req_count = 0;
     if ( link_state <= sync->link_state_seqno ) {
       if ( debug_lnk )
-        n.printf( "sync link result already have seqno %lu\n", link_state );
+        n.printf( "sync link result already have seqno %" PRIu64 "\n", link_state );
     }
   }
   if ( ( which & SYNC_SUB ) != 0 ) {
@@ -1419,7 +1419,7 @@ UserDB::recv_adjacency_result( const MsgFramePublish &pub,  UserBridge &n,
       this->save_unknown_adjacency( *sync, pub.rte, link_state,
                                     unknown, false );
       if ( debug_lnk )
-        sync->printf( "have unknown %u refs to %lu\n", sync->unknown_adj_refs,
+        sync->printf( "have unknown %u refs to %" PRIu64 "\n", sync->unknown_adj_refs,
                       link_state );
     }
     this->peer_dist.invalidate( ADJACENCY_UPDATE_INV, sync->uid );

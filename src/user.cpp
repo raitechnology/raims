@@ -2,7 +2,11 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdint.h>
+#if ! defined( _MSC_VER ) && ! defined( __MINGW32__ )
 #include <unistd.h>
+#else
+#include <raikv/win.h>
+#endif
 #define __STDC_FORMAT_MACROS
 #include <inttypes.h>
 #include <raims/crypt.h>
@@ -80,7 +84,7 @@ UserBuf::copy( const ConfigTree::User &u ) noexcept
 }
 
 static size_t
-timestamp_now( char *time,  size_t maxlen )
+timestamp_now( char *time,  size_t maxlen ) noexcept
 {
   MDStamp stamp;
   stamp.stamp      = current_realtime_ns();
@@ -96,19 +100,49 @@ timestamp_now( char *time,  size_t maxlen )
   }
   return stamp.get_string( time, maxlen );
 }
+
+static size_t
+bootstamp( char *time,  size_t maxlen,  uint64_t off ) noexcept
+{
+  MDStamp  stamp;
+  uint64_t boot;
+  boot  = current_realtime_ns() - current_monotonic_time_ns();
+  boot /= (uint64_t) 1000000000ULL;
+  for ( int i = 0; i < 1000; i++ ) {
+    uint64_t boot2 = 0;
+    for ( int i = 0; i < 8; i++ ) {
+      boot2 += current_realtime_ns() - current_monotonic_time_ns();
+    }
+    boot2 /= (uint64_t) 8000000000ULL;
+    if ( boot == boot2 )
+      break;
+    boot = boot2;
+  }
+  stamp.stamp = boot + off;
+  stamp.resolution = MD_RES_SECONDS;
+  return stamp.get_string( time, maxlen );
+}
+
 /* offset for AES ctr mode enc/dec */
 static inline uint64_t aes_ctr_off( size_t len ) { return ( len + 15 ) / 16; }
 
 bool
 UserBuf::gen_key( const char *user,  size_t ulen,  const char *svc,
                   size_t slen,  const char *expire,  size_t elen,
-                  const CryptPass &pwd ) noexcept
+                  bool is_temp,  const CryptPass &pwd,
+                  UIntHashTab *ht ) noexcept
 {
+  size_t pos;
+  uint64_t i = 0;
   copy_max( this->user, this->user_len, MAX_USER_LEN, user, ulen );
   copy_max( this->service, this->service_len, MAX_SERVICE_LEN, svc, slen );
   copy_max( this->expires, this->expires_len, MAX_TIME_LEN, expire, elen );
-  this->create_len = timestamp_now( this->create, sizeof( this->create ) );
-
+  do {
+    if ( is_temp )
+      this->create_len = bootstamp( this->create, sizeof( this->create ), i++ );
+    else
+      this->create_len = timestamp_now( this->create, sizeof( this->create ) );
+  } while ( ht != NULL && ht->find( this->make_host_id(), pos ) );
   DSA dsa;
   dsa.gen_key();
   return this->put_dsa( pwd, dsa, DO_BOTH );
@@ -116,7 +150,8 @@ UserBuf::gen_key( const char *user,  size_t ulen,  const char *svc,
 
 bool
 UserBuf::gen_tmp_key( const char *usr_svc,  const char *num,
-                      ConfigTree::Service &svc,
+                      const ConfigTree &tree,
+                      const ConfigTree::Service &svc,
                       const CryptPass &pwd ) noexcept
 {
   const char * p,
@@ -154,7 +189,21 @@ UserBuf::gen_tmp_key( const char *usr_svc,  const char *num,
       u_len++; num++;
     }
   }
-  return this->gen_key( us, u_len, sv, s_len, NULL, 0, pwd );
+
+  UIntHashTab * host_ht = UIntHashTab::resize( NULL );
+  for ( const ConfigTree::User *u = tree.users.hd; u != NULL;
+        u = u->next ) {
+    if ( u->user_id < tree.user_cnt ) {
+      if ( u->svc.equals( svc.svc ) ) {
+        host_ht->upsert_rsz( host_ht,
+          UserBuf::make_host_id( u->user.val, u->user.len,
+                                 u->create.val, u->create.len ), 1 );
+      }
+    }
+  }
+  bool b = this->gen_key( us, u_len, sv, s_len, NULL, 0, true, pwd, host_ht );
+  delete host_ht;
+  return b;
 }
 
 uint64_t

@@ -243,7 +243,7 @@ struct UserBridge : public UserStateTest<UserBridge> {
                      hb_miss,             /* count of hb missed */
                      unknown_adj_refs,    /* link refs are yet to be resolved */
                      auth_count,          /* number of times authenticated */
-                     bridge_nonce_int,    /* first 4 bytes of bridge_id.nonce */
+                     host_id,             /* hash of user + create */
                      sync_sum_diff,
                      sync_send_seqno,
                      sync_recv_seqno,
@@ -495,7 +495,6 @@ typedef struct kv::PrioQueue< UserPendingRoute *,
 
 /* nonce -> node_ht[ uid ] -> UserBridge */
 typedef kv::IntHashTabT< Hash128Elem, uint32_t > NodeHashTab;
-typedef kv::UIntHashTab HostHashTab;
 
 struct SubDB;
 struct StringTab;
@@ -529,7 +528,7 @@ struct UserDB {
   /* indexes of node instances */
   NodeHashTab         * node_ht,         /* nonce -> uid */
                       * zombie_ht;       /* timed out nodes */
-  HostHashTab         * host_ht;
+  kv::UIntHashTab     * host_ht;
   UserBridgeTab         bridge_tab;      /* route array bridge_tab[ uid ] */
 
   /* index of node identities */
@@ -571,7 +570,7 @@ struct UserDB {
                         uid_hb_count,    /* total hb / distance zero nones */
                         uid_ping_count,
                         next_ping_uid,
-                        bridge_nonce_int,
+                        host_id,
                         msg_send_counter[ MAX_PUB_TYPE ];
   uint64_t              send_peer_seqno, /* a unique seqno for peer multicast */
                         link_state_seqno,/* seqno of adjacency updates */
@@ -640,6 +639,15 @@ struct UserDB {
   void calc_secret_hmac( UserBridge &n,  PolyHmacDigest &secret_hmac ) noexcept;
 
   void find_inbox_peer( UserBridge &n,  UserRoute &u_rte ) noexcept;
+
+  static uint32_t make_host_id( const ConfigTree::User & user ) {
+    return kv_crc_c( user.user.val, user.user.len,
+                     kv_crc_c( user.create.val, user.create.len, 0 ) );
+  }
+  static uint32_t make_host_id( const PeerEntry & user ) {
+    return kv_crc_c( user.user.val, user.user.len,
+                     kv_crc_c( user.create.val, user.create.len, 0 ) );
+  }
 
   struct InboxPub {
     UserBridge       & n;
@@ -798,6 +806,8 @@ struct UserDB {
                               const MsgHdrDecoder &dec ) noexcept;
   UserBridge * lookup_user( MsgFramePublish &pub,
                             const MsgHdrDecoder &dec ) noexcept;
+  void update_host_id( UserBridge &n,  const MsgHdrDecoder &dec ) noexcept;
+  void update_host_id( UserBridge *n,  uint32_t host_id ) noexcept;
   void add_user_route( UserBridge &n,  TransportRoute &rte,
                        const kv::PeerId &pid,  const MsgHdrDecoder &dec,
                        const UserRoute *src ) noexcept;
@@ -808,7 +818,7 @@ struct UserDB {
                          HashDigest &hello ) noexcept;
   UserBridge * add_user2( const UserNonce &user_bridge_id,  
                           PeerEntry &peer,  uint64_t start,
-                          HashDigest &hello ) noexcept;
+                          HashDigest &hello,  uint32_t host_id ) noexcept;
   bool check_uid_csum( const UserBridge &n,  const Nonce &peer_csum ) noexcept;
   void set_ucast_url( UserRoute &u_rte, const MsgHdrDecoder &dec,
                       const char *src ) noexcept;
@@ -982,6 +992,8 @@ struct UserDB {
                           size_t buflen ) noexcept;
   const char * uid_names( const kv::UIntBitSet &uids,  uint32_t max_uid,
                           char *buf,  size_t buflen ) noexcept;
+  bool write_hostid_cache( void ) noexcept;
+  bool read_hostid_cache( void ) noexcept;
 };
 
 }

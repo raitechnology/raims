@@ -185,10 +185,11 @@ struct PeerDBRec : public MsgFldSet {
   uint64_t     sub_seqno,
                link_state;
   int64_t      hb_skew;
+  uint32_t     host_id;
   PeerDBRec  * next;
   void * operator new( size_t, void *ptr ) { return ptr; }
   PeerDBRec() : user( 0 ), user_len( 0 ), hops( 0 ), sub_seqno( 0 ),
-                link_state( 0 ), hb_skew( 0 ), next( 0 ) {
+                link_state( 0 ), hb_skew( 0 ), host_id( 0 ), next( 0 ) {
     this->nonce.zero();
   }
   void set_field( uint32_t fid,  md::MDReference &mref ) {
@@ -198,6 +199,7 @@ struct PeerDBRec : public MsgFldSet {
       case FID_SUB_SEQNO:  md::cvt_number<uint64_t>( mref, this->sub_seqno ); break;
       case FID_LINK_STATE: md::cvt_number<uint64_t>( mref, this->link_state ); break;
       case FID_HB_SKEW:    md::cvt_number<int64_t>( mref, this->hb_skew ); break;
+      case FID_HOST_ID:    md::cvt_number<uint32_t>( mref, this->host_id ); break;
       case FID_USER:
         this->user     = (const char *) mref.fptr;
         this->user_len = (uint32_t) mref.fsize;

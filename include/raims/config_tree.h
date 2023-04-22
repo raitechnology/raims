@@ -313,6 +313,7 @@ struct ConfigJson {
   md::JsonValue * copy( const ConfigTree::StrList &sl ) noexcept;
   md::JsonValue * copy( const StringVal &s ) noexcept;
   md::JsonObject * copy( const ConfigTree::ParametersList &list ) noexcept;
+  md::JsonString * make_hostid( uint32_t ival ) noexcept;
 
   void push_array( md::JsonArray *&a,  md::JsonValue *v ) noexcept;
   void push_field( md::JsonObject *&o, const StringVal &s,

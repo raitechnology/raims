@@ -2,12 +2,15 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#define __STDC_FORMAT_MACROS
+#include <inttypes.h>
 #include <stdarg.h>
 #define INCLUDE_AUTH_CONST
 #define INCLUDE_PEER_CONST
 #include <raims/user_db.h>
 #include <raims/ev_inbox_transport.h>
-/*#include <raims/ev_rv_transport.h>*/
+#include <raimd/json_msg.h>
+#include <raikv/os_file.h>
 
 using namespace rai;
 using namespace ms;
@@ -29,9 +32,11 @@ UserDB::UserDB( EvPoll &p,  ConfigTree::User &u,  ConfigTree::Service &s,
     link_state_sum( 0 ), mcast_send_seqno( 0 ), hb_ival_ns( 0 ),
     hb_ival_mask( 0 ), next_ping_mono( 0 ), peer_dist( *this )
 {
+  uint64_t i;
   this->start_time = current_realtime_ns();
+  this->start_mono_time = current_monotonic_time_ns(); 
   /* fill in lower nanos if resolution is low */
-  for ( uint64_t i = 1000000000; i > 0; i /= 1000 ) {
+  for ( i = 1000000000; i > 0; i /= 1000 ) {
     if ( ( this->start_time % i ) == 0 ) {
       uint64_t r;
       rand::fill_urandom_bytes( &r, sizeof( r ) );
@@ -41,14 +46,9 @@ UserDB::UserDB( EvPoll &p,  ConfigTree::User &u,  ConfigTree::Service &s,
       break;
     }
   }
-  this->start_mono_time = current_monotonic_time_ns(); 
   this->rand.static_init( this->start_mono_time, this->start_time );
-  /* bridge id is public user hmac + nonce which identifies this peer */
-  do {
-    this->bridge_id.nonce.seed_random();    /* random nonce */
-    ::memcpy( &this->bridge_nonce_int, this->bridge_id.nonce.digest(), 4 );
-  } while ( this->bridge_nonce_int == 0 ||
-            this->bridge_nonce_int == 0xffffffffU );
+  this->host_id = make_host_id( u );
+  this->bridge_id.nonce.seed_random();    /* random nonce */
   ::memset( this->msg_send_counter, 0, sizeof( this->msg_send_counter ) );
 }
 
@@ -98,7 +98,7 @@ UserDB::init( const CryptPass &pwd,  ConfigTree &tree ) noexcept
   /* index hash (src_uid, dest_uid) -> encrypted peer key */
   this->peer_key_ht      = PeerKeyHashTab::resize( NULL );
   /* index nonce_int -> uid */
-  this->host_ht          = HostHashTab::resize( NULL );
+  this->host_ht          = UIntHashTab::resize( NULL );
   this->next_uid         = 0; /* uid assigned to each node */
   this->free_uid_count   = 0; /* after uid freed, this count updated */
   this->uid_auth_count   = 0; /* how many peers are trusted */
@@ -124,7 +124,7 @@ UserDB::init( const CryptPass &pwd,  ConfigTree &tree ) noexcept
   this->bridge_tab[ MY_UID ] = NULL;
   /* MY_UID = 0, data for it is *this, peer data are at bridge_tab[ uid ] */
   this->node_ht->upsert_rsz( this->node_ht, this->bridge_id.nonce, MY_UID );
-  this->host_ht->upsert_rsz( this->host_ht, this->bridge_nonce_int, MY_UID );
+  this->host_ht->upsert_rsz( this->host_ht, this->host_id, MY_UID );
   i = 0;
   for ( u = tree.users.hd; u != NULL; u = u->next )
     if ( u->svc.equals( this->svc.svc ) )
@@ -1319,6 +1319,49 @@ UserDB::closest_peer_route( TransportRoute &rte,  UserBridge &n,
   return this->bridge_tab.ptr[ min_uid ];
 }
 
+void
+UserDB::update_host_id( UserBridge &n,  const MsgHdrDecoder &dec ) noexcept
+{
+  uint32_t host_id;
+
+  if ( ! dec.get_ival<uint32_t>( FID_HOST_ID, host_id ) )
+    return;
+  this->update_host_id( &n, host_id );
+}
+
+void
+UserDB::update_host_id( UserBridge *n,  uint32_t host_id ) noexcept
+{
+  uint32_t old_host_id = ( n == NULL ? this->host_id : n->host_id ),
+           upd_uid     = ( n == NULL ? MY_UID : n->uid ),
+           coll_uid;
+  size_t   pos;
+
+  if ( host_id == old_host_id )
+    return;
+
+  if ( this->host_ht->find( host_id, pos, coll_uid ) ) {
+    bool is_auth = ( coll_uid == 0 ? true :
+          ( this->bridge_tab.ptr[ coll_uid ] != NULL &&
+            this->bridge_tab.ptr[ coll_uid ]->is_set( AUTHENTICATED_STATE ) ) );
+    if ( is_auth ) {
+      const char * coll_user = ( coll_uid == 0 ? this->user.user.val :
+                                this->bridge_tab.ptr[ coll_uid ]->peer.user.val );
+      const char * upd_user  = ( upd_uid == 0 ? this->user.user.val :
+                                this->bridge_tab.ptr[ upd_uid ]->peer.user.val );
+      fprintf( stderr, "collision: %s.%u host_id %08x exists (%s.%u)\n",
+          upd_user, upd_uid, (uint32_t) htonl( host_id ), coll_user, coll_uid );
+    }
+  }
+  if ( this->host_ht->find( old_host_id, pos ) )
+    this->host_ht->remove( pos );
+  this->host_ht->upsert_rsz( this->host_ht, host_id, upd_uid );
+  if ( n != NULL )
+    n->host_id = host_id;
+  else
+    this->host_id = host_id;
+}
+
 /* initialize a new user from a peer definition, configured or sent by another
  * node, with a route; if a from another node, src contains the inbox url
  * that inbox ptp needs to route through */
@@ -1329,27 +1372,21 @@ UserDB::add_user( TransportRoute &rte,  const UserRoute *src, const PeerId &pid,
                   HashDigest &hello ) noexcept
 {
   UserBridge * n;
-  size_t       size, rtsz, pos;
-  uint32_t     uid, coll_uid, seed, nonce_int;
+  size_t       size, rtsz;
+  uint32_t     uid, seed, host_id;
 
-  ::memcpy( &nonce_int, user_bridge_id.nonce.digest(), 4 );
-  if ( this->host_ht->find( nonce_int, pos, coll_uid ) ) {
-    fprintf( stderr, "peer %s host %x exists uid %u\n", peer.user.val,
-             nonce_int, coll_uid );
-    /*if ( coll_uid == 0 ) exit( 1 );*/
-  }
+  if ( ! dec.get_ival<uint32_t>( FID_HOST_ID, host_id ) )
+    host_id = make_host_id( peer );
   uid  = this->new_uid();
-  this->host_ht->upsert_rsz( this->host_ht, nonce_int, uid );
   rtsz = sizeof( UserRoute ) * UserBridge::USER_ROUTE_BASE;
   size = sizeof( UserBridge ) + rtsz;
   seed = (uint32_t) this->rand.next();
   n    = this->make_user_bridge( size, peer, this->poll.g_bloom_db, seed );
 
-  n->bridge_id        = user_bridge_id;
-  n->bridge_nonce_int = nonce_int;
-  n->uid              = uid;
-  n->start_time       = start;
-  n->peer_hello       = hello;
+  n->bridge_id  = user_bridge_id;
+  n->uid        = uid;
+  n->start_time = start;
+  n->peer_hello = hello;
 
   hello.zero();
   ::memset( (void *) &n[ 1 ], 0, rtsz );
@@ -1357,6 +1394,7 @@ UserDB::add_user( TransportRoute &rte,  const UserRoute *src, const PeerId &pid,
   this->add_user_route( *n, rte, pid, dec, src );
   this->bridge_tab[ uid ] = n;
   this->node_ht->upsert_rsz( this->node_ht, user_bridge_id.nonce, uid );
+  this->update_host_id( n, host_id );
   /*if ( this->ipc_transport != NULL && this->ipc_transport->rv_svc != NULL )
     this->ipc_transport->rv_svc->update_host_inbox_patterns( uid );*/
 
@@ -1365,36 +1403,32 @@ UserDB::add_user( TransportRoute &rte,  const UserRoute *src, const PeerId &pid,
 
 UserBridge *
 UserDB::add_user2( const UserNonce &user_bridge_id,  PeerEntry &peer,
-                   uint64_t start,  HashDigest &hello ) noexcept
+                   uint64_t start,  HashDigest &hello,
+                   uint32_t host_id ) noexcept
 {
   UserBridge * n;
-  size_t       size, rtsz, pos;
-  uint32_t     uid, coll_uid, seed, nonce_int;
+  size_t       size, rtsz;
+  uint32_t     uid, seed;
 
-  ::memcpy( &nonce_int, user_bridge_id.nonce.digest(), 4 );
-  if ( this->host_ht->find( nonce_int, pos, coll_uid ) ) {
-    fprintf( stderr, "peer %s host %x exists uid %u\n", peer.user.val,
-             nonce_int, coll_uid );
-    /*if ( coll_uid == 0 ) exit( 1 ); */
-  }
+  if ( host_id == 0 )
+    host_id = make_host_id( peer );
   uid  = this->new_uid();
-  this->host_ht->upsert_rsz( this->host_ht, nonce_int, uid );
   rtsz = sizeof( UserRoute ) * UserBridge::USER_ROUTE_BASE;
   size = sizeof( UserBridge ) + rtsz;
   seed = (uint32_t) this->rand.next();
   n    = this->make_user_bridge( size, peer, this->poll.g_bloom_db, seed );
 
-  n->bridge_id        = user_bridge_id;
-  n->bridge_nonce_int = nonce_int;
-  n->uid              = uid;
-  n->start_time       = start;
-  n->peer_hello       = hello;
+  n->bridge_id  = user_bridge_id;
+  n->uid        = uid;
+  n->start_time = start;
+  n->peer_hello = hello;
 
   hello.zero();
   ::memset( (void *) &n[ 1 ], 0, rtsz );
   n->u_buf[ 0 ] = (UserRoute *) (void *) &n[ 1 ];
   this->bridge_tab[ uid ] = n;
   this->node_ht->upsert_rsz( this->node_ht, user_bridge_id.nonce, uid );
+  this->update_host_id( n, host_id );
   /*if ( this->ipc_transport != NULL && this->ipc_transport->rv_svc != NULL )
     this->ipc_transport->rv_svc->update_host_inbox_patterns( uid );*/
 
@@ -1551,7 +1585,7 @@ UserDB::add_authenticated( UserBridge &n,
       if ( n.start_time == 0 )
         n.start_time = start;
       else if ( n.start_time != start ) {
-        n.printf( "start time is not correct %lu != %lu\n",
+        n.printf( "start time is not correct %" PRIu64 " != %" PRIu64 "\n",
                   n.start_time, start );
       }
     }
@@ -1916,6 +1950,153 @@ UserDB::remove_inbox_route( UserBridge &n ) noexcept
              hash = kv_crc_c( ibx.buf, ibx.len(), seed );
     n.bloom.del_route( (uint16_t) ibx.len(), hash );
   }
+}
+
+bool
+UserDB::write_hostid_cache( void ) noexcept
+{
+  ConfigJson   cache;
+  JsonObject * ar = NULL;
+  uint32_t     hid, uid;
+  size_t       pos;
+
+  if ( this->host_ht == NULL ) {
+    JsonValue * id = cache.make_hostid( this->host_id );
+    cache.push_field( ar, this->user.user, id );
+  }
+  else {
+    for ( bool b = this->host_ht->first( pos ); b;
+          b = this->host_ht->next( pos ) ) {
+      this->host_ht->get( pos, hid, uid );
+      JsonValue * id = cache.make_hostid( hid );
+      if ( uid == 0 )
+        cache.push_field( ar, this->user.user, id );
+      else {
+        UserBridge * n = this->bridge_tab.ptr[ uid ];
+        if ( n != NULL )
+          cache.push_field( ar, n->peer.user, id );
+      }
+    }
+  }
+  const char * d;
+  if ( (d = ::getenv( "TMP" )) == NULL &&
+       (d = ::getenv( "TEMP" )) == NULL ) {
+    d = "/tmp";
+  }
+  size_t l = ::strlen( d );
+  CatMalloc npath( l + 7 + this->user.user.len + 9 + 1 ),
+            opath( l + 7 + this->user.user.len + 5 + 1 );
+  npath.x( d, l ).x( "/raims_", 7 )
+       .x( this->user.user.val, this->user.user.len )
+       .x( ".yaml.new", 9 ).end();
+  opath.x( d, l ).x( "/raims_", 7 )
+       .x( this->user.user.val, this->user.user.len )
+       .x( ".yaml", 5 ).end();
+  ConfigFilePrinter out;
+  if ( out.open( npath.start ) == 0 ) {
+    ar->print_yaml( &out );
+    out.close();
+#if defined( _MSC_VER ) || defined( __MINGW32__ )
+    os_unlink( opath.start );
+#endif
+    if ( os_rename( npath.start, opath.start ) == 0 ) {
+      printf( "saved host_id %08x (%s)\n",
+               (uint32_t) ntohl( this->host_id ), opath.start );
+      return true;
+    }
+    perror( opath.start );
+    return false;
+  }
+  perror( npath.start );
+  return false;
+}
+
+bool
+UserDB::read_hostid_cache( void ) noexcept
+{
+  const char * d;
+  if ( (d = ::getenv( "TMP" )) == NULL &&
+       (d = ::getenv( "TEMP" )) == NULL ) {
+    d = "/tmp";
+  }
+  size_t l = ::strlen( d );
+  CatMalloc opath( l + 7 + this->user.user.len + 5 + 1 );
+  opath.x( d, l ).x( "/raims_", 7 )
+       .x( this->user.user.val, this->user.user.len )
+       .x( ".yaml", 5 ).end();
+
+  MDMsgMem   mem;
+  JsonMsgCtx ctx;
+  MapFile    map( opath.start );
+  os_stat    st;
+  int        status;
+
+  status = os_fstat( opath.start, &st );
+  if ( status < 0 || st.st_size == 0 )
+    return false;
+  /* recursion check */
+  if ( ! map.open() ) {
+    perror( opath.start );
+    return false;
+  }
+  status = ctx.parse( (char *) map.map, 0, map.map_size, NULL, &mem, true );
+  if ( status != 0 ) {
+    fprintf( stderr, "JSON parse error in \"%s\", status %d/%s\n", opath.start,
+             status, Err::err( status )->descr );
+    if ( ctx.input != NULL ) {
+      fprintf( stderr, "line %u col %u\n", (uint32_t) ctx.input->line_count,
+               (uint32_t) ( ctx.input->offset - ctx.input->line_start + 1 ) );
+    }
+    return false;
+  }
+  MDFieldIter * iter;
+  if ( (status = ctx.msg->get_field_iter( iter )) == 0 ) {
+    if ( (status = iter->first()) == 0 ) {
+      do {
+        MDName nm;
+        MDReference mref;
+        if ( iter->get_name( nm ) != 0 )
+          break;
+        if ( nm.fnamelen != this->user.user.len + 1 ||
+           ::memcmp( nm.fname, this->user.user.val, this->user.user.len ) != 0 )
+          continue;
+        if ( iter->get_reference( mref ) != 0 )
+          break;
+        const uint8_t * ptr = mref.fptr,
+                      * end = &ptr[ mref.fsize ];
+        char sbuf[ 32 ];
+        size_t slen = sizeof( sbuf );
+        if ( mref.ftype != MD_STRING ) {
+          if ( to_string( mref, sbuf, slen ) == 0 ) {
+            ptr = (uint8_t *) sbuf;
+            end = &((uint8_t *) sbuf)[ slen ];
+          }
+        }
+        #define hex( c ) ( c >= '0' && c <= '9' ) ? ( c - '0' ): \
+                         ( c >= 'A' && c <= 'F' ) ? ( c - 'A' + 10 ) : \
+                         ( c >= 'a' && c <= 'f' ) ? ( c - 'a' + 10 ) : 16
+        uint32_t h = 0, a, b;
+        while ( ptr < end && *ptr <= ' ' )
+          ptr++;
+        for ( int i = 3; ; ) {
+          if ( &ptr[ i*2+1 ] >= end )
+            break;
+          h = ( h << 4 ) | (a = hex( ptr[ i*2 ] ));
+          h = ( h << 4 ) | (b = hex( ptr[ i*2+1 ] ));
+          if ( ( a | b ) == 16 )
+            break;
+          if ( --i == -1 ) {
+            this->host_id = h;
+            printf( "loaded host_id %08x (%s)\n",
+                     (uint32_t) ntohl( h ), opath.start );
+            return true;
+          }
+        }
+        #undef hex
+      } while ( (status = iter->next()) == 0 );
+    }
+  }
+  return false;
 }
 
 char *

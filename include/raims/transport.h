@@ -378,6 +378,8 @@ struct TransportRvHost {
   TransportRvHost( TransportRoute &r,  kv::EvSocket &c ) noexcept;
   int start_session( void ) noexcept;
   void stop_session( void ) noexcept;
+  static size_t ip4_string( uint32_t host_id,  char *buf ) noexcept;
+  static size_t ip4_hex_string( uint32_t host_id,  char *buf ) noexcept;
 };
 }
 }

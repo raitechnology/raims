@@ -1,7 +1,7 @@
 #include <stdio.h>
 #define __STDC_FORMAT_MACROS
 #include <inttypes.h>
-#ifndef _MSC_VER
+#if ! defined( _MSC_VER ) && ! defined( __MINGW32__ )
 #include <poll.h>
 #include <sys/time.h>
 #include <sys/types.h>
@@ -263,7 +263,7 @@ PgmSock::start_pgm( const char *network,  int svc,  int &fd ) noexcept
   }
   this->is_connected = b;
   if ( b ) {
-#ifndef _MSC_VER
+#if ! defined( _MSC_VER ) && ! defined( __MINGW32__ )
     struct pollfd fds[ 5 ];
     int           n_fds = 5;
     if ( pgm_poll_info( this->sock, fds, &n_fds, POLLIN ) < 1 ) {
@@ -401,6 +401,10 @@ PgmSock::recv_msgs( void ) noexcept
   struct timeval tv;
 
   for (;;) {
+#ifndef MSG_ERRQUEUE
+/* pgm/include/impl/sockaddr.h */
+#define MSG_ERRQUEUE 0x2000
+#endif
     this->status = pgm_recvmsgv( this->sock, this->msgv, MSG_VEC_SIZE,
                                  MSG_ERRQUEUE, &bytes_read, &this->pgm_err );
     this->timeout_usecs = 0;

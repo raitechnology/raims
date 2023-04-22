@@ -313,7 +313,8 @@ enum MsgFid {
   FID_REM_TPORTID    = 83 , /* remote tport on the directly connected link */
   FID_MESH_INFO      = 84 , /* status of mesh in mesh reply */
   FID_LINK_STATE_SUM = 85 , /* sum of peers link_state seqno */
-  FID_SUB_SEQNO_SUM  = 86   /* sum of peers sub seqno */
+  FID_SUB_SEQNO_SUM  = 86 , /* sum of peers sub seqno */
+  FID_HOST_ID        = 87   /* host id */
 };
 static const int FID_TYPE_SHIFT = 8,
                  FID_MAX        = 1 << FID_TYPE_SHIFT; /* 256 */
@@ -854,7 +855,8 @@ static FidTypeName fid_type_name[] = {
 { FID_REM_TPORTID , U_SHORT | U_INT             , XCL , 0 ,"rem_tportid"     },
 { FID_MESH_INFO   , U_SHORT | U_INT             , XCL , 0 ,"mesh_info"       },
 { FID_LINK_STATE_SUM,U_SHORT | U_INT | U_LONG   , XCL , 0 ,"link_state_sum"  },
-{ FID_SUB_SEQNO_SUM ,U_SHORT | U_INT | U_LONG   , XCL , 0 ,"sub_seqno_sum"   }
+{ FID_SUB_SEQNO_SUM ,U_SHORT | U_INT | U_LONG   , XCL , 0 ,"sub_seqno_sum"   },
+{ FID_HOST_ID     , U_SHORT | U_INT | U_LONG    , XCL , 0 ,"host_id"         }
 };
 
 #endif

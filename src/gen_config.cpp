@@ -461,6 +461,16 @@ GenCfg::copy_param( const char *orig_dir,  const char *dir_name ) noexcept
 }
 
 void
+GenCfg::load_svc( const ConfigTree &tree,
+                  const ConfigTree::Service &s ) noexcept
+{
+  this->svc.load_service( tree, s );
+  for ( UserElem *el = this->svc.users.hd; el != NULL; el = el->next ) {
+    this->host_ht->upsert_rsz( this->host_ht, el->user.make_host_id(), 1 );
+  }
+}
+
+void
 GenCfg::add_user( const char *user,  size_t user_len,
                   const char *expire,  size_t expire_len,
                   CryptPass &pass ) noexcept
@@ -468,8 +478,9 @@ GenCfg::add_user( const char *user,  size_t user_len,
   UserBuf u;
   this->user_set.add_member( user, user_len );
   u.gen_key( user, user_len, this->svc.service, this->svc.service_len,
-             expire, expire_len, pass );
+             expire, expire_len, false, pass, this->host_ht );
   this->svc.add_user( u );
+  this->host_ht->upsert_rsz( this->host_ht, u.make_host_id(), 1 );
 }
 
 bool

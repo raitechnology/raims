@@ -4,7 +4,6 @@
 #include <stdint.h>
 #define __STDC_FORMAT_MACROS
 #include <inttypes.h>
-#include <raikv/os_file.h>
 #define DECLARE_SUB_CONST
 #define INCLUDE_FRAME_CONST
 #define DECLARE_CONFIG_CONST
@@ -13,6 +12,7 @@
 #include <raims/ev_name_svc.h>
 #include <raims/ev_web.h>
 #include <raims/ev_telnet.h>
+#include <raikv/os_file.h>
 
 using namespace rai;
 using namespace ms;
@@ -116,11 +116,12 @@ SessionMgr::on_write_ready( void ) noexcept
 }
 
 bool
-SessionMgr::init_param( void ) noexcept
+SessionMgr::load_parameters( void ) noexcept
 {
   const char *s = "", *val = NULL;
-  uint64_t hb_ival, rel_ival, time_val, bytes_val;
+  uint64_t hb_ival, rel_ival, time_val, bytes_val, host_id;
   bool ipv4_only = false, ipv6_only = false;
+  bool cache_hostid = true;
 
   if ( this->tree.parameters.find( s = P_IDLE_BUSY, val, NULL ) ) {
     uint64_t idle = 0;
@@ -173,6 +174,26 @@ SessionMgr::init_param( void ) noexcept
   }
   if ( this->tree.parameters.find( s = P_TCP_IPV6ONLY, val, NULL ) ) {
     if ( ! ConfigTree::string_to_bool( val, ipv6_only ) ) goto fail;
+  }
+  if ( this->tree.parameters.find( s = P_HOST_ID, val, NULL ) ) {
+    if ( val != NULL && ( val[ 0 ] == 'r' || val[ 0 ] == 'R' ) ) {
+      this->user_db.host_id = this->user_db.rand.next();
+      if ( val[ 1 ] != 'c' && val[ 1 ] != 'C' )
+        cache_hostid = false;
+    }
+    else {
+      if ( ! ConfigTree::string_to_uint( val, host_id ) ) goto fail;
+      this->user_db.host_id = htonl( host_id );
+      cache_hostid = false;
+    }
+  }
+  if ( cache_hostid ) {
+    if ( ! this->user_db.read_hostid_cache() ) {
+      if ( ! this->user_db.write_hostid_cache() ) {
+        fprintf( stderr, "unable to save host id %08x\n",
+                 (uint32_t) ntohl( this->user_db.host_id ) );
+      }
+    }
   }
   if ( ipv4_only && ! ipv6_only ) {
     this->tcp_ipv4 = true;
@@ -408,10 +429,14 @@ SessionMgr::fork_daemon( int err_fd,  const char *wkdir ) noexcept
     static char status_line[] = "moving to background daemon\n";
     os_write( err_fd, status_line, sizeof( status_line ) - 1 );
   }
+#if ! defined( _MSC_VER ) && ! defined( __MINGW32__ )
   if ( ::fork() > 0 )
     ::exit( 0 );
-  if ( wkdir != NULL )
-    ::chdir( wkdir );
+  if ( wkdir != NULL ) {
+    if ( ::chdir( wkdir ) != 0 ) {
+      os_write( err_fd, "chdir failed\n", 13 );
+    }
+  }
   ::setsid();
   ::umask( 0 );
   if ( ::fork() > 0 )
@@ -427,24 +452,32 @@ SessionMgr::fork_daemon( int err_fd,  const char *wkdir ) noexcept
       ::fclose( fp );
     }
   }
+#else
+  (void) wkdir;
+#endif
 }
 
 void
 SessionMgr::start( void ) noexcept
 {
-  printf( "%s: %lu bytes\n", P_PUB_WINDOW_SIZE, this->pub_window_size );
-  printf( "%s: %lu bytes\n", P_SUB_WINDOW_SIZE, this->sub_window_size );
-  printf( "%s: %lu secs\n", P_PUB_WINDOW_TIME, ns_to_sec( this->pub_window_ival ) );
-  printf( "%s: %lu secs\n", P_SUB_WINDOW_TIME, ns_to_sec( this->sub_window_ival ) );
+  printf( "%s: %" PRIu64 " bytes\n", P_PUB_WINDOW_SIZE, this->pub_window_size );
+  printf( "%s: %" PRIu64 " bytes\n", P_SUB_WINDOW_SIZE, this->sub_window_size );
+  printf( "%s: %" PRIu64 " secs\n", P_PUB_WINDOW_TIME, ns_to_sec( this->pub_window_ival ) );
+  printf( "%s: %" PRIu64 " secs\n", P_SUB_WINDOW_TIME, ns_to_sec( this->sub_window_ival ) );
   printf( "%s: %u secs\n", P_HEARTBEAT, this->user_db.hb_interval );
   printf( "%s: %u secs\n", P_RELIABILITY, this->user_db.reliability );
-  printf( "%s: %lu secs\n", P_TCP_WRITE_TIMEOUT, ns_to_sec( this->poll.wr_timeout_ns ) );
+  printf( "%s: %" PRIu64 " secs\n", P_TCP_WRITE_TIMEOUT, ns_to_sec( this->poll.wr_timeout_ns ) );
   printf( "%s: %u bytes\n", P_TCP_WRITE_HIGHWATER, this->poll.send_highwater );
   printf( "%s: %s\n", P_TCP_IPV4ONLY, this->tcp_ipv6 &&
                                       ! this->tcp_ipv4 ? "true" : "false" );
   printf( "%s: %s\n", P_TCP_IPV6ONLY, this->tcp_ipv4 &&
                                       ! this->tcp_ipv6 ? "true" : "false" );
   printf( "%s: %s\n", P_TCP_NOENCRYPT, this->tcp_noencrypt ? "true" : "false" );
+
+  char hstr[ 32 ], ipstr[ 32 ];
+  TransportRvHost::ip4_hex_string( this->user_db.host_id, hstr );
+  TransportRvHost::ip4_string( this->user_db.host_id, ipstr );
+  printf( "%s: %s (%s)\n", P_HOST_ID, hstr, ipstr );
 
   uint64_t cur_time = this->poll.current_coarse_ns(),
            cur_mono = this->poll.mono_ns,
@@ -523,7 +556,7 @@ SessionMgr::timer_expire( uint64_t tid,  uint64_t ) noexcept
        cur_time >= this->user_db.net_converge_time ) {
     uint64_t seqno = seqno_init( cur_time );
     if ( seqno != this->converge_seqno ) {
-      d_sess( "set converge seqno %lu\n", seqno );
+      d_sess( "set converge seqno %" PRIu64 "\n", seqno );
       this->converge_seqno      = seqno;
       this->timer_converge_time = cur_time;
     }
@@ -540,7 +573,7 @@ SessionMgr::timer_expire( uint64_t tid,  uint64_t ) noexcept
   if ( cur_mono > this->pub_window_mono_time ) {
     if ( this->sub_db.pub_tab.flip( this->pub_window_size, cur_time ) ) {
       this->pub_window_mono_time = cur_mono + this->pub_window_ival;
-      printf( "pub_tab rotated, count %lu size %lu\n",
+      printf( "pub_tab rotated, count %" PRIu64 " size %" PRIu64 "\n",
               this->sub_db.pub_tab.pub_old->pop_count(),
               this->sub_db.pub_tab.pub_old->mem_size() );
     }
@@ -549,7 +582,7 @@ SessionMgr::timer_expire( uint64_t tid,  uint64_t ) noexcept
   if ( cur_mono > this->sub_window_mono_time ) {
     if ( this->sub_db.seqno_tab.flip( this->sub_window_size, cur_time ) ) {
       this->sub_window_mono_time = cur_mono + this->sub_window_ival;
-      printf( "sub_tab rotated, count %lu size %lu\n",
+      printf( "sub_tab rotated, count %" PRIu64 " size %" PRIu64 "\n",
               this->sub_db.seqno_tab.tab_old->pop_count(),
               this->sub_db.seqno_tab.tab_old->mem_size() );
     }
@@ -732,7 +765,7 @@ SessionMgr::show_seqno_status( MsgFramePublish &fpub,  UserBridge &n,
                                MsgHdrDecoder &dec,  SeqnoArgs &seq,
                                int status,  bool is_session ) noexcept
 {
-  n.printf( "%s %s %.*s seqno %lu.%lu last %lu.%lu miss 0x%x (%s)\n",
+  n.printf( "%s %s %.*s seqno %" PRIu64 ".%" PRIu64 " last %" PRIu64 ".%" PRIu64 " miss 0x%x (%s)\n",
             is_session ? "session" : "ipc",
             seqno_status_string( (SeqnoStatus) status ),
             (int) fpub.subject_len, fpub.subject,
@@ -833,7 +866,7 @@ IpcRoute::on_msg( EvPublish &pub ) noexcept
         return true;
     }
   }
-  d_sess( "-> ipc_rte: %.*s seqno %lu.%lu (%s) reply %.*s "
+  d_sess( "-> ipc_rte: %.*s seqno %" PRIu64 ".%" PRIu64 " (%s) reply %.*s "
           "(len=%u, from %s, fd %d, msg_enc %x)\n",
           (int) fpub.subject_len, fpub.subject,
           seqno_frame( dec.seqno ), seqno_base( dec.seqno ),
@@ -894,7 +927,7 @@ IpcRoute::on_msg( EvPublish &pub ) noexcept
           EvPublish pub( fpub.subject, fpub.subject_len, reply, replylen,
                          data, datalen, rte->sub_route, fpub.src_route,
                          fpub.subj_hash, fmt, 'p', seq.msg_loss,
-                         n.bridge_nonce_int, dec.seqno );
+                         n.host_id, dec.seqno );
           b &= rte->sub_route.forward_except( pub, this->mgr.router_set, this );
         }
       }
@@ -907,7 +940,7 @@ IpcRoute::on_msg( EvPublish &pub ) noexcept
         EvPublish pub( fpub.subject, fpub.subject_len, reply, replylen,
                        data, datalen, rte->sub_route, fpub.src_route,
                        fpub.subj_hash, fmt, 'p', seq.msg_loss,
-                       n.bridge_nonce_int, dec.seqno );
+                       n.host_id, dec.seqno );
         b &= rte->sub_route.forward_except( pub, this->mgr.router_set, this );
       }
     }
@@ -1041,7 +1074,7 @@ IpcRoute::on_inbox( MsgFramePublish &fpub,  UserBridge &n,
     if ( &fpub.rte != rte && rte->is_set( TPORT_IS_IPC ) ) {
       EvPublish pub( subject, subjlen, reply, replylen,
                      data, datalen, rte->sub_route, fpub.src_route, h, fmt, 'p',
-                     0, n.bridge_nonce_int, dec.seqno );
+                     0, n.host_id, dec.seqno );
       b &= rte->sub_route.forward_except_with_cnt( pub, this->mgr.router_set,
                                                    rcnt, &this->mgr );
       if ( rcnt != 0 ) {
@@ -1695,7 +1728,7 @@ SessionMgr::forward_ipc( TransportRoute &src_rte,  EvPublish &pub ) noexcept
   seqno = p->next_seqno( loc.is_new, time, this->timer_time,
                          this->converge_seqno, chain_seqno );
 
-  d_sess( "-> fwd_ipc: %.*s seqno %lu reply %.*s "
+  d_sess( "-> fwd_ipc: %.*s seqno %" PRIu64 " reply %.*s "
           "(len=%u, from %s, fd %d, enc %x)\n",
           (int) pub.subject_len, pub.subject, seqno,
           (int) pub.reply_len, (char *) pub.reply,
@@ -1859,7 +1892,7 @@ SessionMgr::publish_to( PubPtpData &ptp ) noexcept
 
   m.sign( ibx.buf, ibx.len(), *this->user_db.session_key );
 
-  d_sess( "-> publish_to : sub %.*s seqno %lu inbox %.*s\n",
+  d_sess( "-> publish_to : sub %.*s seqno %" PRIu64 " inbox %.*s\n",
           (int) ptp.sublen, ptp.sub, ptp.seqno,
           (int) ibx.len(), (char *) ibx.buf );
 

@@ -2,6 +2,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#define __STDC_FORMAT_MACROS
+#include <inttypes.h>
 #include <raims/session.h>
 #include <raims/ev_inbox_transport.h>
 
@@ -226,8 +228,8 @@ UserDB::on_inbox_auth( const MsgFramePublish &pub,  UserBridge &n,
       dec.get_ival<uint64_t>( FID_SUB_SEQNO, sub_seqno );
       if ( n.link_state_seqno < link_state || n.sub_seqno < sub_seqno ) {
         if ( debug_auth )
-          n.printf( "auth link_state %lu != link_state %lu || "
-                    "auth sub_seqno %lu != sub_seqno %lu\n", n.link_state_seqno,
+          n.printf( "auth link_state %" PRIu64 " != link_state %" PRIu64 " || "
+                    "auth sub_seqno %" PRIu64 " != sub_seqno %" PRIu64 "\n", n.link_state_seqno,
                     link_state, n.sub_seqno, sub_seqno );
         this->send_adjacency_request( n, AUTH_SYNC_REQ );
       }
@@ -257,7 +259,7 @@ UserDB::send_challenge( UserBridge &n,  AuthStage stage ) noexcept
   
   this->events.send_challenge( n.uid, n.user_route->rte.tport_id, stage );
   if ( debug_auth )
-    n.printf( "send stage %u verify(%lu,%lu,0x%08lx)\n", stage,
+    n.printf( "send stage %u verify(%" PRIu64 ",%" PRIu64 ",0x%08" PRIx64 ")\n", stage,
               n.auth[ 0 ].seqno, n.auth[ 0 ].time,
               n.auth[ 0 ].cnonce.nonce[ 0 ] );
   const char * ver_str = ms_get_version();
@@ -290,6 +292,7 @@ UserDB::send_challenge( UserBridge &n,  AuthStage stage ) noexcept
    .cost4      ()
    .tportid    ()
    .tport      ( rte.transport.tport.len )
+   .host_id    ()
    .pk_sig     ();
 
   MsgCat m;
@@ -335,7 +338,8 @@ UserDB::send_challenge( UserBridge &n,  AuthStage stage ) noexcept
     m.cost4( rte.uid_connected.cost[ 3 ] );
   }
   m.tportid( rte.tport_id )
-   .tport( rte.transport.tport.val, rte.transport.tport.len );
+   .tport( rte.transport.tport.val, rte.transport.tport.len )
+   .host_id( this->host_id );
   m.pk_sig();
   uint32_t h = ibx.hash();
   DSA * dsa = ( ! this->svc_dsa->sk.is_zero() ? this->svc_dsa : this->user_dsa );
@@ -364,7 +368,7 @@ UserDB::recv_challenge( const MsgFramePublish &pub,  UserBridge &n,
   n.hb_pubkey.copy_from( dec.mref[ FID_PUBKEY ].fptr );
 
   if ( debug_auth )
-    n.printf( "recv stage %u verify(%lu,%lu,0x%08lx)\n", stage,
+    n.printf( "recv stage %u verify(%" PRIu64 ",%" PRIu64 ",0x%08" PRIx64 ")\n", stage,
               n.auth[ 0 ].seqno, n.auth[ 0 ].time,
               n.auth[ 0 ].cnonce.nonce[ 0 ] );
   this->calc_secret_hmac( n, secret_hmac );
@@ -446,6 +450,7 @@ UserDB::send_trusted( const MsgFramePublish &/*pub*/,  UserBridge &n,
    .cost4     ()
    .tportid   ()
    .tport     ( rte.transport.tport.len )
+   .host_id   ()
    .mesh_url  ( u_ptr->mesh_url.len )
    .mesh_db   ( mesh_db_len )
    .ucast_db  ( ucast_db_len );
@@ -469,7 +474,8 @@ UserDB::send_trusted( const MsgFramePublish &/*pub*/,  UserBridge &n,
     m.cost4( rte.uid_connected.cost[ 3 ] );
   }
   m.tportid( rte.tport_id )
-   .tport   ( rte.transport.tport.val, rte.transport.tport.len );
+   .tport   ( rte.transport.tport.val, rte.transport.tport.len )
+   .host_id ( this->host_id );
   if ( mesh_db_len != 0 && u_ptr->mesh_url.len > 0 ) {
     m.mesh_url( u_ptr->mesh_url.val, u_ptr->mesh_url.len );
     this->mesh_db_submsg( rte, mesh_filter, m );
@@ -550,7 +556,8 @@ UserDB::send_trusted( const MsgFramePublish &/*pub*/,  UserBridge &n,
           m.cost4( rte->uid_connected.cost[ 3 ] );
         }
         m.tportid( tport_id )
-         .tport( rte->transport.tport.val, rte->transport.tport.len );
+         .tport( rte->transport.tport.val, rte->transport.tport.len )
+         .host_id( this->host_id );
 
         if ( mesh_db_len != 0 ) {
           m.mesh_url( u_ptr->mesh_url.val, u_ptr->mesh_url.len );
@@ -587,6 +594,8 @@ UserDB::recv_trusted( const MsgFramePublish &pub,  UserBridge &n,
       this->recv_mesh_db( pub, n, dec );
     if ( is_mcast )
       this->recv_ucast_db( pub, n, dec );
+    if ( dec.test( FID_HOST_ID ) )
+      this->update_host_id( n, dec );
   }
   /* could be hb between trust, start_time sufficient */
   /*else {

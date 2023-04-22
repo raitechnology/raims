@@ -16,7 +16,7 @@ struct TransportRoute;
 union NameInbox {
   uint64_t val;
   struct {
-    uint32_t s_addr;   /* my inbox recv addr */
+    uint32_t in_addr;  /* my inbox recv addr */
     uint16_t sin_port, /* my inbox recv port */
              zero;
   } ip;

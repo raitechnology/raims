@@ -103,6 +103,14 @@ struct UserBuf {
   void zero( void ) volatile {
     ::memset( (void *) this, 0, sizeof( *this ) );
   }
+  uint32_t make_host_id( void ) const {
+    return kv_crc_c( this->user, this->user_len,
+                     kv_crc_c( this->create, this->create_len, 0 ) );
+  }
+  static uint32_t make_host_id( const char *u,  size_t ulen,
+                                const char *c,  size_t clen ) {
+    return kv_crc_c( u, ulen, kv_crc_c( c, clen, 0 ) );
+  }
   /* compare x and y, user name */
   static int cmp_user( const UserBuf &x,  const UserBuf &y ) noexcept;
   /* compare x and y, user name with create time */
@@ -113,9 +121,12 @@ struct UserBuf {
   uint64_t get_revoke( void ) const noexcept;
   /* generate a key pair, pri[] pub[] are encrypted with pass + times */
   bool gen_key( const char *user,  size_t ulen,  const char *svc,  size_t slen,
-              const char *expire,  size_t elen, const CryptPass &pwd ) noexcept;
+                const char *expire,  size_t elen,  bool is_temp,
+                const CryptPass &pwd,  kv::UIntHashTab *ht ) noexcept;
   bool gen_tmp_key( const char *usr_svc,  const char *num,
-                    ConfigTree::Service &svc,  const CryptPass &pwd ) noexcept;
+                    const ConfigTree &tree,
+                    const ConfigTree::Service &svc,
+                    const CryptPass &pwd ) noexcept;
 #if 0
   /* encrypt the keys, pub or pri */
   bool put_ecdh( const CryptPass &pwd,  ECDH &ec,

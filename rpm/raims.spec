@@ -13,7 +13,7 @@ BuildRequires:  gcc-c++
 BuildRequires:  chrpath
 BuildRequires:  raikv
 BuildRequires:  raimd
-BuildRequires:  openpgm
+BuildRequires:  openpgm_st
 BuildRequires:  raids
 BuildRequires:  natsmd
 BuildRequires:  sassrv
@@ -28,7 +28,7 @@ BuildRequires:  c-ares-devel
 BuildRequires:  openssl-devel
 Requires:       raikv
 Requires:       raimd
-Requires:       openpgm
+Requires:       openpgm_st
 Requires:       raids
 Requires:       natsmd
 Requires:       sassrv
@@ -86,5 +86,5 @@ fi
 /sbin/ldconfig
 
 %changelog
-* __DATE__ <support@raitechnology.com>
+* Sat Jan 01 2000 <support@raitechnology.com>
 - Hello world

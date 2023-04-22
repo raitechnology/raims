@@ -3,7 +3,7 @@
 #include <string.h>
 #include <stdint.h>
 #include <stdarg.h>
-#ifndef _MSC_VER
+#if ! defined( _MSC_VER ) && ! defined( __MINGW32__ )
 #include <unistd.h>
 #else
 #include <raikv/win.h>

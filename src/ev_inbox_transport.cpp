@@ -4,7 +4,7 @@
 #include <stdint.h>
 #define __STDC_FORMAT_MACROS
 #include <inttypes.h>
-#ifndef _MSC_VER
+#if ! defined( _MSC_VER ) && ! defined( __MINGW32__ )
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netdb.h>
@@ -585,7 +585,7 @@ void
 EvInboxTransport::post_msg( InboxPeer &p,  const void *msg,
                             uint32_t msg_len ) noexcept
 {
-  static const size_t max_payload = this->mtu - sizeof( InboxPktElem );
+  const size_t max_payload = this->mtu - sizeof( InboxPktElem );
   InboxPktElem * el;
 
   if ( msg_len <= max_payload ) {
@@ -624,7 +624,7 @@ EvInboxTransport::post_msg( InboxPeer &p,  const void *msg,
 void
 EvInboxTransport::post_frag_msg( InboxPeer &p,  MsgFragPublish &fpub ) noexcept
 {
-  static const size_t max_payload = this->mtu - sizeof( InboxPktElem );
+  const size_t max_payload = this->mtu - sizeof( InboxPktElem );
   size_t msg_len = fpub.msg_len + fpub.trail_sz + ( fpub.trail_sz & 1 );
   InboxPktElem * el;
 
@@ -706,8 +706,8 @@ InboxWindow::new_window_mem( InboxPeer &p,  size_t len ) noexcept
   InboxWindow *w = p.window;
   for (;;) {
     if ( w == NULL ) {
-      size_t wsize = WBUF_SIZE;
-      if ( len > WBUF_SIZE )
+      size_t wsize = INBOX_WBUF_SIZE;
+      if ( len > INBOX_WBUF_SIZE )
         wsize = SendWindow::align( len );
       w = new ( ::malloc( sizeof( InboxWindow ) + wsize ) ) /* more space */
           InboxWindow( p, wsize );

@@ -6,9 +6,9 @@
 #define __STDC_FORMAT_MACROS
 #include <inttypes.h>
 #include <raims/ev_web.h>
-#include <raikv/os_file.h>
 #include <raims/user_db.h>
 #include <raims/ev_web_tar.h>
+#include <raikv/os_file.h>
 
 using namespace rai;
 using namespace ds;
@@ -145,7 +145,7 @@ WebService::tar_entry_count( void ) noexcept
     if ( ::memcmp( tarhdr.magic, zeromagic, sizeof( tarhdr.magic ) ) == 0 )
       continue;
     if ( ::strncmp( tarhdr.magic, "ustar", 5 ) != 0 ) {
-      fprintf( stderr, "Bad tar magic %lu\n", taroff );
+      fprintf( stderr, "Bad tar magic %" PRIu64 "\n", taroff );
       return 0;
     }
     te.to_entry( tarhdr, &ev_web_tar_data[ taroff ] );

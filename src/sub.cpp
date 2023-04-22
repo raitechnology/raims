@@ -256,7 +256,7 @@ SubDB::find_fwd_sub( UserBridge &n,  uint32_t hash,
     return true;
   bool b = true;
   if ( match_len == 0 ||
-       ::memmem( sub->value, sub->len, match, match_len ) != NULL ) {
+       kv_memmem( sub->value, sub->len, match, match_len ) != NULL ) {
     b &= this->fwd_resub( n, sub->value, sub->len, from_seqno, seqno, false,
                           suf ? suf : _RESUB, token );
     from_seqno = seqno;
@@ -275,7 +275,7 @@ SubDB::find_fwd_psub( UserBridge &n,  uint32_t hash,
     return true;
   bool b = true;
   if ( match_len == 0 ||
-       ::memmem( sub->value, sub->len, match, match_len ) != NULL ) {
+       kv_memmem( sub->value, sub->len, match, match_len ) != NULL ) {
     b &= this->fwd_resub( n, sub->value, sub->len, from_seqno, seqno, true,
                           suf ? suf : _REPSUB, token );
     from_seqno = seqno;
@@ -1406,7 +1406,7 @@ SubDB::match_inbox( const char *str,  size_t str_len,
 void
 SubDB::queue_sub_update( NotifySub &sub,  uint32_t refcnt ) noexcept
 {
-  printf( "queue_sub_update( %.*s, fd=%u, start=%lx, cnt=%u )\n",
+  printf( "queue_sub_update( %.*s, fd=%u, start=%" PRIx64 ", cnt=%u )\n",
           (int) sub.subject_len, sub.subject, sub.src.fd,
           sub.src.start_ns, refcnt );
 }
@@ -1414,7 +1414,7 @@ SubDB::queue_sub_update( NotifySub &sub,  uint32_t refcnt ) noexcept
 void
 SubDB::queue_psub_update( NotifyPattern &pat,  uint32_t refcnt ) noexcept
 {
-  printf( "queue_psub_update( %.*s, fd=%u, start=%lx, cnt=%u )\n",
+  printf( "queue_psub_update( %.*s, fd=%u, start=%" PRIx64 ", cnt=%u )\n",
           (int) pat.pattern_len, pat.pattern, pat.src.fd,
           pat.src.start_ns, refcnt );
 }

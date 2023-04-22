@@ -3,8 +3,12 @@
 #include <string.h>
 #include <stdint.h>
 #include <stdarg.h>
+#define __STDC_FORMAT_MACROS
+#include <inttypes.h>
 #include <errno.h>
-#include <raikv/os_file.h>
+#if defined( _MSC_VER ) || defined( __MINGW32__ )
+#include <raikv/win.h>
+#endif
 #include <raikv/logger.h>
 #include <raims/parse_config.h>
 #include <raims/session.h>
@@ -14,6 +18,7 @@
 #include <raims/console.h>
 #include <linecook/ttycook.h>
 #include <linecook/linecook.h>
+#include <raikv/os_file.h>
 
 using namespace rai;
 using namespace ms;
@@ -112,6 +117,7 @@ main( int argc, char *argv[] )
              * db_num      = NULL,
              * use_console = NULL,
              * pid_file    = NULL,
+             * hostid      = NULL,
              * reliability = NULL,
              * get_help    = NULL;
   bool         log_hdr     = true;
@@ -119,6 +125,7 @@ main( int argc, char *argv[] )
   const char *program = ::strrchr( argv[ 0 ], '/' );
   program = ( program != NULL ? program + 1 : argv[ 0 ] );
   bool is_rvd = ::strcmp( program, "rvd" ) == 0;
+#if ! defined( _MSC_VER ) && ! defined( __MINGW32__ )
   char path[ 1024 ];
   ssize_t n = ::readlink( "/proc/self/exe", path, sizeof( path ) );
   path[ sizeof( path ) - 1 ] = '\0';
@@ -133,6 +140,7 @@ main( int argc, char *argv[] )
     fprintf( stderr, "exe path length bad: %ld\n", n );
     return 1;
   }
+#endif
   if ( ! is_rvd ) {
     for ( int i = 1; i < argc; i++ ) {
       if ( argv[ i ][ 0 ] == '-' && ::strlen( argv[ i ] ) > 2 ) {
@@ -158,7 +166,8 @@ main( int argc, char *argv[] )
   "   -http              : port for http service (default: listen + 80)\n" \
   "   -no-mcast          : no multicast\n" \
   "   -console           : run with console\n" \
-  "   -pidfile           : write daemon pid to file\n"
+  "   -pidfile           : write daemon pid to file\n" \
+  "   -hostid            : host identity\n"
     cfg         = get_arg( argc, argv, 1, "-cfg", rv_file );
     reliability = get_arg( argc, argv, 1, "-reliability", NULL );
     user        = get_arg( argc, argv, 1, "-user", NULL );
@@ -177,6 +186,7 @@ main( int argc, char *argv[] )
     no_mcast    = get_arg( argc, argv, 0, "-no-multicast", NULL );
     use_console = get_arg( argc, argv, 0, "-console", NULL );
     pid_file    = get_arg( argc, argv, 1, "-pidfile", NULL );
+    hostid      = get_arg( argc, argv, 1, "-hostid", NULL );
     if ( use_console != NULL )
       foreground = use_console;
     get_help    = get_arg( argc, argv, 0, "-help", NULL );
@@ -195,6 +205,7 @@ main( int argc, char *argv[] )
   "   -i name        : connect with ipc name\n" \
   "   -m map         : attach to kv shm map\n" \
   "   -D dbnum       : default db num\n" \
+  "   -x hostid      : host identity\n" \
   "   -c             : run with console\n" \
   "   -b             : fork and detach from terminal\n"
 
@@ -207,6 +218,7 @@ main( int argc, char *argv[] )
     ipc_name    = get_arg( argc, argv, 1, "-i", NULL );
     map_file    = get_arg( argc, argv, 1, "-m", NULL );
     db_num      = get_arg( argc, argv, 1, "-D", NULL );
+    hostid      = get_arg( argc, argv, 1, "-x", NULL );
     use_console = get_arg( argc, argv, 0, "-c", NULL );
     background  = get_arg( argc, argv, 0, "-b", NULL );
     get_help    = get_arg( argc, argv, 0, "-h", NULL );
@@ -224,6 +236,9 @@ main( int argc, char *argv[] )
               argv[ 0 ], ms_get_version() );
     return 0;
   }
+#if defined( _MSC_VER ) || defined( __MINGW32__ )
+  ws_global_init(); /* gethostname() needs WSAStartup() */
+#endif
   int err_fd = os_dup( STDERR_FILENO );
 
   if ( log_file != NULL ) {
@@ -271,13 +286,15 @@ main( int argc, char *argv[] )
     tree->parameters.set( st, P_RELIABILITY, reliability );
   if ( pid_file != NULL )
     tree->parameters.set( st, P_PID_FILE, pid_file );
+  if ( hostid != NULL )
+    tree->parameters.set( st, P_HOST_ID, hostid );
 
   ConfigTree::User      * usr   = NULL;
   ConfigTree::Service   * svc   = NULL;
   ConfigTree::Transport * tport = NULL;
   char host[ 256 ];
   int stdin_fd = STDIN_FILENO;
-#ifndef _MSC_VER
+#if ! defined( _MSC_VER ) && ! defined( __MINGW32__ )
   /* if parse_config read from stdin, it will be closed */
   if ( use_console != NULL ) {
     if ( cfg == NULL || ::strcmp( cfg, "-" ) == 0 ) {
@@ -297,13 +314,26 @@ main( int argc, char *argv[] )
       return 1;
     UserBuf user_buf;
     const char * rv_port_num = NULL;
+    char tmp_port[ 16 ];
     if ( listen != NULL ) {
       if ( (rv_port_num = ::strrchr( listen, ':' )) != NULL )
         rv_port_num++;
       else
         rv_port_num = listen;
     }
-    if ( ! user_buf.gen_tmp_key( user, rv_port_num, *svc, pwd ) ) {
+    if ( is_rvd ) {
+      int port = 0;
+      ConfigTree::Transport * rvd = tree->find_transport( "rvd", 3 );
+      if ( rvd != NULL ) {
+        port = EvTcpTransportParameters::get_listen_port( *rvd );
+        if ( port > 0 && ( rv_port_num == NULL ||
+                           port != atoi( rv_port_num ) ) ) {
+          uint32_to_string( (uint32_t) port, tmp_port );
+          rv_port_num = tmp_port;
+        }
+      }
+    }
+    if ( ! user_buf.gen_tmp_key( user, rv_port_num, *tree, *svc, pwd ) ) {
       fprintf( stderr, "Unable to generate user\n" );
       return 1;
     }
@@ -379,7 +409,7 @@ main( int argc, char *argv[] )
     log.start_ev( poll );
   }
   int status = 0;
-  if ( ! sess.init_param() || ! sess.add_ipc_transport() )
+  if ( ! sess.load_parameters() || ! sess.add_ipc_transport() )
     status = -1;
   if ( status == 0 && nets != NULL ) {
     const char * n     = ::strchr( nets, '.' ),
@@ -460,12 +490,12 @@ main( int argc, char *argv[] )
         tree->parameters.find( P_WORKING_DIRECTORY, wkdir, NULL );
         sess.fork_daemon( err_fd, wkdir );
       }
-#ifndef _MSC_VER
+#if ! defined( _MSC_VER ) && ! defined( __MINGW32__ )
+      /* detach terminal, but keep fd used so that it isn't allocated again */
       int fd = ::open( "/dev/null", O_RDONLY );
       ::dup2( fd, STDIN_FILENO );
       ::close( fd );
 #endif
-      /*os_close( STDIN_FILENO );*/
     }
     sess.start();
     uint32_t idle = 0;

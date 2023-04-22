@@ -2,7 +2,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#if ! defined( _MSC_VER ) && ! defined( __MINGW32__ )
 #include <netdb.h>
+#endif
 #include <raims/transport.h>
 #include <raims/session.h>
 #include <raims/ev_tcp_transport.h>
@@ -99,6 +101,15 @@ TransportRvHost::stop_session( void ) noexcept
   host->send_session_stop( this->conn );
   if ( host->stop_network() )
     this->rte.rv_svc->stop_host( *host );
+}
+
+size_t
+TransportRvHost::ip4_string( uint32_t host_id,  char *buf ) noexcept {
+  return sassrv::RvMcast::ip4_string( host_id, buf );
+}
+size_t
+TransportRvHost::ip4_hex_string( uint32_t host_id,  char *buf ) noexcept {
+  return sassrv::RvMcast::ip4_hex_string( host_id, buf );
 }
 
 uint16_t

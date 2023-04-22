@@ -145,7 +145,7 @@ main( int argc, char *argv[] )
       if ( (s = tree->find_service( svc_name,
                                     ::strlen( svc_name ) )) != NULL ) {
         printf( "- Loading service \"%.*s\"\n", (int) s->svc.len, s->svc.val );
-        cfg.svc.load_service( *tree, *s );
+        cfg.load_svc( *tree, *s );
         if ( ! cfg.svc.check_signatures( pass ) )
           return 1;
         printf( "- Signatures ok\n" );

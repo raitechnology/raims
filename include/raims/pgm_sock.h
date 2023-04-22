@@ -1,7 +1,7 @@
 #ifndef __rai_raims__pgm_sock_h__
 #define __rai_raims__pgm_sock_h__
 
-#include <pgm/pgm.h>
+#include <pgm_st/pgm.h>
 #include <raims/send_window.h>
 #include <raikv/dlinklist.h>
 

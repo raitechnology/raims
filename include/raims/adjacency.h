@@ -309,11 +309,18 @@ struct AdjDistance : public md::MDMsgMem {
                  found_inconsistency; /* if current or last run inconsistent */
 
   static void zero_mem( void *x,  void *y ) {
+#if __GNUC__ >= 9
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Warray-bounds"
+#endif
     ::memset( x, 0, (char *) y - (char *) x );
   }
   AdjDistance( UserDB &u ) : user_db( u ) {
     zero_mem( &this->stack, &this->inc_visit );
     zero_mem( &this->max_uid, &this[ 1 ] );
+#if __GNUC__ >= 9
+#pragma GCC diagnostic pop
+#endif
     this->cache_seqno  = 0;
     this->update_seqno = 1;
     this->prune_seqno  = 0;

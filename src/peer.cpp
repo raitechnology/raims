@@ -61,6 +61,7 @@ UserDB::make_peer_sync_msg( UserBridge &dest,  UserBridge &n,
    .sub_seqno  ()
    .link_state ()
    .hb_skew    ()
+   .host_id    ()
    .bloom      ( code.code_sz * 4 )
    .adjacency  ( this->adjacency_size( &n ) );
 
@@ -82,6 +83,7 @@ UserDB::make_peer_sync_msg( UserBridge &dest,  UserBridge &n,
    .sub_seqno  ( n.sub_seqno   )
    .link_state ( n.link_state_seqno )
    .hb_skew    ( n.hb_skew )
+   .host_id    ( n.host_id )
    .bloom      ( code.ptr       , code.code_sz * 4 );
 
   this->adjacency_submsg( &n, m );
@@ -316,6 +318,12 @@ UserDB::make_peer_session( const MsgFramePublish &pub,  UserBridge &from_n,
         user_n->skew_upd++;
       }
     }
+    if ( dec.test( FID_HOST_ID ) ) {
+      uint32_t host_id = 0;
+      cvt_number<uint32_t>( dec.mref[ FID_HOST_ID ], host_id );
+      if ( host_id != 0 && host_id != user_n->host_id )
+        this->update_host_id( user_n, host_id );
+    }
   }
   peer_key.zero();
   return user_n;
@@ -382,6 +390,10 @@ UserDB::recv_peer_db( const MsgFramePublish &pub,  UserBridge &n,
         user_n->skew_upd++;
       }
     }
+    if ( user_n != NULL && rec.host_id != 0 &&
+         user_n->host_id != rec.host_id ) {
+      this->update_host_id( user_n, rec.host_id );
+    }
   }
   if ( need_adjacency )
     this->send_adjacency_request( n, PEERDB_SYNC_REQ );
@@ -405,7 +417,8 @@ UserDB::peer_db_size( UserBridge &n,  bool is_adj_req ) noexcept
              .link_state ();
           if ( ! is_adj_req ) {
             pdb.hops     ()
-               .hb_skew  ();
+               .hb_skew  ()
+               .host_id  ();
           }
         }
       }
@@ -435,7 +448,8 @@ UserDB::peer_db_submsg( UserBridge &n,  MsgCat &m,  bool is_adj_req ) noexcept
           if ( ! is_adj_req ) {
             uint32_t hops = u_ptr->rte.uid_connected.is_member( uid ) ? 0:1;
             submsg.hops     ( hops                 )
-                  .hb_skew  ( n2->hb_skew          );
+                  .hb_skew  ( n2->hb_skew          ) 
+                  .host_id  ( n2->host_id          );
           }
         }
       }

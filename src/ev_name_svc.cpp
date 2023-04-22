@@ -2,7 +2,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
-#ifndef _MSC_VER
+#define __STDC_FORMAT_MACROS
+#include <inttypes.h>
+#if ! defined( _MSC_VER ) && ! defined( __MINGW32__ )
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #else
@@ -93,7 +95,7 @@ NameSvc::connect( void ) noexcept
     goto fail;
   }
   this->inbox_recv.set_addr( (struct sockaddr *) &sa );
-  this->inbox.ip.s_addr   = sa.sin_addr.s_addr;
+  this->inbox.ip.in_addr  = sa.sin_addr.s_addr;
   this->inbox.ip.sin_port = sa.sin_port;
 
   ibx_paddr.set_address( (struct sockaddr *) &sa );
@@ -192,7 +194,7 @@ EvNameListen::send_msg( const void *data,  size_t len,
   struct sockaddr_in * dest;
   dest = (struct sockaddr_in *) this->alloc_temp( sizeof( sockaddr_in ) );
   dest->sin_family = AF_INET;
-  dest->sin_addr.s_addr = inbox.ip.s_addr;
+  dest->sin_addr.s_addr = inbox.ip.in_addr;
   dest->sin_port = inbox.ip.sin_port;
   if ( debug_name )
     this->name.print_addr( "send", dest );
@@ -316,6 +318,7 @@ UserDB::send_name_advert( NameSvc &name,  TransportRoute &rte,
    .stamp     ()
    .start     ()
    .ret       ()
+   .host_id   ()
    .user      ( this->user.user.len )
    .create    ( this->user.create.len )
    .expires   ( this->user.expires.len )
@@ -335,7 +338,8 @@ UserDB::send_name_advert( NameSvc &name,  TransportRoute &rte,
    .start     ( this->start_time         );
   if ( inbox == NULL )
     m.ret     ( name.inbox.val           );
-  m.user      ( this->user.user.val,
+  m.host_id   ( this->host_id            )
+   .user      ( this->user.user.val,
                 this->user.user.len      )
    .create    ( this->user.create.val,
                 this->user.create.len    );
@@ -382,13 +386,14 @@ UserDB::on_name_svc( NameSvc &name,  CabaMsg *msg ) noexcept
                type_name,
                mesh_url,
                conn_url;
-  uint32_t     uid;
+  uint32_t     uid, host_id;
 
   if ( ! dec.get_bridge( bridge_id.nonce ) ||
        ! dec.get_ival<uint64_t>( FID_SEQNO, dec.seqno ) )
     return;
   dec.get_ival<uint64_t>( FID_START, start );
   dec.get_ival<uint64_t>( FID_STAMP, stamp );
+  dec.get_ival<uint32_t>( FID_HOST_ID, host_id );
   if ( dec.test( FID_RET ) )
     dec.get_ival<uint64_t>( FID_RET, inbox.val );
   else
@@ -425,7 +430,7 @@ UserDB::on_name_svc( NameSvc &name,  CabaMsg *msg ) noexcept
       }
       PeerEntry * peer = this->find_peer( dec, bridge_id.hmac );
       if ( peer != NULL )
-        n = this->add_user2( bridge_id, *peer, start, hello_key );
+        n = this->add_user2( bridge_id, *peer, start, hello_key, host_id );
       if ( n == NULL ) {
         fprintf( stderr, "ignoring msg, no user create\n" );
         return;
@@ -445,7 +450,7 @@ UserDB::on_name_svc( NameSvc &name,  CabaMsg *msg ) noexcept
     }
     else {
       d_name(
-        "%s: ignoring msg, out of order or replay %lu < %lu || %lu < %lu\n",
+        "%s: ignoring msg, out of order or replay %" PRIu64 " < %" PRIu64 " || %" PRIu64 " < %" PRIu64 "\n",
               n->peer.user.val, dec.seqno, n->name_recv_seqno,
               stamp, n->name_recv_time );
       return;

@@ -765,7 +765,7 @@ AdjDistance::prune_adjacency_sets( void ) noexcept
 {
   kv::ArrayCount<AdjacencySpace *, 32> uid_ref;
   this->prune_seqno = this->cache_seqno;
-  d_adj( "update prune seqno %lu\n", this->prune_seqno );
+  d_adj( "update prune seqno %" PRIu64 "\n", this->prune_seqno );
 
   for ( uint32_t uid = 0; uid < this->max_uid; uid++ ) {
     uint32_t count = this->adjacency_count( uid ),

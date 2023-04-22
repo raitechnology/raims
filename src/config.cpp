@@ -7,7 +7,7 @@
 #include <inttypes.h>
 #include <raikv/util.h>
 #include <raikv/os_file.h>
-#ifndef _MSC_VER
+#if ! defined( _MSC_VER ) && ! defined( __MINGW32__ )
 #include <glob.h>
 #endif
 #include <ctype.h>
@@ -574,7 +574,24 @@ ConfigJson::push_field( JsonObject *&o,  JsonString &s,  JsonValue *v ) noexcept
   this->push_field( o, str, v );
 }
 
-#ifndef _MSC_VER
+JsonString *
+ConfigJson::make_hostid( uint32_t ival ) noexcept
+{
+  #define hex( i ) ( ( i ) < 10 ? ( '0' + ( i ) ) : ( 'A' + ( ( i ) - 10 ) ) )
+  JsonString * s = this->make<JsonString>();
+  char * sval = (char *) this->mem.make( 9 );
+  s->val = sval;
+  for ( int i = 0; i < 4; i++ ) {
+    sval[ i * 2 + 1 ] = hex( ival & 0xfU ); ival >>= 4;
+    sval[ i * 2 + 0 ] = hex( ival & 0xfU ); ival >>= 4;
+  }
+  sval[ 8 ] = '\0';
+  s->length = 8;
+  #undef hex
+  return s;
+}
+
+#if ! defined( _MSC_VER ) && ! defined( __MINGW32__ )
 struct Glob {
   glob_t   g;
   uint32_t i;
@@ -621,15 +638,21 @@ struct Glob {
     }
   }
   const char *get_path( void ) {
-    char * slash;
     if ( this->dir == NULL )
       return this->fileinfo.name;
-    ::snprintf( this->buf, sizeof( this->buf ), "%.*s/%s",
-                this->dirlen, this->dir, this->fileinfo.name );
-    slash = buf;
-    while ( (slash = ::strchr( slash, '\\' )) != NULL )
-      *slash++ = '/';
-    return this->buf;
+    CatPtr p( this->buf );
+    size_t namelen = ::strlen( this->fileinfo.name );
+    if ( namelen + this->dirlen + 2 <= sizeof( this->buf ) ) {
+      p.x( this->dir, this->dirlen )
+       .s( "/" )
+       .x( this->fileinfo.name, namelen )
+       .end();
+      char *slash = buf;
+      while ( (slash = ::strchr( slash, '\\' )) != NULL )
+        *slash++ = '/';
+      return this->buf;
+    }
+    return NULL;
   }
   const char *first( void ) {
     if ( this->ptr == -1 )
@@ -2123,30 +2146,66 @@ ConfigTree::ParametersList::remove( StringTab &st,  const char *name ) noexcept
 static bool
 int_prefix( const char *s,  MDDecimal &dec,  size_t &off ) noexcept
 {
-  size_t j, len = ::strlen( s );
+  size_t i, j, len = ::strlen( s );
   if ( len == 0 )
     return false;
 
-  for ( j = len; ; ) {
-    if ( isdigit( s[ j - 1 ] ) || s[ j - 1 ] == '.' )
-      break;
-    if ( --j == 0 )
-      return false;
-  }
-#if 0
-  for ( i = 0; i < j; i++ )
+  for ( i = 0; i < len; i++ )
     if ( ! isspace( s[ i ] ) )
       break;
-  for ( k = i; k < j; k++ )
-    if ( ! isdigit( s[ k ] ) )
-      return false;
-  n = string_to_uint64( &s[ i ], j - i );
-#endif
-  if ( dec.parse( s, j ) != 0 )
+  if ( i == len )
     return false;
+  s = &s[ i ];
+  len -= i;
+  if ( len > 2 && s[ 0 ] == '0' && ( s[ 1 ] == 'x' || s[ 1 ] == 'X' ) ) {
+    for ( j = 2; j < len; j++ ) {
+      if ( ! ( ( s[ j ] >= '0' && s[ j ] <= '9' ) ||
+               ( s[ j ] >= 'a' && s[ j ] <= 'f' ) ||
+               ( s[ j ] >= 'A' && s[ j ] <= 'F' ) ) )
+        break;
+    }
+    dec.ival = string_to_uint64( s, j );
+    dec.hint = MD_DEC_INTEGER;
+  }
+  else {
+    for ( j = len; ; ) {
+      if ( isdigit( s[ j - 1 ] ) || s[ j - 1 ] == '.' )
+        break;
+      if ( --j == 0 )
+        return false;
+    }
+
+    const char * d1 = NULL, * d2 = NULL, * d3 = NULL;
+    bool is_ip4 = false;
+    d1 = (const char *) ::memchr( s, '.', j );
+    if ( d1 != NULL )
+      d2 = (const char *) ::memchr( d1+1, '.', &s[ j ] - &d1[ 1 ] );
+    if ( d2 != NULL )
+      d3 = (const char *) ::memchr( d2+1, '.', &s[ j ] - &d2[ 1 ] );
+    if ( d1 != NULL && d2 != NULL && d3 != NULL ) {
+      uint64_t a = 0, b = 0, c = 0, d = 0;
+      if ( d1 > s )
+        a = string_to_uint64( s, d1 - s );
+      if ( d2 > &d1[ 1 ] )
+        b = string_to_uint64( d1+1, d2 - &d1[ 1 ] );
+      if ( d3 > &d2[ 1 ] )
+        c = string_to_uint64( d2+1, d3 - &d2[ 1 ] );
+      if ( &s[ j ] > &d3[ 1 ] )
+        d = string_to_uint64( d3+1, &s[ j ] - &d3[ 1 ] );
+      if ( ( a | b | c | d ) <= 0xff ) {
+        dec.ival = ( a << 24 ) | ( b << 16 ) | ( c << 8 ) | d;
+        dec.hint = MD_DEC_INTEGER;
+        is_ip4 = true;
+      }
+    }
+    if ( ! is_ip4 ) {
+      if ( dec.parse( &s[ 0 ], j ) != 0 )
+        return false;
+    }
+  }
   while ( j < len && isspace( s[ j ] ) )
     j++;
-  off = j;
+  off = i + j;
   return true;
 }
 
@@ -2159,11 +2218,14 @@ ConfigTree::string_to_uint( const char *s,  uint64_t &ival ) noexcept
   size_t off;
   if ( ! int_prefix( s, dec, off ) )
     return false;
-  if ( dec.hint == MD_DEC_INTEGER )
+  if ( dec.hint == MD_DEC_INTEGER ) {
     ival = (uint64_t) dec.ival;
+    return true;
+  }
   if ( dec.get_real( val ) != 0 )
     return false;
-  return (uint64_t) val;
+  ival = (uint64_t) val;
+  return true;
 }
 
 bool

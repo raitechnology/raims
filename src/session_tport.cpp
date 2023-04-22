@@ -3,12 +3,12 @@
 #include <string.h>
 #include <stdint.h>
 #include <stdarg.h>
+#if ! defined( _MSC_VER ) && ! defined( __MINGW32__ )
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <netdb.h>
-#ifndef _MSC_VER
 #include <unistd.h>
 #else
 #include <raikv/win.h>

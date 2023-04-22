@@ -3,7 +3,7 @@
 #include <string.h>
 #include <stdint.h>
 #include <stdarg.h>
-#ifndef _MSC_VER
+#if ! defined( _MSC_VER ) && ! defined( __MINGW32__ )
 #include <sys/socket.h>
 #else
 #include <raikv/win.h>
@@ -379,7 +379,7 @@ TelnetService::on_quit( void ) noexcept
 void
 TelnetService::process_shutdown( void ) noexcept
 {
-#ifndef _MSC_VER
+#if ! defined( _MSC_VER ) && ! defined( __MINGW32__ )
   ::shutdown( this->fd, SHUT_WR );
 #else
   wp_shutdown_fd( this->fd, SD_SEND );

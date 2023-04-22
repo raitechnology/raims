@@ -1,7 +1,9 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
-#include <stdlib.h>
+#define __STDC_FORMAT_MACROS
+#include <inttypes.h>
 #include <raims/ed25519.h>
 #include <raims/crypt.h>
 #include <raims/user.h>
@@ -89,7 +91,7 @@ main( void )
       dsa.sig.copy_to( test_sig[ i ] );
     }
     uint64_t t2 = current_monotonic_time_ns();
-    printf( "%lu ns per sig\n", ( t2 - t ) / 100 );
+    printf( "%" PRIu64 " ns per sig\n", ( t2 - t ) / 100 );
 
     t = current_monotonic_time_ns();
     for ( size_t i = 0; i < 100; i++ ) {
@@ -99,7 +101,7 @@ main( void )
         printf( "verify failed\n" );
     }
     t2 = current_monotonic_time_ns();
-    printf( "%lu ns per verify\n", ( t2 - t ) / 100 );
+    printf( "%" PRIu64 " ns per verify\n", ( t2 - t ) / 100 );
   }
   msg_test();
   return 0;

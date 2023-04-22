@@ -8,6 +8,7 @@
 /data
 /script
 /tmp
+/config
 # Build temporaries
 /RH5_*
 /RH6_*

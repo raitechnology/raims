@@ -64,12 +64,15 @@ struct GenUserSet : public kv::BitSpace { /* filter user hash */
 };
 
 struct GenCfg {
-  ServiceBuf  svc;      /* service being operated */
-  GenFileList list;     /* list of file changes */
-  GenUserSet  user_set; /* set of users affected */
-  char      * salt_path;
+  ServiceBuf        svc;      /* service being operated */
+  GenFileList       list;     /* list of file changes */
+  GenUserSet        user_set; /* set of users affected */
+  kv::UIntHashTab * host_ht;
+  char            * salt_path;
 
-  GenCfg() : salt_path( 0 ) {}
+  GenCfg() : host_ht( 0 ), salt_path( 0 ) {
+    this->host_ht = kv::UIntHashTab::resize( NULL );
+  }
   int  check_dir( const char *dir_name,  bool create,
                   const char *descr ) noexcept;
   bool init_pass( const char *dir_name,  CryptPass &pass,
@@ -79,6 +82,8 @@ struct GenCfg {
                        bool create_it ) noexcept;
   bool copy_salt( const char *dir_name ) noexcept;
   bool copy_param( const char *orig_dir,  const char *dir_name ) noexcept;
+  void load_svc( const ConfigTree &tree,
+                 const ConfigTree::Service &s ) noexcept;
   void add_user( const char *user,  size_t user_len,
                  const char *expire,  size_t expire_len,
                  CryptPass &pass ) noexcept;

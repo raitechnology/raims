@@ -2,7 +2,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#if ! defined( _MSC_VER ) && ! defined( __MINGW32__ )
 #include <netdb.h>
+#endif
 #include <raims/ev_rv_transport.h>
 #include <raims/ev_web.h>
 #include <raims/transport.h>
@@ -355,7 +357,7 @@ RvTransportService::start_host( RvHost &host,  const RvHostNet &hn,
         return status;
 
       if ( mc.fake_ip == 0 && ! this->no_fakeip )
-        mc.fake_ip = this->rte.mgr.user_db.bridge_nonce_int;
+        mc.fake_ip = this->rte.mgr.user_db.host_id;
       host.host_id_len = (uint16_t)
         min_int( (size_t) this->rte.mgr.user_db.user.user.len,
                  MAX_RV_HOST_ID_LEN - 1 );
@@ -510,7 +512,7 @@ RvTransportService::add_host_inbox_patterns( uint16_t svc ) noexcept
   for ( uint32_t uid = 1; uid < user_db.next_uid; uid++ ) {
     if ( user_db.bridge_tab.ptr[ uid ] == NULL )
       continue;
-    uint32_t fake_ip = user_db.bridge_tab.ptr[ uid ]->bridge_nonce_int;
+    uint32_t fake_ip = user_db.bridge_tab.ptr[ uid ]->host_id;
     RvMcast::ip4_hex_string( fake_ip, host_ip );
     CatPtr ibx( inbox_buf );
     ibx.c( '_' ).u( svc, d ).s( "._INBOX." ).s( host_ip ).end();
@@ -530,7 +532,7 @@ RvTransportService::update_host_inbox_patterns( uint32_t uid ) noexcept
     return;
   if ( user_db.bridge_tab.ptr[ uid ] == NULL )
     return;
-  uint32_t fake_ip = user_db.bridge_tab.ptr[ uid ]->bridge_nonce_int;
+  uint32_t fake_ip = user_db.bridge_tab.ptr[ uid ]->host_id;
   RvMcast::ip4_hex_string( fake_ip, host_ip );
   for ( uint32_t k = 0; k < this->db.host_tab->count; k++ ) {
     if ( this->db.host_tab->ptr[ k ] == NULL )
@@ -559,7 +561,7 @@ RvTransportService::del_host_inbox_patterns( uint16_t svc ) noexcept
   for ( uint32_t uid = 1; uid < user_db.next_uid; uid++ ) {
     if ( user_db.bridge_tab.ptr[ uid ] == NULL )
       continue;
-    uint32_t fake_ip = user_db.bridge_tab.ptr[ uid ]->bridge_nonce_int;
+    uint32_t fake_ip = user_db.bridge_tab.ptr[ uid ]->host_id;
     RvMcast::ip4_hex_string( fake_ip, host_ip );
     CatPtr ibx( inbox_buf );
     ibx.c( '_' ).u( svc, d ).s( "._INBOX." ).s( host_ip ).end();

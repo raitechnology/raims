@@ -78,8 +78,8 @@ struct InboxPkt {
 };
 
 struct InboxPeer;
+static const size_t INBOX_WBUF_SIZE = 16 * 1024;
 struct InboxWindow : public SendWindow {  /* pkts are allocated in a window */
-  static const size_t WBUF_SIZE = 16 * 1024;
   InboxPeer & peer;
   void * operator new( size_t, void *ptr ) { return ptr; }
   InboxWindow( InboxPeer &p,  size_t av )

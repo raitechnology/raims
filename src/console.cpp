@@ -5,7 +5,6 @@
 #include <stdarg.h>
 #define __STDC_FORMAT_MACROS
 #include <inttypes.h>
-#include <raikv/os_file.h>
 #include <errno.h>
 #include <raikv/logger.h>
 #include <raids/term.h>
@@ -24,6 +23,10 @@
 #include <raimd/json_msg.h>
 #include <sassrv/ev_rv.h>
 #include <natsmd/ev_nats.h>
+#if defined( _MSC_VER ) || defined( __MINGW32__ )
+#include <raikv/win.h>
+#endif
+#include <raikv/os_file.h>
 
 namespace rai {
 namespace sassrv {
@@ -40,13 +43,18 @@ using namespace kv;
 using namespace md;
 using namespace ds;
 
-#ifdef _MSC_VER
-static inline void ms_localtime( time_t t, struct tm &tmbuf ) {
+#if defined( _MSC_VER ) || defined( __MINGW32__ )
+static inline int64_t ms_localtime( time_t t, struct tm &tmbuf ) {
   ::localtime_s( &tmbuf, &t );
+  TIME_ZONE_INFORMATION tzinfo;
+  if ( GetTimeZoneInformation( &tzinfo ) == TIME_ZONE_ID_INVALID )
+    return 0;
+  return (int64_t) tzinfo.Bias * (int64_t) 60;
 }
 #else
-static inline void ms_localtime( time_t t, struct tm &tmbuf ) {
+static inline int64_t ms_localtime( time_t t, struct tm &tmbuf ) {
   ::localtime_r( &t, &tmbuf );
+  return (int64_t) tmbuf.tm_gmtoff;
 }
 #endif
 int64_t rai::ms::tz_offset_sec,
@@ -60,8 +68,7 @@ update_tz_offset( void ) noexcept
 {
   time_t now = ::time( NULL );
   struct tm local;
-  ms_localtime( now, local );
-  tz_offset_sec = (int64_t) local.tm_gmtoff;
+  tz_offset_sec = ms_localtime( now, local );
   tz_offset_ns  = tz_offset_sec * (int64_t) 1000000000;
   if ( tz_stamp_gmt ) {
     tz_stamp_sec = 0;
@@ -157,7 +164,7 @@ Console::log_header( int fd ) noexcept
 
   ::strcpy( &line[ off ], "=--=--=--=\n" );  off = sizeof( sep ) - 1;
   ::strcpy( &line[ off ], ::ctime( &now ) ); off = ::strlen( line );
-#ifndef _MSC_VER
+#if ! defined( _MSC_VER ) && ! defined( __MINGW32__ )
   const char *tz = tzname[ daylight ];
 #else
   const char *tz = _tzname[ _daylight ];
@@ -233,23 +240,23 @@ Console::parse_debug_flags( const char *arg,  size_t len,
   for ( size_t i = 0; i < debug_str_count; i++ ) {
     size_t dlen = ::strlen( debug_str[ i ] );
     void * p;
-    if ( (p = ::memmem( arg, len, debug_str[ i ], dlen )) != NULL ) {
+    if ( (p = kv_memmem( arg, len, debug_str[ i ], dlen )) != NULL ) {
       if ( (char *) p == arg || ((char *) p)[ -1 ] == ' ' || 
            ((char *) p)[ -1 ] == ',' || ((char *) p)[ -1 ] == '|' )
         dbg_flags |= ( 1 << i );
     }
   }
-  if ( len >= 4 && ::memmem( arg, len, "dist", 4 ) != NULL )
+  if ( len >= 4 && kv_memmem( arg, len, "dist", 4 ) != NULL )
     dist_dbg = 1;
-  if ( len >= 2 && ::memmem( arg, len, "kvpub", 5 ) != NULL )
+  if ( len >= 2 && kv_memmem( arg, len, "kvpub", 5 ) != NULL )
     kv_pub_debug = 1;
-  if ( len >= 4 && ::memmem( arg, len, "kvps", 4 ) != NULL )
+  if ( len >= 4 && kv_memmem( arg, len, "kvps", 4 ) != NULL )
     kv_ps_debug = 1;
-  if ( len >= 2 && ::memmem( arg, len, "rv", 2 ) != NULL )
+  if ( len >= 2 && kv_memmem( arg, len, "rv", 2 ) != NULL )
     sassrv::rv_debug = 1;
-  if ( len >= 2 && ::memmem( arg, len, "nats", 4 ) != NULL )
+  if ( len >= 2 && kv_memmem( arg, len, "nats", 4 ) != NULL )
     natsmd::nats_debug = 1;
-  if ( len >= 5 && ::memmem( arg, len, "noaes", 5 ) != NULL )
+  if ( len >= 5 && kv_memmem( arg, len, "noaes", 5 ) != NULL )
     no_tcp_aes = 1;
   if ( dbg_flags == 0 && len > 0 && arg[ 0 ] >= '0' && arg[ 0 ] <= '9' )
     dbg_flags = (int) string_to_uint64( arg, len );
@@ -348,7 +355,11 @@ LastTimeStamp::update( uint64_t stamp ) noexcept
     if ( day != this->last_day ) {
       time_t t = (time_t) secs;
       struct tm x;
+#if defined( _MSC_VER ) || defined( __MINGW32__ )
+      ::gmtime_s( &x, &t );
+#else
       ::gmtime_r( &t, &x );
+#endif
       x.tm_mon++;
       this->ts[ 0 ] = ( x.tm_mon / 10 ) + '0';
       this->ts[ 1 ] = ( x.tm_mon % 10 ) + '0';
@@ -696,7 +707,7 @@ Console::on_log( Logger &log ) noexcept
     uint64_t period;
     if ( this->log_rate_total > this->max_terminal_log_rate &&
          this->throttle_total( period ) > this->max_terminal_log_rate ) {
-      this->printf( "log muted, %lu bytes logged in %.3f seconds\n",
+      this->printf( "log muted, %" PRIu64 " bytes logged in %.3f seconds\n",
                     this->log_rate_total, (double) period / 1000000000.0 );
       ::memset( this->log_rate, 0, sizeof( this->log_rate ) );
       ::memset( this->log_time, 0, sizeof( this->log_time ) );
@@ -713,7 +724,7 @@ void
 Console::flush_log( Logger &log ) noexcept
 {
   /*log.flush();*/
-#ifndef _MSC_VER
+#if ! defined( _MSC_VER ) && ! defined( __MINGW32__ )
   usleep( 500 );
   while ( this->on_log( log ) )
     usleep( 100 );
@@ -3386,7 +3397,7 @@ Console::on_subs( ConsoleSubs &subs ) noexcept
         sub = this->sub_db.sub_tab.find_sub( iter.hash, iter.seqno );
         if ( sub != NULL ) {
           if ( match_len == 0 ||
-               ::memmem( sub->value, sub->len, match, match_len ) != NULL ) { 
+               kv_memmem( sub->value, sub->len, match, match_len ) != NULL ) { 
             tab = out.make_row();
             if ( i == 0 )
               tab[ i++ ].set( this->user_db.user.user, PRINT_SELF ); /* user */
@@ -3403,7 +3414,7 @@ Console::on_subs( ConsoleSubs &subs ) noexcept
         pat = this->sub_db.pat_tab.find_sub( iter.hash, iter.seqno );
         if ( pat != NULL ) {
           if ( match_len == 0 ||
-               ::memmem( pat->value, pat->len, match, match_len ) != NULL ) { 
+               kv_memmem( pat->value, pat->len, match, match_len ) != NULL ) { 
             tab = out.make_row();
             if ( i == 0 )
               tab[ i++ ].set( this->user_db.user.user, PRINT_SELF ); /* user */
@@ -4395,9 +4406,9 @@ Console::show_peers( ConsoleOutput *p, const char *name,  size_t len ) noexcept
   for ( UserBridgeElem * el = list.hd; el != NULL; el = el->next ) {
     if ( el->uid == 0 ) {
       if ( show_ip )
-        sassrv::RvMcast::ip4_string( this->user_db.bridge_nonce_int, nonce );
+        sassrv::RvMcast::ip4_string( this->user_db.host_id, nonce );
       else if ( show_host )
-        sassrv::RvMcast::ip4_hex_string( this->user_db.bridge_nonce_int, nonce );
+        sassrv::RvMcast::ip4_hex_string( this->user_db.host_id, nonce );
       else
         this->user_db.bridge_id.nonce.to_base64_str( nonce );
       nstr = this->tmp.stralloc( ::strlen( nonce ), nonce );
@@ -4418,9 +4429,9 @@ Console::show_peers( ConsoleOutput *p, const char *name,  size_t len ) noexcept
     UserBridge * n = this->user_db.bridge_tab[ el->uid ];
 
     if ( show_ip )
-      sassrv::RvMcast::ip4_string( n->bridge_nonce_int, nonce );
+      sassrv::RvMcast::ip4_string( n->host_id, nonce );
     else if ( show_host )
-      sassrv::RvMcast::ip4_hex_string( n->bridge_nonce_int, nonce );
+      sassrv::RvMcast::ip4_hex_string( n->host_id, nonce );
     else
       n->bridge_id.nonce.to_base64_str( nonce );
     nstr = this->tmp.stralloc( ::strlen( nonce ), nonce );
@@ -6223,13 +6234,13 @@ Console::show_seqno( ConsoleOutput *p,  const char *arg,
 #endif
     for ( pub = this->sub_db.pub_tab.first( loc, b ); pub != NULL;
           pub = this->sub_db.pub_tab.next( loc, b ) ) {
-      if ( arglen == 0 || ::memmem( pub->value, pub->len, arg, arglen ) != NULL)
+      if ( arglen == 0 || kv_memmem( pub->value, pub->len, arg, arglen ) != NULL)
         this->tab_pub( pub, out );
     }
 
     for ( sub = this->sub_db.seqno_tab.first( loc, b ); sub != NULL;
           sub = this->sub_db.seqno_tab.next( loc, b ) ) {
-      if ( arglen == 0 || ::memmem( sub->value, sub->len, arg, arglen ) != NULL)
+      if ( arglen == 0 || kv_memmem( sub->value, sub->len, arg, arglen ) != NULL)
         this->tab_seqno( sub, out );
     }
 #if 0
@@ -7054,7 +7065,7 @@ Console::print_data( ConsoleOutput *p,  const SubMsgData &val,
       MDMsgMem mem;
       MDMsg * m = MDMsg::unpack( (void *) val.data, 0, val.datalen, val.fmt,
                                  MsgFrameDecoder::msg_dict, &mem );
-      this->printf( "%.*s%.*s%.*s n=%lu.%lu (%s @ %s via %s)\n",
+      this->printf( "%.*s%.*s%.*s n=%" PRIu64 ".%" PRIu64 " (%s @ %s via %s)\n",
               bz, bc, (int) sublen, sub, nz, nc,
               seqno_frame( val.seqno ), seqno_base( val.seqno ),
               user_val, src_nonce, val.pub.rte.name );
@@ -7062,7 +7073,7 @@ Console::print_data( ConsoleOutput *p,  const SubMsgData &val,
         this->print_msg( *m );
     }
     else {
-      this->printf( "%.*s%.*s%.*s n=%lu.%lu"
+      this->printf( "%.*s%.*s%.*s n=%" PRIu64 ".%" PRIu64 ""
                     " (%s @ %s via %s) : %.*s%.*s%.*s\n",
               bz, bc, (int) sublen, sub, nz, nc,
               seqno_frame( val.seqno ), seqno_base( val.seqno ),
@@ -7071,7 +7082,7 @@ Console::print_data( ConsoleOutput *p,  const SubMsgData &val,
     }
   }
   else {
-    this->printf( "%.*s%.*s%.*s n=%lu.%lu (%s @ %s via %s)\n",
+    this->printf( "%.*s%.*s%.*s n=%" PRIu64 ".%" PRIu64 " (%s @ %s via %s)\n",
               bz, bc, (int) sublen, sub, nz, nc,
               seqno_frame( val.seqno ), seqno_base( val.seqno ),
               user_val, src_nonce, val.pub.rte.name );

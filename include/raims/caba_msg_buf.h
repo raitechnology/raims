@@ -327,6 +327,7 @@ struct MsgBufDigestT : public BMsgBufT<T> {
   T  & cost2      ( uint32_t n )  { return this->i( FID_COST2, n ); }
   T  & cost3      ( uint32_t n )  { return this->i( FID_COST3, n ); }
   T  & cost4      ( uint32_t n )  { return this->i( FID_COST4, n ); }
+  T  & host_id    ( uint32_t n )  { return this->i( FID_HOST_ID, n ); }
   T  & peer       ( const char *in, size_t in_len ) {
     return this->b( FID_PEER, in, (uint16_t) in_len ); }
   T  & latency    ( const char *in, size_t in_len ) {
@@ -546,6 +547,7 @@ struct MsgEst {
   MsgEst & cost2      ( void ) { sz += fid_est( FID_COST2 ); return *this; }
   MsgEst & cost3      ( void ) { sz += fid_est( FID_COST3 ); return *this; }
   MsgEst & cost4      ( void ) { sz += fid_est( FID_COST4 ); return *this; }
+  MsgEst & host_id    ( void ) { sz += fid_est( FID_HOST_ID ); return *this; }
   MsgEst & peer       ( size_t l ) { sz += fid_est( FID_PEER, l ); return *this; }
   MsgEst & latency    ( size_t l ) { sz += fid_est( FID_LATENCY, l ); return *this; }
 
