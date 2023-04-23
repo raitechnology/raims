@@ -1145,7 +1145,7 @@ AdjDistance::message_graph_config( kv::ArrayOutput &out,
   rai::ms::CryptPass  pass;
   rai::ms::ServiceBuf svc;
   void * salt;
-  size_t salt_len;
+  size_t salt_len = 0;
   salt = pass.gen_salt( salt_len );
   rai::ms::init_kdf( salt, salt_len );
   pass.gen_pass();
