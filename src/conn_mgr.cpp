@@ -280,7 +280,7 @@ TransportRoute::on_connect( kv::EvSocket &conn ) noexcept
       else if ( this->is_self_connect( conn ) ) /* accepted sock */
         return;
 
-      if ( first_connect ) {
+      if ( first_connect || debug_conn ) {
         this->printf( "%s %s %s %s using %s fd %u\n",
                       tcp.is_connect ? "connect" : "accept",
                       tcp.encrypt ? "encrypted" : "plaintext",
@@ -342,9 +342,13 @@ TransportRoute::on_shutdown( EvSocket &conn,  const char *err,
             err = errbuf;
         }
         if ( errlen > 0 ) {
-          this->printf( "%s %s (%.*s)\n",
-                        conn.kind, conn.peer_address.buf, (int) errlen, err );
+          this->printf( "%s %s (%.*s)\n", conn.kind, conn.peer_address.buf,
+                        (int) errlen, err );
         }
+      }
+      if ( errlen == 0 && debug_conn ) {
+        this->printf( "%s %s (disconnected)\n", conn.kind,
+                      conn.peer_address.buf );
       }
     }
   }
@@ -363,6 +367,10 @@ TransportRoute::on_shutdown( EvSocket &conn,  const char *err,
                     conn.peer_address.buf, this->connect_count,
                     (int) errlen, err );
       this->mgr.events.on_shutdown( this->tport_id, conn.fd >= 0 );
+    }
+    else if ( debug_conn ) {
+      this->printf( "%s %s (%.*s)\n", s, conn.peer_address.buf,
+                    (int) errlen, err );
     }
     if ( conn.fd >= 0 ) {
       this->user_db.retire_source( *this, conn.fd );

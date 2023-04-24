@@ -6138,9 +6138,17 @@ Console::show_match( ConsoleOutput *p,  const char *sub,  size_t len ) noexcept
 {
   static const uint32_t ncols = 1;
   TabOut out( this->table, this->tmp, ncols );
-  uint32_t pos, uid, h = kv_crc_c( sub, len, 0 );
-  AnyMatch * any = this->sub_db.any_match( sub, len, h );
+  uint32_t       pos, uid,
+                 h   = kv_crc_c( sub, len, 0 );
+  AnyMatch     * any = this->sub_db.any_match( sub, len, h );
+  BloomMatch     match;
+  BloomMatchArgs args( h, sub, len, this->sub_db.pat_tab.seed );
 
+  match.init_match( len );
+  if ( match.match_sub( args, this->sub_db.bloom ) ) {
+    out.add_row()
+       .set( this->user_db.user.user, PRINT_SELF ); /* user */
+  }
   for ( bool b = any->first_dest( pos, uid ); b;
         b = any->next_dest( pos, uid ) ) {
     UserBridge * n = this->user_db.bridge_tab[ uid ];
