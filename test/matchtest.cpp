@@ -22,8 +22,8 @@ main( int argc, char *argv[] )
   };
   static const char *type[] =
     { "NO_MATCH", "IS_QUEUE", "IS_INBOX", "IS_INBOX_PREFIX" };
-  const char * pre, * name, * subj;
-  size_t       pre_len, name_len, subj_len;
+  const char * pre = "", * name = "", * subj = "";
+  size_t       pre_len = 0, name_len = 0, subj_len = 0;
   for ( int i = 1; i < argc; i++ ) {
     const char * s = argv[ i ];
     int n = SubDB::match_ipc_subject( s, ::strlen( s ), pre, pre_len,

@@ -26,9 +26,8 @@ libd      := $(build_dir)/lib64
 objd      := $(build_dir)/obj
 dependd   := $(build_dir)/dep
 
-have_asciidoctor := $(shell if [ -x /usr/bin/asciidoctor ]; then echo true; fi)
-
-default_cflags := -ggdb -O3
+have_asciidoctor := $(shell if [ -x /usr/bin/asciidoctor ] ; then echo true; fi)
+default_cflags   := -ggdb -O3
 # use 'make port_extra=-g' for debug build
 ifeq (-g,$(findstring -g,$(port_extra)))
   default_cflags := -ggdb
@@ -40,6 +39,10 @@ ifeq (-mingw,$(findstring -mingw,$(port_extra)))
   CC    := /usr/bin/x86_64-w64-mingw32-gcc
   CXX   := /usr/bin/x86_64-w64-mingw32-g++
   mingw := true
+endif
+ifeq (,$(port_extra))
+  build_cflags := $(shell if [ -x /bin/rpm ]; then /bin/rpm --eval '%{optflags}' ; \
+                          elif [ -x /bin/dpkg-buildflags ] ; then /bin/dpkg-buildflags --get CFLAGS ; fi)
 endif
 # msys2 using ucrt64
 ifeq (MSYS2,$(lsb_dist))
@@ -75,12 +78,13 @@ ifeq (Darwin,$(lsb_dist))
 dll         := dylib
 endif
 # rpmbuild uses RPM_OPT_FLAGS
-ifeq ($(RPM_OPT_FLAGS),)
-CFLAGS ?= $(default_cflags)
-else
-CFLAGS ?= $(RPM_OPT_FLAGS)
-endif
+#ifeq ($(RPM_OPT_FLAGS),)
+CFLAGS ?= $(build_cflags) $(default_cflags)
+#else
+#CFLAGS ?= $(RPM_OPT_FLAGS)
+#endif
 cflags := $(gcc_wflags) $(CFLAGS) $(arch_cflags)
+lflags := -Wno-stringop-overflow
 
 INCLUDES  ?= -Iinclude
 #-Iraikv/include -Iraimd/include -Iraids/include -Ilinecook/include
@@ -951,19 +955,16 @@ $(libd)/%.a:
 
 ifeq (Darwin,$(lsb_dist))
 $(libd)/%.dylib:
-	$(cpplink) -dynamiclib $(cflags) -o $@.$($(*)_dylib).dylib -current_version $($(*)_dylib) -compatibility_version $($(*)_ver) $($(*)_dbjs) $($(*)_dlnk) $(sock_lib) $(math_lib) $(thread_lib) $(malloc_lib) $(dynlink_lib) && \
+	$(cpplink) -dynamiclib $(cflags) $(lflags) -o $@.$($(*)_dylib).dylib -current_version $($(*)_dylib) -compatibility_version $($(*)_ver) $($(*)_dbjs) $($(*)_dlnk) $(sock_lib) $(math_lib) $(thread_lib) $(malloc_lib) $(dynlink_lib) && \
 	cd $(libd) && ln -f -s $(@F).$($(*)_dylib).dylib $(@F).$($(*)_ver).dylib && ln -f -s $(@F).$($(*)_ver).dylib $(@F)
 else
 $(libd)/%.$(dll):
-	$(cpplink) $(soflag) $(rpath) $(cflags) -o $@.$($(*)_spec) -Wl,-soname=$(@F).$($(*)_ver) $($(*)_dbjs) $($(*)_dlnk) $(sock_lib) $(math_lib) $(thread_lib) $(malloc_lib) $(dynlink_lib) && \
+	$(cpplink) $(soflag) $(rpath) $(cflags) $(lflags) -o $@.$($(*)_spec) -Wl,-soname=$(@F).$($(*)_ver) $($(*)_dbjs) $($(*)_dlnk) $(sock_lib) $(math_lib) $(thread_lib) $(malloc_lib) $(dynlink_lib) && \
 	cd $(libd) && ln -f -s $(@F).$($(*)_spec) $(@F).$($(*)_ver) && ln -f -s $(@F).$($(*)_ver) $(@F)
 endif
 
 $(bind)/%$(exe):
-	$(cpplink) $(cflags) $(rpath) -o $@ $($(*)_objs) -L$(libd) $($(*)_lnk) $(cpp_lnk) $(sock_lib) $(math_lib) $(thread_lib) $(malloc_lib) $(dynlink_lib)
-
-$(bind)/%.static:
-	$(cpplink) $(cflags) -o $@ $($(*)_objs) $($(*)_static_lnk) $(sock_lib) $(math_lib) $(thread_lib) $(malloc_lib) $(dynlink_lib)
+	$(cpplink) $(cflags) $(lflags) $(rpath) -o $@ $($(*)_objs) -L$(libd) $($(*)_lnk) $(cpp_lnk) $(sock_lib) $(math_lib) $(thread_lib) $(malloc_lib) $(dynlink_lib)
 
 $(dependd)/%.d: src/%.cpp
 	$(cpp) $(arch_cflags) $(defines) $(includes) $($(notdir $*)_includes) $($(notdir $*)_defines) -MM $< -MT $(objd)/$(*).o -MF $@
