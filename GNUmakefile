@@ -27,6 +27,8 @@ objd      := $(build_dir)/obj
 dependd   := $(build_dir)/dep
 
 have_asciidoctor := $(shell if [ -x /usr/bin/asciidoctor ] ; then echo true; fi)
+have_rpm         := $(shell if [ -x /bin/rpmquery ] ; then echo true; fi)
+have_dpkg        := $(shell if [ -x /bin/dpkg-buildflags ] ; then echo true; fi)
 default_cflags   := -ggdb -O3
 # use 'make port_extra=-g' for debug build
 ifeq (-g,$(findstring -g,$(port_extra)))
@@ -41,8 +43,12 @@ ifeq (-mingw,$(findstring -mingw,$(port_extra)))
   mingw := true
 endif
 ifeq (,$(port_extra))
-  build_cflags := $(shell if [ -x /bin/rpm ]; then /bin/rpm --eval '%{optflags}' ; \
-                          elif [ -x /bin/dpkg-buildflags ] ; then /bin/dpkg-buildflags --get CFLAGS ; fi)
+  ifeq (true,$(have_rpm))
+    build_cflags = $(shell /bin/rpm --eval '%{optflags}')
+  endif
+  ifeq (true,$(have_dpkg))
+    build_cflags = $(shell /bin/dpkg-buildflags --get CFLAGS)
+  endif
 endif
 # msys2 using ucrt64
 ifeq (MSYS2,$(lsb_dist))
@@ -108,6 +114,13 @@ math_lib  := -lm
 test_makefile = $(shell if [ -f ./$(1)/GNUmakefile ] ; then echo ./$(1) ; \
                         elif [ -f ../$(1)/GNUmakefile ] ; then echo ../$(1) ; fi)
 
+ifeq (true,$(have_rpm))
+test_library = $(shell x=`/bin/rpmquery -ql $(1) | grep '\.a$$'` ; if [ -z "$${x}" ] ; then echo $(2) ; else echo $${x} ; fi)
+endif
+ifeq (true,$(have_dpkg))
+test_library = $(shell x=`/bin/dpkg -L $(1) | grep '\.a$$'` ; if [ -z "$${x}" ] ; then echo $(2) ; else echo $${x} ; fi)
+endif
+
 md_home     := $(call test_makefile,raimd)
 dec_home    := $(call test_makefile,libdecnumber)
 kv_home     := $(call test_makefile,raikv)
@@ -148,7 +161,7 @@ dlnk_dep    += $(ds_dll)
 rpath1       = ,-rpath,$(pwd)/$(ds_home)/$(libd)
 ds_includes  = -I$(ds_home)/include
 else
-lnk_lib     += -lraids
+lnk_lib     += $(call test_library,raids,-lraids)
 dlnk_lib    += -lraids
 endif
 
@@ -162,7 +175,7 @@ dlnk_dep    += $(md_dll)
 rpath2       = ,-rpath,$(pwd)/$(md_home)/$(libd)
 includes    += -I$(md_home)/include
 else
-lnk_lib     += -lraimd
+lnk_lib     += $(call test_library,raimd,-lraimd)
 dlnk_lib    += -lraimd
 endif
 
@@ -176,7 +189,7 @@ dlnk_dep    += $(dec_dll)
 rpath3       = ,-rpath,$(pwd)/$(dec_home)/$(libd)
 dec_includes = -I$(dec_home)/include
 else
-lnk_lib     += -ldecnumber
+lnk_lib     += $(call test_library,libdecnumber,-ldecnumber)
 dlnk_lib    += -ldecnumber
 endif
 
@@ -190,7 +203,7 @@ dlnk_dep    += $(lc_dll)
 rpath4       = ,-rpath,$(pwd)/$(lc_home)/$(libd)
 lc_includes  = -I$(lc_home)/include
 else
-lnk_lib     += -llinecook
+lnk_lib     += $(call test_library,linecook,-llinecook)
 dlnk_lib    += -llinecook
 endif
 
@@ -204,7 +217,7 @@ dlnk_dep    += $(h3_dll)
 rpath5       = ,-rpath,$(pwd)/$(h3_home)/$(libd)
 h3_includes  = -I$(h3_home)/src/h3lib/include
 else
-lnk_lib     += -lh3
+lnk_lib     += $(call test_library,h3,-lh3)
 dlnk_lib    += -lh3
 endif
 
@@ -218,7 +231,7 @@ dlnk_dep    += $(rdb_dll)
 rpath6       = ,-rpath,$(pwd)/$(rdb_home)/$(libd)
 rdb_includes = -I$(rdb_home)/include
 else
-lnk_lib     += -lrdbparser
+lnk_lib     += $(call test_library,rdbparser,-lrdbparser)
 dlnk_lib    += -lrdbparser
 endif
 
@@ -232,7 +245,7 @@ dlnk_dep    += $(kv_dll)
 rpath7       = ,-rpath,$(pwd)/$(kv_home)/$(libd)
 includes    += -I$(kv_home)/include
 else
-lnk_lib     += -lraikv
+lnk_lib     += $(call test_library,raikv,-lraikv)
 dlnk_lib    += -lraikv
 endif
 
@@ -246,7 +259,7 @@ dlnk_dep    += $(pgm_dll)
 rpath8       = ,-rpath,$(pwd)/$(pgm_home)/$(libd)
 pgm_includes = -I$(pgm_home)/openpgm/pgm/include
 else
-lnk_lib     += -lopenpgm_st
+lnk_lib     += $(call test_library,openpgm_st,-lopenpgm_st)
 dlnk_lib    += -lopenpgm_st
 endif
 
@@ -260,7 +273,7 @@ dlnk_dep    += $(sassrv_dll)
 rpath9       = ,-rpath,$(pwd)/$(sassrv_home)/$(libd)
 sassrv_includes = -I$(sassrv_home)/include
 else
-lnk_lib     += -lsassrv
+lnk_lib     += $(call test_library,sassrv,-lsassrv)
 dlnk_lib    += -lsassrv
 endif
 
@@ -274,7 +287,7 @@ dlnk_dep    += $(natsmd_dll)
 rpath10      = ,-rpath,$(pwd)/$(natsmd_home)/$(libd)
 natsmd_includes = -I$(natsmd_home)/include
 else
-lnk_lib     += -lnatsmd
+lnk_lib     += $(call test_library,natsmd,-lnatsmd)
 dlnk_lib    += -lnatsmd
 endif
 
@@ -290,7 +303,7 @@ lzf_includes = -I$(lzf_home)/include
 else
 lnk_lib     += -llzf
 dlnk_lib    += -llzf
-includes    += -Iliblzf
+includes    += -I/usr/include/liblzf
 endif
 
 rpath := -Wl,-rpath,$(pwd)/$(libd)$(rpath1)$(rpath2)$(rpath3)$(rpath4)$(rpath5)$(rpath6)$(rpath7)$(rpath8)$(rpath9)$(rpath10)$(rpath11)
