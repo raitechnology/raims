@@ -28,9 +28,19 @@ BuildRequires:  c-ares-devel
 BuildRequires:  openssl-devel
 Requires:       pcre2
 Requires:       liblzf
-Requires:       h3
 Requires:       c-ares
 Requires:       openssl
+Requires:       h3
+Requires:       hdrhist
+Requires:       libdecnumber
+Requires:       linecook
+Requires:       natsmd
+Requires:       openpgm_st
+Requires:       raids
+Requires:       raikv
+Requires:       raimd
+Requires:       rdbparser
+Requires:       sassrv
 Requires(post): /sbin/ldconfig
 Requires(postun): /sbin/ldconfig
 
