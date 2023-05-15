@@ -19,13 +19,7 @@ struct ConfigErrPrinter : public md::MDOutput {
     __attribute__((format(printf,2,3)));
 };
 struct ConfigFilePrinter : public md::MDOutput {
-  FILE * fp;
-  ConfigFilePrinter() : fp( 0 ) {}
-  ~ConfigFilePrinter() noexcept;
   int open( const char *path ) noexcept;
-  void close( void ) noexcept;
-  virtual int puts( const char *s ) noexcept;
-  virtual int printf( const char *fmt,  ... ) noexcept;
 };
 struct ConfigDirPrinter : public ConfigFilePrinter {
   const StringVal & dir_name;

@@ -1224,21 +1224,21 @@ SubDB::reply_memo( const char *sub,  size_t sublen,  const char *host,
   match.init_match( sublen );
   if ( match.test_prefix( args, n.bloom, n.reply_prefix ) != MAX_RTE ) {
     if ( host_uid == 0 )
-      this->reply.add_exists( args.hash(), n.uid );
+      this->reply.add_exists( args.subj_hash, n.uid );
   }
   else {
     n.reply_prefix = match.sub_prefix( args, n.bloom );
     if ( n.reply_prefix != MAX_RTE ) {
       if ( host_uid == 0 ) {
-        this->reply.add_exists( args.hash(), n.uid );
+        this->reply.add_exists( args.subj_hash, n.uid );
       }
     }
     else {
-      if ( this->reply.add_missing( args.hash(), n.uid, sub, sublen,
+      if ( this->reply.add_missing( args.subj_hash, n.uid, sub, sublen,
                                     cur_mono ) == 0 ) {
         TransportRoute * rte;
         if ( (rte = this->user_db.ipc_transport) != NULL )
-          rte->sub_route.add_sub_route( args.hash(), rte->fd );
+          rte->sub_route.add_sub_route( args.subj_hash, rte->fd );
       }
     }
   }

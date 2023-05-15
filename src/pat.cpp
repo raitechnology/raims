@@ -277,15 +277,13 @@ uint16_t
 PatTab::prefix_hash( const char *sub,  uint16_t sub_len,
                      uint32_t *hash,  uint8_t *prefix ) noexcept
 {
-  const char * key[ MAX_PRE ];
-  size_t       keylen[ MAX_PRE ]; 
-  uint16_t     x = 0, k = 0;
+  size_t   keylen[ MAX_PRE ];
+  uint16_t x = 0, k = 0;
 
   for ( uint16_t i = 0; i < MAX_PRE; i++ ) {
     if ( i > sub_len )
       break;
     if ( this->pref_count[ i ] != 0 ) {
-      key[ x ]    = sub;
       keylen[ x ] = i;
       hash[ x++ ] = this->seed[ i ];
     }
@@ -293,7 +291,7 @@ PatTab::prefix_hash( const char *sub,  uint16_t sub_len,
   if ( x > 0 ) {
     if ( keylen[ 0 ] == 0 )
       k++;
-    kv_crc_c_array( (const void **) &key[ k ], &keylen[ k ], &hash[ k ], x-k );
+    kv_crc_c_key_array( sub, &keylen[ k ], &hash[ k ], x-k );
     for ( k = 0; k < x; k++ )
       prefix[ k ] = (uint8_t) keylen[ k ];
   }

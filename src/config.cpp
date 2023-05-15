@@ -813,48 +813,12 @@ ConfigDB::parse_include( MDMsg &msg, MDName &, MDReference &mref ) noexcept
 int
 ConfigFilePrinter::open( const char *path ) noexcept
 {
-  this->fp = fopen( path, "w" );
-  if ( this->fp == NULL ) {
+  if ( this->MDOutput::open( path, "wb" ) != 0 ) {
     fprintf( stderr, "unable to write %s: %d/%s\n", path, errno,
              strerror( errno ) );
     return -1;
   }
   return 0;
-}
-
-int
-ConfigFilePrinter::printf( const char *fmt,  ... ) noexcept
-{
-  va_list args;
-  va_start( args, fmt );
-  int n = ::vfprintf( this->fp, fmt, args );
-  va_end( args );
-  return n;
-}
-
-int
-ConfigFilePrinter::puts( const char *s ) noexcept
-{
-  if ( s != NULL ) {
-    int n = fputs( s, this->fp );
-    if ( n > 0 )
-      return (int) ::strlen( s );
-  }
-  return 0;
-}
-
-void
-ConfigFilePrinter::close( void ) noexcept
-{
-  if ( this->fp != NULL ) {
-    fclose( this->fp );
-    this->fp = NULL;
-  }
-}
-
-ConfigFilePrinter::~ConfigFilePrinter() noexcept
-{
-  this->close();
 }
 
 int
@@ -875,8 +839,8 @@ ConfigDirPrinter::open( const char *kind,  const StringVal &sv ) noexcept
    .x( sv.val, sv.len )
    .s( ".yaml.new" )
    .end();
-  this->fp = fopen( path, "w" );
-  if ( this->fp == NULL ) {
+
+  if ( this->ConfigFilePrinter::open( path ) != 0 ) {
     fprintf( stderr, "unable to write %s: %d/%s\n", path, errno,
              strerror( errno ) );
     return -1;

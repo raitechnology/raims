@@ -107,20 +107,11 @@ cppflags  := -std=c++11
 cpplink   := $(CXX)
 endif
 
-rpath     := -Wl,-rpath,$(pwd)/$(libd)
-math_lib  := -lm
+math_lib    := -lm
 
 # test submodules exist (they don't exist for dist_rpm, dist_dpkg targets)
 test_makefile = $(shell if [ -f ./$(1)/GNUmakefile ] ; then echo ./$(1) ; \
                         elif [ -f ../$(1)/GNUmakefile ] ; then echo ../$(1) ; fi)
-
-ifeq (true,$(have_rpm))
-test_library = $(shell x=`/bin/rpmquery -ql $(1) | grep '\.a$$'` ; if [ -z "$${x}" ] ; then echo $(2) ; else echo $${x} ; fi)
-endif
-ifeq (true,$(have_dpkg))
-test_library = $(shell x=`/bin/dpkg -L $(1) | grep '\.a$$'` ; if [ -z "$${x}" ] ; then echo $(2) ; else echo $${x} ; fi)
-endif
-
 md_home     := $(call test_makefile,raimd)
 dec_home    := $(call test_makefile,libdecnumber)
 kv_home     := $(call test_makefile,raikv)
@@ -146,7 +137,8 @@ ifeq (,$(lzf_home))
 lzf_home    := $(call test_makefile,$(rdb_home)/lzf)
 endif
 
-lnk_lib     := $(libd)/libraims.a
+lnk_lib     := -Wl,--push-state -Wl,-Bstatic
+lnk_lib     += $(libd)/libraims.a
 dlnk_lib    :=
 lnk_dep     := $(libd)/libraims.a
 dlnk_dep    :=
@@ -161,7 +153,7 @@ dlnk_dep    += $(ds_dll)
 rpath1       = ,-rpath,$(pwd)/$(ds_home)/$(libd)
 ds_includes  = -I$(ds_home)/include
 else
-lnk_lib     += $(call test_library,raids,-lraids)
+lnk_lib     += -lraids
 dlnk_lib    += -lraids
 endif
 
@@ -175,7 +167,7 @@ dlnk_dep    += $(md_dll)
 rpath2       = ,-rpath,$(pwd)/$(md_home)/$(libd)
 includes    += -I$(md_home)/include
 else
-lnk_lib     += $(call test_library,raimd,-lraimd)
+lnk_lib     += -lraimd
 dlnk_lib    += -lraimd
 endif
 
@@ -189,7 +181,7 @@ dlnk_dep    += $(dec_dll)
 rpath3       = ,-rpath,$(pwd)/$(dec_home)/$(libd)
 dec_includes = -I$(dec_home)/include
 else
-lnk_lib     += $(call test_library,libdecnumber,-ldecnumber)
+lnk_lib     += -ldecnumber
 dlnk_lib    += -ldecnumber
 endif
 
@@ -203,7 +195,7 @@ dlnk_dep    += $(lc_dll)
 rpath4       = ,-rpath,$(pwd)/$(lc_home)/$(libd)
 lc_includes  = -I$(lc_home)/include
 else
-lnk_lib     += $(call test_library,linecook,-llinecook)
+lnk_lib     += -llinecook
 dlnk_lib    += -llinecook
 endif
 
@@ -217,7 +209,7 @@ dlnk_dep    += $(h3_dll)
 rpath5       = ,-rpath,$(pwd)/$(h3_home)/$(libd)
 h3_includes  = -I$(h3_home)/src/h3lib/include
 else
-lnk_lib     += $(call test_library,h3,-lh3)
+lnk_lib     += -lh3
 dlnk_lib    += -lh3
 endif
 
@@ -231,7 +223,7 @@ dlnk_dep    += $(rdb_dll)
 rpath6       = ,-rpath,$(pwd)/$(rdb_home)/$(libd)
 rdb_includes = -I$(rdb_home)/include
 else
-lnk_lib     += $(call test_library,rdbparser,-lrdbparser)
+lnk_lib     += -lrdbparser
 dlnk_lib    += -lrdbparser
 endif
 
@@ -245,7 +237,7 @@ dlnk_dep    += $(kv_dll)
 rpath7       = ,-rpath,$(pwd)/$(kv_home)/$(libd)
 includes    += -I$(kv_home)/include
 else
-lnk_lib     += $(call test_library,raikv,-lraikv)
+lnk_lib     += -lraikv
 dlnk_lib    += -lraikv
 endif
 
@@ -259,7 +251,7 @@ dlnk_dep    += $(pgm_dll)
 rpath8       = ,-rpath,$(pwd)/$(pgm_home)/$(libd)
 pgm_includes = -I$(pgm_home)/openpgm/pgm/include
 else
-lnk_lib     += $(call test_library,openpgm_st,-lopenpgm_st)
+lnk_lib     += -lopenpgm_st
 dlnk_lib    += -lopenpgm_st
 endif
 
@@ -273,7 +265,7 @@ dlnk_dep    += $(sassrv_dll)
 rpath9       = ,-rpath,$(pwd)/$(sassrv_home)/$(libd)
 sassrv_includes = -I$(sassrv_home)/include
 else
-lnk_lib     += $(call test_library,sassrv,-lsassrv)
+lnk_lib     += -lsassrv
 dlnk_lib    += -lsassrv
 endif
 
@@ -287,9 +279,11 @@ dlnk_dep    += $(natsmd_dll)
 rpath10      = ,-rpath,$(pwd)/$(natsmd_home)/$(libd)
 natsmd_includes = -I$(natsmd_home)/include
 else
-lnk_lib     += $(call test_library,natsmd,-lnatsmd)
+lnk_lib     += -lnatsmd
 dlnk_lib    += -lnatsmd
 endif
+
+lnk_lib += -Wl,--pop-state
 
 ifneq (,$(lzf_home))
 lzf_lib     := $(lzf_home)/$(libd)/liblzf.a
