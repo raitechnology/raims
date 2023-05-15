@@ -48,6 +48,6 @@ core.[0-9]?*
 /*.srctrl*
 # bear make output
 /compile_commands.json
-/.*history
+/.*history*
 # config files
 /*.yaml
