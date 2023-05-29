@@ -405,7 +405,7 @@ EvTcpTransport::fwd_msg( EvPublish &pub ) noexcept
     }
   }
 #endif
-  if ( pub.pub_type != 'f' ) {
+  if ( ! pub.is_pub_type( PUB_TYPE_FRAGMENT ) ) {
     if ( pub.msg_len > this->recv_highwater ) {
       idx = this->poll.zero_copy_ref( pub.src_route.fd, pub.msg, pub.msg_len );
       if ( idx != 0 )

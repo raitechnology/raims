@@ -370,7 +370,7 @@ struct InboxPublish : public MsgFragPublish {
     MsgFragPublish( subj, subj_len, data, data_len, src_rt, src, hash,
                enc, tr, tsz ),
       peer_url( url ), peer_uid( uid ), url_hash( url_h ) {
-    this->pub_type = 'I';
+    this->publish_type = kv::PUB_TYPE_INBOX;
   }
 };
 

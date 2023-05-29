@@ -740,8 +740,7 @@ UserDB::send_adjacency_change( void ) noexcept
     if ( rte->connect_count > 0 && ! rte->is_set( TPORT_IS_IPC ) ) {
       if ( ! unique.superset( rte->uid_connected ) ) {
         EvPublish pub( Z_ADJ, Z_ADJ_SZ, NULL, 0, m.msg, m.len(),
-                       rte->sub_route, this->my_src, adj_h,
-                       CABA_TYPE_ID, 'p' );
+                       rte->sub_route, this->my_src, adj_h, CABA_TYPE_ID );
         rte->forward_to_connected( pub );
         unique.add( rte->uid_connected );
       }

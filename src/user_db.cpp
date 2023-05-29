@@ -265,7 +265,7 @@ UserDB::forward_to( InboxPub &p ) noexcept
     if ( p.frag_size == 0 ) {
       EvPublish pub( p.sub, p.sublen, NULL, 0, p.msg, p.msglen,
                      u_rte.rte.sub_route, *p.src_route, p.subj_hash,
-                     CABA_TYPE_ID, 'p' );
+                     CABA_TYPE_ID );
       b = u_rte.rte.sub_route.forward_to( pub, u_rte.inbox.fd, p.data );
     }
     else {
@@ -346,12 +346,12 @@ UserDB::bcast_pub( const MsgFramePublish &pub,  const UserBridge &n,
   if ( dec.is_mcast_type() ) {
     size_t count = this->transport_tab.count;
     if ( count > 1 || pub.rte.connect_count > 1 ) {
-      kv::EvPublish tmp( pub );
-      kv::BitSpace unique;
+      EvPublish tmp( pub );
+      BitSpace unique;
       unique.add( n.uid );
       for ( size_t i = 0; i < count; i++ ) {
         TransportRoute * rte = this->transport_tab.ptr[ i ];
-        tmp.pub_type = 'p';
+        tmp.publish_type = PUB_TYPE_NORMAL;
         if ( rte->connect_count > 0 && ! rte->is_set( TPORT_IS_IPC ) ) {
           if ( ! unique.superset( rte->uid_connected ) ) {
             if ( rte != &pub.rte )
@@ -386,8 +386,8 @@ UserDB::mcast_pub( const MsgFramePublish &pub,  UserBridge &n,
     this->peer_dist.update_forward_cache( forward, n.uid, path_select );
     if ( forward.first( tport_id ) ) {
       do {
-        kv::EvPublish tmp( pub );
-        tmp.pub_type = 'p';
+        EvPublish tmp( pub );
+        tmp.publish_type = PUB_TYPE_NORMAL;
         rte = this->transport_tab.ptr[ tport_id ];
         b  &= rte->sub_route.forward_except( tmp, this->router_set );
       } while ( forward.next( tport_id ) );
@@ -1610,6 +1610,8 @@ UserDB::add_authenticated( UserBridge &n,
     this->add_inbox_route( n, primary );
     if ( primary != NULL )
       this->set_connected_user_route( n, *primary );
+    n.bloom_uid =
+      this->sub_db.uid_route.create_bloom_route( n.uid, &n.bloom, 0 );
     this->uid_auth_count++;
     d_usr( "+++ uid_auth_count=%u +%s\n", this->uid_auth_count,
             n.peer.user.val );
@@ -1699,6 +1701,10 @@ UserDB::remove_authenticated( UserBridge &n,  AuthStage bye ) noexcept
     }
     n.forward_path[ i ].reset();
     n.src_path[ i ].zero();
+  }
+  if ( n.bloom_uid != NULL ) {
+    n.bloom_uid->remove_if_empty();
+    n.bloom_uid = NULL;
   }
   n.bloom.zero();
   n.adjacency.reset();

@@ -652,8 +652,7 @@ UserDB::send_peer_add( UserBridge &n,
           m.sign( Z_ADD, Z_ADD_SZ, *this->session_key );
 
           EvPublish pub( Z_ADD, Z_ADD_SZ, NULL, 0, m.msg, m.len(),
-                         rte->sub_route, this->my_src, add_h,
-                         CABA_TYPE_ID, 'p' );
+                         rte->sub_route, this->my_src, add_h, CABA_TYPE_ID );
           rte->forward_to_connected_auth( pub );
           unique.add( rte->uid_connected );
         }
@@ -699,8 +698,7 @@ UserDB::send_peer_del( UserBridge &n ) noexcept
         m.sign( Z_DEL, Z_DEL_SZ, *this->session_key );
 
         EvPublish pub( Z_DEL, Z_DEL_SZ, NULL, 0, m.msg, m.len(),
-                       rte->sub_route, this->my_src, del_h,
-                       CABA_TYPE_ID, 'p' );
+                       rte->sub_route, this->my_src, del_h, CABA_TYPE_ID );
         rte->forward_to_connected_auth( pub );
         unique.add( rte->uid_connected );
       }

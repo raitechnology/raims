@@ -5,6 +5,7 @@
 #define __STDC_FORMAT_MACROS
 #include <inttypes.h>
 #include <raims/session.h>
+#include <raikv/publish_ctx.h>
 
 using namespace rai;
 using namespace ms;
@@ -15,18 +16,78 @@ SubDB::SubDB( EvPoll &p,  UserDB &udb,  SessionMgr &smg ) noexcept
      : user_db( udb ), mgr( smg ), my_src( smg ), next_inbox( 0 ),
        sub_seqno( 0 ), sub_seqno_sum( 0 ), sub_update_mono_time( 0 ),
        sub_tab( this->sub_list ),
-       pat_tab( this->sub_list, p.sub_route.pre_seed ),
+       pat_tab( this->sub_list ),
        bloom( (uint32_t) udb.rand.next(), "(node)", p.g_bloom_db ),
        console( (uint32_t) udb.rand.next(), "(console)", p.g_bloom_db ),
        ipc( (uint32_t) udb.rand.next(), "(ipc)", p.g_bloom_db ),
-       queue( (uint32_t) udb.rand.next(), "(queue)", p.g_bloom_db )
+       queue_tab( this->sub_list ), uid_route( p.g_bloom_db )
 {
+}
+
+QueueSubTab *
+QueueSubArray::find_tab( const char *queue,  uint16_t queue_len,
+                         uint32_t queue_hash ) noexcept
+{
+  uint32_t i;
+  for ( i = 0; i < this->count; i++ ) {
+    if ( this->ptr[ i ]->equals( queue, queue_len, queue_hash ) )
+      break;
+  }
+  if ( i == this->count ) {
+    if ( queue_len == 0 )
+      return NULL;
+    this->push( new ( ::malloc( sizeof( QueueSubTab ) ) )
+                QueueSubTab( queue, queue_len, queue_hash, this->sub_list ) );
+  }
+  return this->ptr[ i ];
+}
+
+SubStatus
+QueueSubArray::start( SubArgs &ctx ) noexcept
+{
+  QueueSubTab *t = this->find_tab( ctx.queue, ctx.queue_len, ctx.queue_hash );
+  if ( t == NULL )
+    return SUB_ERROR;
+  SubStatus status = t->sub_tab.start( ctx );
+  if ( status == SUB_EXISTS )
+    return SUB_UPDATED;
+  return status;
+}
+
+SubStatus
+QueueSubArray::stop( SubArgs &ctx ) noexcept
+{
+  QueueSubTab *t = this->find_tab( ctx.queue, ctx.queue_len, ctx.queue_hash );
+  if ( t == NULL )
+    return SUB_NOT_FOUND;
+  return t->sub_tab.stop( ctx );
+}
+
+QueueSubTab::QueueSubTab( const char *q,  uint16_t qlen,  uint32_t qhash,
+                          SubList &l ) noexcept
+           : sub_tab( l ), pat_tab( l )
+{
+  this->queue = (char *) ::malloc( qlen + 1 );
+  this->queue_len = qlen;
+  ::memcpy( this->queue, q, qlen );
+  this->queue[ qlen ] = '\0';
+  this->queue_hash = qhash;
 }
 
 uint64_t
 SubDB::sub_start( SubArgs &ctx ) noexcept
 {
-  SubStatus status = this->sub_tab.start( ctx );
+  SubStatus status;
+
+  if ( ctx.queue_hash == 0 )
+    status = this->sub_tab.start( ctx );
+  else
+    status = this->queue_tab.start( ctx );
+
+  d_sub( "sub_start %.*s count %u queue_refs %u status %s\n",
+          (int) ctx.sublen, ctx.sub, ctx.sub_count, ctx.queue_refs,
+          sub_status_string( status ) );
+
   if ( status == SUB_OK || status == SUB_UPDATED ) {
     this->update_bloom( ctx );
 
@@ -48,7 +109,16 @@ SubDB::sub_start( SubArgs &ctx ) noexcept
 uint64_t
 SubDB::sub_stop( SubArgs &ctx ) noexcept
 {
-  SubStatus status = this->sub_tab.stop( ctx );
+  SubStatus status;
+  if ( ctx.queue_hash == 0 )
+    status = this->sub_tab.stop( ctx );
+  else
+    status = this->queue_tab.stop( ctx );
+
+  d_sub( "sub_stop %.*s count %u queue_refs %u status %s\n",
+          (int) ctx.sublen, ctx.sub, ctx.sub_count, ctx.queue_refs,
+          sub_status_string( status ) );
+
   if ( status == SUB_OK || status == SUB_UPDATED ) {
     this->update_bloom( ctx );
 
@@ -72,28 +142,47 @@ SubDB::update_bloom( SubArgs &ctx ) noexcept
 {
   this->update_seqno++;
   if ( ctx.is_start() ) {
-    if ( ctx.sub_count == 1 && ctx.sub_coll == 0 ) {
+    if ( ctx.queue_hash != 0 ) {
+      QueueMatch m = { ctx.queue_hash, ctx.queue_refs };
+      ctx.bloom_updated = true;
+      ctx.resize_bloom = this->bloom.add_queue_route( SUB_RTE, ctx.hash, m );
+      if ( ( ctx.flags & CONSOLE_SUB ) != 0 )
+        ctx.resize_bloom = this->console.add_queue_route( SUB_RTE, ctx.hash, m );
+      else if ( ( ctx.flags & IPC_SUB ) != 0 )
+        ctx.resize_bloom = this->ipc.add_queue_route( SUB_RTE, ctx.hash, m );
+    }
+    else if ( ctx.sub_count == 1 && ctx.sub_coll == 0 ) {
       ctx.resize_bloom  = this->bloom.add( ctx.hash );
       ctx.bloom_updated = true;
+      if ( ( ctx.flags & CONSOLE_SUB ) != 0 &&
+           ctx.console_count == 1 && ctx.console_coll == 0 )
+        ctx.resize_bloom |= this->console.add( ctx.hash );
+      if ( ( ctx.flags & IPC_SUB ) != 0 &&
+           ctx.ipc_count == 1 && ctx.ipc_coll == 0 )
+        ctx.resize_bloom |= this->ipc.add( ctx.hash );
     }
-    if ( ( ctx.flags & CONSOLE_SUB ) != 0 &&
-         ctx.console_count == 1 && ctx.console_coll == 0 )
-      ctx.resize_bloom |= this->console.add( ctx.hash );
-    if ( ( ctx.flags & IPC_SUB ) != 0 &&
-         ctx.ipc_count == 1 && ctx.ipc_coll == 0 )
-      ctx.resize_bloom |= this->ipc.add( ctx.hash );
   }
   else {
-    if ( ctx.sub_count == 0 && ctx.sub_coll == 0 ) {
+    if ( ctx.queue_hash != 0 ) {
+      QueueMatch m = { ctx.queue_hash, 0 };
+      ctx.bloom_updated = true;
+      this->bloom.del_queue_route( SUB_RTE, ctx.hash, m );
+      if ( ( ctx.flags & CONSOLE_SUB ) != 0 )
+        this->console.del_queue_route( SUB_RTE, ctx.hash, m );
+      else if ( ( ctx.flags & IPC_SUB ) != 0 )
+        this->ipc.del_queue_route( SUB_RTE, ctx.hash, m );
+    }
+    else if ( ctx.sub_count == 0 && ctx.sub_coll == 0 ) {
       this->bloom.del( ctx.hash );
       ctx.bloom_updated = true;
+
+      if ( ( ctx.flags & CONSOLE_SUB ) != 0 &&
+           ctx.console_count == 0 && ctx.console_coll == 0 )
+        this->console.del( ctx.hash );
+      if ( ( ctx.flags & IPC_SUB ) != 0 &&
+           ctx.ipc_count == 0 && ctx.ipc_coll == 0 )
+        this->ipc.del( ctx.hash );
     }
-    if ( ( ctx.flags & CONSOLE_SUB ) != 0 &&
-         ctx.console_count == 0 && ctx.console_coll == 0 )
-      this->console.del( ctx.hash );
-    if ( ( ctx.flags & IPC_SUB ) != 0 &&
-         ctx.ipc_count == 0 && ctx.ipc_coll == 0 )
-      this->ipc.del( ctx.hash );
   }
 }
 
@@ -145,9 +234,12 @@ SubDB::fwd_sub( SubArgs &ctx ) noexcept
   d_sub( "%ssub(%.*s)\n", ( ctx.is_start() ? "" : "un" ),
          (int) ctx.sublen, ctx.sub );
   MsgEst e( s.len() );
-  e.seqno     ()
-   .subj_hash ()
-   .subject   ( ctx.sublen );
+  e.seqno      ()
+   .subj_hash  ()
+   .subject    ( ctx.sublen )
+   .queue      ( ctx.queue_len )
+   .queue_hash ()
+   .queue_refs ();
 
   MsgCat m;
   m.reserve( e.sz );
@@ -157,6 +249,14 @@ SubDB::fwd_sub( SubArgs &ctx ) noexcept
    .seqno     ( this->sub_seqno )
    .subj_hash ( ctx.hash )
    .subject   ( ctx.sub, ctx.sublen );
+
+  if ( ctx.queue_hash != 0 ) {
+    if ( ctx.queue_len != 0 )
+      m.queue ( ctx.queue, ctx.queue_len );
+    m.queue_hash ( ctx.queue_hash );
+    if ( ctx.queue_refs != 0 )
+      m.queue_refs ( ctx.queue_refs );
+  }
   uint32_t h = s.hash();
   m.close( e.sz, h, CABA_RTR_ALERT );
   m.sign( s.msg, s.len(), *this->user_db.session_key );
@@ -174,8 +274,7 @@ SubDB::fwd_sub( SubArgs &ctx ) noexcept
     }
   }
   EvPublish pub( s.msg, s.len(), NULL, 0, m.msg, m.len(),
-                 rte->sub_route, this->my_src, h,
-                 CABA_TYPE_ID, 'p' );
+                 rte->sub_route, this->my_src, h, CABA_TYPE_ID );
   this->user_db.mcast_send( pub, 0 );
 }
 /* request subs from peer */
@@ -212,7 +311,8 @@ SubDB::send_subs_request( UserBridge &n,  uint64_t seqno ) noexcept
 bool
 SubDB::fwd_resub( UserBridge &n,  const char *sub,  size_t sublen,
                   uint64_t from_seqno,  uint64_t seqno,  bool is_psub,
-                  const char *suf,  uint64_t token ) noexcept
+                  const char *suf,  uint64_t token,  const char *queue,
+                  uint16_t queue_len,  uint32_t queue_hash ) noexcept
 {
   InboxBuf ibx( n.bridge_id, suf );
 
@@ -222,11 +322,13 @@ SubDB::fwd_resub( UserBridge &n,  const char *sub,  size_t sublen,
     e.subject( sublen );
   else
     e.pattern( sublen );
-  e.start ()
-   .end   ()
-   .token ();
+  e.start      ()
+   .end        ()
+   .token      ()
+   .queue      ( queue_len )
+   .queue_hash ();
 
-  MsgCat   m;
+  MsgCat m;
   m.reserve( e.sz );
   m.open( this->user_db.bridge_id.nonce, ibx.len() )
    .seqno( n.inbox.next_send( U_INBOX_RESUB ) );
@@ -238,6 +340,10 @@ SubDB::fwd_resub( UserBridge &n,  const char *sub,  size_t sublen,
    .end   ( seqno      );
   if ( token != 0 )
     m.token  ( token );
+  if ( queue_len != 0 ) {
+    m.queue      ( queue, queue_len )
+     .queue_hash ( queue_hash );
+  }
   uint32_t h = ibx.hash();
   m.close( e.sz, h, CABA_INBOX );
   m.sign( ibx.buf, ibx.len(), *this->user_db.session_key );
@@ -251,14 +357,29 @@ SubDB::find_fwd_sub( UserBridge &n,  uint32_t hash,
                      const char *suf,  uint64_t token,
                      const char *match,  size_t match_len ) noexcept
 {
-  SubRoute * sub;
-  if ( (sub = this->sub_tab.find_sub( hash, seqno )) == NULL )
+  SubRoute   * sub;
+  const char * queue      = NULL;
+  uint16_t     queue_len  = 0;
+  uint32_t     queue_hash = 0;
+  if ( (sub = this->sub_tab.find_sub( hash, seqno )) == NULL ) {
+    for ( uint32_t i = 0; i < this->queue_tab.count; i++ ) {
+      SubTab &tab = this->queue_tab.ptr[ i ]->sub_tab;
+      if ( (sub = tab.find_sub( hash, seqno )) != NULL ) {
+        queue      = this->queue_tab.ptr[ i ]->queue;
+        queue_len  = this->queue_tab.ptr[ i ]->queue_len;
+        queue_hash = this->queue_tab.ptr[ i ]->queue_hash;
+        break;
+      }
+    }
+  }
+  if ( sub == NULL )
     return true;
   bool b = true;
   if ( match_len == 0 ||
        kv_memmem( sub->value, sub->len, match, match_len ) != NULL ) {
     b &= this->fwd_resub( n, sub->value, sub->len, from_seqno, seqno, false,
-                          suf ? suf : _RESUB, token );
+                          suf ? suf : _RESUB, token, queue, queue_len,
+                          queue_hash );
     from_seqno = seqno;
   }
   return b;
@@ -270,14 +391,29 @@ SubDB::find_fwd_psub( UserBridge &n,  uint32_t hash,
                       const char *suf,  uint64_t token,
                       const char *match,  size_t match_len ) noexcept
 {
-  PatRoute * sub;
-  if ( (sub = this->pat_tab.find_sub( hash, seqno )) == NULL )
+  PatRoute   * sub;
+  const char * queue      = NULL;
+  uint16_t     queue_len  = 0;
+  uint32_t     queue_hash = 0;
+  if ( (sub = this->pat_tab.find_sub( hash, seqno )) == NULL ) {
+    for ( uint32_t i = 0; i < this->queue_tab.count; i++ ) {
+      PatTab &ptab = this->queue_tab.ptr[ i ]->pat_tab;
+      if ( (sub = ptab.find_sub( hash, seqno )) != NULL ) {
+        queue      = this->queue_tab.ptr[ i ]->queue;
+        queue_len  = this->queue_tab.ptr[ i ]->queue_len;
+        queue_hash = this->queue_tab.ptr[ i ]->queue_hash;
+        break;
+      }
+    }
+  }
+  if ( sub == NULL )
     return true;
   bool b = true;
   if ( match_len == 0 ||
        kv_memmem( sub->value, sub->len, match, match_len ) != NULL ) {
     b &= this->fwd_resub( n, sub->value, sub->len, from_seqno, seqno, true,
-                          suf ? suf : _REPSUB, token );
+                          suf ? suf : _REPSUB, token, queue, queue_len,
+                          queue_hash );
     from_seqno = seqno;
   }
   return b;
@@ -485,15 +621,34 @@ SubDB::recv_sub_start( const MsgFramePublish &pub,  UserBridge &n,
   if ( dec.test_2( FID_SUBJECT, FID_SUBJ_HASH ) ) {
     size_t       sublen = dec.mref[ FID_SUBJECT ].fsize;
     const char * sub    = (const char *) dec.mref[ FID_SUBJECT ].fptr;
-    uint32_t     hash;
+    uint32_t     hash, queue_hash, queue_refs;
 
     dec.get_ival<uint32_t>( FID_SUBJ_HASH, hash );
-    n.bloom.add( hash );
-    TransportRoute *rte = this->user_db.ipc_transport;
-    if ( rte != NULL ) {
-      NotifySub   nsub( sub, sublen, hash, false, 'M', pub.src_route );
-      nsub.bref = &n.bloom;
-      rte->sub_route.do_notify_sub( nsub );
+    if ( dec.get_ival<uint32_t>( FID_QUEUE_HASH, queue_hash ) &&
+         dec.get_ival<uint32_t>( FID_QUEUE_REFS, queue_refs ) &&
+         dec.test( FID_QUEUE ) ) {
+      size_t       queue_len = dec.mref[ FID_QUEUE ].fsize;
+      const char * queue     = (const char *) dec.mref[ FID_QUEUE ].fptr;
+      this->uid_route.get_queue_group( queue, queue_len, queue_hash );
+      QueueMatch m = { queue_hash, queue_refs };
+      n.bloom.add_queue_route( SUB_RTE, hash, m );
+      TransportRoute *rte = this->user_db.ipc_transport;
+      if ( rte != NULL ) {
+        NotifyQueue nsub( sub, sublen, NULL, 0, hash, false, 'M', pub.src_route,
+                          queue, queue_len, queue_hash );
+        nsub.sub_count = queue_refs;
+        nsub.bref = &n.bloom;
+        rte->sub_route.do_notify_sub_q( nsub );
+      }
+    }
+    else {
+      n.bloom.add( hash );
+      TransportRoute *rte = this->user_db.ipc_transport;
+      if ( rte != NULL ) {
+        NotifySub   nsub( sub, sublen, hash, false, 'M', pub.src_route );
+        nsub.bref = &n.bloom;
+        rte->sub_route.do_notify_sub( nsub );
+      }
     }
     if ( debug_sub )
       n.printf( "start %.*s\n", (int) pub.subject_len, pub.subject );
@@ -509,15 +664,29 @@ SubDB::recv_sub_stop( const MsgFramePublish &pub,  UserBridge &n,
   if ( dec.test_2( FID_SUBJECT, FID_SUBJ_HASH ) ) {
     size_t       sublen = dec.mref[ FID_SUBJECT ].fsize;
     const char * sub    = (const char *) dec.mref[ FID_SUBJECT ].fptr;
-    uint32_t     hash;
+    uint32_t     hash, queue_hash;
 
     dec.get_ival<uint32_t>( FID_SUBJ_HASH, hash );
-    n.bloom.del( hash );
-    TransportRoute *rte = this->user_db.ipc_transport;
-    if ( rte != NULL ) {
-      NotifySub   nsub( sub, sublen, hash, false, 'M', pub.src_route );
-      nsub.bref = &n.bloom;
-      rte->sub_route.do_notify_unsub( nsub );
+    if ( dec.get_ival<uint32_t>( FID_QUEUE_HASH, queue_hash ) ) {
+      QueueMatch m = { queue_hash, 0 };
+      n.bloom.del_queue_route( SUB_RTE, hash, m );
+      TransportRoute *rte = this->user_db.ipc_transport;
+      if ( rte != NULL ) {
+        NotifyQueue nsub( sub, sublen, NULL, 0, hash, false, 'M',
+                          pub.src_route, NULL, 0, queue_hash );
+        nsub.sub_count = 0;
+        nsub.bref = &n.bloom;
+        rte->sub_route.do_notify_unsub_q( nsub );
+      }
+    }
+    else {
+      n.bloom.del( hash );
+      TransportRoute *rte = this->user_db.ipc_transport;
+      if ( rte != NULL ) {
+        NotifySub   nsub( sub, sublen, hash, false, 'M', pub.src_route );
+        nsub.bref = &n.bloom;
+        rte->sub_route.do_notify_unsub( nsub );
+      }
     }
     if ( debug_sub )
       n.printf( "stop %.*s\n", (int) pub.subject_len, pub.subject );
@@ -530,34 +699,6 @@ bool
 SubDB::recv_resub_result( const MsgFramePublish &,  UserBridge &,
                           const MsgHdrDecoder & ) noexcept
 {
-#if 0
-  if ( ! dec.test_2( FID_START, FID_END ) ) {
-    fprintf( stderr, "missing start end in recv subs request\n" );
-     return true;
-  }
-  uint64_t start = 0, seqno = 0;
-  cvt_number<uint64_t>( dec.mref[ FID_START ], start );
-  cvt_number<uint64_t>( dec.mref[ FID_END ], seqno );
-  if ( start == n.sub_seqno && seqno > start ) {
-    n.sub_seqno = seqno;
-    if ( dec.test( FID_SUBJECT ) ) {
-      UserRoute      & u_rte  = *n.user_route;
-      TransportRoute & rte    = u_rte.rte;
-      size_t           sublen = dec.mref[ FID_SUBJECT ].fsize;
-      const char     * sub    = (const char *) dec.mref[ FID_SUBJECT ].fptr;
-      uint32_t         hash   = kv_crc_c( sub, sublen, 0 ),
-                       rcnt;
-      rcnt = rte.sub_route.get_sub_route_count( hash ) + 1;
-      n.bloom.add( hash );
-      rte.sub_route.notify_sub( hash, sub, sublen, u_rte.mcast_fd,
-                                rcnt, 's' );
-    }
-    n.printf( "%.*s start %" PRIu64 " end %" PRIu64 "\n",
-            (int) pub.subject_len, pub.subject, start, seqno );
-  }
-  if ( n.test_clear( SUBS_REQUEST_STATE ) )
-    this->user_db.subs_queue.remove( &n );
-#endif
   return true;
 }
 
@@ -615,8 +756,7 @@ SubDB::reseed_bloom( void ) noexcept
     do {
       TransportRoute *rte = this->user_db.transport_tab.ptr[ tport_id ];
       EvPublish pub( Z_BLM, Z_BLM_SZ, NULL, 0, m.msg, m.len(),
-                     rte->sub_route, this->my_src,
-                     blm_h, CABA_TYPE_ID, 'p' );
+                     rte->sub_route, this->my_src, blm_h, CABA_TYPE_ID );
 
       rte->sub_route.forward_except( pub, this->mgr.router_set );
     } while ( forward.next( tport_id ) );
@@ -686,8 +826,7 @@ SubDB::resize_bloom( void ) noexcept
       do {
         TransportRoute *rte = this->user_db.transport_tab.ptr[ tport_id ];
         EvPublish pub( Z_BLM, Z_BLM_SZ, NULL, 0, m.msg, m.len(),
-                       rte->sub_route, this->my_src,
-                       blm_h, CABA_TYPE_ID, 'p' );
+                       rte->sub_route, this->my_src, blm_h, CABA_TYPE_ID );
 
         rte->sub_route.forward_except( pub, this->mgr.router_set );
       } while ( forward.next( tport_id ) );
@@ -728,6 +867,23 @@ SubDB::index_bloom( BloomBits &bits,  uint32_t flags ) noexcept
       if ( pat->test( flags ) )
         bits.add( pat->hash );
     } while ( (pat = this->pat_tab.tab.next( loc )) != NULL );
+  }
+
+  for ( uint32_t i = 0; i < this->queue_tab.count; i++ ) {
+    SubTab &tab = this->queue_tab.ptr[ i ]->sub_tab;
+    PatTab &ptab = this->queue_tab.ptr[ i ]->pat_tab;
+    if ( (rt = tab.tab.first( loc )) != NULL ) {
+      do {
+        if ( rt->test( flags ) )
+          bits.add( rt->hash );
+      } while ( (rt = tab.tab.next( loc )) != NULL );
+    }
+    if ( (pat = ptab.tab.first( loc )) != NULL ) {
+      do {
+        if ( pat->test( flags ) )
+          bits.add( pat->hash );
+      } while ( (pat = ptab.tab.next( loc )) != NULL );
+    }
   }
 }
 
@@ -895,7 +1051,7 @@ SubDB::match_subscription( const kv::EvPublish &pub,  SeqnoArgs &ctx ) noexcept
           ctx.start_seqno = rt->start_seqno;
           ctx.cb          = rt->on_data;
         }
-        ctx.tport_mask |= rt->ref.tport_mask;
+        ctx.tport_mask |= rt->ref.tport_mask();
         matched = true;
       }
     }
@@ -908,7 +1064,7 @@ SubDB::match_subscription( const kv::EvPublish &pub,  SeqnoArgs &ctx ) noexcept
             ctx.start_seqno = rt->start_seqno;
             ctx.cb          = rt->on_data;
           }
-          ctx.tport_mask |= rt->ref.tport_mask;
+          ctx.tport_mask |= rt->ref.tport_mask();
           matched = true;
         }
         rt = this->pat_tab.tab.find_next_by_hash( pub.hash[ cnt ], loc );
@@ -927,7 +1083,7 @@ SubDB::match_any_sub( const char *sub,  uint16_t sublen ) noexcept
     return rt->on_data;
   for ( uint16_t i = 0; i <= sublen; i++ ) {
     if ( this->bloom.pref_count[ i ] != 0 ) {
-      h = kv_crc_c( sub, i, this->pat_tab.seed[ i ] );
+      h = kv_crc_c( sub, i, RouteGroup::pre_seed[ i ] );
 
       RouteLoc   loc;
       PatRoute * rt = this->pat_tab.tab.find_by_hash( h, loc );
@@ -1014,35 +1170,36 @@ SubOnMsg::on_data( const SubMsgData & ) noexcept
 {
 }
 
-void
-AnyMatch::init_any( const char *s,  uint16_t sublen, uint32_t uid_cnt ) noexcept
+size_t
+AnyMatch::init_any( const char *s,  uint16_t sublen, uint32_t uid_cnt,
+                    bool is_queue ) noexcept
 {
-  size_t off = sizeof( AnyMatch ) - sizeof( kv::BloomMatch ) +
-               kv::BloomMatch::match_size( sublen );
-  char * ptr = &((char *) (void *) this)[ off ];
+  size_t off = (char *) (void *) &this->match - (char *) (void *) this;
+  char * ptr = (char *) (void *) this;
+  ptr = &ptr[ off + BloomMatch::match_size( sublen ) ];
   ::memcpy( ptr, s, sublen );
   ptr[ sublen ] = '\0';
 
-  uid_cnt         = ( uid_cnt + 127 ) & ~(uint32_t) 127;
-  this->max_uid   = uid_cnt;
-  this->set_count = 0;
+  this->max_uid   = align<uint32_t>( uid_cnt, 64 );
   this->mono_time = 0;
   this->sub_off   = (uint16_t) ( ptr - (char *) (void *) this );
   this->sub_len   = sublen;
-  ptr            += ( ( (size_t) sublen + 8 ) & ~(size_t) 7 );
+  this->is_queue  = is_queue;
+  ptr             = &ptr[ align<size_t>( sublen, 8 ) ];
   this->bits_off  = (uint32_t) ( ptr - (char *) (void *) this );
-  ::memset( ptr, 0, uid_cnt / 8 );
+  ptr             = &ptr[ this->max_uid / 8 ];
   this->match.init_match( sublen );
+  return ptr - (char *) (void *) this;
 }
 
 size_t
-AnyMatch::any_size( uint16_t sublen,  uint32_t uid_cnt ) noexcept
+AnyMatch::any_size( uint16_t sublen,  uint32_t &uid_cnt ) noexcept
 {
-  size_t   len     = ( ( (size_t) sublen + 8 ) & ~(size_t) 7 );
-  uint32_t max_uid = ( uid_cnt + 127 ) & ~(uint32_t) 127;
-  len += sizeof( AnyMatch ) - sizeof( kv::BloomMatch ) +
-         kv::BloomMatch::match_size( sublen ) + (size_t) max_uid / 8;
-  return len;
+  uid_cnt = align<uint32_t>( uid_cnt, 64 );
+  return align<size_t>( align<size_t>( sublen, 8 ) +
+                        sizeof( AnyMatch ) +
+                        kv::BloomMatch::match_size( sublen ) +
+                        (size_t) uid_cnt / 8, 8 );
 }
 
 void
@@ -1055,7 +1212,7 @@ AnyMatchTab::reset( void ) noexcept
 
 AnyMatch *
 AnyMatchTab::get_match( const char *sub,  uint16_t sublen,  uint32_t h,
-                        uint32_t max_uid ) noexcept
+                        uint32_t max_uid,  bool is_queue ) noexcept
 {
   AnyMatch * any;
   size_t     pos;
@@ -1063,60 +1220,36 @@ AnyMatchTab::get_match( const char *sub,  uint16_t sublen,  uint32_t h,
   if ( this->ht->find( h, pos, off ) ) {
     any = (AnyMatch *) (void *) &this->tab.ptr[ off ];
     if ( any->sub_len == sublen && ::memcmp( any->sub(), sub, sublen ) == 0 &&
-         any->max_uid >= max_uid )
+         any->max_uid >= max_uid && any->is_queue == is_queue )
       return any;
     this->reset();
     this->ht->find( h, pos );
   }
-  size_t     sz = AnyMatch::any_size( sublen, max_uid ) / 8;
+  size_t     sz = AnyMatch::any_size( sublen, max_uid ) / 8, n;
   uint64_t * p  = this->tab.resize( this->max_off + sz, false );
 
   any = (AnyMatch *) (void *) &p[ this->max_off ];
-  any->init_any( sub, sublen, max_uid );
+  n   = any->init_any( sub, sublen, max_uid, is_queue );
   this->ht->set_rsz( this->ht, h, pos, (uint32_t) this->max_off );
-  this->max_off += sz;
+  if ( sz < n / 8 ) {
+    fprintf( stderr, "get_match is sz %lu %lu\n", sz, n / 8 );
+  }
+  this->max_off += n / 8;
   return any;
-}
-
-bool
-AnyMatch::first_dest( uint32_t &pos,  uint32_t &uid ) noexcept
-{
-  bool b = false;
-  pos = 0;
-  if ( this->set_count > 0 ) {
-    BitSetT<uint64_t> set( this->bits() );
-    b = set.first( uid, this->max_uid );
-  }
-  return b;
-}
-
-bool
-AnyMatch::next_dest( uint32_t &pos,  uint32_t &uid ) noexcept
-{
-  bool b = false;
-  if ( ++pos < this->set_count ) {
-    BitSetT<uint64_t> set( this->bits() );
-    b = set.index( uid, pos, this->max_uid );
-  }
-  return b;
 }
 
 UserBridge *
 AnyMatch::get_destination( UserDB &user_db ) noexcept
 {
-  if ( this->set_count > 0 ) {
-    BitSetT<uint64_t> set( this->bits() );
-    bool b = false;
-    uint32_t uid, pos = 0;
-    if ( this->set_count > 1 )
-      pos = user_db.rand.next() % this->set_count;
-    if ( pos == 0 )
-      b = set.first( uid, this->max_uid );
-    else
-      b = set.index( uid, pos, this->max_uid );
-    if ( b )
-      return user_db.bridge_tab[ uid ];
-  }
+  BitSetT<uint64_t> set( this->bits() );
+  uint32_t set_count = set.count( this->max_uid );
+  uint32_t uid, pos = 0;
+  bool b = false;
+  if ( set_count > 1 )
+    pos = user_db.rand.next() % set_count;
+  b = set.index( uid, pos, this->max_uid );
+  if ( b )
+    return user_db.bridge_tab[ uid ];
   return NULL;
 }
 
@@ -1155,33 +1288,41 @@ SubDB::host_match( const char *host,  size_t host_len ) noexcept
 AnyMatch *
 SubDB::any_match( const char *sub,  uint16_t sublen,  uint32_t h ) noexcept
 {
-  uint32_t   uid, max_uid = this->user_db.next_uid;
   AnyMatch * any;
-
-  any = this->any_tab.get_match( sub, sublen, h, max_uid );
+  any = this->any_tab.get_match( sub, sublen, h, this->user_db.next_uid, false );
   if ( any->mono_time < this->sub_update_mono_time ) {
-    BloomMatchArgs args( h, sub, sublen, this->pat_tab.seed );
+    BloomMatchArgs args( h, sub, sublen );
     BitSetT<uint64_t> set( any->bits() );
-    for ( uid = 1; uid < max_uid; uid++ ) {
+    set.zero( any->max_uid );
+    for ( uint32_t uid = 1; uid < this->user_db.next_uid; uid++ ) {
       UserBridge * n = this->user_db.bridge_tab.ptr[ uid ];
       if ( n != NULL && n->is_set( AUTHENTICATED_STATE ) ) {
         if ( any->mono_time < n->sub_recv_mono_time ) {
-          if ( any->match.match_sub( args, n->bloom ) ) {
-            if ( ! set.test_set( uid ) )
-              any->set_count++;
-          }
-          else {
-            if ( set.test_clear( uid ) )
-              any->set_count--;
-          }
+          if ( any->match.match_sub( args, n->bloom ) )
+            set.add( uid );
         }
-      }
-      else {
-        if ( set.test_clear( uid ) )
-          any->set_count--;
       }
     }
     any->mono_time = this->sub_update_mono_time;
+  }
+  return any;
+}
+
+AnyMatch *
+SubDB::any_queue( EvPublish &pub ) noexcept
+{
+  AnyMatch * any;
+  any = this->any_tab.get_match( pub.subject, pub.subject_len, pub.subj_hash,
+                                 this->user_db.next_uid, true );
+  BitSetT<uint64_t> set( any->bits() );
+  set.zero( any->max_uid );
+
+  RoutePublishContext ctx( this->uid_route, pub );
+  RoutePublishData * rpd = ctx.set.rpd;
+  for ( uint32_t i = 0; i < ctx.set.n; i++ ) {
+    for ( uint32_t j = 0; j < rpd[ i ].rcount; j++ ) {
+      set.add( rpd[ i ].routes[ j ] );
+    }
   }
   return any;
 }
@@ -1218,7 +1359,7 @@ SubDB::reply_memo( const char *sub,  size_t sublen,  const char *host,
                    size_t hostlen,  UserBridge &n,  uint64_t cur_mono ) noexcept
 {
   uint32_t       host_uid = this->host_match( host, hostlen );
-  BloomMatchArgs args( 0, sub, sublen, this->pat_tab.seed );
+  BloomMatchArgs args( 0, sub, sublen );
   BloomMatch     match;
 
   match.init_match( sublen );
@@ -1404,17 +1545,23 @@ SubDB::match_inbox( const char *str,  size_t str_len,
 }
 
 void
-SubDB::queue_sub_update( NotifySub &sub,  uint32_t refcnt ) noexcept
+SubDB::queue_sub_update( NotifyQueue &sub,  uint32_t tport_id,
+                         uint32_t refcnt ) noexcept
 {
   printf( "queue_sub_update( %.*s, fd=%u, start=%" PRIx64 ", cnt=%u )\n",
           (int) sub.subject_len, sub.subject, sub.src.fd,
           sub.src.start_ns, refcnt );
-}
-
-void
-SubDB::queue_psub_update( NotifyPattern &pat,  uint32_t refcnt ) noexcept
-{
-  printf( "queue_psub_update( %.*s, fd=%u, start=%" PRIx64 ", cnt=%u )\n",
-          (int) pat.pattern_len, pat.pattern, pat.src.fd,
-          pat.src.start_ns, refcnt );
+  uint32_t flags = IPC_SUB | QUEUE_SUB;
+  if ( sub.sub_count != 0 )
+    flags |= IS_SUB_START;
+  SubArgs ctx( sub.subject, sub.subject_len, NULL, 0, NULL,
+               this->sub_seqno + 1, flags, tport_id, sub.subj_hash );
+  ctx.queue      = sub.queue;
+  ctx.queue_len  = sub.queue_len;
+  ctx.queue_hash = sub.queue_hash;
+  ctx.queue_refs = sub.sub_count;
+  if ( ( flags & IS_SUB_START ) != 0 )
+    this->sub_start( ctx );
+  else
+    this->sub_stop( ctx );
 }

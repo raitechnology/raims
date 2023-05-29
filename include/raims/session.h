@@ -108,7 +108,9 @@ struct SubMsgData {
   size_t            datalen; /* message data length */
   uint32_t          fmt,     /* format of data */
                     reply,   /* non-zero when peer wants a ptp reply */
-                    tport_id;
+                    tport_id,
+                    hdr_len,
+                    suf_len;
   /* start_seqno : seqno of subscripton */
   /* sub2, sublen2 : subject of inbox */
 
@@ -116,7 +118,7 @@ struct SubMsgData {
               size_t dl )
     : pub( p ), src_bridge( n ), seqno( 0 ), stamp( 0 ), token( 0 ),
       ref_seqno( 0 ), data( d ), datalen( dl ), fmt( 0 ), reply( 0 ),
-      tport_id( 0 ) {}
+      tport_id( 0 ), hdr_len( 0 ), suf_len( 0 ) {}
 };
 /* a publish sent to all subscribers */
 struct PubMcastData {
@@ -397,6 +399,10 @@ struct SessionMgr : public kv::EvSocket, public kv::BPData {
                           uint32_t uid ) noexcept;
   bool forward_inbox( TransportRoute &src_rte,  kv::EvPublish &pub,
                       const char *host,  size_t host_len ) noexcept;
+  bool forward_ipc_queue( TransportRoute &src_rte,
+                          kv::EvPublish &fwd ) noexcept;
+  bool forward_to_any( TransportRoute &src_rte,  kv::EvPublish &fwd,
+                       AnyMatch &any ) noexcept;
   bool forward_ipc( TransportRoute &src_rte, kv::EvPublish &mc ) noexcept;
   bool listen_start_noencrypt( ConfigTree::Transport &tport,
                                kv::EvTcpListen *l, const char *k ) noexcept;

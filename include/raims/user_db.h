@@ -204,7 +204,8 @@ struct UserBridge : public UserStateTest<UserBridge> {
   PeerEntry        & peer;                /* configuration entry */
   UserNonce          bridge_id;           /* the user hmac and nonce */
   ForwardCache       forward_path[ COST_PATH_COUNT ]; /* which tports to fwd */
-  kv::BloomRoute   * bloom_rt[ COST_PATH_COUNT ];
+  kv::BloomRoute   * bloom_rt[ COST_PATH_COUNT ],
+                   * bloom_uid;
   UidSrcPath         src_path[ COST_PATH_COUNT ];
   kv::BloomRef       bloom;               /* the subs by this user */
   AdjacencyTab       adjacency;           /* what nonce routes are adjacent */
@@ -300,6 +301,7 @@ struct UserBridge : public UserStateTest<UserBridge> {
         adj_req_throttle( this->state, ADJACENCY_REQUEST_STATE ),
         mesh_req_throttle( this->state, MESH_REQUEST_STATE ) {
     ::memset( this->bloom_rt, 0, sizeof( this->bloom_rt ) );
+    this->bloom_uid = NULL;
     this->peer_key.zero();
     this->peer_hello.zero();
     this->uid_csum.zero();

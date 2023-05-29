@@ -110,7 +110,7 @@ EvPgmTransport::on_msg( EvPublish &pub ) noexcept
   this->msgs_sent++;
   MsgFragPublish * fpub = NULL;
   size_t msg_len = pub.msg_len;
-  if ( pub.pub_type == 'f' ) {
+  if ( pub.is_pub_type( PUB_TYPE_FRAGMENT ) ) {
     fpub = (MsgFragPublish *) &pub;
     msg_len += fpub->trail_sz + ( fpub->trail_sz & 1 );
   }

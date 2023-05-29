@@ -516,7 +516,7 @@ EvInboxTransport::timer_expire( uint64_t tid, uint64_t ) noexcept
 bool
 EvInboxTransport::on_msg( kv::EvPublish &pub ) noexcept
 {
-  if ( pub.pub_type == 'I' ) {
+  if ( pub.is_pub_type( PUB_TYPE_INBOX ) ) {
     InboxPublish & ipub = (InboxPublish &) pub;
     InboxPeer    * p;
 
@@ -551,8 +551,8 @@ EvInboxTransport::on_msg( kv::EvPublish &pub ) noexcept
     this->idle_push( EV_WRITE );
   }
   else {
-    d_ibx( "ignoring on_msg( %.*s ), type '%c'\n",
-             (int) pub.subject_len, pub.subject, pub.pub_type );
+    d_ibx( "ignoring on_msg( %.*s ), type %x\n",
+             (int) pub.subject_len, pub.subject, pub.publish_type );
   }
   return true;
 }

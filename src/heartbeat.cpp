@@ -155,7 +155,7 @@ UserDB::hello_hb( void ) noexcept
              this->bridge_id.hmac.to_base64_str( buf ),
              this->bridge_id.nonce.to_base64_str( buf2 ), rte->name );
       EvPublish pub( X_HELLO, X_HELLO_SZ, NULL, 0, m.msg, m.len(),
-                     rte->sub_route, this->my_src, hello_h, CABA_TYPE_ID, 'p' );
+                     rte->sub_route, this->my_src, hello_h, CABA_TYPE_ID );
       rte->forward_to_connected( pub );
     }
   }
@@ -175,7 +175,7 @@ UserDB::bye_hb( void ) noexcept
       this->make_hb( *rte, X_BYE, X_BYE_SZ, bye_h, m );
       d_hb( "bye\n" );
       EvPublish pub( X_BYE, X_BYE_SZ, NULL, 0, m.msg, m.len(),
-                     rte->sub_route, this->my_src, bye_h, CABA_TYPE_ID, 'p' );
+                     rte->sub_route, this->my_src, bye_h, CABA_TYPE_ID );
       rte->forward_to_connected( pub );
     }
   }
@@ -205,7 +205,7 @@ UserDB::interval_hb( uint64_t cur_mono,  uint64_t cur_time ) noexcept
         this->push_hb_time( *rte, cur_time, cur_mono );
         this->make_hb( *rte, X_HB, X_HB_SZ, hb_h, m );
         EvPublish pub( X_HB, X_HB_SZ, NULL, 0, m.msg, m.len(),
-                       rte->sub_route, this->my_src, hb_h, CABA_TYPE_ID, 'p' );
+                       rte->sub_route, this->my_src, hb_h, CABA_TYPE_ID );
         rte->forward_to_connected( pub );
         hb_cnt++;
       }
@@ -716,7 +716,7 @@ UserDB::mcast_sync( TransportRoute &rte ) noexcept
   m.sign( m_sync, m_sync_len, *this->session_key );
 
   EvPublish pub( m_sync, m_sync_len, NULL, 0, m.msg, m.len(),
-                 rte.sub_route, this->my_src, h, CABA_TYPE_ID, 'p' );
+                 rte.sub_route, this->my_src, h, CABA_TYPE_ID );
   rte.sub_route.forward_except( pub, this->router_set );
 }
 

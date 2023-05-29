@@ -314,7 +314,12 @@ enum MsgFid {
   FID_MESH_INFO      = 84 , /* status of mesh in mesh reply */
   FID_LINK_STATE_SUM = 85 , /* sum of peers link_state seqno */
   FID_SUB_SEQNO_SUM  = 86 , /* sum of peers sub seqno */
-  FID_HOST_ID        = 87   /* host id */
+  FID_HOST_ID        = 87 , /* host id */
+  FID_QUEUE          = 88 , /* queue name */
+  FID_QUEUE_HASH     = 89 , /* queue hash */
+  FID_QUEUE_REFS     = 90 , /* how queue many subs */
+  FID_HDR_LEN        = 91 , /* len of message hdr */
+  FID_SUF_LEN        = 92   /* len of message suffix  */
 };
 static const int FID_TYPE_SHIFT = 8,
                  FID_MAX        = 1 << FID_TYPE_SHIFT; /* 256 */
@@ -637,7 +642,7 @@ struct MsgFramePublish : public kv::EvPublish {
                    TransportRoute &r,  kv::RoutePublish &sub_rt ) :
     EvPublish( subj, subj_len, NULL, 0,
                &((uint8_t *) m->msg_buf)[ m->msg_off ], m->msg_end - m->msg_off,
-               sub_rt, src, hash, enc, 'X' ),
+               sub_rt, src, hash, enc, kv::PUB_TYPE_ROUTING ),
     n( 0 ), rte( r ), status( FRAME_STATUS_UNKNOWN ), flags( 0 ), dec( m ) {}
 
   MsgFramePublish( kv::EvPublish &pub,  CabaMsg *m, TransportRoute &r ) :
@@ -647,10 +652,10 @@ struct MsgFramePublish : public kv::EvPublish {
       this->msg     = &((uint8_t *) m->msg_buf)[ m->msg_off ];
       this->msg_len = m->msg_end - m->msg_off;
     }
-    this->pub_type   = 'X';
-    this->hash       = pub.hash;
-    this->prefix     = pub.prefix;
-    this->prefix_cnt = pub.prefix_cnt;
+    this->publish_type = kv::PUB_TYPE_ROUTING;
+    this->hash         = pub.hash;
+    this->prefix       = pub.prefix;
+    this->prefix_cnt   = pub.prefix_cnt;
   }
   void print( const char *what ) const noexcept;
   const char *status_string( void ) const noexcept;
@@ -665,7 +670,7 @@ struct MsgFragPublish : public kv::EvPublish {
                   const kv::PeerId &src, uint32_t hash,  uint32_t enc,
                   const void *tr,  size_t tsz ) :
     EvPublish( subj, subj_len, NULL, 0, msg, msg_len,
-               sub_rt, src, hash, enc, 'f' ),
+               sub_rt, src, hash, enc, kv::PUB_TYPE_FRAGMENT ),
     trail( tr ), trail_sz( tsz ) {}
 };
 
@@ -856,7 +861,12 @@ static FidTypeName fid_type_name[] = {
 { FID_MESH_INFO   , U_SHORT | U_INT             , XCL , 0 ,"mesh_info"       },
 { FID_LINK_STATE_SUM,U_SHORT | U_INT | U_LONG   , XCL , 0 ,"link_state_sum"  },
 { FID_SUB_SEQNO_SUM ,U_SHORT | U_INT | U_LONG   , XCL , 0 ,"sub_seqno_sum"   },
-{ FID_HOST_ID     , U_SHORT | U_INT | U_LONG    , XCL , 0 ,"host_id"         }
+{ FID_HOST_ID     , U_SHORT | U_INT             , XCL , 0 ,"host_id"         },
+{ FID_QUEUE       , SHORT_STRING                , XCL , 0 ,"queue"           },
+{ FID_QUEUE_HASH  , U_SHORT | U_INT             , XCL , 0 ,"queue_hash"      },
+{ FID_QUEUE_REFS  , U_SHORT | U_INT             , XCL , 0 ,"queue_refs"      },
+{ FID_HDR_LEN     , U_SHORT | U_INT             , XCL , 0 ,"hdr_len"         },
+{ FID_SUF_LEN     , U_SHORT | U_INT             , XCL , 0 ,"suf_len"         } 
 };
 
 #endif

@@ -252,6 +252,8 @@ struct MsgBufDigestT : public BMsgBufT<T> {
     return this->b( FID_EXPIRES, in, (uint16_t) in_len ); }
   T  & version    ( const char *in, size_t in_len ) {
     return this->b( FID_VERSION, in, (uint16_t) in_len ); }
+  T  & queue      ( const char *in, size_t in_len ) {
+    return this->b( FID_QUEUE, in, (uint16_t) in_len ); }
 
   T  & sync_bridge( const Nonce &bridge ) {
     return this->n( FID_SYNC_BRIDGE, bridge ); }
@@ -328,6 +330,10 @@ struct MsgBufDigestT : public BMsgBufT<T> {
   T  & cost3      ( uint32_t n )  { return this->i( FID_COST3, n ); }
   T  & cost4      ( uint32_t n )  { return this->i( FID_COST4, n ); }
   T  & host_id    ( uint32_t n )  { return this->i( FID_HOST_ID, n ); }
+  T  & queue_hash ( uint32_t n )  { return this->i( FID_QUEUE_HASH, n ); }
+  T  & queue_refs ( uint32_t n )  { return this->i( FID_QUEUE_REFS, n ); }
+  T  & hdr_len    ( uint32_t n )  { return this->i( FID_HDR_LEN, n ); }
+  T  & suf_len    ( uint32_t n )  { return this->i( FID_SUF_LEN, n ); }
   T  & peer       ( const char *in, size_t in_len ) {
     return this->b( FID_PEER, in, (uint16_t) in_len ); }
   T  & latency    ( const char *in, size_t in_len ) {
@@ -479,6 +485,7 @@ struct MsgEst {
   MsgEst & create     ( size_t l ) { sz += fid_est( FID_CREATE, l ); return *this; }
   MsgEst & expires    ( size_t l ) { sz += fid_est( FID_EXPIRES, l ); return *this; }
   MsgEst & version    ( size_t l ) { sz += fid_est( FID_VERSION, l ); return *this; }
+  MsgEst & queue      ( size_t l ) { sz += fid_est( FID_QUEUE, l ); return *this; }
 
   MsgEst & sync_bridge( void ) { sz += fid_est( FID_SYNC_BRIDGE ); return *this; }
   MsgEst & rem_bridge ( void ) { sz += fid_est( FID_REM_BRIDGE ); return *this; }
@@ -548,6 +555,10 @@ struct MsgEst {
   MsgEst & cost3      ( void ) { sz += fid_est( FID_COST3 ); return *this; }
   MsgEst & cost4      ( void ) { sz += fid_est( FID_COST4 ); return *this; }
   MsgEst & host_id    ( void ) { sz += fid_est( FID_HOST_ID ); return *this; }
+  MsgEst & queue_hash ( void ) { sz += fid_est( FID_QUEUE_HASH ); return *this; }
+  MsgEst & queue_refs ( void ) { sz += fid_est( FID_QUEUE_REFS ); return *this; }
+  MsgEst & hdr_len    ( void ) { sz += fid_est( FID_HDR_LEN ); return *this; }
+  MsgEst & suf_len    ( void ) { sz += fid_est( FID_SUF_LEN ); return *this; }
   MsgEst & peer       ( size_t l ) { sz += fid_est( FID_PEER, l ); return *this; }
   MsgEst & latency    ( size_t l ) { sz += fid_est( FID_LATENCY, l ); return *this; }
 

@@ -86,7 +86,6 @@ TransportRoute::TransportRoute( kv::EvPoll &p,  SessionMgr &m,
   }
   else {
     this->sub_route.create_bloom_route( m.console_rt.fd, &m.sub_db.console, 0 );
-    this->sub_route.create_bloom_route( m.queue_rt.fd, &m.sub_db.queue, 0 );
     /* extrenal routes do not have system subjects */
   }
   /*this->user_db.check_bloom_route( *this, 0 );*/
@@ -392,7 +391,7 @@ TransportRoute::on_msg( EvPublish &pub ) noexcept
             (int) pub.subject_len, pub.subject );
     return true;
   }
-  if ( pub.pub_type != 'X' ) {
+  if ( ! pub.is_pub_type( PUB_TYPE_ROUTING ) ) {
     uint32_t id = pub.sub_route.route_id;
     TransportRoute * rte = this->user_db.transport_tab.ptr[ id ];
     if ( rte->is_set( TPORT_IS_IPC ) ) {
@@ -401,8 +400,8 @@ TransportRoute::on_msg( EvPublish &pub ) noexcept
       bool b = this->mgr.forward_ipc( *rte, pub );
       return this->check_flow_control( b );
     }
-    d_tran( "rte(%s) pub_type == (%c) transport_route: on_msg (%.*s)\n",
-            rte->name, pub.pub_type, (int) pub.subject_len, pub.subject );
+    d_tran( "rte(%s) pub_type == (%x) transport_route: on_msg (%.*s)\n",
+            rte->name, pub.publish_type, (int) pub.subject_len, pub.subject );
     return true;
   }
   MsgFramePublish & fpub = (MsgFramePublish &) pub;
@@ -1035,6 +1034,8 @@ static inline int src_type_flag( char src_type ) {
 }
 static inline int src_type_flag( NotifySub &sub ) {
   int fl = src_type_flag( sub.src_type );
+  if ( is_notify_queue( sub.notify_type ) )
+    fl |= IS_QUEUE;
   switch ( SubDB::match_ipc_any( sub.subject, sub.subject_len ) ) {
     default: break;
     case SubDB::IPC_IS_INBOX_PREFIX:
@@ -1045,6 +1046,8 @@ static inline int src_type_flag( NotifySub &sub ) {
 }
 static inline int src_type_flag( NotifyPattern &pat ) {
   int fl = src_type_flag( pat.src_type );
+  if ( is_notify_queue( pat.notify_type ) )
+    fl |= IS_QUEUE;
   switch ( SubDB::match_ipc_any( pat.pattern, pat.pattern_len ) ) {
     default: break;
     case SubDB::IPC_IS_INBOX_PREFIX:
@@ -1059,9 +1062,11 @@ IpcRteList::on_sub( NotifySub &sub ) noexcept
 {
   int flags = IS_SUB | src_type_flag( sub );
   if ( ( flags & ( IS_CONSOLE | IS_SESSION ) ) == 0 ) {
-    this->rte.mgr.sub_db.ipc_sub_start( sub, this->rte.tport_id );
-    if ( ( flags & IS_QUEUE ) != 0 )
-      this->rte.mgr.sub_db.queue_sub_update( sub, 1 );
+    if ( ( flags & IS_QUEUE ) == 0 )
+      this->rte.mgr.sub_db.ipc_sub_start( sub, this->rte.tport_id );
+    else
+      this->rte.mgr.sub_db.queue_sub_update( (NotifyQueue &) sub,
+                                             this->rte.tport_id, 1 );
   }
   if ( ( flags & ( IS_SESSION | IS_RV ) ) == 0 )
     this->send_listen( sub.src, sub.subject, sub.subject_len,
@@ -1078,10 +1083,13 @@ IpcRteList::on_unsub( NotifySub &sub ) noexcept
     this->send_listen( sub.src, sub.subject, sub.subject_len, NULL, 0, 0,
                        flags );
   if ( ( flags & ( IS_CONSOLE | IS_SESSION ) ) == 0 ) {
-    if ( sub.sub_count == 0 )
-      this->rte.mgr.sub_db.ipc_sub_stop( sub, this->rte.tport_id );
-    if ( ( flags & IS_QUEUE ) != 0 )
-      this->rte.mgr.sub_db.queue_sub_update( sub, 0 );
+    if ( ( flags & IS_QUEUE ) == 0 ) {
+      if ( sub.sub_count == 0 )
+        this->rte.mgr.sub_db.ipc_sub_stop( sub, this->rte.tport_id );
+    }
+    else
+      this->rte.mgr.sub_db.queue_sub_update( (NotifyQueue &) sub,
+                                             this->rte.tport_id, 0 );
   }
   d_tran( "on_unsub(%.*s) rcnt=%u src_type=%c\n", (int) sub.subject_len,
           sub.subject, sub.sub_count, sub.src_type );
@@ -1092,15 +1100,18 @@ IpcRteList::on_resub( NotifySub &sub ) noexcept
 {
   int flags = IS_RESUB | src_type_flag( sub );
   if ( ( flags & ( IS_SESSION | IS_RV ) ) == 0 ) {
-    if ( sub.notify_type == NOTIFY_ADD_REF )
+    if ( get_notify_type( sub.notify_type ) == NOTIFY_ADD_REF )
       this->send_listen( sub.src, sub.subject, sub.subject_len,
                          (const char *) sub.reply, sub.reply_len, sub.sub_count,
                          flags );
   }
+#if 0
   if ( ( flags & ( IS_CONSOLE | IS_SESSION ) ) == 0 ) {
     if ( ( flags & IS_QUEUE ) != 0 )
-      this->rte.mgr.sub_db.queue_sub_update( sub, sub.sub_count );
+      this->rte.mgr.sub_db.queue_sub_update( (NotifyQueue &) sub,
+                                            this->rte.tport_id, sub.sub_count );
   }
+#endif
 }
 
 void
@@ -1108,9 +1119,11 @@ IpcRteList::on_psub( NotifyPattern &pat ) noexcept
 {
   int flags = IS_PSUB | src_type_flag( pat );
   if ( ( flags & ( IS_CONSOLE | IS_SESSION ) ) == 0 ) {
-    this->rte.mgr.sub_db.ipc_psub_start( pat, this->rte.tport_id );
-    if ( ( flags & IS_QUEUE ) != 0 )
-      this->rte.mgr.sub_db.queue_psub_update( pat, 1 );
+    if ( ( flags & IS_QUEUE ) == 0 )
+      this->rte.mgr.sub_db.ipc_psub_start( pat, this->rte.tport_id );
+    else
+      this->rte.mgr.sub_db.queue_psub_update( (NotifyPatternQueue &) pat,
+                                              this->rte.tport_id, 1 );
   }
   if ( ( flags & ( IS_SESSION | IS_RV ) ) == 0 )
     this->send_listen( pat.src, pat.pattern, pat.pattern_len, NULL, 0, 1,
@@ -1127,10 +1140,13 @@ IpcRteList::on_punsub( NotifyPattern &pat ) noexcept
     this->send_listen( pat.src, pat.pattern, pat.pattern_len, NULL, 0, 0,
                        flags );
   if ( ( flags & ( IS_CONSOLE | IS_SESSION ) ) == 0 ) {
-    if ( pat.sub_count == 0 )
-      this->rte.mgr.sub_db.ipc_psub_stop( pat, this->rte.tport_id );
-    if ( ( flags & IS_QUEUE ) != 0 )
-      this->rte.mgr.sub_db.queue_psub_update( pat, 0 );
+    if ( ( flags & IS_QUEUE ) == 0 ) {
+      if ( pat.sub_count == 0 )
+        this->rte.mgr.sub_db.ipc_psub_stop( pat, this->rte.tport_id );
+    }
+    else
+      this->rte.mgr.sub_db.queue_psub_update( (NotifyPatternQueue &) pat,
+                                              this->rte.tport_id, 0 );
   }
   d_tran( "on_punsub(%.*s) rcnt=%u src_type=%c\n", (int) pat.pattern_len,
         pat.pattern, pat.sub_count, pat.src_type );
@@ -1141,14 +1157,17 @@ IpcRteList::on_repsub( NotifyPattern &pat ) noexcept
 {
   int flags = IS_REPSUB | src_type_flag( pat );
   if ( ( flags & ( IS_SESSION | IS_RV ) ) == 0 ) {
-    if ( pat.notify_type == NOTIFY_ADD_REF )
+    if ( get_notify_type( pat.notify_type ) == NOTIFY_ADD_REF )
       this->send_listen( pat.src, pat.pattern, pat.pattern_len, NULL, 0,
                          pat.sub_count, flags );
   }
+#if 0
   if ( ( flags & ( IS_CONSOLE | IS_SESSION ) ) == 0 ) {
     if ( ( flags & IS_QUEUE ) != 0 )
-      this->rte.mgr.sub_db.queue_psub_update( pat, pat.sub_count );
+      this->rte.mgr.sub_db.queue_psub_update( (NotifyPatternQueue &) pat,
+                                            this->rte.tport_id, pat.sub_count );
   }
+#endif
 }
 
 void
@@ -1215,4 +1234,40 @@ IpcRteList::on_reassert( uint32_t , kv::RouteVec<kv::RouteSub> &,
                          kv::RouteVec<kv::RouteSub> & ) noexcept
 {
   d_tran( "on_reassert()\n" );
+}
+
+void
+IpcRteList::on_sub_q( NotifyQueue &sub ) noexcept
+{
+  this->on_sub( sub );
+}
+
+void
+IpcRteList::on_resub_q( NotifyQueue &sub ) noexcept
+{
+  this->on_resub( sub );
+}
+
+void
+IpcRteList::on_unsub_q( NotifyQueue &sub ) noexcept
+{
+  this->on_unsub( sub );
+}
+
+void
+IpcRteList::on_psub_q( NotifyPatternQueue &pat ) noexcept
+{
+  this->on_psub( pat );
+}
+
+void
+IpcRteList::on_repsub_q( NotifyPatternQueue &pat ) noexcept
+{
+  this->on_repsub( pat );
+}
+
+void
+IpcRteList::on_punsub_q( NotifyPatternQueue &pat ) noexcept
+{
+  this->on_punsub( pat );
 }

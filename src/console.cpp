@@ -3380,7 +3380,7 @@ Console::on_ping( ConsolePing &ping ) noexcept
 void
 Console::on_subs( ConsoleSubs &subs ) noexcept
 {
-  static const uint32_t ncols = 3;
+  static const uint32_t ncols = 4;
   TabOut out( this->table, this->tmp, ncols );
   TabPrint * tab;
   uint32_t s, i = 0, uid;
@@ -3393,14 +3393,29 @@ Console::on_subs( ConsoleSubs &subs ) noexcept
 
     for ( bool ok = iter.first(); ok; ok = iter.next() ) {
       if ( iter.action == ACTION_SUB_JOIN ) {
-        SubRoute * sub;
+        SubRoute   * sub;
+        const char * q = NULL;
         sub = this->sub_db.sub_tab.find_sub( iter.hash, iter.seqno );
+
+        if ( sub == NULL ) {
+          for ( uint32_t i = 0; i < this->sub_db.queue_tab.count; i++ ) {
+            SubTab &tab = this->sub_db.queue_tab.ptr[ i ]->sub_tab; 
+            if ( (sub = tab.find_sub( iter.hash, iter.seqno )) != NULL ) {
+              q = this->sub_db.queue_tab.ptr[ i ]->queue;
+              break;
+            }
+          }
+        }
         if ( sub != NULL ) {
           if ( match_len == 0 ||
                kv_memmem( sub->value, sub->len, match, match_len ) != NULL ) { 
             tab = out.make_row();
             if ( i == 0 )
               tab[ i++ ].set( this->user_db.user.user, PRINT_SELF ); /* user */
+            else
+              tab[ i++ ].set_null();
+            if ( q != NULL )
+              tab[ i++ ].set( q );
             else
               tab[ i++ ].set_null();
             tab[ i++ ].set_null();
@@ -3410,14 +3425,29 @@ Console::on_subs( ConsoleSubs &subs ) noexcept
         }
       }
       else {
-        PatRoute * pat;
+        PatRoute   * pat;
+        const char * q = NULL;
         pat = this->sub_db.pat_tab.find_sub( iter.hash, iter.seqno );
+
+        if ( pat == NULL ) {
+          for ( uint32_t i = 0; i < this->sub_db.queue_tab.count; i++ ) {
+            PatTab &ptab = this->sub_db.queue_tab.ptr[ i ]->pat_tab; 
+            if ( (pat = ptab.find_sub( iter.hash, iter.seqno )) != NULL ) {
+              q = this->sub_db.queue_tab.ptr[ i ]->queue;
+              break;
+            }
+          }
+        }
         if ( pat != NULL ) {
           if ( match_len == 0 ||
                kv_memmem( pat->value, pat->len, match, match_len ) != NULL ) { 
             tab = out.make_row();
             if ( i == 0 )
               tab[ i++ ].set( this->user_db.user.user, PRINT_SELF ); /* user */
+            else
+              tab[ i++ ].set_null();
+            if ( q != NULL )
+              tab[ i++ ].set( q );
             else
               tab[ i++ ].set_null();
             tab[ i++ ].set( "p" );
@@ -3453,6 +3483,13 @@ Console::on_subs( ConsoleSubs &subs ) noexcept
       if ( no_user )
         tab[ i++ ].set_null();
       const char *str = &subs.strings.ptr[ reply.sub_off ];
+      if ( reply.queue_len != 0 ) {
+        const char *q = &str[ reply.sub_len + 1 ];
+        tab[ i++ ].set( q );
+      }
+      else {
+        tab[ i++ ].set_null();
+      }
       if ( reply.is_pattern )
         tab[ i++ ].set( "p" );
       else
@@ -3462,7 +3499,7 @@ Console::on_subs( ConsoleSubs &subs ) noexcept
     }
   }
 
-  static const char *hdr[ ncols ] = { "user", "p", "subject" };
+  static const char *hdr[ ncols ] = { "user", "q", "p", "subject" };
   for ( size_t n = 0; n < subs.out.count; n++ ) {
     ConsoleOutput * p = subs.out.ptr[ n ];
     this->print_table( p, hdr, ncols );
@@ -5993,7 +6030,7 @@ Console::show_blooms( ConsoleOutput *p,  uint8_t path_select,
     if ( out.table.count > 0 )
       out.row( ncols - 1 ).typ |= PRINT_SEP;
 
-    for ( BloomRoute *p = rte->sub_route.bloom_list.hd( path_select );
+    for ( BloomRoute *p = rte->sub_route.bloom.list.hd( path_select );
           p != NULL; p = p->next ) {
       size_t sz = 0;
       char   buf[ 80 ];
@@ -6138,19 +6175,20 @@ Console::show_match( ConsoleOutput *p,  const char *sub,  size_t len ) noexcept
 {
   static const uint32_t ncols = 1;
   TabOut out( this->table, this->tmp, ncols );
-  uint32_t       pos, uid,
+  uint32_t       uid,
                  h   = kv_crc_c( sub, len, 0 );
   AnyMatch     * any = this->sub_db.any_match( sub, len, h );
   BloomMatch     match;
-  BloomMatchArgs args( h, sub, len, this->sub_db.pat_tab.seed );
+  BloomMatchArgs args( h, sub, len );
 
   match.init_match( len );
   if ( match.match_sub( args, this->sub_db.bloom ) ) {
     out.add_row()
        .set( this->user_db.user.user, PRINT_SELF ); /* user */
   }
-  for ( bool b = any->first_dest( pos, uid ); b;
-        b = any->next_dest( pos, uid ) ) {
+  BitSetT<uint64_t> set( any->bits() );
+  for ( bool b = set.first( uid, any->max_uid ); b;
+        b = set.next( uid, any->max_uid ) ) {
     UserBridge * n = this->user_db.bridge_tab[ uid ];
     if ( n == NULL || ! n->is_set( AUTHENTICATED_STATE ) )
       continue;
@@ -6910,19 +6948,23 @@ ConsoleSubs::on_data( const SubMsgData &val ) noexcept
     }
   }
   if ( len > 0 ) {
-    size_t i   = this->reply.count,
-           off = this->strings.count;
+    size_t      i     = this->reply.count;
     SubsReply & reply = this->reply[ i ];
-    char      * sub   = this->strings.make( off + len + 1 );
-    sub = &sub[ off ];
-    ::memcpy( sub, str, len );
-    sub[ len ] = '\0';
-    this->strings.count += len + 1;
 
     reply.uid        = val.src_bridge->uid;
-    reply.sub_off    = off;
+    reply.sub_off    = this->append_string( str, len );
     reply.sub_len    = (uint16_t) len;
     reply.is_pattern = is_pattern;
+
+    if ( dec.test( FID_QUEUE ) ) {
+      len = dec.mref[ FID_QUEUE ].fsize;
+      str = (const char *) dec.mref[ FID_QUEUE ].fptr;
+      this->append_string( str, len );
+      reply.queue_len = (uint16_t) len;
+    }
+    else {
+      reply.queue_len = 0;
+    }
   }
   if ( this->is_complete )
     this->console.on_subs( *this );

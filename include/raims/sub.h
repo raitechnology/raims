@@ -55,83 +55,74 @@ struct SubOnMsg {
 enum SubFlags {
   CONSOLE_SUB  = 1,
   IPC_SUB      = 2,
-  IS_SUB_START = 4
+  IS_SUB_START = 4,
+  QUEUE_SUB    = 8
 };
 
 struct SubRefs {
-  static const uint32_t ALL_MASK = ~(uint32_t) 0;
-  uint32_t console_ref : 1,
-           ipc_refs    : 31;
-  uint32_t tport_mask;
+  uint32_t refs;
 
   void init( uint32_t flags,  uint32_t tport_id ) {
-    this->console_ref = 0;
-    this->ipc_refs    = 0;
-    this->tport_mask  = 0;
+    this->refs = 0;
     this->add( flags, tport_id );
   }
   bool add( uint32_t flags,  uint32_t tport_id ) {
-    if ( ( flags & CONSOLE_SUB ) != 0 ) {
-      if ( this->console_ref != 0 )
-        return false;
-      this->console_ref = 1;
-    }
-    else {
-      if ( tport_id >= 32 )
-        this->tport_mask = ALL_MASK;
-      else {
-        uint32_t mask = 1U << tport_id;
-        if ( ( this->tport_mask & mask ) != 0 )
-          return false;
-        this->tport_mask |= mask;
-      }
-      this->ipc_refs++;
-    }
-    return true;
+    if ( ( flags & CONSOLE_SUB ) != 0 )
+      return ! this->test_set( 0 );
+    return ! this->test_set( tport_id + 1 );
   }
   bool rem( uint32_t flags,  uint32_t tport_id ) {
-    if ( ( flags & CONSOLE_SUB ) != 0 ) {
-      if ( this->console_ref == 0 )
-        return false;
-      this->console_ref = 0;
-    }
-    else {
-      if ( this->ipc_refs == 0 )
-        return false;
-      if ( this->tport_mask != ALL_MASK && tport_id < 32 ) {
-        uint32_t mask = 1U << tport_id;
-        if ( ( this->tport_mask & mask ) == 0 )
-          return false;
-        this->tport_mask &= ~mask;
-      }
-      this->ipc_refs--;
-    }
-    return true;
+    if ( ( flags & CONSOLE_SUB ) != 0 )
+      return this->test_clear( 0 );
+    return this->test_clear( tport_id + 1 );
+  }
+  bool test_set( uint32_t id ) {
+    uint32_t mask = ( (uint32_t) 1 << id );
+    bool b = ( this->refs & mask ) != 0;
+    this->refs |= mask;
+    return b;
+  }
+  bool test_clear( uint32_t id ) {
+    uint32_t mask = ( (uint32_t) 1 << id );
+    bool b = ( this->refs & mask ) != 0;
+    this->refs &= ~mask;
+    return b;
   }
   bool is_empty( void ) const {
-    return ( this->console_ref == 0 && this->ipc_refs == 0 );
+    return this->refs == 0;
   }
   bool test( uint32_t flags ) const {
-    if ( ( flags & CONSOLE_SUB ) != 0 && this->console_ref != 0 )
-      return true;
-    if ( ( flags & IPC_SUB ) != 0 && this->ipc_refs != 0 )
-      return true;
-    return false;
+    if ( ( flags & CONSOLE_SUB ) != 0 )
+      return ( this->refs & (uint32_t) 1 ) != 0;
+    return ( this->refs >> 1 ) != 0;
   }
   uint32_t ref_count( void ) const {
-    return this->console_ref + this->ipc_refs;
+    return kv_popcountw( this->refs );
+  }
+  uint32_t console_count( void ) const {
+    return this->test( CONSOLE_SUB ) ? 1 : 0;
+  }
+  uint32_t ipc_count( void ) const {
+    return kv_popcountw( this->refs >> 1 );
+  }
+  uint32_t tport_mask( void ) const {
+    return this->refs >> 1;
   }
 };
 
 struct SubArgs {
   const char * sub,
-             * inbox;
+             * inbox,
+             * queue;
   uint16_t     sublen,
-               inbox_len;
+               inbox_len,
+               queue_len;
   SubOnMsg   * cb;
   uint64_t     seqno;
   uint32_t     flags,
                hash,
+               queue_hash,
+               queue_refs,
                tport_id,
                sub_count,
                console_count,
@@ -145,11 +136,11 @@ struct SubArgs {
   SubArgs( const char *s,  uint16_t len,  const char *i,  uint16_t ilen, 
            SubOnMsg *on_msg,  uint64_t n,  uint32_t fl,
            uint32_t tp,  uint32_t h = 0 ) :
-    sub( s ), inbox( i ), sublen( len ), inbox_len( ilen ),
-    cb( on_msg ), seqno( n ), flags( fl ),
-    hash( h ), tport_id( tp ), sub_count( 0 ), console_count( 0 ),
-    ipc_count( 0 ), sub_coll( 0 ), console_coll( 0 ), ipc_coll( 0 ),
-    bloom_updated( false ), resize_bloom( false ) {
+    sub( s ), inbox( i ), queue( 0 ), sublen( len ), inbox_len( ilen ),
+    queue_len( 0 ), cb( on_msg ), seqno( n ), flags( fl ),
+    hash( h ), queue_hash( 0 ), queue_refs( 0 ), tport_id( tp ), sub_count( 0 ),
+    console_count( 0 ), ipc_count( 0 ), sub_coll( 0 ), console_coll( 0 ),
+    ipc_coll( 0 ), bloom_updated( false ), resize_bloom( false ) {
     if ( h == 0 ) this->hash = kv_crc_c( s, len, 0 );
   }
   bool is_start( void ) const {
@@ -170,16 +161,16 @@ struct SubRoute {
     this->on_data     = ctx.cb;
     this->ref.init( ctx.flags, ctx.tport_id );
     ctx.sub_count     = 1;
-    ctx.console_count = this->ref.console_ref;
-    ctx.ipc_count     = this->ref.ipc_refs;
+    ctx.console_count = this->ref.console_count();
+    ctx.ipc_count     = this->ref.ipc_count();
   }
   bool add( SubArgs &ctx ) {
     if ( this->ref.add( ctx.flags, ctx.tport_id ) ) {
       if ( ( ctx.flags & CONSOLE_SUB ) != 0 )
         this->on_data = ctx.cb;
       ctx.sub_count     = this->ref.ref_count();
-      ctx.console_count = this->ref.console_ref;
-      ctx.ipc_count     = this->ref.ipc_refs;
+      ctx.console_count = this->ref.console_count();
+      ctx.ipc_count     = this->ref.ipc_count();
       ctx.seqno         = this->start_seqno;
       return true;
     }
@@ -190,8 +181,8 @@ struct SubRoute {
       if ( ( ctx.flags & CONSOLE_SUB ) != 0 )
         this->on_data = NULL;
       ctx.sub_count     = this->ref.ref_count();
-      ctx.console_count = this->ref.console_ref;
-      ctx.ipc_count     = this->ref.ipc_refs;
+      ctx.console_count = this->ref.console_count();
+      ctx.ipc_count     = this->ref.ipc_count();
       if ( ctx.sub_count == 0 )
         return true;
       ctx.seqno = this->start_seqno;
@@ -264,8 +255,8 @@ struct SubTab {
     while ( rt2 != NULL ) {
       if ( rt != rt2 ) {
         ctx.sub_coll     += rt->ref.ref_count();
-        ctx.console_coll += rt->ref.console_ref;
-        ctx.ipc_coll     += rt->ref.ipc_refs;
+        ctx.console_coll += rt->ref.console_count();
+        ctx.ipc_coll     += rt->ref.ipc_count();
       }
       rt2 = this->tab.find_next_by_hash( ctx.hash, loc );
     }
@@ -274,6 +265,19 @@ struct SubTab {
   void release( void ) {
     this->tab.release();
   }
+};
+
+struct QueueSubTab;
+struct PatternArgs;
+struct QueueSubArray : public kv::ArrayCount<QueueSubTab *, 4> {
+  SubList & sub_list;
+  QueueSubArray( SubList &l ) : sub_list( l ) {}
+  QueueSubTab *find_tab( const char *queue,  uint16_t queue_len, 
+                         uint32_t queue_hash ) noexcept;
+  SubStatus start( SubArgs &ctx ) noexcept;
+  SubStatus stop( SubArgs &ctx ) noexcept;
+  SubStatus start( PatternArgs &ctx ) noexcept;
+  SubStatus stop( PatternArgs &ctx ) noexcept;
 };
 
 /* 33 is ~10 second frames, 35 is 32 billion sequences, 9 hours at 1 mill/sec */
@@ -647,23 +651,22 @@ struct UserBridge;
 struct AnyMatch {
   uint64_t       mono_time;
   uint32_t       max_uid,
-                 set_count;
+                 bits_off;
   uint16_t       sub_off,
                  sub_len;
-  uint32_t       bits_off;
+  bool           is_queue;
   kv::BloomMatch match;
 
-  void init_any( const char *s,  uint16_t sublen,  uint32_t uid_cnt ) noexcept;
+  size_t init_any( const char *s,  uint16_t sublen,  uint32_t uid_cnt,
+                   bool is_queue ) noexcept;
   UserBridge * get_destination( UserDB &user_db ) noexcept;
-  static size_t any_size( uint16_t sublen,  uint32_t uid_cnt ) noexcept;
+  static size_t any_size( uint16_t sublen,  uint32_t &uid_cnt ) noexcept;
   const char *sub( void ) {
     return &((char *) (void *) this)[ this->sub_off ];
   }
   uint64_t *bits( void ) {
     return (uint64_t *) &((char *) (void *) this)[ this->bits_off ];
   }
-  bool first_dest( uint32_t &pos,  uint32_t &uid ) noexcept;
-  bool next_dest( uint32_t &pos,  uint32_t &uid ) noexcept;
 };
 
 struct AnyMatchTab {
@@ -683,9 +686,9 @@ struct AnyMatchTab {
     }
   }
   AnyMatch *get_match( const char *sub,  uint16_t sublen,  uint32_t h,
-                       uint32_t max_uid ) noexcept;
+                       uint32_t max_uid,  bool is_queue ) noexcept;
 };
-
+#if 0
 struct QueueGrp {
   uint32_t   workers,    /* number of queue workers */
              hash;       /* hash of gropu name */
@@ -705,7 +708,7 @@ struct QueueSub {
 
 typedef kv::RouteVec<QueueSub> QueueSubTab;
 typedef kv::RouteVec<QueueGrp> QueueGrpTab;
-
+#endif
 struct ReplyMissing {
   uint64_t mono_ns;
   uint32_t hash, uid, ref;
@@ -716,7 +719,7 @@ struct ReplyMissing {
 struct ReplyCache {
   kv::UIntHashTab          * exists_ht;
   kv::RouteVec<ReplyMissing> missing;
-  uint64_t gc_time;
+  uint64_t                   gc_time;
 
   ReplyCache() : gc_time( 0 ) {
     this->exists_ht = kv::UIntHashTab::resize( NULL );
@@ -739,6 +742,22 @@ struct ReplyCache {
 namespace rai {
 namespace ms {
 
+struct QueueSubTab {
+  SubTab   sub_tab;
+  PatTab   pat_tab;
+  char   * queue;
+  uint32_t queue_len,
+           queue_hash;
+  bool equals( const char *q,  uint32_t l,  uint32_t h )  const {
+    if ( h != this->queue_hash ) return false;
+    return ( l == this->queue_len && ::memcmp( this->queue, q, l ) == 0 ) ||
+           l == 0;
+  }
+  void * operator new( size_t, void *ptr ) { return ptr; }
+  QueueSubTab( const char *q,  uint16_t qlen,  uint32_t qhash,
+               SubList &l ) noexcept;
+};
+
 struct SubDB {
   UserDB           & user_db;
   SessionMgr       & mgr;
@@ -756,12 +775,11 @@ struct SubDB {
   PubTab             pub_tab;      /* subject -> seqno */
   AnyMatchTab        any_tab;
   ReplyCache         reply;
-  QueueSubTab        queue_sub_tab;
-  QueueGrpTab        queue_grp_tab;
   kv::BloomRef       bloom,
                      console,
-                     ipc,
-                     queue;
+                     ipc;
+  QueueSubArray      queue_tab;
+  kv::RouteDB        uid_route;
 
   SubDB( kv::EvPoll &p,  UserDB &udb,  SessionMgr &smg ) noexcept;
 
@@ -835,7 +853,8 @@ struct SubDB {
   /* reassert subscription forward */
   bool fwd_resub( UserBridge &n,  const char *sub,  size_t sublen,
                   uint64_t from_seqno,  uint64_t seqno,  bool is_psub,
-                  const char *suf,  uint64_t token ) noexcept;
+                  const char *suf,  uint64_t token,  const char *queue,
+                  uint16_t queue_len,  uint32_t queue_hash ) noexcept;
   bool find_fwd_sub( UserBridge &n,  uint32_t hash,  uint64_t &from_seqno,
                      uint64_t seqno,  const char *suf,  uint64_t token,
                      const char *match,  size_t match_len ) noexcept;
@@ -860,6 +879,7 @@ struct SubDB {
   uint32_t host_match( const char *host,  size_t host_len ) noexcept;
 
   AnyMatch *any_match( const char *sub,  uint16_t sublen, uint32_t h ) noexcept;
+  AnyMatch *any_queue( kv::EvPublish &fwd ) noexcept;
 
   void reply_memo( const char *sub,  size_t sublen,  const char *host,
                    size_t hostlen,  UserBridge &n, uint64_t cur_mono ) noexcept;
@@ -885,8 +905,10 @@ struct SubDB {
                            const char *&pre,  size_t &pre_len,
                            const char *&name,  size_t &name_len,
                            const char *&subj,  size_t &subj_len ) noexcept;
-  void queue_sub_update( kv::NotifySub &sub,  uint32_t refcnt ) noexcept;
-  void queue_psub_update( kv::NotifyPattern &pat,  uint32_t refcnt ) noexcept;
+  void queue_sub_update( kv::NotifyQueue &sub,  uint32_t tport_id,
+                         uint32_t refcnt ) noexcept;
+  void queue_psub_update( kv::NotifyPatternQueue &pat,  uint32_t tport_id,
+                          uint32_t refcnt ) noexcept;
 };
 
 }

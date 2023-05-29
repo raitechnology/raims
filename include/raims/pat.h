@@ -16,9 +16,13 @@ struct SubOnMsg;
 struct PatRoute;
 
 struct PatternArgs {
-  const char           * pat;
-  uint16_t               patlen;
+  const char           * pat,
+                       * queue;
+  uint16_t               patlen,
+                         queue_len;
   uint32_t               hash,
+                         queue_hash,
+                         queue_refs,
                          flags,
                          tport_id,
                          sub_count,
@@ -36,13 +40,13 @@ struct PatternArgs {
   PatternArgs( const char *p,  uint16_t len,  const kv::PatternCvt &c,
                SubOnMsg *on_msg,  uint64_t n,  uint32_t fl,  uint32_t tp,
                uint32_t h = 0 ) : 
-    pat( p ), patlen( len ), hash( h ), flags( fl ), tport_id( tp ),
-    sub_count( 0 ), console_count( 0 ), ipc_count( 0 ), seqno( n ),
-    cvt( c ), rt( 0 ), cb( on_msg ),
-    bloom_updated( false ), resize_bloom( false ), sub_coll( false ) {}
+    pat( p ), queue( 0 ), patlen( len ), queue_len( 0 ), hash( h ),
+    queue_hash( 0 ), queue_refs( 0 ), flags( fl ), tport_id( tp ), sub_count( 0 ),
+    console_count( 0 ), ipc_count( 0 ), seqno( n ), cvt( c ), rt( 0 ),
+    cb( on_msg ), bloom_updated( false ), resize_bloom( false ),
+    sub_coll( false ) {}
 
-  bool cvt_wild( kv::PatternCvt &cvt,  const uint32_t *seed,
-                 kv::PatternFmt fmt ) noexcept;
+  bool cvt_wild( kv::PatternCvt &cvt,  kv::PatternFmt fmt ) noexcept;
   bool is_start( void ) const {
     return ( this->flags & IS_SUB_START ) != 0;
   }
@@ -70,11 +74,10 @@ struct PatRoute : public kv::BloomDetail {
 struct PatTab {
   kv::RouteVec<PatRoute> tab;
 
-  SubList        & list;
-  const uint32_t * seed; /* prefix seeds */
-  uint32_t         pref_count[ kv::MAX_PRE ];
+  SubList & list;
+  uint32_t  pref_count[ kv::MAX_PRE ];
 
-  PatTab( SubList &l,  const uint32_t *s ) : list( l ), seed( s ) {
+  PatTab( SubList &l ) : list( l ) {
     ::memset( this->pref_count, 0, sizeof( this->pref_count ) );
   }
   uint16_t prefix_hash( const char *sub,  uint16_t sub_len,

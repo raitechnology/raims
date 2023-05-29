@@ -781,7 +781,7 @@ IpcRoute::on_msg( EvPublish &pub ) noexcept
   this->bytes_recv += pub.msg_len;
   if ( this->equals( pub.src_route ) )
     return true;
-  if ( pub.pub_type != 'X' ) {
+  if ( ! pub.is_pub_type( PUB_TYPE_ROUTING ) ) {
     fprintf( stderr, "IPC publish has no frame %.*s\n",
              (int) pub.subject_len, pub.subject );
     return true;
@@ -843,11 +843,13 @@ IpcRoute::on_msg( EvPublish &pub ) noexcept
                                this->poll.mono_ns );
   }
   SeqnoArgs seq( this->mgr.timer_time );
-  uint32_t  fmt = 0;
+  uint32_t  fmt = 0, hdr_len = 0, suf_len = 0;
 
   dec.get_ival<uint64_t>( FID_CHAIN_SEQNO, seq.chain_seqno );
   dec.get_ival<uint64_t>( FID_TIME, seq.time );
   dec.get_ival<uint32_t>( FID_FMT, fmt );
+  dec.get_ival<uint32_t>( FID_HDR_LEN, hdr_len );
+  dec.get_ival<uint32_t>( FID_SUF_LEN, suf_len );
   SeqnoStatus status = this->sub_db.match_seqno( fpub, seq );
 
   uint16_t opt = dec.msg->caba.get_opt();
@@ -916,7 +918,7 @@ IpcRoute::on_msg( EvPublish &pub ) noexcept
   }*/
   bool b = true;
   size_t i, count = this->user_db.transport_tab.count;
-  if ( seq.tport_mask != SubRefs::ALL_MASK ) {
+  if ( seq.tport_mask != 0 ) {
     uint32_t mask = seq.tport_mask; /* ipc tports (currently only one) */
     for ( i = 0; mask != 0; i++ ) {
       bool is_set = ( mask & 1 ) != 0;
@@ -926,8 +928,10 @@ IpcRoute::on_msg( EvPublish &pub ) noexcept
         if ( &fpub.rte != rte && rte->is_set( TPORT_IS_IPC ) ) {
           EvPublish pub( fpub.subject, fpub.subject_len, reply, replylen,
                          data, datalen, rte->sub_route, fpub.src_route,
-                         fpub.subj_hash, fmt, 'p', seq.msg_loss,
+                         fpub.subj_hash, fmt, PUB_TYPE_NORMAL, seq.msg_loss,
                          n.host_id, dec.seqno );
+          pub.hdr_len = hdr_len;
+          pub.suf_len = suf_len;
           b &= rte->sub_route.forward_except( pub, this->mgr.router_set, this );
         }
       }
@@ -939,8 +943,10 @@ IpcRoute::on_msg( EvPublish &pub ) noexcept
       if ( &fpub.rte != rte && rte->is_set( TPORT_IS_IPC ) ) {
         EvPublish pub( fpub.subject, fpub.subject_len, reply, replylen,
                        data, datalen, rte->sub_route, fpub.src_route,
-                       fpub.subj_hash, fmt, 'p', seq.msg_loss,
+                       fpub.subj_hash, fmt, PUB_TYPE_NORMAL, seq.msg_loss,
                        n.host_id, dec.seqno );
+        pub.hdr_len = hdr_len;
+        pub.suf_len = suf_len;
         b &= rte->sub_route.forward_except( pub, this->mgr.router_set, this );
       }
     }
@@ -957,6 +963,8 @@ IpcRoute::on_msg( EvPublish &pub ) noexcept
     dec.get_ival<uint64_t>( FID_REF_SEQNO, val.ref_seqno );
     dec.get_ival<uint32_t>( FID_RET,       val.reply );
     dec.get_ival<uint32_t>( FID_TPORTID,   val.tport_id );
+    dec.get_ival<uint32_t>( FID_HDR_LEN,   val.hdr_len );
+    dec.get_ival<uint32_t>( FID_SUF_LEN,   val.suf_len );
     seq.cb->on_data( val );
   }
   return b;
@@ -989,6 +997,8 @@ ConsoleRoute::fwd_console( EvPublish &pub,  bool is_caba ) noexcept
               stamp       = 0,
               chain_seqno = 0,
               ref_seqno   = 0;
+    uint32_t  hdr_len     = 0,
+              suf_len     = 0;
     size_t    end         = pub.msg_len;
 
     if ( CabaMsg::unpack2( (uint8_t *) pub.msg, 0, end, &mem, msg ) != 0 )
@@ -1001,6 +1011,8 @@ ConsoleRoute::fwd_console( EvPublish &pub,  bool is_caba ) noexcept
     fpub.dec.get_ival<uint64_t>( FID_CHAIN_SEQNO, chain_seqno );
     fpub.dec.get_ival<uint64_t>( FID_TIME, time );
     fpub.dec.get_ival<uint64_t>( FID_STAMP, stamp );
+    fpub.dec.get_ival<uint32_t>( FID_HDR_LEN, hdr_len );
+    fpub.dec.get_ival<uint32_t>( FID_SUF_LEN, suf_len );
 
     seq.time        = time;
     seq.chain_seqno = chain_seqno;
@@ -1021,6 +1033,8 @@ ConsoleRoute::fwd_console( EvPublish &pub,  bool is_caba ) noexcept
         val.ref_seqno = ref_seqno;
         val.stamp     = stamp;
         val.fmt       = pub.msg_enc;
+        val.hdr_len   = hdr_len;
+        val.suf_len   = suf_len;
         seq.cb->on_data( val );
         return 1;
       }
@@ -1054,7 +1068,9 @@ IpcRoute::on_inbox( MsgFramePublish &fpub,  UserBridge &n,
                replylen = 0,
                datalen  = 0;
   uint32_t     h        = kv_crc_c( subject, subjlen, 0 ),
-               fmt;
+               fmt      = 0,
+               hdr_len  = 0,
+               suf_len  = 0;
   if ( dec.test( FID_DATA ) ) {
     data    = dec.mref[ FID_DATA ].fptr;
     datalen = dec.mref[ FID_DATA ].fsize;
@@ -1064,6 +1080,8 @@ IpcRoute::on_inbox( MsgFramePublish &fpub,  UserBridge &n,
     replylen = dec.mref[ FID_REPLY ].fsize;
   }
   dec.get_ival<uint32_t>( FID_FMT, fmt );
+  dec.get_ival<uint32_t>( FID_HDR_LEN, hdr_len );
+  dec.get_ival<uint32_t>( FID_SUF_LEN, suf_len );
 
   d_sess( "on_inbox(%.*s)\n", (int) subjlen, subject );
   bool b = true;
@@ -1073,8 +1091,10 @@ IpcRoute::on_inbox( MsgFramePublish &fpub,  UserBridge &n,
     TransportRoute *rte = this->user_db.transport_tab.ptr[ i ];
     if ( &fpub.rte != rte && rte->is_set( TPORT_IS_IPC ) ) {
       EvPublish pub( subject, subjlen, reply, replylen,
-                     data, datalen, rte->sub_route, fpub.src_route, h, fmt, 'p',
-                     0, n.host_id, dec.seqno );
+                     data, datalen, rte->sub_route, fpub.src_route, h, fmt,
+                     PUB_TYPE_NORMAL, 0, n.host_id, dec.seqno );
+      pub.hdr_len = hdr_len;
+      pub.suf_len = suf_len;
       b &= rte->sub_route.forward_except_with_cnt( pub, this->mgr.router_set,
                                                    rcnt, &this->mgr );
       if ( rcnt != 0 ) {
@@ -1087,8 +1107,10 @@ IpcRoute::on_inbox( MsgFramePublish &fpub,  UserBridge &n,
     SubOnMsg * cb = this->sub_db.match_any_sub( subject, subjlen );
     if ( cb != NULL ) {
       SubMsgData val( fpub, &n, data, datalen );
-      val.seqno = dec.seqno;
-      val.fmt   = fmt;
+      val.seqno   = dec.seqno;
+      val.fmt     = fmt;
+      val.hdr_len = hdr_len;
+      val.suf_len = suf_len;
       cb->on_data( val );
     }
     else {
@@ -1105,7 +1127,7 @@ SessionMgr::on_msg( EvPublish &pub ) noexcept
   this->bytes_recv += pub.msg_len;
   if ( this->equals( pub.src_route ) )
     return true;
-  if ( pub.pub_type != 'X' ) {
+  if ( ! pub.is_pub_type( PUB_TYPE_ROUTING ) ) {
     fprintf( stderr, "Session publish has no frame %.*s\n",
              (int) pub.subject_len, pub.subject );
     return true;
@@ -1582,7 +1604,7 @@ SessionMgr::publish( PubMcastData &mc ) noexcept
                  (int) mc.sublen, mc.sub, h, mc.path_select, rte->name );
       }
       EvPublish pub( mc.sub, mc.sublen, NULL, 0, m.msg, m.len(),
-                     rte->sub_route, *this, h, CABA_TYPE_ID, 'p' );
+                     rte->sub_route, *this, h, CABA_TYPE_ID );
       pub.shard = mc.path_select;
       b &= rte->sub_route.forward_except( pub, this->router_set );
     } while ( forward.next( tport_id ) );
@@ -1592,7 +1614,7 @@ SessionMgr::publish( PubMcastData &mc ) noexcept
     if ( fmt == 0 && mc.datalen > 0 )
       fmt = MD_STRING;
     EvPublish pub( mc.sub, mc.sublen, mc.inbox, mc.inbox_len,
-                   mc.data, mc.datalen, rte->sub_route, *this, h, fmt, 'p' );
+                   mc.data, mc.datalen, rte->sub_route, *this, h, fmt );
     b &= rte->sub_route.forward_except( pub, this->router_set );
   }
   return b;
@@ -1620,7 +1642,9 @@ SessionMgr::forward_uid_inbox( TransportRoute &src_rte,  EvPublish &fwd,
   e.seqno  ()
    .subject( fwd.subject_len )
    .reply  ( fwd.reply_len )
-   .fmt    ();
+   .fmt    ()
+   .hdr_len()
+   .suf_len();
 
   if ( fwd.msg_len != 0 ) {
     if ( fwd.msg_len <= this->poll.recv_highwater )
@@ -1642,6 +1666,10 @@ SessionMgr::forward_uid_inbox( TransportRoute &src_rte,  EvPublish &fwd,
     m.reply( (const char *) fwd.reply, fwd.reply_len );
   if ( fwd.msg_enc != 0 )
     m.fmt( fwd.msg_enc );
+  if ( fwd.hdr_len != 0 )
+    m.hdr_len( fwd.hdr_len );
+  if ( fwd.suf_len != 0 )
+    m.suf_len( fwd.suf_len );
   fl.set_opt( CABA_OPT_ANY );
 
   uint32_t h = ibx.hash();
@@ -1674,33 +1702,45 @@ SessionMgr::forward_inbox( TransportRoute &src_rte,  EvPublish &fwd,
                            const char *host,  size_t host_len ) noexcept
 {
   uint32_t uid = this->sub_db.host_match( host, host_len );
-  bool     b   = true;
-
   if ( uid == 0 ) {
     uid = this->sub_db.lookup_memo( fwd.subj_hash, fwd.subject,
                                     fwd.subject_len );
     d_sess( "reply.lookup( %.*s ) = %u\n",
             (int) fwd.subject_len, fwd.subject, uid );
   }
-  if ( uid != 0 )
-    b &= this->forward_uid_inbox( src_rte, fwd, uid );
-  else {
-    AnyMatch * any = this->sub_db.any_match( fwd.subject, fwd.subject_len,
-                                             fwd.subj_hash );
-    if ( any->set_count == 0 ) {
-      printf( "no match for %.*s\n", (int) fwd.subject_len, fwd.subject );
-      return true;
-    }
-    BitSetT<uint64_t> set( any->bits() );
-    uint32_t uid, cnt = 0;
+  if ( uid != 0 ) {
+    bool b = this->forward_uid_inbox( src_rte, fwd, uid );
+    return src_rte.check_flow_control( b );
+  }
+  AnyMatch * any = this->sub_db.any_match( fwd.subject, fwd.subject_len,
+                                           fwd.subj_hash );
+  return this->forward_to_any( src_rte, fwd, *any );
+}
 
-    set.first( uid, any->max_uid );
-    for (;;) {
-      b &= this->forward_uid_inbox( src_rte, fwd, uid );
-      if ( ++cnt == any->set_count )
-        break;
-      set.next( uid, any->max_uid );
-    }
+bool
+SessionMgr::forward_ipc_queue( TransportRoute &src_rte,
+                               EvPublish &fwd ) noexcept
+{
+  AnyMatch * any = this->sub_db.any_queue( fwd );
+  return this->forward_to_any( src_rte, fwd, *any );
+}
+
+bool
+SessionMgr::forward_to_any( TransportRoute &src_rte,  EvPublish &fwd,
+                            AnyMatch &any ) noexcept
+{
+  BitSetT<uint64_t> set( any.bits() );
+  uint32_t uid, set_count = 0;
+  bool b = true;
+
+  for ( bool x = set.first( uid, any.max_uid ); x;
+        x = set.next( uid, any.max_uid ) ) {
+    b &= this->forward_uid_inbox( src_rte, fwd, uid );
+    set_count++;
+  }
+  if ( set_count == 0 ) {
+    printf( "no match for %.*s\n", (int) fwd.subject_len, fwd.subject );
+    return true;
   }
   return src_rte.check_flow_control( b );
 }
@@ -1708,6 +1748,8 @@ SessionMgr::forward_inbox( TransportRoute &src_rte,  EvPublish &fwd,
 bool
 SessionMgr::forward_ipc( TransportRoute &src_rte,  EvPublish &pub ) noexcept
 {
+  if ( pub.is_queue_pub() )
+    return this->forward_ipc_queue( src_rte, pub );
   CabaFlags fl( CABA_MCAST );
   RouteLoc  loc;
   Pub * p = this->sub_db.pub_tab.pub->find( pub.subj_hash, pub.subject,
@@ -1737,7 +1779,7 @@ SessionMgr::forward_ipc( TransportRoute &src_rte,  EvPublish &pub ) noexcept
   const void * frag = NULL;
   size_t frag_sz = 0;
   uint8_t path_select = 0;
-  if ( pub.pub_type == 'p' ) {
+  if ( ! pub.is_pub_type( PUB_TYPE_SERIAL ) ) {
     path_select = caba_hash_to_path( pub.subj_hash );
     fl.set_opt( path_select << CABA_OPT_MC_SHIFT );
   }
@@ -1746,7 +1788,9 @@ SessionMgr::forward_ipc( TransportRoute &src_rte,  EvPublish &pub ) noexcept
    .chain_seqno ()
    .time        ()
    .reply       ( pub.reply_len )
-   .fmt         ();
+   .fmt         ()
+   .hdr_len     ()
+   .suf_len     ();
   if ( pub.msg_len <= this->poll.recv_highwater )
     e.data( pub.msg_len );
   else {
@@ -1768,6 +1812,10 @@ SessionMgr::forward_ipc( TransportRoute &src_rte,  EvPublish &pub ) noexcept
     m.reply( (const char *) pub.reply, pub.reply_len );
   if ( pub.msg_enc != 0 )
     m.fmt( pub.msg_enc );
+  if ( pub.hdr_len != 0 )
+    m.hdr_len( pub.hdr_len );
+  if ( pub.suf_len != 0 )
+    m.suf_len( pub.suf_len );
   if ( pub.msg_len != 0 ) {
     if ( frag_sz == 0 )
       m.data( pub.msg, pub.msg_len );
@@ -1798,7 +1846,7 @@ SessionMgr::forward_ipc( TransportRoute &src_rte,  EvPublish &pub ) noexcept
         if ( frag_sz == 0 ) {
           EvPublish evp( pub.subject, pub.subject_len, NULL, 0, m.msg, m.len(),
                          rte->sub_route, pub.src_route, pub.subj_hash,
-                         CABA_TYPE_ID, 'p' );
+                         CABA_TYPE_ID );
           evp.shard = path_select;
 
           b &= rte->sub_route.forward_except( evp, this->router_set, &src_rte );
@@ -1819,12 +1867,13 @@ SessionMgr::forward_ipc( TransportRoute &src_rte,  EvPublish &pub ) noexcept
       EvPublish evp( pub.subject, pub.subject_len, NULL, 0,
                      pub.msg, pub.msg_len,
                      rte->sub_route, pub.src_route, pub.subj_hash, 
-                     pub.msg_enc, 'p' );
+                     pub.msg_enc );
       b &= rte->sub_route.forward_except( evp, this->router_set, &src_rte );
     }
   }
   return src_rte.check_flow_control( b );
 }
+
 /* forward a message to any peer, chosen randomly */
 bool
 SessionMgr::publish_any( PubMcastData &mc ) noexcept

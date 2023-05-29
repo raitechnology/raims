@@ -336,7 +336,7 @@ SessionMgr::fwd_stat_msg( SubjectVar &s,  MsgCat &m,  uint32_t h,
   for ( uint32_t j = 0; j < tport_count; j++ ) {
     TransportRoute * fwd = this->user_db.transport_tab.ptr[ j ];
     EvPublish pub( s.msg, s.len(), NULL, 0, m.msg, m.len(),
-                   fwd->sub_route, *this, h, CABA_TYPE_ID, 'p' );
+                   fwd->sub_route, *this, h, CABA_TYPE_ID );
     uint32_t k = 0;
     if ( ! fwd->is_set( TPORT_IS_IPC ) ) {
       fwd->sub_route.forward_set_with_cnt( pub, fwd->connected_auth, k );

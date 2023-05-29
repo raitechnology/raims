@@ -326,7 +326,8 @@ struct ConsolePing : public ConsoleRPC {
 struct SubsReply {
   size_t   sub_off;
   uint32_t uid;
-  uint16_t sub_len;
+  uint16_t sub_len,
+           queue_len;
   bool     is_pattern;
 };
 
@@ -354,6 +355,15 @@ struct ConsoleSubs : public ConsoleRPC {
     ::memcpy( this->match, s, l );
     this->match[ l ] = '\0';
     this->match_len = l;
+  }
+  size_t append_string( const char *str,  size_t len ) {
+    size_t   off = this->strings.count;
+    char   * s   = this->strings.make( off + len + 1 );
+    s = &s[ off ];
+    ::memcpy( s, str, len );
+    s[ len ] = '\0';
+    this->strings.count += len + 1;
+    return off;
   }
 };
 
