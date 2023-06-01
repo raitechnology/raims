@@ -168,6 +168,8 @@ struct IpcRteList : public kv::RouteNotify {
   virtual void on_punsub_q( kv::NotifyPatternQueue &pat ) noexcept;
   virtual void on_reassert( uint32_t fd,  kv::RouteVec<kv::RouteSub> &sub_db,
                             kv::RouteVec<kv::RouteSub> &pat_db ) noexcept;
+  virtual void on_bloom_ref( kv::BloomRef &ref ) noexcept;
+  virtual void on_bloom_deref( kv::BloomRef &ref ) noexcept;
   void send_listen( const kv::PeerId &src,  const char *subj,  size_t sublen,
                     const char *reply,  size_t replen,  uint32_t refcnt,
                     int sub_flags ) noexcept;

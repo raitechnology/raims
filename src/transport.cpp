@@ -1237,6 +1237,18 @@ IpcRteList::on_reassert( uint32_t , kv::RouteVec<kv::RouteSub> &,
 }
 
 void
+IpcRteList::on_bloom_ref( BloomRef &ref ) noexcept
+{
+  d_tran( "ipc on_bloom_ref %s\n", ref.name );
+}
+
+void
+IpcRteList::on_bloom_deref( BloomRef &ref ) noexcept
+{
+  d_tran( "ipc on_bloom_deref %s\n", ref.name );
+}
+
+void
 IpcRteList::on_sub_q( NotifyQueue &sub ) noexcept
 {
   this->on_sub( sub );

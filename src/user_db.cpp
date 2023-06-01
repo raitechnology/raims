@@ -1870,9 +1870,9 @@ UserDB::add_inbox_route( UserBridge &n,  UserRoute *primary ) noexcept
       if ( debug_usr )
         n.printf( "del inbox route %.*s -> %u (%s)\n",
                   (int) ibx.len(), ibx.buf, inbox->inbox.fd, inbox->rte.name );
-      if ( this->ipc_transport != NULL &&
+      /*if ( this->ipc_transport != NULL &&
            n.bloom.has_link( this->ipc_transport->fd ) )
-        this->ipc_transport->sub_route.do_notify_bloom_deref( n.bloom );
+        this->ipc_transport->sub_route.do_notify_bloom_deref( n.bloom );*/
       n.bloom_rt[ 0 ]->del_bloom_ref( &n.bloom );
       n.bloom_rt[ 0 ]->remove_if_empty();
       n.bloom_rt[ 0 ] = NULL;

@@ -88,7 +88,7 @@ SubDB::psub_stop( PatternArgs &ctx ) noexcept
       this->resize_bloom();
 
     if ( status == SUB_OK ) {
-      this->pat_tab.remove( ctx );
+      ctx.tab->remove( ctx );
       return this->sub_seqno;
     }
     if ( status == SUB_UPDATED )
@@ -293,6 +293,7 @@ PatTab::start( PatternArgs &ctx ) noexcept
   uint16_t preflen = ctx.cvt.prefixlen;
   if ( preflen >= MAX_PRE )
     preflen = MAX_PRE - 1;
+  ctx.tab = this;
   ctx.rt = this->tab.upsert2( ctx.hash, ctx.pat, ctx.patlen, ctx.loc, hcnt );
   if ( ctx.rt == NULL )
     return SUB_ERROR;
@@ -321,6 +322,7 @@ PatTab::stop( PatternArgs &ctx ) noexcept
   uint16_t preflen = ctx.cvt.prefixlen;
   if ( preflen >= MAX_PRE )
     preflen = MAX_PRE - 1;
+  ctx.tab = this;
   ctx.rt = this->tab.find2( ctx.hash, ctx.pat, ctx.patlen, ctx.loc, hcnt );
   if ( ctx.rt == NULL )
     return SUB_NOT_FOUND;
@@ -456,7 +458,8 @@ PatRoute::start( PatternArgs &ctx ) noexcept
     ctx.console_count = this->ref.console_count();
     ctx.ipc_count     = this->ref.ipc_count();
     if ( ctx.queue_hash != 0 ) {
-      QueueMatch m = { ctx.queue_hash, ctx.queue_refs };
+      QueueMatch m = { ctx.queue_hash, ctx.queue_refs,
+                    QueueMatch::hash2( ctx.pat, ctx.cvt.prefixlen, ctx.hash ) };
       this->init_queue( m );
     }
     return true;
@@ -472,7 +475,8 @@ bool
 PatRoute::add( PatternArgs &ctx ) noexcept
 {
   if ( ctx.queue_hash != 0 ) {
-    QueueMatch m = { ctx.queue_hash, ctx.queue_refs };
+    QueueMatch m = { ctx.queue_hash, ctx.queue_refs,
+                    QueueMatch::hash2( ctx.pat, ctx.cvt.prefixlen, ctx.hash ) };
     this->init_queue( m );
   }
   if ( this->ref.add( ctx.flags, ctx.tport_id ) ) {
@@ -552,9 +556,11 @@ SubDB::recv_psub_start( const MsgFramePublish &pub,  UserBridge &n,
          dec.test( FID_QUEUE ) ) {
       size_t       queue_len = dec.mref[ FID_QUEUE ].fsize;
       const char * queue     = (const char *) dec.mref[ FID_QUEUE ].fptr;
+      uint16_t     preflen   = ctx.cvt.prefixlen;
       this->uid_route.get_queue_group( queue, queue_len, queue_hash );
-      QueueMatch m = { queue_hash, queue_refs };
-      n.bloom.add_queue_route( ctx.cvt.prefixlen, ctx.hash, m );
+      QueueMatch m = { queue_hash, queue_refs,
+                       QueueMatch::hash2( ctx.pat, preflen, hash ) };
+      n.bloom.add_queue_route( preflen, ctx.hash, m );
 
       TransportRoute *rte = this->user_db.ipc_transport;
       if ( rte != NULL ) {
@@ -610,8 +616,10 @@ SubDB::recv_psub_stop( const MsgFramePublish &pub,  UserBridge &n,
     if ( ! ctx.cvt_wild( cvt, (PatternFmt) fmt ) )
       return true;
     if ( dec.get_ival<uint32_t>( FID_QUEUE_HASH, queue_hash ) ) {
-      QueueMatch m = { queue_hash, 0 };
-      n.bloom.del_queue_route( ctx.cvt.prefixlen, ctx.hash, m );
+      uint16_t preflen = ctx.cvt.prefixlen;
+      QueueMatch m = { queue_hash, 0,
+                       QueueMatch::hash2( ctx.pat, preflen, hash ) };
+      n.bloom.del_queue_route( preflen, ctx.hash, m );
 
       TransportRoute *rte = this->user_db.ipc_transport;
       if ( rte != NULL ) {
@@ -652,7 +660,7 @@ void
 SubDB::queue_psub_update( NotifyPatternQueue &pat,
                           uint32_t tport_id,  uint32_t refcnt ) noexcept
 {
-  printf( "queue_psub_update( %.*s, fd=%u, start=%" PRIx64 ", cnt=%u )\n",
+  d_sub( "queue_psub_update( %.*s, fd=%u, start=%" PRIx64 ", cnt=%u )\n",
           (int) pat.pattern_len, pat.pattern, pat.src.fd,
           pat.src.start_ns, refcnt );
   uint32_t flags = IPC_SUB | QUEUE_SUB;

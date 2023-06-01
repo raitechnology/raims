@@ -779,7 +779,7 @@ struct SubDB {
                      console,
                      ipc;
   QueueSubArray      queue_tab;
-  kv::RouteDB        uid_route;
+  kv::RoutePublish & uid_route;
 
   SubDB( kv::EvPoll &p,  UserDB &udb,  SessionMgr &smg ) noexcept;
 
@@ -827,7 +827,7 @@ struct SubDB {
 
   void resize_bloom( void ) noexcept;
   void reseed_bloom( void ) noexcept;
-  static void notify_bloom_update( kv::BloomRef &ref ) noexcept;
+  void notify_bloom_update( kv::BloomRef &ref ) noexcept;
 
   static void print_bloom( kv::BloomBits &bits ) noexcept;
 

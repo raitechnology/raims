@@ -14,6 +14,7 @@ namespace ms {
 
 struct SubOnMsg;
 struct PatRoute;
+struct PatTab;
 
 struct PatternArgs {
   const char           * pat,
@@ -31,6 +32,7 @@ struct PatternArgs {
   uint64_t               seqno;
   const kv::PatternCvt & cvt;
   kv::RouteLoc           loc;
+  PatTab               * tab;
   PatRoute             * rt;
   SubOnMsg             * cb;
   bool                   bloom_updated,
@@ -41,10 +43,10 @@ struct PatternArgs {
                SubOnMsg *on_msg,  uint64_t n,  uint32_t fl,  uint32_t tp,
                uint32_t h = 0 ) : 
     pat( p ), queue( 0 ), patlen( len ), queue_len( 0 ), hash( h ),
-    queue_hash( 0 ), queue_refs( 0 ), flags( fl ), tport_id( tp ), sub_count( 0 ),
-    console_count( 0 ), ipc_count( 0 ), seqno( n ), cvt( c ), rt( 0 ),
-    cb( on_msg ), bloom_updated( false ), resize_bloom( false ),
-    sub_coll( false ) {}
+    queue_hash( 0 ), queue_refs( 0 ), flags( fl ), tport_id( tp ),
+    sub_count( 0 ), console_count( 0 ), ipc_count( 0 ), seqno( n ), cvt( c ),
+    tab( 0 ), rt( 0 ), cb( on_msg ), bloom_updated( false ),
+    resize_bloom( false ), sub_coll( false ) {}
 
   bool cvt_wild( kv::PatternCvt &cvt,  kv::PatternFmt fmt ) noexcept;
   bool is_start( void ) const {

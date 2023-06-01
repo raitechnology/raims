@@ -20,7 +20,8 @@ SubDB::SubDB( EvPoll &p,  UserDB &udb,  SessionMgr &smg ) noexcept
        bloom( (uint32_t) udb.rand.next(), "(node)", p.g_bloom_db ),
        console( (uint32_t) udb.rand.next(), "(console)", p.g_bloom_db ),
        ipc( (uint32_t) udb.rand.next(), "(ipc)", p.g_bloom_db ),
-       queue_tab( this->sub_list ), uid_route( p.g_bloom_db )
+       queue_tab( this->sub_list ),
+       uid_route( p.sub_route.get_service( "(uid)", 0, -1 ) )
 {
 }
 
@@ -143,7 +144,8 @@ SubDB::update_bloom( SubArgs &ctx ) noexcept
   this->update_seqno++;
   if ( ctx.is_start() ) {
     if ( ctx.queue_hash != 0 ) {
-      QueueMatch m = { ctx.queue_hash, ctx.queue_refs };
+      QueueMatch m = { ctx.queue_hash, ctx.queue_refs,
+                       QueueMatch::hash2( ctx.sub, ctx.sublen, ctx.hash ) };
       ctx.bloom_updated = true;
       ctx.resize_bloom = this->bloom.add_queue_route( SUB_RTE, ctx.hash, m );
       if ( ( ctx.flags & CONSOLE_SUB ) != 0 )
@@ -164,7 +166,8 @@ SubDB::update_bloom( SubArgs &ctx ) noexcept
   }
   else {
     if ( ctx.queue_hash != 0 ) {
-      QueueMatch m = { ctx.queue_hash, 0 };
+      QueueMatch m = { ctx.queue_hash, 0, 
+                       QueueMatch::hash2( ctx.sub, ctx.sublen, ctx.hash ) };
       ctx.bloom_updated = true;
       this->bloom.del_queue_route( SUB_RTE, ctx.hash, m );
       if ( ( ctx.flags & CONSOLE_SUB ) != 0 )
@@ -581,8 +584,17 @@ SubDB::recv_bloom( const MsgFramePublish &pub,  UserBridge &n,
     cvt_number<uint64_t>( dec.mref[ FID_SUB_SEQNO ], sub_seqno );
     d_sub( "sub_seqno %" PRIu64 " >= %" PRIu64 "\n", sub_seqno, n.sub_seqno );
     if ( sub_seqno >= n.sub_seqno ) {
+      QueueNameArray q_arr;
       if ( n.bloom.decode( dec.mref[ FID_BLOOM ].fptr,
-                           dec.mref[ FID_BLOOM ].fsize ) ) {
+                           dec.mref[ FID_BLOOM ].fsize, q_arr ) ) {
+        if ( q_arr.count > 0 ) {
+          TransportRoute * ipc = this->user_db.ipc_transport;
+          for ( size_t i = 0; i < q_arr.count; i++ ) {
+            this->uid_route.get_queue_group( *q_arr.ptr[ i ] );
+            if ( ipc != NULL )
+              ipc->sub_route.get_queue_group( *q_arr.ptr[ i ] );
+          }
+        }
         d_sub( "update_bloom count %" PRIu64 "\n", n.bloom.bits->count );
         if ( debug_sub )
           print_bloom( *n.bloom.bits );
@@ -630,7 +642,8 @@ SubDB::recv_sub_start( const MsgFramePublish &pub,  UserBridge &n,
       size_t       queue_len = dec.mref[ FID_QUEUE ].fsize;
       const char * queue     = (const char *) dec.mref[ FID_QUEUE ].fptr;
       this->uid_route.get_queue_group( queue, queue_len, queue_hash );
-      QueueMatch m = { queue_hash, queue_refs };
+      QueueMatch m = { queue_hash, queue_refs,
+                       QueueMatch::hash2( sub, sublen, hash ) };
       n.bloom.add_queue_route( SUB_RTE, hash, m );
       TransportRoute *rte = this->user_db.ipc_transport;
       if ( rte != NULL ) {
@@ -668,7 +681,7 @@ SubDB::recv_sub_stop( const MsgFramePublish &pub,  UserBridge &n,
 
     dec.get_ival<uint32_t>( FID_SUBJ_HASH, hash );
     if ( dec.get_ival<uint32_t>( FID_QUEUE_HASH, queue_hash ) ) {
-      QueueMatch m = { queue_hash, 0 };
+      QueueMatch m = { queue_hash, 0, QueueMatch::hash2( sub, sublen, hash ) };
       n.bloom.del_queue_route( SUB_RTE, hash, m );
       TransportRoute *rte = this->user_db.ipc_transport;
       if ( rte != NULL ) {
@@ -837,8 +850,20 @@ SubDB::resize_bloom( void ) noexcept
 void
 SubDB::notify_bloom_update( BloomRef &ref ) noexcept
 {
-  for ( uint32_t i = 0; i < ref.nlinks; i++ )
-    ((RoutePublish &) ref.links[ i ]->rdb).do_notify_bloom_ref( ref );
+  TransportRoute * ipc = this->user_db.ipc_transport;
+  if ( ipc != NULL )
+    ipc->sub_route.do_notify_bloom_ref( ref );
+#if 0
+  for ( uint32_t i = 0; i < ref.nlinks; i++ ) {
+    RoutePublish &sub_route = (RoutePublish &) ref.links[ i ]->rdb;
+    if ( ref.links[ i ]->in_list == 1 ) {
+      printf( "notofy_bloom_update link[ %u ] fd %u list %u, %s -> %s\n",
+              i, ref.links[ i ]->r, ref.links[ i ]->in_list,
+              ref.name, sub_route.service_name );
+      sub_route.do_notify_bloom_ref( ref );
+    }
+  }
+#endif
 }
 
 void
