@@ -1034,7 +1034,7 @@ static inline int src_type_flag( char src_type ) {
 }
 static inline int src_type_flag( NotifySub &sub ) {
   int fl = src_type_flag( sub.src_type );
-  if ( is_notify_queue( sub.notify_type ) )
+  if ( sub.is_notify_queue() )
     fl |= IS_QUEUE;
   switch ( SubDB::match_ipc_any( sub.subject, sub.subject_len ) ) {
     default: break;
@@ -1046,7 +1046,7 @@ static inline int src_type_flag( NotifySub &sub ) {
 }
 static inline int src_type_flag( NotifyPattern &pat ) {
   int fl = src_type_flag( pat.src_type );
-  if ( is_notify_queue( pat.notify_type ) )
+  if ( pat.is_notify_queue() )
     fl |= IS_QUEUE;
   switch ( SubDB::match_ipc_any( pat.pattern, pat.pattern_len ) ) {
     default: break;
@@ -1100,7 +1100,7 @@ IpcRteList::on_resub( NotifySub &sub ) noexcept
 {
   int flags = IS_RESUB | src_type_flag( sub );
   if ( ( flags & ( IS_SESSION | IS_RV ) ) == 0 ) {
-    if ( get_notify_type( sub.notify_type ) == NOTIFY_ADD_REF )
+    if ( sub.get_notify_type() == NOTIFY_ADD_REF )
       this->send_listen( sub.src, sub.subject, sub.subject_len,
                          (const char *) sub.reply, sub.reply_len, sub.sub_count,
                          flags );
@@ -1132,16 +1132,40 @@ IpcRteList::on_psub( NotifyPattern &pat ) noexcept
         pat.pattern, pat.sub_count, pat.src_type );
 }
 
+bool
+IpcRteList::punsub_test( NotifyPattern &pat ) noexcept
+{
+  if ( pat.refp != NULL ) {
+    RouteRef & ref  = *pat.refp;
+    EvPoll   & poll = this->rte.poll;
+    for ( uint32_t i = 0; i < ref.rcnt; i++ ) {
+      uint32_t r = ref.routes[ i ];
+      if ( r != (uint32_t) pat.src.fd && r <= poll.maxfd ) {
+        EvSocket *s;
+        if ( (s = poll.sock[ r ]) != NULL ) {
+          uint8_t v = s->is_psubscribed( pat );
+          if ( ( v & EV_NOT_SUBSCRIBED ) == 0 )
+            return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
 void
 IpcRteList::on_punsub( NotifyPattern &pat ) noexcept
 {
   int flags = IS_PUNSUB | src_type_flag( pat );
+  uint32_t count = pat.sub_count;
   if ( ( flags & ( IS_SESSION | IS_RV ) ) == 0 )
     this->send_listen( pat.src, pat.pattern, pat.pattern_len, NULL, 0, 0,
                        flags );
   if ( ( flags & ( IS_CONSOLE | IS_SESSION ) ) == 0 ) {
     if ( ( flags & IS_QUEUE ) == 0 ) {
-      if ( pat.sub_count == 0 )
+      if ( count != 0 && ! this->punsub_test( pat ) )
+        count = 0;
+      if ( count == 0 )
         this->rte.mgr.sub_db.ipc_psub_stop( pat, this->rte.tport_id );
     }
     else
@@ -1157,7 +1181,7 @@ IpcRteList::on_repsub( NotifyPattern &pat ) noexcept
 {
   int flags = IS_REPSUB | src_type_flag( pat );
   if ( ( flags & ( IS_SESSION | IS_RV ) ) == 0 ) {
-    if ( get_notify_type( pat.notify_type ) == NOTIFY_ADD_REF )
+    if ( pat.get_notify_type() == NOTIFY_ADD_REF )
       this->send_listen( pat.src, pat.pattern, pat.pattern_len, NULL, 0,
                          pat.sub_count, flags );
   }

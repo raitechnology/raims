@@ -92,9 +92,11 @@ struct SubRefs {
     return this->refs == 0;
   }
   bool test( uint32_t flags ) const {
-    if ( ( flags & CONSOLE_SUB ) != 0 )
-      return ( this->refs & (uint32_t) 1 ) != 0;
-    return ( this->refs >> 1 ) != 0;
+    if ( ( flags & CONSOLE_SUB ) != 0 && ( this->refs & 1 ) != 0 )
+      return true;
+    if ( ( flags & IPC_SUB ) != 0 && ( this->refs >> 1 ) != 0 )
+      return true;
+    return false;
   }
   uint32_t ref_count( void ) const {
     return kv_popcountw( this->refs );

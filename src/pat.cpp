@@ -100,18 +100,16 @@ SubDB::psub_stop( PatternArgs &ctx ) noexcept
 bool
 SubDB::add_bloom( PatternArgs &ctx,  BloomRef &b ) noexcept
 {
-  bool rsz = false;
+  uint16_t prelen = (uint16_t) ctx.cvt.prefixlen;
+  bool     rsz = false;
   if ( ctx.rt->detail_type == NO_DETAIL )
-    rsz = b.add_route( (uint16_t) ctx.cvt.prefixlen, ctx.hash );
+    rsz = b.add_route( prelen, ctx.hash );
   else if ( ctx.rt->detail_type == SUFFIX_MATCH )
-    rsz = b.add_suffix_route( (uint16_t) ctx.cvt.prefixlen, ctx.hash,
-                              ctx.rt->u.suffix );
+    rsz = b.add_suffix_route( prelen, ctx.hash, ctx.rt->u.suffix );
   else if ( ctx.rt->detail_type == SHARD_MATCH )
-    rsz = b.add_shard_route( (uint16_t) ctx.cvt.prefixlen, ctx.hash,
-                             ctx.rt->u.shard );
+    rsz = b.add_shard_route( prelen, ctx.hash, ctx.rt->u.shard );
   else if ( ctx.rt->detail_type == QUEUE_MATCH )
-    rsz = b.add_queue_route( (uint16_t) ctx.cvt.prefixlen, ctx.hash,
-                             ctx.rt->u.queue );
+    rsz = b.add_queue_route( prelen, ctx.hash, ctx.rt->u.queue );
   else
     fprintf( stderr, "bad detail\n" );
   return rsz;
@@ -120,17 +118,15 @@ SubDB::add_bloom( PatternArgs &ctx,  BloomRef &b ) noexcept
 void
 SubDB::del_bloom( PatternArgs &ctx,  BloomRef &b ) noexcept
 {
+  uint16_t prelen = (uint16_t) ctx.cvt.prefixlen;
   if ( ctx.rt->detail_type == NO_DETAIL )
-    b.del_route( (uint16_t) ctx.cvt.prefixlen, ctx.hash );
+    b.del_route( prelen, ctx.hash );
   else if ( ctx.rt->detail_type == SUFFIX_MATCH )
-    b.del_suffix_route( (uint16_t) ctx.cvt.prefixlen, ctx.hash,
-                        ctx.rt->u.suffix );
+    b.del_suffix_route( prelen, ctx.hash, ctx.rt->u.suffix );
   else if ( ctx.rt->detail_type == SHARD_MATCH )
-    b.del_shard_route( (uint16_t) ctx.cvt.prefixlen, ctx.hash,
-                       ctx.rt->u.shard );
+    b.del_shard_route( prelen, ctx.hash, ctx.rt->u.shard );
   else if ( ctx.rt->detail_type == QUEUE_MATCH )
-    b.del_queue_route( (uint16_t) ctx.cvt.prefixlen, ctx.hash,
-                       ctx.rt->u.queue );
+    b.del_queue_route( prelen, ctx.hash, ctx.rt->u.queue );
   else
     fprintf( stderr, "bad detail\n" );
 }

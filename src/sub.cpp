@@ -1573,9 +1573,9 @@ void
 SubDB::queue_sub_update( NotifyQueue &sub,  uint32_t tport_id,
                          uint32_t refcnt ) noexcept
 {
-  printf( "queue_sub_update( %.*s, fd=%u, start=%" PRIx64 ", cnt=%u )\n",
-          (int) sub.subject_len, sub.subject, sub.src.fd,
-          sub.src.start_ns, refcnt );
+  d_sub( "queue_sub_update( %.*s, fd=%u, start=%" PRIx64 ", cnt=%u )\n",
+         (int) sub.subject_len, sub.subject, sub.src.fd,
+         sub.src.start_ns, refcnt );
   uint32_t flags = IPC_SUB | QUEUE_SUB;
   if ( sub.sub_count != 0 )
     flags |= IS_SUB_START;
