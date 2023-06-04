@@ -28,7 +28,7 @@ namespace ms {
  *  _P.STOP. -> U_PSUB_STOP
  */
 struct UScoreTab {
-  static const uint32_t U_TAB_SZ = 64;
+  static const uint32_t U_TAB_SZ = 32;
   uint16_t tab[ U_TAB_SZ ];
   uint16_t max_len;
   UScoreTab() { this->init(); }
@@ -36,19 +36,23 @@ struct UScoreTab {
   void init( void ) { memset( this->tab, 0, sizeof( this->tab ) );
                       this->max_len = 0; }
 
-  PublishType lookup( uint32_t h,  size_t len ) {
+  PublishType lookup( uint32_t h,  uint16_t len ) {
     if ( len <= this->max_len ) {
-      size_t pos = h % U_TAB_SZ;
-      if ( (uint8_t) ( this->tab[ pos ] & 0xff ) == (uint8_t) ( h >> 24 ) )
-        return (PublishType) ( this->tab[ pos ] >> 8 );
+      uint16_t pos = h % U_TAB_SZ;
+      for ( ; this->tab[ pos ] != 0; pos = ( pos + 1 ) % U_TAB_SZ )
+        if ( (uint8_t) ( this->tab[ pos ] & 0xff ) == (uint8_t) ( h >> 24 ) )
+          return (PublishType) ( this->tab[ pos ] >> 8 );
     }
     return U_NORMAL;
   }
   bool set( uint32_t h,  uint16_t len,  PublishType t ) {
     if ( len > this->max_len )
       this->max_len = len;
-    if ( this->lookup( h, len ) != U_NORMAL ) return false; /* unique entry */
-    size_t pos = h % U_TAB_SZ;
+    uint16_t pos = h % U_TAB_SZ;
+    if ( this->lookup( h, len ) != U_NORMAL )
+      return false;
+    for ( ; this->tab[ pos ] != 0; pos = ( pos + 1 ) % U_TAB_SZ )
+      ;
     this->tab[ pos ] = (uint16_t) ( h >> 24 ) | ( (uint16_t) t << 8 );
     return true;
   }
