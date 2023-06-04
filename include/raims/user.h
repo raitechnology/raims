@@ -411,7 +411,10 @@ struct HmacEncrypt : public HmacKdf {
       out_size = 0;
       return false;
     }
-    out_size = kv::bin_to_base64( this->cipher, this->cipher_len, out, false );
+    size_t x = kv::bin_to_base64( this->cipher, this->cipher_len, out, false );
+    if ( x < out_size )
+      ((char *) out)[ x ] = '\0';
+    out_size = x;
     return true;
   }
 };
