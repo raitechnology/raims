@@ -15,9 +15,10 @@ namespace rai {
 namespace ms {
 
 /* quick lookup of PublishType to resolve _subscripions:
- *  _X.HELLO -> U_SESSION_HELLO
+ *  _X.HELO  -> U_SESSION_HELLO
  *  _X.HB    -> U_SESSION_HB
  *  _X.BYE   -> U_SESSION_BYE
+ *  _X.LINK  -> U_SESSION_LINK
  *  _Z.ADD   -> U_PEER_ADD
  *  _Z.DEL   -> U_PEER_DEL
  *  _Z.BLM   -> U_BLOOM_FILTER

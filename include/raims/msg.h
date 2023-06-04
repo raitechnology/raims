@@ -377,7 +377,7 @@ enum FldTypeBit {
 
 enum PublishType {
   U_NORMAL          = 0,  /* other _ABC */
-  U_SESSION_HELLO   = 1,  /* _X.HELLO   */
+  U_SESSION_HELLO   = 1,  /* _X.HELO    */
   U_SESSION_HB      = 2,  /* _X.HB      */
   U_SESSION_BYE     = 3,  /* _X.BYE     */
   U_SESSION_LINK    = 4,  /* _X.LINK    */

@@ -10,7 +10,7 @@ namespace ms {
 #define _MCAST          "_M"
 
 /* session start, hb, end */
-#define _SESSION_HELLO  "_X.HELLO"
+#define _SESSION_HELLO  "_X.HELO"
 #define _SESSION_HB     "_X.HB"
 #define _SESSION_BYE    "_X.BYE"
 #define _SESSION_NAME   "_X.NAME"
