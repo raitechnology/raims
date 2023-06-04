@@ -760,6 +760,8 @@ struct UserDB {
                      uint64_t mono ) noexcept;
   void make_hb( TransportRoute &rte,  const char *sub,  size_t sublen,
                 uint32_t h,  MsgCat &m ) noexcept;
+  bool on_link( const MsgFramePublish &pub,  UserBridge &n,
+                MsgHdrDecoder &dec ) noexcept;
   bool on_heartbeat( const MsgFramePublish &pub,  UserBridge &n,
                      MsgHdrDecoder &dec ) noexcept;
   void mcast_sync( TransportRoute &rte ) noexcept;

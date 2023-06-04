@@ -380,15 +380,16 @@ enum PublishType {
   U_SESSION_HELLO   = 1,  /* _X.HELLO   */
   U_SESSION_HB      = 2,  /* _X.HB      */
   U_SESSION_BYE     = 3,  /* _X.BYE     */
-  U_PEER_ADD        = 4,  /* _Z.ADD     */
-  U_PEER_DEL        = 5,  /* _Z.DEL     */
-  U_BLOOM_FILTER    = 6,  /* _Z.BLM     */
-  U_ADJACENCY       = 7,  /* _Z.ADJ     */
-  U_SUB_JOIN        = 8,  /* _S.JOIN.>  */
-  U_SUB_LEAVE       = 9,  /* _S.LEAV.>  */
-  U_PSUB_START      = 10, /* _P.PSUB.>  */
-  U_PSUB_STOP       = 11, /* _P.PSTP.>  */
-  /* unused bits, 12 -> 15 */
+  U_SESSION_LINK    = 4,  /* _X.LINK    */
+  U_PEER_ADD        = 5,  /* _Z.ADD     */
+  U_PEER_DEL        = 6,  /* _Z.DEL     */
+  U_BLOOM_FILTER    = 7,  /* _Z.BLM     */
+  U_ADJACENCY       = 8,  /* _Z.ADJ     */
+  U_SUB_JOIN        = 9,  /* _S.JOIN.>  */
+  U_SUB_LEAVE       = 10, /* _S.LEAV.>  */
+  U_PSUB_START      = 11, /* _P.PSUB.>  */
+  U_PSUB_STOP       = 12, /* _P.PSTP.>  */
+  /* unused bits, 13 -> 15 */
   U_INBOX_AUTH      = 16, /* _I.Nonce.auth (not a wildcard) */
   U_INBOX_SUBS      = 17, /* _I.Nonce.subs */
   U_INBOX_PING      = 18, /* _I.Nonce.ping */

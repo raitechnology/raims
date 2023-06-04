@@ -14,6 +14,7 @@ namespace ms {
 #define _SESSION_HB     "_X.HB"
 #define _SESSION_BYE    "_X.BYE"
 #define _SESSION_NAME   "_X.NAME"
+#define _SESSION_LINK   "_X.LINK"
 
 /* peer add, del, bloom, adjacency */
 #define _PEER_ADD       "_Z.ADD"
@@ -77,6 +78,7 @@ SUB_CONST( X_HELLO , ( _SESSION_HELLO    ) )
 SUB_CONST( X_HB    , ( _SESSION_HB       ) )
 SUB_CONST( X_BYE   , ( _SESSION_BYE      ) )
 SUB_CONST( X_NAME  , ( _SESSION_NAME     ) )
+SUB_CONST( X_LINK  , ( _SESSION_LINK     ) )
 SUB_CONST( Z_ADD   , ( _PEER_ADD         ) )
 SUB_CONST( Z_DEL   , ( _PEER_DEL         ) )
 SUB_CONST( Z_BLM   , ( _BLOOM_FILTER     ) )
@@ -91,7 +93,7 @@ SUB_CONST( N_ADJ   , ( _STAT_ADJ     "." ) )
 SUB_CONST( N_ALL   , ( _STAT_ALL     "." ) )
                     /* prefix string size */
 /* hashes of above */
-EX uint32_t hello_h, hb_h, bye_h, name_h, add_h, del_h, blm_h, adj_h,
+EX uint32_t hello_h, hb_h, bye_h, name_h, link_h, add_h, del_h, blm_h, adj_h,
             join_h, leave_h, psub_h, pstop_h;
 #undef SUB_CONST
 #undef EX

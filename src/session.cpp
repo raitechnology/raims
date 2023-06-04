@@ -88,6 +88,7 @@ SessionMgr::SessionMgr( EvPoll &p,  Logger &l,  ConfigTree &c,
   hb_h    = kv_crc_c( X_HB,    X_HB_SZ,    0 );
   bye_h   = kv_crc_c( X_BYE,   X_BYE_SZ,   0 );
   name_h  = kv_crc_c( X_NAME,  X_NAME_SZ,  0 );
+  link_h  = kv_crc_c( X_LINK,  X_LINK_SZ,  0 );
   add_h   = kv_crc_c( Z_ADD,   Z_ADD_SZ,   0 );
   del_h   = kv_crc_c( Z_DEL,   Z_DEL_SZ,   0 );
   blm_h   = kv_crc_c( Z_BLM,   Z_BLM_SZ,   0 );
@@ -335,6 +336,7 @@ SessionMgr::init_session( const CryptPass &pwd ) noexcept
   this->add_rte( X_HELLO, X_HELLO_SZ, hello_h, U_SESSION_HELLO );/*_X.HELLO */
   this->add_rte( X_HB   , X_HB_SZ   , hb_h   , U_SESSION_HB );   /*_X.HB    */
   this->add_rte( X_BYE  , X_BYE_SZ  , bye_h  , U_SESSION_BYE );  /*_X.BYE   */
+  this->add_rte( X_LINK , X_LINK_SZ , link_h , U_SESSION_LINK ); /*_X.LINK  */
   this->add_rte( Z_ADD  , Z_ADD_SZ  , add_h  , U_PEER_ADD );     /*_Z.ADD   */
   this->add_rte( Z_DEL  , Z_DEL_SZ  , del_h  , U_PEER_DEL );     /*_Z.DEL   */
   this->add_rte( Z_BLM  , Z_BLM_SZ  , blm_h  , U_BLOOM_FILTER ); /*_Z.BLM   */
@@ -895,11 +897,12 @@ IpcRoute::on_msg( EvPublish &pub ) noexcept
     else if ( status == SEQNO_UID_SKIP ) {
       if ( debug_sess_loss )
         this->mgr.show_seqno_status( fpub, n, dec, seq, status, false );
+      uint32_t loss = 1;
       n.msg_loss_time = this->mgr.timer_time;
       if ( seq.msg_loss <= MAX_MSG_LOSS )
-        n.msg_loss_count += seq.msg_loss;
-      else
-        n.msg_loss_count++;
+        loss = seq.msg_loss;
+      n.msg_loss_count += loss;
+      this->mgr.events.inbound_msg_loss( n.uid, fpub.rte.tport_id, loss );
     }
     else if ( debug_sess )
       this->mgr.show_seqno_status( fpub, n, dec, seq, status, false );
@@ -1238,6 +1241,9 @@ SessionMgr::on_msg( EvPublish &pub ) noexcept
   }
   /* dispatch other subject types */
   switch ( type ) {
+    case U_SESSION_LINK:
+      return this->user_db.on_link( fpub, n, dec );
+
     case U_SUB_JOIN:      /* _S.JOIN.subject */
     case U_SUB_LEAVE:     /* _S.LEAV.subject */
     case U_PSUB_START:    /* _P.PSUB.wildcard */
@@ -1463,11 +1469,12 @@ SessionMgr::dispatch_console( MsgFramePublish &fpub,  UserBridge &n,
       else if ( status == SEQNO_UID_SKIP ) {
         if ( debug_sess_loss )
           this->show_seqno_status( fpub, n, dec, seq, status, true );
+        uint32_t loss = 1;
         n.msg_loss_time = this->timer_time;
         if ( seq.msg_loss <= MAX_MSG_LOSS )
-          n.msg_loss_count += seq.msg_loss;
-        else
-          n.msg_loss_count++;
+          loss = seq.msg_loss;
+        n.msg_loss_count += loss;
+        this->events.inbound_msg_loss( n.uid, fpub.rte.tport_id, loss );
       }
       else if ( debug_sess )
         this->show_seqno_status( fpub, n, dec, seq, status, true );

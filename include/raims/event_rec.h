@@ -45,8 +45,9 @@ enum EventType {
   RESIZE_BLOOM      = 31,
   RECV_BLOOM        = 32,
   CONVERGE          = 33,
-  BAD_EVENT         = 34,
-  MAX_EVENT         = 35
+  INBOUND_MSG_LOSS  = 34,
+  BAD_EVENT         = 35,
+  MAX_EVENT         = 36
 };
 
 static const uint32_t MASK_EVENT =   0x3f, /* 63 */
@@ -99,7 +100,8 @@ static const struct {
   EVSZ( "resize_bloom" ),    /* 31 */
   EVSZ( "recv_bloom" ),      /* 32 */
   EVSZ( "converge" ),        /* 33 */
-  EVSZ( "bad_event" )        /* 34 */
+  EVSZ( "inbound_msg_loss" ),/* 34 */
+  EVSZ( "bad_event" )        /* 35 */
 };
 #if __cplusplus >= 201103L
 static_assert( MAX_EVENT == ( sizeof( event_strings ) / sizeof( event_strings[ 0 ] ) ), "max_events" );
@@ -180,7 +182,8 @@ struct EventRec {
             return adjacency_request_string( (AdjacencyRequest) this->data );
             /*return sync_kind_string( (SyncKind) this->data );*/
           case RESIZE_BLOOM:
-          case RECV_BLOOM: {
+          case RECV_BLOOM:
+          case INBOUND_MSG_LOSS: {
             size_t len = kv::uint32_to_string( this->data, buf );
             buf[ len ] = '\0';
             return buf;
@@ -254,6 +257,15 @@ struct EventRecord {
     const EventRec *ev = &this->ptr[ i ];
     i = ( i + 1 ) % MAX_EVENTS;
     return ev;
+  }
+  EventRec *prev( uint32_t &i ) const {
+    uint32_t first = 0;
+    if ( this->count >= MAX_EVENTS )
+      first = ( this->hd + 1 ) % MAX_EVENTS;
+    if ( i == first )
+      return NULL;
+    i = ( i - 1 ) % MAX_EVENTS;
+    return &this->ptr[ i ];
   }
   void startup( uint64_t t ) {
     this->ptr = (EventRec *) ::malloc( sizeof( EventRec ) * MAX_EVENTS );
@@ -438,6 +450,22 @@ struct EventRecord {
   }
   void converge( uint16_t inv,  uint32_t uid ) {
     this->uid_event( uid, CONVERGE | HAS_DATA ).data = inv;
+  }
+  void inbound_msg_loss( uint32_t uid,  uint32_t tid,  uint32_t lost ) {
+    uint64_t   nowish = *this->cur_time >> 30;
+    uint32_t   i      = this->hd;
+    EventRec * ev;
+    while ( (ev = this->prev( i )) != NULL ) {
+      if ( ( ev->stamp >> 30 ) != nowish )
+        break;
+      if ( ev->event_type() == INBOUND_MSG_LOSS &&
+           ev->source_uid == uid && ev->tport_id == tid ) {
+        ev->data += lost;
+        return;
+      }
+    }
+    this->tid_event( uid, tid,
+                     INBOUND_MSG_LOSS | HAS_TPORT | HAS_DATA ).data = lost;
   }
 };
 

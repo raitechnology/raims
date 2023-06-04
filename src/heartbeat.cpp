@@ -64,6 +64,7 @@ UserDB::make_hb( TransportRoute &rte,  const char *sub,  size_t sublen,
    .tportid       ()
    .tport         ( rte.transport.tport.len )
    .host_id       ()
+   .ms            ()
    .version       ( ver_len )
    .pk_digest     ();
 
@@ -113,6 +114,16 @@ UserDB::make_hb( TransportRoute &rte,  const char *sub,  size_t sublen,
     m.tportid( rte.tport_id );
     m.tport  ( rte.transport.tport.val, rte.transport.tport.len );
     m.host_id( this->host_id );
+
+    if ( ! rte.is_mcast() && rte.uid_connected.rem_uid != 0 ) {
+      uint32_t   fd;
+      EvSocket * sock;
+      if ( rte.connected.first( fd ) &&
+           (sock = this->poll.sock[ fd ]) != NULL &&
+            sock->route_id == rte.tport_id ) {
+        m.ms( sock->msgs_sent );
+      }
+    }
     m.version( ver_str, ver_len );
   }
   m.pk_digest();
@@ -186,7 +197,9 @@ UserDB::interval_hb( uint64_t cur_mono,  uint64_t cur_time ) noexcept
 {
   uint64_t ival   = this->hb_ival_ns;
   size_t   count  = this->transport_tab.count;
-  uint32_t hb_cnt = 0;
+  uint32_t hb_cnt = 0, fd;
+  EvSocket *sock;
+
   for ( size_t i = 0; i < count; i++ ) {
     TransportRoute *rte = this->transport_tab.ptr[ i ];
     if ( rte->connect_count > 0 && ! rte->is_set( TPORT_IS_IPC ) ) {
@@ -208,6 +221,28 @@ UserDB::interval_hb( uint64_t cur_mono,  uint64_t cur_time ) noexcept
                        rte->sub_route, this->my_src, hb_h, CABA_TYPE_ID );
         rte->forward_to_connected( pub );
         hb_cnt++;
+#if 0
+        for ( bool b = rte->connected.first( fd ); b;
+              b = rte->connected.next( fd ) ) {
+          if ( (sock = this->poll.sock[ fd ]) != NULL ) {
+            if ( sock->route_id != rte->tport_id )
+              continue;
+            MsgEst e( X_LINK_SZ );
+            e.ms    ();
+
+            MsgCat m;
+            m.reserve( e.sz );
+            m.open( this->bridge_id.nonce, X_LINK_SZ )
+             .seqno( sock->msgs_sent );
+            m.close( e.sz, link_h, CABA_HEARTBEAT );
+            m.sign( X_LINK, X_LINK_SZ, *this->session_key );
+
+            EvPublish pub( X_LINK, X_LINK_SZ, NULL, 0, m.msg, m.len(),
+                           rte->sub_route, this->my_src, link_h, CABA_TYPE_ID );
+            sock->on_msg( pub );
+          }
+        }
+#endif
       }
       if ( rte->is_mcast() )
         continue;
@@ -223,8 +258,7 @@ UserDB::interval_hb( uint64_t cur_mono,  uint64_t cur_time ) noexcept
   if ( max_idle_ns < ival )
     max_idle_ns = ival;
   max_idle_ns *= 3;
-  for ( uint32_t fd = 0; fd <= this->poll.maxfd; fd++ ) {
-    EvSocket *sock;
+  for ( fd = 0; fd <= this->poll.maxfd; fd++ ) {
     if ( (sock = this->poll.sock[ fd ]) != NULL ) {
       if ( sock->route_id == 0 || (size_t) sock->route_id >= count )
         continue;
@@ -242,6 +276,18 @@ UserDB::interval_hb( uint64_t cur_mono,  uint64_t cur_time ) noexcept
       }
     }
   }
+}
+/* _X.LINK */
+bool
+UserDB::on_link( const MsgFramePublish &pub,  UserBridge &n,
+                 MsgHdrDecoder &dec ) noexcept
+{
+  EvSocket * sock;
+  if ( (sock = this->poll.sock[ pub.src_route.fd ]) != NULL &&
+       sock->route_id == pub.rte.tport_id ) {
+    n.printf( "link %lu = %lu\n", dec.seqno, sock->msgs_recv );
+  }
+  return true;
 }
 /* _X.HELLO, _X.HB */
 bool
@@ -282,10 +328,12 @@ UserDB::on_heartbeat( const MsgFramePublish &pub,  UserBridge &n,
 #endif
   TransportRoute & rte = pub.rte;
   if ( pub.status == FRAME_STATUS_OK && n.is_set( AUTHENTICATED_STATE ) ) {
-    uint32_t cost[ COST_PATH_COUNT ] = { COST_DEFAULT, COST_DEFAULT,
-                                         COST_DEFAULT, COST_DEFAULT },
-             rem_tport_id = 0;
+    uint32_t  cost[ COST_PATH_COUNT ] = { COST_DEFAULT, COST_DEFAULT,
+                                          COST_DEFAULT, COST_DEFAULT },
+              rem_tport_id = 0;
+    uint64_t  ms;
     StringVal tport;
+
     dec.get_ival<uint32_t>( FID_TPORTID, rem_tport_id );
     if ( dec.test( FID_TPORT ) ) {
       tport.val = (const char *) dec.mref[ FID_TPORT ].fptr;
@@ -337,6 +385,16 @@ UserDB::on_heartbeat( const MsgFramePublish &pub,  UserBridge &n,
       if ( debug_hb )
         n.printf( "bad transport cost (%s)\n", rte.name );
       return true;
+    }
+    if ( dec.get_ival<uint64_t>( FID_MS, ms ) ) {
+      EvSocket * sock;
+      if ( (sock = this->poll.sock[ pub.src_route.fd ]) != NULL &&
+           sock->route_id == pub.rte.tport_id ) {
+        if ( ms + rte.delta_recv != sock->msgs_recv ) {
+          n.printe( "link %lu = %lu\n", ms + rte.delta_recv, sock->msgs_recv );
+          rte.delta_recv = sock->msgs_recv - ms;
+        }
+      }
     }
   }
   if ( ! n.user_route->test_set( HAS_HB_STATE ) ) {

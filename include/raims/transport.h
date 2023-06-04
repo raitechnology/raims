@@ -221,6 +221,7 @@ struct TransportRoute : public kv::EvSocket, public kv::EvConnectionNotify,
                           hb_seqno,       /* last hb seqno */
                           stats_seqno,    /* seqno for _N.PORT msgs */
                           timer_id;       /* unique timer id serial */
+  int64_t                 delta_recv;
   StageAuth               auth[ 3 ];      /* history of last 3 hb */
   uint32_t                tport_id,       /* index in transport_tab[] */
                           hb_count,       /* count of new hb recvd */
