@@ -478,6 +478,7 @@ RvTransportService::stop_host( RvHost &host ) noexcept
           (int) host.network_len, host.network, extra );
   uint64_t cur_mono = this->rte.poll.mono_ns;
   RvHostRoute * hr  = this->tab.find( &host );
+  host.stop_host();
   if ( hr != NULL ) {
     hr->last_active_mono = cur_mono;
     hr->is_active = false;
