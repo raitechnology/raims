@@ -39,10 +39,11 @@ struct UScoreTab {
 
   PublishType lookup( uint32_t h,  uint16_t len ) {
     if ( len <= this->max_len ) {
-      uint16_t pos = h % U_TAB_SZ;
+      uint16_t pos = h % U_TAB_SZ,
+               x   = (uint16_t) ( h >> 24 ) | ( len << 8 );
       for ( ; this->tab[ pos ] != 0; pos = ( pos + 1 ) % U_TAB_SZ )
-        if ( (uint8_t) ( this->tab[ pos ] & 0xff ) == (uint8_t) ( h >> 24 ) )
-          return (PublishType) ( this->tab[ pos ] >> 8 );
+        if ( ( this->tab[ pos ] & 0xfff ) == x )
+          return (PublishType) ( this->tab[ pos ] >> 12 );
     }
     return U_NORMAL;
   }
@@ -52,9 +53,13 @@ struct UScoreTab {
     uint16_t pos = h % U_TAB_SZ;
     if ( this->lookup( h, len ) != U_NORMAL )
       return false;
+    if ( len > 15 || (int) t > 15 )
+      return false;
     for ( ; this->tab[ pos ] != 0; pos = ( pos + 1 ) % U_TAB_SZ )
       ;
-    this->tab[ pos ] = (uint16_t) ( h >> 24 ) | ( (uint16_t) t << 8 );
+    this->tab[ pos ] = (uint16_t) ( h   >> 24 ) |
+                                  ( len << 8  ) |
+                       ( (uint16_t) t   << 12 );
     return true;
   }
 };
