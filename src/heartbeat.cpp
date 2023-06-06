@@ -391,7 +391,9 @@ UserDB::on_heartbeat( const MsgFramePublish &pub,  UserBridge &n,
       if ( (sock = this->poll.sock[ pub.src_route.fd ]) != NULL &&
            sock->route_id == pub.rte.tport_id ) {
         if ( ms + rte.delta_recv != sock->msgs_recv ) {
-          n.printe( "link sent %lu recv %lu delta %ld\n", ms + rte.delta_recv,
+          n.printe( "fd %u link %s  sent %lu recv %lu delta %ld\n",
+                    pub.src_route.fd, rte.name,
+                    ms + rte.delta_recv,
                     sock->msgs_recv, rte.delta_recv );
           rte.delta_recv = sock->msgs_recv - ms;
         }

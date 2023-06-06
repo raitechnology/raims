@@ -292,6 +292,7 @@ EvTcpTransport::process( void ) noexcept
         return;
       }
     }
+    this->msgs_recv++;
     buflen = this->len - this->off;
   }
   this->pop( EV_PROCESS );
@@ -310,13 +311,13 @@ EvTcpTransport::dispatch_msg( void ) noexcept
                        this->rte->sub_route );
   d_tcp( "< ev_tcp(%s) dispatch %.*s (%" PRIu64 ")\n", this->rte->name,
          (int) pub.subject_len, pub.subject, this->msgs_recv + 1 );
-  this->msgs_recv++;
   BPData * data = NULL;
   if ( ( this->tcp_state & ( TCP_BACKPRESSURE | TCP_BUFFERSIZE ) ) != 0 )
     data = this;
 
   if ( this->msg_in.msg->caba.get_type() != CABA_MCAST ) {
-    if ( this->rte->sub_route.forward_set( pub, this->rte->mgr.router_set, data ) )
+    if ( this->rte->sub_route.forward_set( pub, this->rte->mgr.router_set,
+                                           data ) )
       return TCP_FLOW_GOOD;
   }
   else {
