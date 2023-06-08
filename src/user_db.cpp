@@ -751,6 +751,29 @@ const char *
 rai::ms::invalidate_reason_string( InvalidReason r ) noexcept {
   return invalid_reason_str[ r < MAX_INVALIDATE ? r : 0 ];
 }
+const char *
+rai::ms::adjacency_result_string( char *buf,  AdjacencyRequest r,
+                                  uint32_t which ) noexcept {
+  const char *s = adjacency_request_str[ r < MAX_ADJ_REQ ? r : 0 ];
+  size_t len = ::strlen( s );
+  ::memcpy( buf, s, len );
+  if ( which == 0 )
+    ::strcpy( &buf[ len ], ",null" );
+  else {
+    if ( ( which & 1 ) != 0 ) { /* SYNC_LINK */
+      ::strcpy( &buf[ len ], ",link" );
+      len += 5;
+    }
+    if ( ( which & 2 ) != 0 ) { /* SYNC_SUB */
+      ::strcpy( &buf[ len ], ",sub" );
+      len += 4;
+    }
+    if ( ( which & 4 ) != 0 ) { /* SYNC_NULL */
+      ::strcpy( &buf[ len ], ",force" );
+    }
+  }
+  return buf;
+}
 
 #if 0
 static MsgFrameStatus lookup_NO_AUTH( void ) { return FRAME_STATUS_NO_AUTH; }

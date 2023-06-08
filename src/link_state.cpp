@@ -1113,9 +1113,10 @@ enum {
   SYNC_LINK    = 1,
   SYNC_SUB     = 2,
   SYNC_ANY     = 1 + 2,
-  RQ_SYNC_LINK = 4,
-  RQ_SYNC_SUB  = 8,
-  RQ_SYNC_ANY  = 4 + 8
+  SYNC_NULL    = 4,
+  RQ_SYNC_LINK = 8,
+  RQ_SYNC_SUB  = 16,
+  RQ_SYNC_ANY  = 8 + 16
 };
 bool
 UserDB::recv_adjacency_request( const MsgFramePublish &,  UserBridge &n,
@@ -1317,8 +1318,8 @@ UserDB::recv_adjacency_result( const MsgFramePublish &pub,  UserBridge &n,
   Nonce        nonce;
   uint64_t     link_state = 0,
                sub_seqno  = 0;
-  uint32_t     reas;
-  int          which = SYNC_NONE;
+  uint32_t     reas,
+               which = SYNC_NONE;
   UserBridge * sync  = NULL;
   StringVal    sync_user;
 
@@ -1372,13 +1373,10 @@ UserDB::recv_adjacency_result( const MsgFramePublish &pub,  UserBridge &n,
 
   if ( reas == UNKNOWN_ADJ_REQ ) /* from a sync_result, sync_req -> sync_rpy */
     reas = PEER_SYNC_REQ;
-  this->events.recv_adjacency_result( n.uid, pub.rte.tport_id,
-                                      sync == &n ? 0 : sync->uid, reas );
 
-  bool sync_link_anyway = false;
   if ( ( which & SYNC_LINK ) != 0 ) {
     if ( sync->null_sync_res > 5 && link_state == sync->link_state_seqno )
-      sync_link_anyway = true;
+      which |= SYNC_NULL;
     if ( link_state > sync->link_state_seqno )
       n.adj_req_throttle.req_count = 0;
     if ( link_state <= sync->link_state_seqno ) {
@@ -1386,12 +1384,16 @@ UserDB::recv_adjacency_result( const MsgFramePublish &pub,  UserBridge &n,
         n.printf( "sync link result already have seqno %" PRIu64 "\n", link_state );
     }
   }
+  this->events.recv_adjacency_result( n.uid, pub.rte.tport_id,
+                                      sync == &n ? 0 : sync->uid,
+                                      reas | ( which << 16 ) );
+
   if ( ( which & SYNC_SUB ) != 0 ) {
     if ( sub_seqno > sync->sub_seqno )
       n.adj_req_throttle.req_count = 0;
   }
   if ( ( which & SYNC_LINK ) != 0 &&
-       ( link_state > sync->link_state_seqno || sync_link_anyway ) ) {
+       ( link_state > sync->link_state_seqno || ( which & SYNC_NULL ) != 0 ) ) {
     AdjacencyRec * rec_list =
       dec.decode_rec_list<AdjacencyRec>( FID_ADJACENCY );
     if ( debug_lnk )

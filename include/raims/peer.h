@@ -15,7 +15,8 @@ const char *peer_sync_reason_string( PeerSyncReason r ) noexcept;
 const char *adjacency_change_string( AdjacencyChange c ) noexcept;
 const char *adjacency_request_string( AdjacencyRequest r ) noexcept;
 const char *invalidate_reason_string( InvalidReason r ) noexcept;
-
+const char *adjacency_result_string( char *buf,  AdjacencyRequest r,
+                                     uint32_t which ) noexcept;
 static const uint64_t SEC_TO_NS = 1000 * 1000 * 1000;
 template <class Int> static inline uint64_t sec_to_ns( Int sec ) {
   return (uint64_t) sec * SEC_TO_NS;

@@ -177,9 +177,12 @@ struct EventRec {
             return adjacency_change_string( (AdjacencyChange) this->data );
           case SEND_ADJ_REQUEST:
           case RECV_ADJ_REQUEST:
-          case RECV_ADJ_RESULT:
           case SEND_ADJ:
             return adjacency_request_string( (AdjacencyRequest) this->data );
+          case RECV_ADJ_RESULT:
+            return adjacency_result_string( buf,
+              (AdjacencyRequest) ( this->data & 0xffffU ),
+              this->data >> 16 );
             /*return sync_kind_string( (SyncKind) this->data );*/
           case RESIZE_BLOOM:
           case RECV_BLOOM:

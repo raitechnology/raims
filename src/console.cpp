@@ -3714,7 +3714,7 @@ Console::show_events( ConsoleOutput *p ) noexcept
   const EventRec * ev;
   uint32_t         n, tid, uid;
   const char     * s, * s2;
-  char             buf[ 32 ];
+  char             buf[ 80 ];
 
   for ( ev = this->mgr.events.first( n ); ev != NULL;
         ev = this->mgr.events.next( n ) ) {
