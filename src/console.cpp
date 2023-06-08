@@ -3749,8 +3749,12 @@ Console::show_events( ConsoleOutput *p ) noexcept
     if ( (s = ev->data_tag( this->string_tab, buf )) != NULL ) { /* data */
       if ( (s2 = ev->reason_str()) != NULL )
         this->tab_concat( s, s2, tab[ i++ ] );
-      else
-        tab[ i++ ].set( s );
+      else {
+        if ( s == buf )
+          this->tab_string( s, tab[ i++ ] );
+        else
+          tab[ i++ ].set( s );
+      }
     }
     else if ( (s = ev->reason_str()) != NULL )
       tab[ i++ ].set( s );
