@@ -59,6 +59,7 @@ namespace ms {
 #define _ACK            "ack"
 #define _ANY            "any"
 #define _SYNC           "sync"
+#define _LOSS           "loss"
 
 #ifdef DECLARE_SUB_CONST
 #define SUB_CONST( CON, VAL ) \

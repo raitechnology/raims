@@ -191,7 +191,7 @@ main( int argc, const char *argv[] )
 
   /* find inconsistent peers */
   for (;;) {
-    if ( peer_dist.find_inconsistent( b, c ) ) {
+    if ( peer_dist.find_inconsistent2( b, c ) ) {
       if ( b != NULL || c != NULL )
         printf( "inconsistent2 %s -> %s\n",
                 b != NULL ? b->peer.user.val : "null",

@@ -262,6 +262,7 @@ struct UserBridge : public UserStateTest<UserBridge> {
                      null_sync_res;
   AuthStage          last_auth_type;
   uint64_t           null_route_count,
+                     null_route_time,
                      unknown_link_seqno,  /* edge of link_state_seqno */
                      peer_recv_seqno,     /* seqno used for add/del/blm peer */
                      mcast_recv_seqno,    /* recv side mcast seqno */

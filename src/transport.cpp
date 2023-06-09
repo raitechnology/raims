@@ -480,8 +480,10 @@ TransportRoute::on_msg( EvPublish &pub ) noexcept
         total_rcnt += rcnt;
       } while ( forward.next( tport_id ) );
     }
-    if ( total_rcnt == 0 )
+    if ( total_rcnt == 0 ) {
       n.null_route_count++;
+      n.null_route_time = this->mgr.timer_time;
+    }
     return this->check_flow_control( b );
   }
   return true;

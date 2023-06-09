@@ -387,6 +387,10 @@ struct SessionMgr : public kv::EvSocket, public kv::BPData {
   bool publish( PubMcastData &mc ) noexcept;
   bool publish_any( PubMcastData &mc ) noexcept;
   bool publish_to( PubPtpData &ptp ) noexcept;
+  void send_loss_notify( const MsgFramePublish &pub,  UserBridge &n,
+                         const MsgHdrDecoder &dec,  uint32_t loss ) noexcept;
+  bool recv_loss_notify( const MsgFramePublish &pub,  UserBridge &n,
+                         const MsgHdrDecoder &dec ) noexcept;
   void send_ack( const MsgFramePublish &pub,  UserBridge &,
                  const MsgHdrDecoder &dec,  const char *suf ) noexcept;
   bool forward_uid_inbox( TransportRoute &src_rte,  kv::EvPublish &fwd,

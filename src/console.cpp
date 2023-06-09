@@ -5336,7 +5336,7 @@ Console::show_inbox( ConsoleOutput *p, const char *arg, size_t arglen ) noexcept
 void
 Console::show_loss( ConsoleOutput *p ) noexcept
 {
-  static const uint32_t ncols = 10;
+  static const uint32_t ncols = 11;
   TabOut out( this->table, this->tmp, ncols );
 
   for ( uint32_t uid = 1; uid < this->user_db.next_uid; uid++ ) {
@@ -5347,6 +5347,7 @@ Console::show_loss( ConsoleOutput *p ) noexcept
     out.add_row()
        .set( n, PRINT_USER )                 /* user */
        .set_long( n->null_route_count )      /* null rte */
+       .set_time( n->null_route_time )       /* null time */
        .set_long( n->msg_repeat_count )      /* repeat */
        .set_time( n->msg_repeat_time )       /* rep time */
        .set_long( n->msg_not_subscr_count )  /* not sub */
@@ -5357,8 +5358,8 @@ Console::show_loss( ConsoleOutput *p ) noexcept
        .set_time( n->inbox_msg_loss_time );  /* ibx time */
   }
   static const char *hdr[ ncols ] =
-    { "user", "null rte", "repeat", "rep time", "not sub", "not time",
-      "msg loss", "loss time", "ibx loss", "ibx time" };
+    { "user", "null rte", "null time", "repeat", "rep time", "not sub",
+      "not time", "msg loss", "loss time", "ibx loss", "ibx time" };
   this->print_table( p, hdr, ncols );
 }
 

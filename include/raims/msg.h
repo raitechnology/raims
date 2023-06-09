@@ -424,15 +424,16 @@ enum PublishType {
   U_INBOX_ACK       = 35, /* _I.Nonce.ack */
   U_INBOX_ANY       = 36, /* _I.Nonce.any */
   U_INBOX_SYNC      = 37, /* _I.Nonce.sync */
-  U_INBOX           = 38, /* _I.Nonce.X reply subject, X is integer */
+  U_INBOX_LOSS      = 38, /* _I.Nonce.sync */
+  U_INBOX           = 39, /* _I.Nonce.X reply subject, X is integer */
 
-  U_MCAST_PING      = 39, /* _M.ping */
-  U_MCAST_SYNC      = 40, /* _M.sync */
-  U_MCAST           = 41, /* _M.> */
+  U_MCAST_PING      = 40, /* _M.ping */
+  U_MCAST_SYNC      = 41, /* _M.sync */
+  U_MCAST           = 42, /* _M.> */
   /* other subject */
-  U_INBOX_ANY_RTE   = 42, /* _I.Nonce.any, ipc inbox */
-  MCAST_SUBJECT     = 43, /* not _XX subject */
-  UNKNOWN_SUBJECT   = 44, /* init, not resolved */
+  U_INBOX_ANY_RTE   = 43, /* _I.Nonce.any, ipc inbox */
+  MCAST_SUBJECT     = 44, /* not _XX subject */
+  UNKNOWN_SUBJECT   = 45, /* init, not resolved */
   MAX_PUB_TYPE      = 64
 };
 #ifdef INCLUDE_MSG_CONST
@@ -472,6 +473,7 @@ static const char *publish_type_str[] = {
   "u_inbox_ack",
   "u_inbox_any",
   "u_inbox_sync",
+  "u_inbox_loss",
   "u_inbox",
   "u_mcast_ping",
   "u_mcast_sync",

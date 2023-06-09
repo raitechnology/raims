@@ -302,6 +302,7 @@ SessionMgr::init_session( const CryptPass &pwd ) noexcept
   this->ibx.init( ibx, _ACK      , U_INBOX_ACK );
   this->ibx.init( ibx, _ANY      , U_INBOX_ANY );
   this->ibx.init( ibx, _SYNC     , U_INBOX_SYNC );
+  this->ibx.init( ibx, _LOSS     , U_INBOX_LOSS );
 
   McastBuf mcb;
   this->mch.len = (uint16_t) mcb.len();
@@ -881,12 +882,17 @@ IpcRoute::on_msg( EvPublish &pub ) noexcept
     else if ( status == SEQNO_UID_SKIP ) {
       if ( debug_sess_loss )
         this->mgr.show_seqno_status( fpub, n, dec, seq, status, false );
+      uint64_t diff = 0;
       uint32_t loss = 1;
+      if ( this->mgr.timer_time > n.msg_loss_time )
+        diff = this->mgr.timer_time - n.msg_loss_time;
       n.msg_loss_time = this->mgr.timer_time;
       if ( seq.msg_loss <= MAX_MSG_LOSS )
         loss = seq.msg_loss;
       n.msg_loss_count += loss;
       this->mgr.events.inbound_msg_loss( n.uid, fpub.rte.tport_id, loss );
+      if ( ns_to_sec( diff ) >= 10 )
+        this->mgr.send_loss_notify( fpub, n, dec, loss );
     }
     else if ( debug_sess )
       this->mgr.show_seqno_status( fpub, n, dec, seq, status, false );
@@ -1298,7 +1304,8 @@ SessionMgr::on_msg( EvPublish &pub ) noexcept
     case U_INBOX_MESH_RPY:  /* _I.Nonce.mesh_rpy  */
     case U_INBOX_UCAST_REQ: /* _I.Nonce.ucast_req */
     case U_INBOX_UCAST_RPY: /* _I.Nonce.ucast_rpy */
-    case U_INBOX_ANY_RTE: { /* _I.Nonce.any, ipc_rt inbox */
+    case U_INBOX_ANY_RTE:   /* _I.Nonce.any, ipc_rt inbox */
+    case U_INBOX_LOSS: {    /* _I.Nonce.loss      */
       uint8_t  path_select = dec.msg->caba.get_path();
       uint64_t recv_seqno  = n.inbox.next_path_recv( path_select );
       if ( dec.seqno > recv_seqno ) {
@@ -1337,6 +1344,7 @@ SessionMgr::on_msg( EvPublish &pub ) noexcept
           case U_INBOX_UCAST_REQ: return true; /* probably don't need these */
           case U_INBOX_UCAST_RPY: return true;
           case U_INBOX_ANY_RTE:   return this->ipc_rt.on_inbox( fpub, n, dec );
+          case U_INBOX_LOSS:      return this->recv_loss_notify( fpub, n, dec );
           default: break;
         }
       }
@@ -1951,6 +1959,52 @@ SessionMgr::publish_to( PubPtpData &ptp ) noexcept
 
   return this->user_db.forward_to_primary_inbox( ptp.peer, ibx, h,
                                                  m.msg, m.len() );
+}
+void
+SessionMgr::send_loss_notify( const MsgFramePublish &pub,  UserBridge &n,
+                             const MsgHdrDecoder &dec,  uint32_t loss ) noexcept
+{
+  InboxBuf ibx( n.bridge_id, _LOSS );
+
+  MsgEst e( ibx.len() );
+  e.seqno        ()
+   .subject      ( pub.subject_len )
+   .idl_msg_loss ()
+   .ms_tot       ()
+   .ref_seqno    ();
+
+  MsgCat m;
+  m.reserve( e.sz );
+
+  m.open( this->user_db.bridge_id.nonce, ibx.len() )
+   .seqno        ( n.inbox.next_send( U_INBOX_LOSS ) )
+   .subject      ( pub.subject, pub.subject_len )
+   .idl_msg_loss ( loss )
+   .ms_tot       ( n.msg_loss_count )
+   .ref_seqno    ( dec.seqno );
+
+  uint32_t h = ibx.hash();
+  m.close( e.sz, h, CABA_INBOX );
+  m.sign( ibx.buf, ibx.len(), *this->user_db.session_key );
+
+  this->user_db.forward_to_primary_inbox( n, ibx, h, m.msg, m.len() );
+}
+bool
+SessionMgr::recv_loss_notify( const MsgFramePublish &pub,  UserBridge &n,
+                              const MsgHdrDecoder &dec ) noexcept
+{
+  if ( dec.test( FID_SUBJECT ) ) {
+    uint64_t loss = 0, total = 0, seqno = 0;
+    const char * sub    = (const char *) dec.mref[ FID_SUBJECT ].fptr;
+    size_t       sublen = dec.mref[ FID_SUBJECT ].fsize;
+    if ( dec.get_ival<uint64_t>( FID_IDL_MSG_LOSS, loss ) &&
+         dec.get_ival<uint64_t>( FID_MS_TOT, total ) &&
+         dec.get_ival<uint64_t>( FID_REF_SEQNO, seqno ) ) {
+      n.printf( "%.*s loss %lu total %lu seqno %lu from %s\n",
+                (int) sublen, sub, loss, total, seqno, pub.rte.name );
+    }
+  }
+  return true;
 }
 /* if a message has the ACK flag set, ack back to sender */
 void

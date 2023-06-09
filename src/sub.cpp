@@ -261,7 +261,8 @@ SubDB::fwd_sub( SubArgs &ctx ) noexcept
     if ( ctx.queue_refs != 0 )
       m.queue_refs ( ctx.queue_refs );
   }
-  m.bloom_upd( ctx.bloom_updated );
+  if ( ! ctx.bloom_updated )
+    m.bloom_upd( ctx.bloom_updated );
   uint32_t h = s.hash();
   m.close( e.sz, h, CABA_RTR_ALERT );
   m.sign( s.msg, s.len(), *this->user_db.session_key );
