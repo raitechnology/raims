@@ -926,9 +926,10 @@ UserDB::recv_ping_request( MsgFramePublish &pub,  UserBridge &n,
         n.mcast_recv_seqno = dec.seqno;
     }
     else if ( suf == ret_buf ) { /* when using _I.<bridge>.N, uses inbox seqno */
-      seqno = n.inbox.recv_seqno;
+      uint8_t  path_select = dec.msg->caba.get_path();
+      seqno = n.inbox.next_path_recv( path_select );
       if ( dec.seqno > seqno )
-        n.inbox.set_recv( dec.seqno, U_INBOX_PING );
+        n.inbox.set_path_recv( path_select, dec.seqno, U_INBOX_PING );
     }
     else { /* using _I.<bridge>.PING, uses ping seqno */
       seqno = n.ping_recv_seqno;

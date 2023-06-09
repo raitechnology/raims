@@ -431,25 +431,28 @@ TransportRoute::on_msg( EvPublish &pub ) noexcept
       this->mgr.send_ack( fpub, n, dec, _TRACE );
     }
   }
-  UserBridge * ptp_bridge;
-  CabaTypeFlag tflag = dec.msg->caba.get_type();
-  if ( tflag == CABA_INBOX &&
-       (ptp_bridge = this->user_db.is_inbox_sub( pub.subject,
-                                                 pub.subject_len )) != NULL ) {
-    if ( ptp_bridge->primary_route != this->tport_id ) {
-      d_tran( "transport_route: inbox (%.*s) -> %u\n",
-              (int) pub.subject_len, pub.subject, ptp_bridge->primary_route );
-      /*this->msgs_sent++;
-      this->bytes_sent += pub.msg_len;*/
-      bool b = this->user_db.forward_to_primary_inbox(
-                 *ptp_bridge, pub.subject, pub.subject_len, pub.subj_hash,
-                 pub.msg, pub.msg_len, this, NULL, 0, pub.src_route );
-      return this->check_flow_control( b );
+  UserBridge * dst;
+  uint8_t path_select = dec.msg->caba.get_path();
+  if ( dec.msg->caba.get_type() == CABA_INBOX &&
+       (dst = this->user_db.is_inbox_sub( pub.subject,
+                                          pub.subject_len )) != NULL ) {
+    UidSrcPath & path = dst->src_path[ path_select ];
+    if ( path.tport != this->tport_id ) {
+      UserRoute * u_path = dst->user_route_ptr( this->user_db, path.tport );
+      if ( u_path->is_valid() ) {
+        d_tran( "transport_route: inbox (%.*s) -> %u\n",
+                (int) pub.subject_len, pub.subject, path.tport );
+        /*this->msgs_sent++;
+        this->bytes_sent += pub.msg_len;*/
+        bool b = this->user_db.forward_to_inbox(
+                   *dst, pub.subject, pub.subject_len, pub.subj_hash,
+                   pub.msg, pub.msg_len, this, NULL, 0, pub.src_route, u_path );
+        return this->check_flow_control( b );
+      }
     }
   }
   else {
     /* cache of the multicast tree for messages originating at n */
-    uint8_t path_select = ( opt >> CABA_OPT_MC_SHIFT ) % COST_PATH_COUNT;
     if ( path_select > 0 && n.bloom_rt[ path_select ] == NULL )
       path_select = 0;
 
@@ -459,7 +462,9 @@ TransportRoute::on_msg( EvPublish &pub ) noexcept
     }
     ForwardCache   & forward = n.forward_path[ path_select ];
     TransportRoute * rte;
-    uint32_t         tport_id;
+    uint32_t         tport_id,
+                     rcnt,
+                     total_rcnt = 0;
     bool             b = true;
     pub.shard = path_select;
     this->user_db.peer_dist.update_forward_cache( forward, n.uid, path_select );
@@ -470,9 +475,13 @@ TransportRoute::on_msg( EvPublish &pub ) noexcept
           n.printf( "transport_route fwd %.*s to %s\n", 
                     (int) pub.subject_len, pub.subject, rte->name );
         }
-        b  &= rte->sub_route.forward_except( pub, this->mgr.router_set, this );
+        b &= rte->sub_route.forward_except_with_cnt( pub, this->mgr.router_set,
+                                                     rcnt, this );
+        total_rcnt += rcnt;
       } while ( forward.next( tport_id ) );
     }
+    if ( total_rcnt == 0 )
+      n.null_route_count++;
     return this->check_flow_control( b );
   }
   return true;

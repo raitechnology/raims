@@ -95,8 +95,9 @@ static const int      CABA_VER_BITS     = 1,
                       CABA_OPT_MC_BITS  = 2; /* 0, 1, 2, 3 */
 static const uint16_t CABA_VER_MASK     = ( (uint16_t) 1 << CABA_VER_BITS ) - 1,
                       CABA_TYPE_MASK    = ( (uint16_t) 1 << CABA_TYPE_BITS ) - 1,
-                      CABA_OPT_MASK     = ( (uint16_t) 1 << CABA_OPT_BITS ) - 1;
-static const uint32_t CABA_LENGTH_MASK  = ( (uint32_t) 1 << CABA_LENGTH_BITS )-1;
+                      CABA_OPT_MASK     = ( (uint16_t) 1 << CABA_OPT_BITS ) - 1,
+                      CABA_OPT_MC_MASK  = ( (uint16_t) 1 << CABA_OPT_MC_BITS ) - 1;
+static const uint32_t CABA_LENGTH_MASK  = ( (uint32_t) 1 << CABA_LENGTH_BITS ) - 1;
 
 /* this is also true: COST_PATH_COUNT == 1 << CABA_OPT_MC_BITS */
 static inline uint8_t caba_hash_to_path( uint32_t h ) {
@@ -143,10 +144,15 @@ struct CabaFlags {
     uint16_t tmp = ( fl & ( CABA_OPT_MASK << FLAGS_OPT_SHIFT ) );
     return tmp >> FLAGS_OPT_SHIFT;
   }
+  static uint8_t get_path( uint16_t fl ) {
+    return (uint8_t)
+      ( ( get_opt( fl ) >> CABA_OPT_MC_SHIFT ) & CABA_OPT_MC_MASK );
+  }
 
   uint16_t get_ver( void ) const      { return get_ver( this->flags ); }
   CabaTypeFlag get_type( void ) const { return get_type( this->flags ); }
   uint16_t get_opt( void ) const      { return get_opt( this->flags ); }
+  uint8_t  get_path( void ) const     { return get_path( this->flags ); }
   const char *type_str( void ) const {
     return caba_type_flag_str( this->get_type() );
   }
@@ -160,7 +166,12 @@ struct CabaFlags {
   }
   void set_opt( uint16_t opt ) {
     uint16_t tmp = ( this->flags & ~( CABA_OPT_MASK << FLAGS_OPT_SHIFT ) );
-    this->flags = tmp | ( (uint16_t) opt << FLAGS_OPT_SHIFT );
+    this->flags = tmp | ( opt << FLAGS_OPT_SHIFT );
+  }
+  void set_opt_path( uint16_t opt,  uint8_t path ) {
+    uint16_t tmp = ( this->flags & ~( CABA_OPT_MASK << FLAGS_OPT_SHIFT ) );
+    opt |= (uint16_t) path << CABA_OPT_MC_SHIFT;
+    this->flags = tmp | ( opt << FLAGS_OPT_SHIFT );
   }
 };
 
@@ -319,7 +330,8 @@ enum MsgFid {
   FID_QUEUE_HASH     = 89 , /* queue hash */
   FID_QUEUE_REFS     = 90 , /* how queue many subs */
   FID_HDR_LEN        = 91 , /* len of message hdr */
-  FID_SUF_LEN        = 92   /* len of message suffix  */
+  FID_SUF_LEN        = 92 , /* len of message suffix  */
+  FID_BLOOM_UPD      = 93   /* peer bloom updated  */
 };
 static const int FID_TYPE_SHIFT = 8,
                  FID_MAX        = 1 << FID_TYPE_SHIFT; /* 256 */
@@ -867,7 +879,8 @@ static FidTypeName fid_type_name[] = {
 { FID_QUEUE_HASH  , U_SHORT | U_INT             , XCL , 0 ,"queue_hash"      },
 { FID_QUEUE_REFS  , U_SHORT | U_INT             , XCL , 0 ,"queue_refs"      },
 { FID_HDR_LEN     , U_SHORT | U_INT             , XCL , 0 ,"hdr_len"         },
-{ FID_SUF_LEN     , U_SHORT | U_INT             , XCL , 0 ,"suf_len"         } 
+{ FID_SUF_LEN     , U_SHORT | U_INT             , XCL , 0 ,"suf_len"         },
+{ FID_BLOOM_UPD   , BOOL_1                      , XCL , 0 ,"bloom_upd"       }
 };
 
 #endif

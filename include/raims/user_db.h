@@ -157,24 +157,31 @@ struct UserRoute : public UserStateTest<UserRoute> {
 };
 
 struct InboxSeqno {
-  uint64_t recv_seqno, /* recv side inbox seqno */
-           send_seqno; /* inbox seqnos for ptp links */
-  uint8_t  recv_type[ 32 ],
-           send_type[ 32 ];
+  uint64_t recv_seqno[ COST_PATH_COUNT ], /* recv side inbox seqno */
+           send_seqno[ COST_PATH_COUNT ]; /* inbox seqnos for ptp links */
+  uint8_t  recv_type[ COST_PATH_COUNT ][ 32 ],
+           send_type[ COST_PATH_COUNT ][ 32 ];
   uint32_t * send_counter;
   void init( uint32_t *ctr ) {
-    this->recv_seqno = this->send_seqno = 0;
+    ::memset( this->recv_seqno, 0, sizeof( this->recv_seqno ) );
+    ::memset( this->send_seqno, 0, sizeof( this->send_seqno ) );
     ::memset( this->recv_type, 0, sizeof( this->recv_type ) );
     ::memset( this->send_type, 0, sizeof( this->send_type ) );
     this->send_counter = ctr;
   }
-  void set_recv( uint64_t seqno,  uint8_t pub_type ) {
-    this->recv_type[ seqno % 32 ] = pub_type;
-    this->recv_seqno = seqno;
+  void set_path_recv( uint8_t path_select, uint64_t seqno,  uint8_t pub_type ) {
+    this->recv_type[ path_select ][ seqno % 32 ] = pub_type;
+    this->recv_seqno[ path_select ] = seqno;
+  }
+  uint64_t next_path_recv( uint8_t path_select ) {
+    return this->recv_seqno[ path_select ];
   }
   uint64_t next_send( uint8_t pub_type ) {
-    uint64_t seqno = ++this->send_seqno;
-    this->send_type[ seqno % 32 ] = pub_type;
+    return this->next_path_send( 0, pub_type );
+  }
+  uint64_t next_path_send( uint8_t path_select, uint8_t pub_type ) {
+    uint64_t seqno = ++this->send_seqno[ path_select ];
+    this->send_type[ path_select ][ seqno % 32 ] = pub_type;
     this->send_counter[ pub_type & ( MAX_PUB_TYPE - 1 ) ]++;
     return seqno;
   }
@@ -254,7 +261,8 @@ struct UserBridge : public UserStateTest<UserBridge> {
                      sync_sum_res_adj,
                      null_sync_res;
   AuthStage          last_auth_type;
-  uint64_t           unknown_link_seqno,  /* edge of link_state_seqno */
+  uint64_t           null_route_count,
+                     unknown_link_seqno,  /* edge of link_state_seqno */
                      peer_recv_seqno,     /* seqno used for add/del/blm peer */
                      mcast_recv_seqno,    /* recv side mcast seqno */
                      subs_mono_time,      /* time subs reqeust sent */
@@ -676,7 +684,7 @@ struct UserDB {
                                  const void *msg,  size_t msglen ) {
     InboxPub p( n, ibx.buf, ibx.len(), h, msg, msglen );
     p.src_route = &this->my_src;
-    p.u_ptr = n.primary( *this );
+    p.u_ptr     = n.primary( *this );
     return this->forward_to( p );
   }
   bool forward_to_primary_inbox( UserBridge &n,  InboxBuf &ibx,  uint32_t h,
@@ -684,7 +692,29 @@ struct UserDB {
                                  const kv::PeerId &src_route  ) {
     InboxPub p( n, ibx.buf, ibx.len(), h, msg, msglen );
     p.src_route = &src_route;
-    p.u_ptr = n.primary( *this );
+    p.u_ptr     = n.primary( *this );
+    return this->forward_to( p );
+  }
+  bool forward_to_inbox( UserBridge &n,  InboxBuf &ibx,  uint32_t h,
+                         const void *msg,  size_t msglen,
+                         kv::BPData *data,  const void *frag,
+                         size_t frag_size,  const kv::PeerId &src_route,
+                         UserRoute * u_ptr ) {
+    InboxPub p( n, ibx.buf, ibx.len(), h, msg, msglen, frag, frag_size );
+    p.data      = data;
+    p.src_route = &src_route;
+    p.u_ptr     = u_ptr;
+    return this->forward_to( p );
+  }
+  bool forward_to_inbox( UserBridge &n,  const char *sub,  size_t sublen,
+                         uint32_t h,  const void *msg,  size_t msglen,
+                         kv::BPData *data,  const void *frag,
+                         size_t frag_size,  const kv::PeerId &src_route,
+                         UserRoute * u_ptr ) {
+    InboxPub p( n, sub, sublen, h, msg, msglen, frag, frag_size );
+    p.data      = data;
+    p.src_route = &src_route;
+    p.u_ptr     = u_ptr;
     return this->forward_to( p );
   }
   bool forward_to_primary_inbox( UserBridge &n,  InboxBuf &ibx,  uint32_t h,
@@ -694,14 +724,14 @@ struct UserDB {
     InboxPub p( n, ibx.buf, ibx.len(), h, msg, msglen, frag, frag_size );
     p.data      = data;
     p.src_route = &src_route;
-    p.u_ptr = n.primary( *this );
+    p.u_ptr     = n.primary( *this );
     return this->forward_to( p );
   }
   bool forward_to_primary_inbox( UserBridge &n,  const char *sub, size_t sublen,
                                 uint32_t h,  const void *msg,  size_t msglen ) {
     InboxPub p( n, sub, sublen, h, msg, msglen );
     p.src_route = &this->my_src;
-    p.u_ptr = n.primary( *this );
+    p.u_ptr     = n.primary( *this );
     return this->forward_to( p );
   }
   bool forward_to_primary_inbox( UserBridge &n,  const char *sub, size_t sublen,
@@ -709,9 +739,9 @@ struct UserDB {
                                  kv::BPData *data,  const void *frag,
                                size_t frag_size, const kv::PeerId &src_route ) {
     InboxPub p( n, sub, sublen, h, msg, msglen, frag, frag_size );
-    p.data = data;
+    p.data      = data;
     p.src_route = &src_route;
-    p.u_ptr = n.primary( *this );
+    p.u_ptr     = n.primary( *this );
     return this->forward_to( p );
   }
   /* use route that request used (n.user_route) for reply */

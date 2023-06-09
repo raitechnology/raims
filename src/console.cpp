@@ -5150,7 +5150,7 @@ Console::show_urls( ConsoleOutput *p ) noexcept
 void
 Console::show_counters( ConsoleOutput *p ) noexcept
 {
-  static const uint32_t ncols = 10;
+  static const uint32_t ncols = 16;
   TabOut out( this->table, this->tmp, ncols );
 
   for ( uint32_t uid = 0; uid < this->user_db.next_uid; uid++ ) {
@@ -5169,19 +5169,26 @@ Console::show_counters( ConsoleOutput *p ) noexcept
       continue;
 
     out.add_row()
-       .set( n, PRINT_USER )             /* user */
-       .set_time( n->start_time )        /* start */
-       .set_long( n->hb_seqno )          /* hb */
-       .set_time( n->hb_time )           /* hb_time */
-       .set_long( n->inbox.send_seqno )  /* isnd */
-       .set_long( n->inbox.recv_seqno )  /* ircv */
-       .set_long( n->ping_send_count )   /* pisnd */
-       .set_time( n->ping_send_time )    /* ping_stime */
-       .set_long( n->pong_recv_count )   /* porcv */
-       .set_long( n->ping_recv_count );  /* pircv */
+       .set( n, PRINT_USER )                  /* user */
+       .set_time( n->start_time )             /* start */
+       .set_long( n->hb_seqno )               /* hb */
+       .set_time( n->hb_time )                /* hb_time */
+       .set_long( n->inbox.send_seqno[ 0 ] )  /* isnd */
+       .set_long( n->inbox.recv_seqno[ 0 ] )  /* ircv */
+       .set_long( n->inbox.send_seqno[ 1 ] )  /* isnd */
+       .set_long( n->inbox.recv_seqno[ 1 ] )  /* ircv */
+       .set_long( n->inbox.send_seqno[ 2 ] )  /* isnd */
+       .set_long( n->inbox.recv_seqno[ 2 ] )  /* ircv */
+       .set_long( n->inbox.send_seqno[ 3 ] )  /* isnd */
+       .set_long( n->inbox.recv_seqno[ 3 ] )  /* ircv */
+       .set_long( n->ping_send_count )        /* pisnd */
+       .set_time( n->ping_send_time )         /* ping_stime */
+       .set_long( n->pong_recv_count )        /* porcv */
+       .set_long( n->ping_recv_count );       /* pircv */
   }
   static const char *hdr[ ncols ] =
-    { "user", "start", "hb seqno", "hb time", "snd ibx", "rcv ibx",
+    { "user", "start", "hb seqno", "hb time", "ibx snd0", "ibx rcv0",
+      "ibx snd1", "ibx rcv1", "ibx snd2", "ibx rcv2", "ibx snd3", "ibx rcv3",
       "ping snd", "ping stime", "pong rcv", "ping rcv" };
   this->print_table( p, hdr, ncols );
 }
@@ -5276,8 +5283,8 @@ Console::show_inbox( ConsoleOutput *p, const char *arg, size_t arglen ) noexcept
 
     if ( out.table.count > 0 )
       out.row( ncols - 1 ).typ |= PRINT_SEP;
-    uint64_t send_seqno = n->inbox.send_seqno,
-             recv_seqno = n->inbox.recv_seqno;
+    uint64_t send_seqno = n->inbox.send_seqno[ 0 ],
+             recv_seqno = n->inbox.recv_seqno[ 0 ];
     if ( send_seqno > 32 )
       send_seqno -= 32;
     else
@@ -5287,8 +5294,8 @@ Console::show_inbox( ConsoleOutput *p, const char *arg, size_t arglen ) noexcept
     else
       recv_seqno = 1;
     bool first = true;
-    while ( send_seqno < n->inbox.send_seqno ||
-            recv_seqno <= n->inbox.recv_seqno ) {
+    while ( send_seqno < n->inbox.send_seqno[ 0 ] ||
+            recv_seqno <= n->inbox.recv_seqno[ 0 ] ) {
       TabPrint * tab = out.add_row_p();
       uint32_t i = 0;
       if ( first ) {
@@ -5297,21 +5304,21 @@ Console::show_inbox( ConsoleOutput *p, const char *arg, size_t arglen ) noexcept
       }
       else
         tab[ i++ ].set_null();
-      if ( send_seqno < n->inbox.send_seqno ) {
+      if ( send_seqno < n->inbox.send_seqno[ 0 ] ) {
         tab[ i++ ].set_long( send_seqno );/* send seqno */
         tab[ i++ ].set(
           publish_type_to_string(
-            (PublishType) n->inbox.send_type[ send_seqno % 32 ] ) );
+            (PublishType) n->inbox.send_type[ 0 ][ send_seqno % 32 ] ) );
       }
       else {
         tab[ i++ ].set_null();
         tab[ i++ ].set_null();
       }
-      if ( recv_seqno <= n->inbox.recv_seqno ) {
+      if ( recv_seqno <= n->inbox.recv_seqno[ 0 ] ) {
         tab[ i++ ].set_long( recv_seqno );/* recv seqno */
         tab[ i++ ].set(
           publish_type_to_string(
-            (PublishType) n->inbox.recv_type[ recv_seqno % 32 ] ) );
+            (PublishType) n->inbox.recv_type[ 0 ][ recv_seqno % 32 ] ) );
       }
       else {
         tab[ i++ ].set_null();
@@ -5329,7 +5336,7 @@ Console::show_inbox( ConsoleOutput *p, const char *arg, size_t arglen ) noexcept
 void
 Console::show_loss( ConsoleOutput *p ) noexcept
 {
-  static const uint32_t ncols = 9;
+  static const uint32_t ncols = 10;
   TabOut out( this->table, this->tmp, ncols );
 
   for ( uint32_t uid = 1; uid < this->user_db.next_uid; uid++ ) {
@@ -5339,6 +5346,7 @@ Console::show_loss( ConsoleOutput *p ) noexcept
 
     out.add_row()
        .set( n, PRINT_USER )                 /* user */
+       .set_long( n->null_route_count )      /* null rte */
        .set_long( n->msg_repeat_count )      /* repeat */
        .set_time( n->msg_repeat_time )       /* rep time */
        .set_long( n->msg_not_subscr_count )  /* not sub */
@@ -5349,7 +5357,7 @@ Console::show_loss( ConsoleOutput *p ) noexcept
        .set_time( n->inbox_msg_loss_time );  /* ibx time */
   }
   static const char *hdr[ ncols ] =
-    { "user", "repeat", "rep time", "not sub", "not time",
+    { "user", "null rte", "repeat", "rep time", "not sub", "not time",
       "msg loss", "loss time", "ibx loss", "ibx time" };
   this->print_table( p, hdr, ncols );
 }
@@ -6045,8 +6053,6 @@ Console::show_blooms( ConsoleOutput *p,  uint8_t path_select,
         sys = "console";
       else if ( p->r == (uint32_t) this->mgr.ipc_rt.fd )
         sys = "ipc";
-      else if ( p->r == (uint32_t) this->mgr.queue_rt.fd )
-        sys = "queue";
       else if ( p->r == (uint32_t) rte->fd )
         sys = "route";
 

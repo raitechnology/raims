@@ -49,17 +49,11 @@ ConsoleRoute::ConsoleRoute( EvPoll &p,  SessionMgr &m ) noexcept
   this->sock_opts = OPT_NO_POLL;
 }
 
-QueueRoute::QueueRoute( EvPoll &p,  SessionMgr &m ) noexcept
-          : EvSocket( p, p.register_type( "queue_route" ) ),
-            mgr( m ), user_db( m.user_db ), sub_db( m.sub_db ) {
-  this->sock_opts = OPT_NO_POLL;
-}
-
 SessionMgr::SessionMgr( EvPoll &p,  Logger &l,  ConfigTree &c,
                         ConfigTree::User &u,  ConfigTree::Service &s,
                         StringTab &st,  ConfigStartup &start ) noexcept
            : EvSocket( p, p.register_type( "session_mgr" ) ),
-             ipc_rt( p, *this ), console_rt( p, *this ), queue_rt( p, *this ),
+             ipc_rt( p, *this ), console_rt( p, *this ),
              tree( c ), user( u ), svc( s ), startup( start ), timer_id( 0 ),
              timer_mono_time( 0 ), timer_time( 0 ),
              timer_converge_time( 0 ), converge_seqno( 0 ),
@@ -217,25 +211,22 @@ SessionMgr::init_sock( void ) noexcept
 {
   this->events.startup( this->user_db.start_time );
 
-  int xfd[ 4 ] = { this->poll.get_null_fd(),
-                   this->poll.get_null_fd(),
+  int xfd[ 3 ] = { this->poll.get_null_fd(),
                    this->poll.get_null_fd(),
                    this->poll.get_null_fd() };
   #define swap( x, y ) { int z = x; x = y; y = z; }
-  for ( int i = 0; i < 3; i++ ) {
-    for ( int j = i+1; j < 4; j++ ) {
+  for ( int i = 0; i < 2; i++ ) {
+    for ( int j = i+1; j < 3; j++ ) {
       if ( xfd[ i ] > xfd[ j ] )
         swap( xfd[ i ], xfd[ j ] );
     }
   }
   #undef swap
-  /* make ipc, queue, console the lower fd number, dispatched first */
+  /* make ipc, console the lower fd number, dispatched first */
   int ifd = xfd[ 0 ],
-      qfd = xfd[ 1 ],
-      cfd = xfd[ 2 ],
-      sfd = xfd[ 3 ];
+      cfd = xfd[ 1 ],
+      sfd = xfd[ 2 ];
   this->router_set.add( ifd );
-  this->router_set.add( qfd );
   this->router_set.add( cfd );
   this->router_set.add( sfd );
 
@@ -246,11 +237,6 @@ SessionMgr::init_sock( void ) noexcept
   p.begin().x( this->svc.svc.val, sz ).s( ".ipc" ).end();
   this->ipc_rt.PeerData::init_peer( this->poll.get_next_id(), ifd, -1, NULL, "ipc" );
   this->ipc_rt.PeerData::set_name( buf, p.len() );
-
-  p.begin().x( this->svc.svc.val, sz ).s( ".queue" ).end();
-  this->queue_rt.PeerData::init_peer( this->poll.get_next_id(), qfd, -1, NULL,
-                                      "queue" );
-  this->queue_rt.PeerData::set_name( buf, p.len() );
 
   p.begin().x( this->svc.svc.val, sz ).s( ".console" ).end();
   this->console_rt.PeerData::init_peer( this->poll.get_next_id(), cfd, -1, NULL,
@@ -264,8 +250,6 @@ SessionMgr::init_sock( void ) noexcept
   int status = this->poll.add_sock( &this->ipc_rt );
   if ( status == 0 )
     status = this->poll.add_sock( &this->console_rt );
-  if ( status == 0 )
-    status = this->poll.add_sock( &this->queue_rt );
   if ( status == 0 )
     status = this->poll.add_sock( this );
   return status;
@@ -980,13 +964,6 @@ ConsoleRoute::on_msg( EvPublish &pub ) noexcept
   return true;
 }
 
-bool
-QueueRoute::on_msg( EvPublish & ) noexcept
-{
-  /*this->fwd_console( pub, false );*/
-  return true;
-}
-
 uint32_t
 ConsoleRoute::fwd_console( EvPublish &pub,  bool is_caba ) noexcept
 {
@@ -1192,10 +1169,10 @@ SessionMgr::on_msg( EvPublish &pub ) noexcept
     }
     /* authorize user by verifying the DSA key exchange */
     if ( type == U_INBOX_AUTH && fpub.status == FRAME_STATUS_INBOX_AUTH ) {
-      uint64_t seqno = n.inbox.recv_seqno;
-      n.inbox.set_recv( dec.seqno, U_INBOX_AUTH );
+      uint64_t seqno = n.inbox.next_path_recv( 0 );
+      n.inbox.set_path_recv( 0, dec.seqno, U_INBOX_AUTH );
       if ( seqno > dec.seqno ) /* auth trust reuses seqno from auth */
-        n.inbox.recv_seqno = seqno;
+        n.inbox.recv_seqno[ 0 ] = seqno;
       return this->user_db.on_inbox_auth( fpub, n, dec );
     }
     /* maybe authorize if needed by starting DSA exchange */
@@ -1321,9 +1298,11 @@ SessionMgr::on_msg( EvPublish &pub ) noexcept
     case U_INBOX_MESH_RPY:  /* _I.Nonce.mesh_rpy  */
     case U_INBOX_UCAST_REQ: /* _I.Nonce.ucast_req */
     case U_INBOX_UCAST_RPY: /* _I.Nonce.ucast_rpy */
-    case U_INBOX_ANY_RTE:   /* _I.Nonce.any, ipc_rt inbox */
-      if ( dec.seqno > n.inbox.recv_seqno ) {
-        if ( n.inbox.recv_seqno != 0 && dec.seqno != n.inbox.recv_seqno + 1 ) {
+    case U_INBOX_ANY_RTE: { /* _I.Nonce.any, ipc_rt inbox */
+      uint8_t  path_select = dec.msg->caba.get_path();
+      uint64_t recv_seqno  = n.inbox.next_path_recv( path_select );
+      if ( dec.seqno > recv_seqno ) {
+        if ( recv_seqno != 0 && dec.seqno != recv_seqno + 1 ) {
           /*uint64_t recv_seqno = n.inbox.recv_seqno;
           if ( recv_seqno > 32 ) recv_seqno -= 32; else recv_seqno = 1;
           while ( recv_seqno < n.inbox.recv_seqno ) {
@@ -1333,13 +1312,14 @@ SessionMgr::on_msg( EvPublish &pub ) noexcept
             recv_seqno++;
           }*/
           n.inbox_msg_loss_time   = this->timer_time;
-          n.inbox_msg_loss_count += dec.seqno - ( n.inbox.recv_seqno + 1 );
-          n.printf( "%.*s missing inbox seqno %" PRIu64 " -> %" PRIu64 " (%s)\n",
-                    (int) fpub.subject_len, fpub.subject,
-                    n.inbox.recv_seqno, dec.seqno, fpub.rte.name );
+          n.inbox_msg_loss_count += dec.seqno - ( recv_seqno + 1 );
+          n.printf(
+            "%.*s missing inbox seqno(%u) %" PRIu64 " -> %" PRIu64 " (%s)\n",
+                    (int) fpub.subject_len, fpub.subject, path_select,
+                    recv_seqno, dec.seqno, fpub.rte.name );
         }
         /* these should be in order, otherwise message loss occurred */
-        n.inbox.set_recv( dec.seqno, type );
+        n.inbox.set_path_recv( path_select, dec.seqno, type );
         switch ( type ) {
           case U_INBOX_SUBS:      return this->sub_db.recv_subs_request( fpub, n, dec );
           case U_INBOX_REM:       return this->console.recv_remote_request( fpub, n, dec );
@@ -1361,13 +1341,14 @@ SessionMgr::on_msg( EvPublish &pub ) noexcept
         }
       }
       else {
-        n.printf( "%.*s ignoring inbox seqno replay %" PRIu64 " -> %" PRIu64 " (%s)\n",
-                  (int) fpub.subject_len, fpub.subject,
-                  n.inbox.recv_seqno, dec.seqno, fpub.rte.name );
+        n.printf(
+       "%.*s ignoring inbox seqno(%u) replay %" PRIu64 " -> %" PRIu64 " (%s)\n",
+                  (int) fpub.subject_len, fpub.subject, path_select,
+                  recv_seqno, dec.seqno, fpub.rte.name );
         fpub.status = FRAME_STATUS_DUP_SEQNO;
       }
       break;
-
+    }
     case U_MCAST_SYNC:
       return this->user_db.recv_mcast_sync_request( fpub, n, dec ); /* _M.sync */
 
@@ -1415,13 +1396,16 @@ SessionMgr::dispatch_console( MsgFramePublish &fpub,  UserBridge &n,
 
   /* if _I.Nonce.<inbox_ret>, find the inbox_ret */
   if ( dec.inbox_ret != 0 || dec.type == U_INBOX_ANY ) {
-    if ( n.inbox.recv_seqno != 0 && dec.seqno != n.inbox.recv_seqno + 1 ) {
-      n.printf( "%.*s missing inbox return seqno %" PRIu64 " -> %" PRIu64 " (%s)\n",
-                (int) fpub.subject_len, fpub.subject,
-                n.inbox.recv_seqno, dec.seqno, fpub.rte.name );
+    uint8_t  path_select = dec.msg->caba.get_path();
+    uint64_t recv_seqno  = n.inbox.next_path_recv( path_select );
+    if ( recv_seqno != 0 && dec.seqno != recv_seqno + 1 ) {
+      n.printf(
+        "%.*s missing inbox return seqno(%u) %" PRIu64 " -> %" PRIu64 " (%s)\n",
+                (int) fpub.subject_len, fpub.subject, path_select,
+                recv_seqno, dec.seqno, fpub.rte.name );
     }
     /* these should be in order, otherwise message loss occurred */
-    n.inbox.set_recv( dec.seqno, dec.type );
+    n.inbox.set_path_recv( path_select, dec.seqno, dec.type );
     if ( dec.type != U_INBOX_ANY ) {
       const char * num = &fpub.subject[ this->ibx.len ];
       size_t       len = fpub.subject_len - this->ibx.len;
@@ -1545,7 +1529,7 @@ SessionMgr::publish( PubMcastData &mc ) noexcept
   }
 
   uint16_t option = mc.option;
-  option &= ~( ( COST_PATH_COUNT - 1 ) << CABA_OPT_MC_SHIFT );
+  option &= ~( CABA_OPT_MC_MASK << CABA_OPT_MC_SHIFT );
   if ( fl.get_type() == CABA_MCAST ||
        ( is_mcast_prefix && mc.path < COST_PATH_COUNT ) ) {
     if ( mc.path >= COST_PATH_COUNT )
@@ -1606,10 +1590,8 @@ SessionMgr::publish( PubMcastData &mc ) noexcept
   if ( forward.first( tport_id ) ) {
     do {
       rte = this->user_db.transport_tab.ptr[ tport_id ];
-      if ( debug_sess ) {
-        printf( "pub %.*s (0x%x) path %u to %s\n",
-                 (int) mc.sublen, mc.sub, h, mc.path_select, rte->name );
-      }
+      d_sess( "pub %.*s (0x%x) path %u to %s\n",
+              (int) mc.sublen, mc.sub, h, mc.path_select, rte->name );
       EvPublish pub( mc.sub, mc.sublen, NULL, 0, m.msg, m.len(),
                      rte->sub_route, *this, h, CABA_TYPE_ID );
       pub.shard = mc.path_select;
@@ -1643,6 +1625,21 @@ SessionMgr::forward_uid_inbox( TransportRoute &src_rte,  EvPublish &fwd,
   InboxBuf  ibx( n->bridge_id );
   CabaFlags fl( CABA_INBOX );
 
+  uint8_t path_select = 0;
+  UserRoute * u_ptr = NULL;
+  if ( ! fwd.is_pub_type( PUB_TYPE_SERIAL ) ) {
+    path_select          = caba_hash_to_path( fwd.subj_hash );
+    UidSrcPath  & path   = n->src_path[ path_select ];
+    UserRoute   * u_path = n->user_route_ptr( this->user_db, path.tport );
+    if ( u_path->is_valid() )
+      u_ptr = u_path;
+  }
+  if ( u_ptr == NULL ) {
+    path_select = 0;
+    u_ptr = n->primary( this->user_db );
+  }
+  d_sess( "any(%.*s) select(%u) %s\n", (int) fwd.subject_len, fwd.subject,
+          path_select, u_ptr->rte.name );
   ibx.s( _ANY );
 
   MsgEst e( ibx.len() );
@@ -1666,7 +1663,7 @@ SessionMgr::forward_uid_inbox( TransportRoute &src_rte,  EvPublish &fwd,
   m.reserve( e.sz );
 
   m.open( this->user_db.bridge_id.nonce, ibx.len() )
-   .seqno ( n->inbox.next_send( U_INBOX_ANY ) );
+   .seqno ( n->inbox.next_path_send( path_select, U_INBOX_ANY ) );
 
   m.subject( fwd.subject, fwd.subject_len );
   if ( fwd.reply_len != 0 )
@@ -1677,7 +1674,7 @@ SessionMgr::forward_uid_inbox( TransportRoute &src_rte,  EvPublish &fwd,
     m.hdr_len( fwd.hdr_len );
   if ( fwd.suf_len != 0 )
     m.suf_len( fwd.suf_len );
-  fl.set_opt( CABA_OPT_ANY );
+  fl.set_opt_path( CABA_OPT_ANY, path_select );
 
   uint32_t h = ibx.hash();
 
@@ -1699,9 +1696,9 @@ SessionMgr::forward_uid_inbox( TransportRoute &src_rte,  EvPublish &fwd,
     m.sign_frag( ibx.buf, ibx.len(), frag, frag_sz,
                  *this->user_db.session_key );
   }
-  return this->user_db.forward_to_primary_inbox( *n, ibx, h, m.msg, m.len(),
-                                                 &src_rte, frag, frag_sz,
-                                                 fwd.src_route );
+  return this->user_db.forward_to_inbox( *n, ibx, h, m.msg, m.len(),
+                                         &src_rte, frag, frag_sz,
+                                         fwd.src_route, u_ptr );
 }
 /* find a peer target for an _INBOX endpoint, and send it direct to the peer */
 bool
@@ -1788,7 +1785,7 @@ SessionMgr::forward_ipc( TransportRoute &src_rte,  EvPublish &pub ) noexcept
   uint8_t path_select = 0;
   if ( ! pub.is_pub_type( PUB_TYPE_SERIAL ) ) {
     path_select = caba_hash_to_path( pub.subj_hash );
-    fl.set_opt( path_select << CABA_OPT_MC_SHIFT );
+    fl.set_opt_path( 0, path_select );
   }
   MsgEst e( pub.subject_len );
   e.seqno       ()
@@ -1978,8 +1975,7 @@ SessionMgr::send_ack( const MsgFramePublish &pub,  UserBridge &n,
   dec.get_ival<uint64_t>( FID_SEQNO, ref_seqno );
   if ( ! dec.get_ival<uint64_t>( FID_STAMP, stamp ) || stamp == 0 )
     stamp = current_realtime_ns();
-  uint16_t opt         = dec.msg->caba.get_opt();
-  uint8_t  path_select = ( opt >> CABA_OPT_MC_SHIFT ) % COST_PATH_COUNT;
+  uint8_t  path_select = dec.msg->caba.get_path();
   d = this->user_db.peer_dist.calc_transport_cache( n.uid, pub.rte.tport_id,
                                                     path_select );
   MsgCat m;
@@ -2053,10 +2049,6 @@ void ConsoleRoute::write( void ) noexcept {}
 void ConsoleRoute::read( void ) noexcept {}
 void ConsoleRoute::process( void ) noexcept {}
 void ConsoleRoute::release( void ) noexcept {}
-void QueueRoute::write( void ) noexcept {}
-void QueueRoute::read( void ) noexcept {}
-void QueueRoute::process( void ) noexcept {}
-void QueueRoute::release( void ) noexcept {}
 
 #if 0
 void

@@ -92,7 +92,7 @@ SubDB::sub_start( SubArgs &ctx ) noexcept
   if ( status == SUB_OK || status == SUB_UPDATED ) {
     this->update_bloom( ctx );
 
-    if ( ctx.bloom_updated )
+    if ( ctx.sub_count == 1 )
       this->fwd_sub( ctx );
 
     if ( ctx.resize_bloom )
@@ -123,7 +123,7 @@ SubDB::sub_stop( SubArgs &ctx ) noexcept
   if ( status == SUB_OK || status == SUB_UPDATED ) {
     this->update_bloom( ctx );
 
-    if ( ctx.bloom_updated )
+    if ( ctx.sub_count == 0 )
       this->fwd_sub( ctx );
 
     if ( ctx.resize_bloom )
@@ -242,7 +242,8 @@ SubDB::fwd_sub( SubArgs &ctx ) noexcept
    .subject    ( ctx.sublen )
    .queue      ( ctx.queue_len )
    .queue_hash ()
-   .queue_refs ();
+   .queue_refs ()
+   .bloom_upd  ();
 
   MsgCat m;
   m.reserve( e.sz );
@@ -260,6 +261,7 @@ SubDB::fwd_sub( SubArgs &ctx ) noexcept
     if ( ctx.queue_refs != 0 )
       m.queue_refs ( ctx.queue_refs );
   }
+  m.bloom_upd( ctx.bloom_updated );
   uint32_t h = s.hash();
   m.close( e.sz, h, CABA_RTR_ALERT );
   m.sign( s.msg, s.len(), *this->user_db.session_key );
@@ -634,6 +636,10 @@ SubDB::recv_sub_start( const MsgFramePublish &pub,  UserBridge &n,
     size_t       sublen = dec.mref[ FID_SUBJECT ].fsize;
     const char * sub    = (const char *) dec.mref[ FID_SUBJECT ].fptr;
     uint32_t     hash, queue_hash, queue_refs;
+    bool         bloom_updated = true;
+
+    if ( dec.test( FID_BLOOM_UPD ) )
+      cvt_number<bool>( dec.mref[ FID_BLOOM_UPD ], bloom_updated );
 
     dec.get_ival<uint32_t>( FID_SUBJ_HASH, hash );
     if ( dec.get_ival<uint32_t>( FID_QUEUE_HASH, queue_hash ) &&
@@ -642,9 +648,11 @@ SubDB::recv_sub_start( const MsgFramePublish &pub,  UserBridge &n,
       size_t       queue_len = dec.mref[ FID_QUEUE ].fsize;
       const char * queue     = (const char *) dec.mref[ FID_QUEUE ].fptr;
       this->uid_route.get_queue_group( queue, queue_len, queue_hash );
-      QueueMatch m = { queue_hash, queue_refs,
-                       QueueMatch::hash2( sub, sublen, hash ) };
-      n.bloom.add_queue_route( SUB_RTE, hash, m );
+      if ( bloom_updated ) {
+        QueueMatch m = { queue_hash, queue_refs,
+                         QueueMatch::hash2( sub, sublen, hash ) };
+        n.bloom.add_queue_route( SUB_RTE, hash, m );
+      }
       TransportRoute *rte = this->user_db.ipc_transport;
       if ( rte != NULL ) {
         NotifyQueue nsub( sub, sublen, NULL, 0, hash, false, 'M', pub.src_route,
@@ -655,7 +663,9 @@ SubDB::recv_sub_start( const MsgFramePublish &pub,  UserBridge &n,
       }
     }
     else {
-      n.bloom.add( hash );
+      if ( bloom_updated ) {
+        n.bloom.add( hash );
+      }
       TransportRoute *rte = this->user_db.ipc_transport;
       if ( rte != NULL ) {
         NotifySub   nsub( sub, sublen, hash, false, 'M', pub.src_route );
@@ -678,11 +688,18 @@ SubDB::recv_sub_stop( const MsgFramePublish &pub,  UserBridge &n,
     size_t       sublen = dec.mref[ FID_SUBJECT ].fsize;
     const char * sub    = (const char *) dec.mref[ FID_SUBJECT ].fptr;
     uint32_t     hash, queue_hash;
+    bool         bloom_updated = true;
+
+    if ( dec.test( FID_BLOOM_UPD ) )
+      cvt_number<bool>( dec.mref[ FID_BLOOM_UPD ], bloom_updated );
 
     dec.get_ival<uint32_t>( FID_SUBJ_HASH, hash );
     if ( dec.get_ival<uint32_t>( FID_QUEUE_HASH, queue_hash ) ) {
-      QueueMatch m = { queue_hash, 0, QueueMatch::hash2( sub, sublen, hash ) };
-      n.bloom.del_queue_route( SUB_RTE, hash, m );
+      if ( bloom_updated ) {
+        QueueMatch m = { queue_hash, 0,
+                         QueueMatch::hash2( sub, sublen, hash ) };
+        n.bloom.del_queue_route( SUB_RTE, hash, m );
+      }
       TransportRoute *rte = this->user_db.ipc_transport;
       if ( rte != NULL ) {
         NotifyQueue nsub( sub, sublen, NULL, 0, hash, false, 'M',
@@ -693,7 +710,9 @@ SubDB::recv_sub_stop( const MsgFramePublish &pub,  UserBridge &n,
       }
     }
     else {
-      n.bloom.del( hash );
+      if ( bloom_updated ) {
+        n.bloom.del( hash );
+      }
       TransportRoute *rte = this->user_db.ipc_transport;
       if ( rte != NULL ) {
         NotifySub   nsub( sub, sublen, hash, false, 'M', pub.src_route );
