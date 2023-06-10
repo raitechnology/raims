@@ -639,7 +639,8 @@ enum MsgFrameFlags {
   MSG_FRAME_ACK_CONTROL     = 1, /* if ack / trace was handled */
   MSG_FRAME_TPORT_CONTROL   = 2, /* if transport routing was handled */
   MSG_FRAME_IPC_CONTROL     = 4, /* if ipc routing was handled */
-  MSG_FRAME_CONSOLE_CONTROL = 8  /* if console routing was handled */
+  MSG_FRAME_CONSOLE_CONTROL = 8, /* if console routing was handled */
+  MSG_FRAME_IPC_ROUTE       = 16 /* if ipc route has dest */
 };
 
 struct TransportRoute;

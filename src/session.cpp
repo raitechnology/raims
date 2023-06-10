@@ -909,8 +909,10 @@ IpcRoute::on_msg( EvPublish &pub ) noexcept
   if ( fmt == CABA_TYPE_ID ) {
     fmt = fpub.dec.msg->caba_to_rvmsg( mem, data, datalen );
   }*/
-  bool b = true;
-  size_t i, count = this->user_db.transport_tab.count;
+  bool     b = true;
+  size_t   i, count = this->user_db.transport_tab.count;
+  uint32_t rcnt,
+           total_rcnt = 0;
   if ( seq.tport_mask != 0 ) {
     uint32_t mask = seq.tport_mask; /* ipc tports (currently only one) */
     for ( i = 0; mask != 0; i++ ) {
@@ -925,7 +927,9 @@ IpcRoute::on_msg( EvPublish &pub ) noexcept
                          n.host_id, dec.seqno );
           pub.hdr_len = hdr_len;
           pub.suf_len = suf_len;
-          b &= rte->sub_route.forward_except( pub, this->mgr.router_set, this );
+          b &= rte->sub_route.forward_except_with_cnt( pub,this->mgr.router_set,
+                                                       rcnt, this );
+          total_rcnt += rcnt;
         }
       }
     }
@@ -940,7 +944,9 @@ IpcRoute::on_msg( EvPublish &pub ) noexcept
                        n.host_id, dec.seqno );
         pub.hdr_len = hdr_len;
         pub.suf_len = suf_len;
-        b &= rte->sub_route.forward_except( pub, this->mgr.router_set, this );
+        b &= rte->sub_route.forward_except_with_cnt( pub, this->mgr.router_set,
+                                                     rcnt, this );
+        total_rcnt += rcnt;
       }
     }
   }
@@ -959,6 +965,10 @@ IpcRoute::on_msg( EvPublish &pub ) noexcept
     dec.get_ival<uint32_t>( FID_HDR_LEN,   val.hdr_len );
     dec.get_ival<uint32_t>( FID_SUF_LEN,   val.suf_len );
     seq.cb->on_data( val );
+    total_rcnt++;
+  }
+  if ( total_rcnt != 0 ) {
+    fpub.flags |= MSG_FRAME_IPC_ROUTE;
   }
   return b;
 }
