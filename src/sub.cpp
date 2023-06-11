@@ -1342,10 +1342,8 @@ SubDB::any_match( const char *sub,  uint16_t sublen,  uint32_t h ) noexcept
     for ( uint32_t uid = 1; uid < this->user_db.next_uid; uid++ ) {
       UserBridge * n = this->user_db.bridge_tab.ptr[ uid ];
       if ( n != NULL && n->is_set( AUTHENTICATED_STATE ) ) {
-        if ( any->mono_time < n->sub_recv_mono_time ) {
-          if ( any->match.match_sub( args, n->bloom ) )
-            set.add( uid );
-        }
+        if ( any->match.match_sub( args, n->bloom ) )
+          set.add( uid );
       }
     }
     any->mono_time = this->sub_update_mono_time;

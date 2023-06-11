@@ -309,8 +309,8 @@ EvTcpTransport::dispatch_msg( void ) noexcept
   MsgFramePublish pub( sub, sublen, this->msg_in.msg, *this, h,
                        (uint8_t) CABA_TYPE_ID, *this->rte,
                        this->rte->sub_route );
-  d_tcp( "< ev_tcp(%s) dispatch %.*s (%" PRIu64 ")\n", this->rte->name,
-         (int) pub.subject_len, pub.subject, this->msgs_recv + 1 );
+  d_tcp( "< ev_tcp(%s,fd=%u) dispatch %.*s (%" PRIu64 ")\n", this->rte->name,
+         this->fd, (int) pub.subject_len, pub.subject, this->msgs_recv + 1 );
   BPData * data = NULL;
   if ( ( this->tcp_state & ( TCP_BACKPRESSURE | TCP_BUFFERSIZE ) ) != 0 )
     data = this;
@@ -391,8 +391,8 @@ bool
 EvTcpTransport::fwd_msg( EvPublish &pub ) noexcept
 {
   uint32_t idx = 0;
-  d_tcp( "> ev_tcp(%s) fwd %.*s (%" PRIu64 ")\n", this->rte->name,
-          (int) pub.subject_len, pub.subject, this->msgs_sent + 1 );
+  d_tcp( "> ev_tcp(%s,fd=%u) fwd %.*s (%" PRIu64 ")\n", this->rte->name,
+         this->fd, (int) pub.subject_len, pub.subject, this->msgs_sent + 1 );
 #if 0
   if ( pub.msg_len > 0x38 ) {
     if ( ::memcmp( &((char *) pub.msg)[ 0x30 ], "_X.HB", 5 ) == 0 ) {
