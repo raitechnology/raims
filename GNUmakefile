@@ -142,6 +142,8 @@ lnk_lib     += $(libd)/libraims.a
 dlnk_lib    :=
 lnk_dep     := $(libd)/libraims.a
 dlnk_dep    :=
+ms_dlnk_lib := -L$(pwd)/$(libd) -lraims
+ms_dlnk_dep := $(libd)/libraims.$(dll)
 
 ifneq (,$(ds_home))
 ds_lib      := $(ds_home)/$(libd)/libraids.a
@@ -659,9 +661,9 @@ ms_server_cfile := src/server.cpp
 ms_server_objs  := $(addprefix $(objd)/, $(addsuffix .o, $(ms_server_files)))
 ms_server_deps  := $(addprefix $(dependd)/, $(addsuffix .d, $(ms_server_files)))
 ms_server_libs  :=
-ms_server_lnk   := $(lnk_lib)
+ms_server_lnk   := $(ms_dlnk_lib) $(dlnk_lib)
 
-$(bind)/ms_server$(exe): $(ms_server_objs) $(ms_server_libs) $(lnk_dep)
+$(bind)/ms_server$(exe): $(ms_server_objs) $(ms_server_libs) $(dlnk_dep) $(ms_dlnk_dep)
 
 all_exes    += $(bind)/ms_server$(exe)
 all_depends += $(ms_server_deps)
