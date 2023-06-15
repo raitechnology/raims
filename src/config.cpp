@@ -811,7 +811,7 @@ ConfigDB::parse_include( MDMsg &msg, MDName &, MDReference &mref ) noexcept
 }
 
 int
-ConfigFilePrinter::open( const char *path ) noexcept
+ConfigFilePrinter::open_file( const char *path ) noexcept
 {
   if ( this->MDOutput::open( path, "wb" ) != 0 ) {
     fprintf( stderr, "unable to write %s: %d/%s\n", path, errno,
@@ -822,7 +822,7 @@ ConfigFilePrinter::open( const char *path ) noexcept
 }
 
 int
-ConfigDirPrinter::open( const char *kind,  const StringVal &sv ) noexcept
+ConfigDirPrinter::open_dir( const char *kind,  const StringVal &sv ) noexcept
 {
   const char * sep = "/";
   char path[ 1024 ];
@@ -840,7 +840,7 @@ ConfigDirPrinter::open( const char *kind,  const StringVal &sv ) noexcept
    .s( ".yaml.new" )
    .end();
 
-  if ( this->ConfigFilePrinter::open( path ) != 0 ) {
+  if ( this->ConfigFilePrinter::open_file( path ) != 0 ) {
     fprintf( stderr, "unable to write %s: %d/%s\n", path, errno,
              strerror( errno ) );
     return -1;
@@ -852,7 +852,7 @@ int
 ConfigTree::save_tport( const ConfigTree::Transport &tport ) const noexcept
 {
   ConfigDirPrinter out( this->cfg_name );
-  if ( out.open( "tport_", tport.tport ) != 0 )
+  if ( out.open_dir( "tport_", tport.tport ) != 0 )
     return -1;
   ConfigJson cfg;
   JsonValue *val = cfg.copy( tport );
@@ -867,7 +867,7 @@ ConfigTree::save_startup( const TransportArray &listen,
 {
   ConfigDirPrinter out( this->cfg_name );
   StringVal        mt;
-  if ( out.open( "startup", mt ) != 0 )
+  if ( out.open_dir( "startup", mt ) != 0 )
     return -1;
   ConfigJson cfg;
   JsonValue *val = cfg.copy( NULL, PRINT_STARTUP, NULL, &listen, &connect );
@@ -890,7 +890,7 @@ ConfigTree::save_file( const TransportArray &listen,
   p.x( this->cfg_name.val, this->cfg_name.len )
    .s( ".new" )
    .end();
-  if ( out.open( path ) != 0 )
+  if ( out.open_file( path ) != 0 )
     return -1;
 
   ConfigJson cfg;

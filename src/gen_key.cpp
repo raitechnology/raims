@@ -264,7 +264,7 @@ done:;
     }
     printf( "- Output config to \"%s\"\n", out_file );
     ConfigFilePrinter p;
-    if ( p.open( out_file ) != 0 )
+    if ( p.open_file( out_file ) != 0 )
       return 1;
     tree->print_y( p, PRINT_NORMAL );
     p.close();

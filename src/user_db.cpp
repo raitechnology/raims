@@ -2022,7 +2022,7 @@ UserDB::write_hostid_cache( void ) noexcept
        .x( this->user.user.val, this->user.user.len )
        .x( ".yaml", 5 ).end();
   ConfigFilePrinter out;
-  if ( out.open( npath.start ) == 0 ) {
+  if ( out.open_file( npath.start ) == 0 ) {
     ar->print_yaml( &out );
     out.close();
 #if defined( _MSC_VER ) || defined( __MINGW32__ )

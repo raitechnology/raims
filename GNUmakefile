@@ -660,10 +660,15 @@ ms_server_files := server
 ms_server_cfile := src/server.cpp
 ms_server_objs  := $(addprefix $(objd)/, $(addsuffix .o, $(ms_server_files)))
 ms_server_deps  := $(addprefix $(dependd)/, $(addsuffix .d, $(ms_server_files)))
-ms_server_libs  :=
-ms_server_lnk   := $(ms_dlnk_lib) $(dlnk_lib)
+#ms_server_libs  :=
+#ms_server_lnk   := $(ms_dlnk_lib) $(dlnk_lib)
 
-$(bind)/ms_server$(exe): $(ms_server_objs) $(ms_server_libs) $(dlnk_dep) $(ms_dlnk_dep)
+#$(bind)/ms_server$(exe): $(ms_server_objs) $(ms_server_libs) $(dlnk_dep) $(ms_dlnk_dep)
+
+ms_server_libs  :=
+ms_server_lnk   := $(lnk_lib)
+
+$(bind)/ms_server$(exe): $(ms_server_objs) $(ms_server_libs) $(lnk_dep)
 
 all_exes    += $(bind)/ms_server$(exe)
 all_depends += $(ms_server_deps)

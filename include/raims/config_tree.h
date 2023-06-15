@@ -19,12 +19,12 @@ struct ConfigErrPrinter : public md::MDOutput {
     __attribute__((format(printf,2,3)));
 };
 struct ConfigFilePrinter : public md::MDOutput {
-  int open( const char *path ) noexcept;
+  int open_file( const char *path ) noexcept;
 };
 struct ConfigDirPrinter : public ConfigFilePrinter {
   const StringVal & dir_name;
   ConfigDirPrinter( const StringVal &d ) : dir_name( d ) {}
-  int open( const char *kind,  const StringVal &sv ) noexcept;
+  int open_dir( const char *kind,  const StringVal &sv ) noexcept;
 };
 
 enum WhichYaml {
