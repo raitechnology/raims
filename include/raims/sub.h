@@ -282,6 +282,40 @@ struct QueueSubArray : public kv::ArrayCount<QueueSubTab *, 4> {
   SubStatus stop( PatternArgs &ctx ) noexcept;
 };
 
+struct WindowHistory {
+  static const uint32_t H_SZ = 32;
+  struct {
+    uint64_t time;
+    size_t   size,
+             count;
+  } hist[ H_SZ ];
+  uint32_t hd, sz;
+  WindowHistory() : hd( 0 ), sz( 0 ) {}
+  void add( uint64_t time,  size_t size,  size_t count ) {
+    uint32_t i = this->hd++ % H_SZ;
+    if ( this->sz < H_SZ ) this->sz++;
+    this->hist[ i ].time  = time;
+    this->hist[ i ].size  = size;
+    this->hist[ i ].count = count;
+  }
+  bool first( uint32_t &i,  uint64_t &time,  size_t &size,  size_t &count ) {
+    i = 0;
+    return this->next( i, time, size, count );
+  }
+  bool next( uint32_t &i,  uint64_t &time,  size_t &size,  size_t &count ) {
+    if ( i == this->sz ) {
+      time = 0; size = count = 0;
+      return false;
+    }
+    uint32_t j = ++i;
+    j     = ( this->hd - j ) % H_SZ;
+    time  = this->hist[ j ].time;
+    size  = this->hist[ j ].size;
+    count = this->hist[ j ].count;
+    return true;
+  }
+};
+
 /* 33 is ~10 second frames, 35 is 32 billion sequences, 9 hours at 1 mill/sec */
 static inline uint64_t seqno_init( uint64_t time ) {
   return ( time >> 33 ) << 35;
@@ -349,13 +383,17 @@ struct PubTab {
          * pub_old;
   uint64_t flip_time,
            trailing_time;
-  size_t   max_size;
+  size_t   max_size,
+           max_count;
+  WindowHistory wh;
+
   PubTab() {
     this->pub           = &this->pub1;
     this->pub_old       = &this->pub2;
     this->flip_time     = 0;
     this->trailing_time = 0;
     this->max_size      = 0;
+    this->max_count     = 0;
   }
   Pub *upsert( uint32_t h,  const char *sub,  uint16_t sublen,
                kv::RouteLoc &loc ) {
@@ -404,21 +442,8 @@ struct PubTab {
     return p;
   }
   /* limit size of pub sequences */
-  bool flip( size_t win_size,  uint64_t cur_time ) {
-    PubT * p = this->pub;
-    size_t sz = p->mem_size();
-    if ( sz > win_size ) {
-      if ( sz > this->max_size )
-        this->max_size = sz;
-      this->pub_old->release();
-      this->pub           = this->pub_old;
-      this->pub_old       = p;
-      this->trailing_time = this->flip_time;
-      this->flip_time     = cur_time;
-      return true;
-    }
-    return false;
-  }
+  bool flip( size_t win_size,  size_t win_count,  uint64_t cur_time,
+             bool double_time,  bool quad_time ) noexcept;
 };
 
 struct SeqnoSave {
@@ -550,7 +575,9 @@ struct SeqnoTab {
            trailing_time;
   size_t   seqno_ht_size,
            old_ht_size,
-           max_size;
+           max_size,
+           max_count;
+  WindowHistory wh;
 
   SeqnoTab() {
     this->tab     = &this->tab1;
@@ -560,6 +587,7 @@ struct SeqnoTab {
     this->seqno_ht_size = 0;
     this->old_ht_size   = 0;
     this->max_size      = 0;
+    this->max_count     = 0;
   }
   SubSeqno *upsert( uint32_t h,  const char *sub,  uint16_t sublen,
                     kv::RouteLoc &loc, kv::RouteLoc &loc2,
@@ -619,29 +647,8 @@ struct SeqnoTab {
       this->tab_old->remove( loc2 );
   }
   /* limit size of pub sequences */
-  bool flip( size_t win_size,  uint64_t cur_time ) {
-    SeqnoT * p = this->tab;
-    size_t sz = p->mem_size() + this->seqno_ht_size;
-    if ( sz > win_size ) {
-      if ( sz > this->max_size )
-        this->max_size = sz;
-      kv::RouteLoc loc;
-      if ( this->old_ht_size > 0 ) {
-        for ( SubSeqno *s = this->tab_old->first( loc ); s != NULL;
-              s = this->tab_old->next( loc ) )
-          s->release();
-      }
-      this->tab_old->release();
-      this->tab           = this->tab_old;
-      this->old_ht_size   = this->seqno_ht_size;
-      this->seqno_ht_size = 0;
-      this->tab_old       = p;
-      this->trailing_time = this->flip_time;
-      this->flip_time     = cur_time;
-      return true;
-    }
-    return false;
-  }
+  bool flip( size_t win_size,  size_t win_count,  uint64_t cur_time,
+             bool double_time,  bool quad_time ) noexcept;
 };
 
 typedef kv::RouteVec<InboxSub> InboxTab;

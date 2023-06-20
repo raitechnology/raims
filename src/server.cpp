@@ -47,16 +47,6 @@ struct MySessionMgr : public SessionMgr, public SubOnMsg {
     : SessionMgr( p, l, c, u, s, st, sup ), term( 0 ) {}
 };
 
-static const char *
-get_arg( int argc, char *argv[], int b, const char *f,
-         const char *def ) noexcept
-{
-  for ( int i = 1; i < argc - b; i++ )
-    if ( ::strcmp( f, argv[ i ] ) == 0 ) /* -p port */
-      return argv[ i + b ];
-  return def; /* default value */
-}
-
 bool
 TermCallback::on_data( char *buf,  size_t &buflen ) noexcept
 {
@@ -93,8 +83,20 @@ TermCallback::on_close( void ) noexcept
 {
 }
 
+static const char *
+get_arg( int argc, const char *argv[], int b, const char *f,
+         const char *g, const char *def ) noexcept
+{
+  for ( int i = 1; i < argc - b; i++ ) {
+    if ( ( f != NULL && ::strcmp( f, argv[ i ] ) == 0 ) ||
+         ( g != NULL && ::strcmp( g, argv[ i ] ) == 0 ) )
+      return argv[ i + b ];
+  }
+  return def; /* default value */
+}
+
 int
-main( int argc, char *argv[] )
+main( int argc, const char *argv[] )
 {
   const char * cfg         = NULL,
              * rv_file     = NULL,
@@ -150,7 +152,6 @@ main( int argc, char *argv[] )
     }
   }
 
-  if ( is_rvd ) {
   #define RVD_HELP \
   "\n" \
   "   -cfg               : config dir/file (default: exe_path/rv.yaml)\n" \
@@ -167,33 +168,9 @@ main( int argc, char *argv[] )
   "   -no-mcast          : no multicast\n" \
   "   -console           : run with console\n" \
   "   -pidfile           : write daemon pid to file\n" \
-  "   -hostid            : host identity\n"
-    cfg         = get_arg( argc, argv, 1, "-cfg", rv_file );
-    reliability = get_arg( argc, argv, 1, "-reliability", NULL );
-    user        = get_arg( argc, argv, 1, "-user", NULL );
-    log_file    = get_arg( argc, argv, 1, "-log", NULL );
-    if ( log_file == NULL )
-      log_file = get_arg( argc, argv, 1, "-logfile", NULL );
-    log_rotate  = get_arg( argc, argv, 1, "-log-rotate", NULL );
-    if ( log_rotate == NULL )
-      log_rotate = get_arg( argc, argv, 1, "-log-max-size", NULL );
-    log_max_rot = get_arg( argc, argv, 1, "-log-max-rotations", NULL );
-    no_perm     = get_arg( argc, argv, 0, "-no-permanent", NULL );
-    foreground  = get_arg( argc, argv, 0, "-foreground", NULL );
-    listen      = get_arg( argc, argv, 1, "-listen", "7500" );
-    no_http     = get_arg( argc, argv, 0, "-no-http", NULL );
-    http        = get_arg( argc, argv, 1, "-http", NULL );
-    no_mcast    = get_arg( argc, argv, 0, "-no-multicast", NULL );
-    use_console = get_arg( argc, argv, 0, "-console", NULL );
-    pid_file    = get_arg( argc, argv, 1, "-pidfile", NULL );
-    hostid      = get_arg( argc, argv, 1, "-hostid", NULL );
-    if ( use_console != NULL )
-      foreground = use_console;
-    get_help    = get_arg( argc, argv, 0, "-help", NULL );
-    if ( get_help == NULL )
-      get_help = get_arg( argc, argv, 0, "-version", NULL );
-  }
-  else {
+  "   -hostid            : host identity\n" \
+  "   -debug             : debug flags\n"
+
   #define MS_SERVER_HELP \
   "[-d dir] [-a file] -u user.svc -t tport.listen [...]\n" \
   "   -d dir         : config dir/file (default: config)\n" \
@@ -209,24 +186,9 @@ main( int argc, char *argv[] )
   "   -c             : run with console\n" \
   "   -b             : fork and detach from terminal\n"
 
-    cfg         = get_arg( argc, argv, 1, "-d", cfg_dir );
-    user        = get_arg( argc, argv, 1, "-u", NULL );
-    tports      = get_arg( argc, argv, 1, "-t", NULL );
-    nets        = get_arg( argc, argv, 1, "-n", NULL );
-    log_file    = get_arg( argc, argv, 1, "-l", NULL );
-    debug       = get_arg( argc, argv, 1, "-f", NULL );
-    ipc_name    = get_arg( argc, argv, 1, "-i", NULL );
-    map_file    = get_arg( argc, argv, 1, "-m", NULL );
-    db_num      = get_arg( argc, argv, 1, "-D", NULL );
-    hostid      = get_arg( argc, argv, 1, "-x", NULL );
-    use_console = get_arg( argc, argv, 0, "-c", NULL );
-    background  = get_arg( argc, argv, 0, "-b", NULL );
-    get_help    = get_arg( argc, argv, 0, "-h", NULL );
-    if ( use_console != NULL )
-      background = NULL;
-    if ( get_help == NULL )
-      get_help = get_arg( argc, argv, 0, "-v", NULL );
-  }
+  get_help    = get_arg( argc, argv, 0, "-h", "-help", NULL );
+  if ( get_help == NULL )
+    get_help = get_arg( argc, argv, 0, "-v", "-version", NULL );
   if ( get_help != NULL ) {
     if ( is_rvd )
       printf( "%s " RVD_HELP "RaiMS version %s\n",
@@ -236,6 +198,39 @@ main( int argc, char *argv[] )
               argv[ 0 ], ms_get_version() );
     return 0;
   }
+
+  cfg         = get_arg( argc, argv, 1, "-d", "-cfg", is_rvd ? rv_file : cfg_dir );
+  reliability = get_arg( argc, argv, 1, NULL, "-reliability", NULL );
+  user        = get_arg( argc, argv, 1, "-u", "-user", NULL );
+  log_file    = get_arg( argc, argv, 1, "-l", "-log", NULL );
+  if ( log_file == NULL )
+    log_file  = get_arg( argc, argv, 1, NULL, "-logfile", NULL );
+  log_rotate  = get_arg( argc, argv, 1, NULL, "-log-rotate", NULL );
+  if ( log_rotate == NULL )
+    log_rotate = get_arg( argc, argv, 1, NULL, "-log-max-size", NULL );
+  log_max_rot = get_arg( argc, argv, 1, NULL, "-log-max-rotations", NULL );
+  no_perm     = get_arg( argc, argv, 0, NULL, "-no-permanent", NULL );
+  foreground  = get_arg( argc, argv, 0, NULL, "-foreground", NULL );
+  listen      = get_arg( argc, argv, 1, NULL, "-listen", is_rvd ? "7500" : NULL );
+  no_http     = get_arg( argc, argv, 0, NULL, "-no-http", NULL );
+  http        = get_arg( argc, argv, 1, NULL, "-http", NULL );
+  no_mcast    = get_arg( argc, argv, 0, NULL, "-no-multicast", NULL );
+  use_console = get_arg( argc, argv, 0, "-c", "-console", NULL );
+  pid_file    = get_arg( argc, argv, 1, NULL, "-pidfile", NULL );
+  hostid      = get_arg( argc, argv, 1, "-x", "-hostid", NULL );
+  debug       = get_arg( argc, argv, 1, "-f", "-debug", NULL );
+  tports      = get_arg( argc, argv, 1, "-t", NULL, NULL );
+  nets        = get_arg( argc, argv, 1, "-n", NULL, NULL );
+  ipc_name    = get_arg( argc, argv, 1, "-i", NULL, NULL );
+  map_file    = get_arg( argc, argv, 1, "-m", NULL, NULL );
+  db_num      = get_arg( argc, argv, 1, "-D", NULL, NULL );
+  background  = get_arg( argc, argv, 0, "-b", NULL, NULL );
+
+  if ( use_console != NULL )
+    background = NULL;
+  if ( use_console != NULL )
+    foreground = use_console;
+
 #if defined( _MSC_VER ) || defined( __MINGW32__ )
   ws_global_init(); /* gethostname() needs WSAStartup() */
 #endif
@@ -423,7 +418,7 @@ main( int argc, char *argv[] )
     for ( int i = 2; status == 0; i++ ) {
       if ( ! sess.add_network( n, n_len, s, s_len, false ) )
         status = -1;
-      nets = get_arg( argc, argv, i, "-n", NULL );
+      nets = get_arg( argc, argv, i, "-n", NULL, NULL );
       if ( nets == NULL || nets[ 0 ] == '-' )
         break;
       n     = ::strchr( s = nets, '.' );
@@ -447,7 +442,7 @@ main( int argc, char *argv[] )
         status = -1;
         break;
       }
-      tports = get_arg( argc, argv, i, "-t", NULL );
+      tports = get_arg( argc, argv, i, "-t", NULL, NULL );
       if ( tports == NULL || tports[ 0 ] == '-' )
         break;
       tport = tree->find_transport( tports, ::strlen( tports ), &conn );

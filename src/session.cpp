@@ -66,12 +66,16 @@ SessionMgr::SessionMgr( EvPoll &p,  Logger &l,  ConfigTree &c,
              connect_mgr( *this, this->user_db, p, p.register_type( "ev_tcp_tport_client" ) ),
              pub_window_mono_time( 0 ), sub_window_mono_time( 0 ),
              name_svc_mono_time( 0 ),
-             pub_window_size( 4 * 1024 * 1024 ),
+             pub_window_size( 8 * 1024 * 1024 ),
              sub_window_size( 8 * 1024 * 1024 ),
+             pub_window_count( 100 * 1000 ), pub_window_autoscale( 100 * 1000 ),
+             sub_window_count( 40 * 1000 ),
              pub_window_ival( sec_to_ns( 10 ) ),
              sub_window_ival( sec_to_ns( 10 ) ),
-             tcp_timeout( 10 ), tcp_noencrypt( false ), tcp_ipv4( true ),
-             tcp_ipv6( true ), session_started( false ), idle_busy( 16 )
+             last_autoscale( 0 ), msg_loss_count( 0 ), frame_loss_count( 0 ),
+             tcp_connect_timeout( 10 ), tcp_noencrypt( false ),
+             tcp_ipv4( true ), tcp_ipv6( true ), session_started( false ),
+             idle_busy( 16 )
 {
   this->sock_opts = OPT_NO_POLL;
   this->bp_flags  = BP_FORWARD | BP_NOTIFY;
@@ -114,72 +118,64 @@ bool
 SessionMgr::load_parameters( void ) noexcept
 {
   const char *s = "", *val = NULL;
-  uint64_t hb_ival, rel_ival, time_val, bytes_val, host_id;
+  /*uint64_t hb_ival, rel_ival, time_val, bytes_val, host_id;*/
+  ConfigTree::ParametersList &plist = this->tree.parameters;
+  StringTab & st = this->user_db.string_tab;
+  uint64_t tcp_write_timeout = this->poll.wr_timeout_ns,
+           tcp_write_highwater = this->poll.send_highwater,
+           idle = this->idle_busy;
+  uint32_t tcp_conn_timeout = this->tcp_connect_timeout;
   bool ipv4_only = false, ipv6_only = false;
   bool cache_hostid = true;
 
-  if ( this->tree.parameters.find( s = P_IDLE_BUSY, val, NULL ) ) {
-    uint64_t idle = 0;
-    if ( ! ConfigTree::string_to_uint( val, idle ) )
-      goto fail;
-    if ( idle >= ((uint64_t) 1 << 32) )
-      this->idle_busy = 0xffffffffU;
-    else
-      this->idle_busy = (uint32_t) idle;
-  }
-  if ( this->tree.parameters.find( s = P_PUB_WINDOW_SIZE, val, NULL ) &&
-       ! ConfigTree::string_to_bytes( val, this->pub_window_size ) ) goto fail;
-  if ( this->tree.parameters.find( s = P_SUB_WINDOW_SIZE, val, NULL ) &&
-       ! ConfigTree::string_to_bytes( val, this->sub_window_size ) ) goto fail;
-  if ( this->tree.parameters.find( s = P_PUB_WINDOW_TIME, val, NULL ) &&
-       ! ConfigTree::string_to_nanos( val, this->pub_window_ival ) ) goto fail;
-  if ( this->tree.parameters.find( s = P_SUB_WINDOW_TIME, val, NULL ) &&
-       ! ConfigTree::string_to_nanos( val, this->sub_window_ival ) ) goto fail;
-  if ( this->tree.parameters.find( s = P_HEARTBEAT, val, NULL ) ) {
-    if ( ! ConfigTree::string_to_secs( val, hb_ival ) ) goto fail;
-    this->user_db.hb_interval = (uint32_t) hb_ival;
-  }
-  if ( this->tree.parameters.find( s = P_RELIABILITY, val, NULL ) ) {
-    if ( ! ConfigTree::string_to_secs( val, rel_ival ) ) goto fail;
-    this->user_db.reliability = (uint32_t) rel_ival;
-  }
-  if ( this->tree.parameters.find( s = P_TIMESTAMP, val, NULL ) ) {
+  if ( ! plist.getset_bytes( st, P_IDLE_BUSY, idle ) )
+    return false;
+  this->idle_busy = (uint32_t) idle;
+
+  if ( ! plist.getset_bytes( st, P_PUB_WINDOW_SIZE, this->pub_window_size ) ||
+       ! plist.getset_bytes( st, P_SUB_WINDOW_SIZE, this->sub_window_size ) ||
+       ! plist.getset_bytes( st, P_PUB_WINDOW_COUNT, this->pub_window_count ) ||
+       ! plist.getset_bytes( st, P_PUB_WINDOW_AUTOSCALE, this->pub_window_autoscale ) ||
+       ! plist.getset_bytes( st, P_SUB_WINDOW_COUNT, this->sub_window_count ) ||
+       ! plist.getset_nanos( st, P_PUB_WINDOW_TIME, this->pub_window_ival ) ||
+       ! plist.getset_nanos( st, P_SUB_WINDOW_TIME, this->sub_window_ival ) ||
+       ! plist.getset_secs( st, P_HEARTBEAT, this->user_db.hb_interval ) ||
+       ! plist.getset_secs( st, P_RELIABILITY, this->user_db.reliability ) ||
+       ! plist.getset_bool( st, P_TCP_NOENCRYPT, this->tcp_noencrypt ) ||
+       ! plist.getset_secs( st, P_TCP_CONNECT_TIMEOUT, tcp_conn_timeout ) ||
+       ! plist.getset_nanos( st, P_TCP_WRITE_TIMEOUT, tcp_write_timeout ) ||
+       ! plist.getset_bytes( st, P_TCP_WRITE_HIGHWATER, tcp_write_highwater ) ||
+       ! plist.getset_bool( st, P_TCP_IPV4ONLY, ipv4_only ) ||
+       ! plist.getset_bool( st, P_TCP_IPV6ONLY, ipv6_only ) )
+    return false;
+
+  this->poll.wr_timeout_ns   = tcp_write_timeout;
+  this->poll.so_keepalive_ns = tcp_write_timeout;
+  this->tcp_connect_timeout  = tcp_conn_timeout;
+  this->poll.send_highwater  = tcp_write_highwater;
+
+  if ( plist.find( s = P_TIMESTAMP, val, NULL ) ) {
     if ( val != NULL &&
          ( ::strcmp( val, "gmt" ) == 0 || ::strcmp( val, "GMT" ) == 0 ) )
       tz_stamp_gmt = true;
   }
-  if ( this->tree.parameters.find( s = P_TCP_NOENCRYPT, val, NULL ) ) {
-    if ( ! ConfigTree::string_to_bool( val, this->tcp_noencrypt ) ) goto fail;
-  }
-  if ( this->tree.parameters.find( s = P_TCP_TIMEOUT, val, NULL ) ) {
-    if ( ! ConfigTree::string_to_secs( val, time_val ) ) goto fail;
-    this->tcp_timeout = (int) time_val;
-  }
-  if ( this->tree.parameters.find( s = P_TCP_WRITE_TIMEOUT, val, NULL ) ) {
-    if ( ! ConfigTree::string_to_nanos( val, time_val ) ) goto fail;
-    this->poll.wr_timeout_ns = time_val;
-    this->poll.so_keepalive_ns = time_val;
-  }
-  if ( this->tree.parameters.find( s = P_TCP_WRITE_HIGHWATER, val, NULL ) ) {
-    if ( ! ConfigTree::string_to_bytes( val, bytes_val ) ) goto fail;
-    this->poll.send_highwater = (uint32_t) bytes_val;
-  }
-  if ( this->tree.parameters.find( s = P_TCP_IPV4ONLY, val, NULL ) ) {
-    if ( ! ConfigTree::string_to_bool( val, ipv4_only ) ) goto fail;
-  }
-  if ( this->tree.parameters.find( s = P_TCP_IPV6ONLY, val, NULL ) ) {
-    if ( ! ConfigTree::string_to_bool( val, ipv6_only ) ) goto fail;
-  }
-  if ( this->tree.parameters.find( s = P_HOST_ID, val, NULL ) ) {
+
+  if ( plist.find( s = P_HOST_ID, val, NULL ) ) {
     if ( val != NULL && ( val[ 0 ] == 'r' || val[ 0 ] == 'R' ) ) {
       this->user_db.host_id = this->user_db.rand.next();
       if ( val[ 1 ] != 'c' && val[ 1 ] != 'C' )
         cache_hostid = false;
     }
     else {
-      if ( ! ConfigTree::string_to_uint( val, host_id ) ) goto fail;
-      this->user_db.host_id = htonl( host_id );
-      cache_hostid = false;
+      uint64_t host_id;
+      if ( ! ConfigTree::string_to_uint( val, host_id ) ) {
+        fprintf( stderr, "bad hostid %s value: %s\n", s, val );
+        return false;
+      }
+      else {
+        this->user_db.host_id = htonl( (uint32_t) host_id );
+        cache_hostid = false;
+      }
     }
   }
   if ( cache_hostid ) {
@@ -190,6 +186,7 @@ SessionMgr::load_parameters( void ) noexcept
       }
     }
   }
+
   if ( ipv4_only && ! ipv6_only ) {
     this->tcp_ipv4 = true;
     this->tcp_ipv6 = false;
@@ -200,10 +197,6 @@ SessionMgr::load_parameters( void ) noexcept
   }
   update_tz_stamp();
   return true;
-
-fail:
-  fprintf( stderr, "bad %s value: %s\n", s, val );
-  return false;
 }
 
 int
@@ -449,6 +442,8 @@ SessionMgr::start( void ) noexcept
 {
   printf( "%s: %" PRIu64 " bytes\n", P_PUB_WINDOW_SIZE, this->pub_window_size );
   printf( "%s: %" PRIu64 " bytes\n", P_SUB_WINDOW_SIZE, this->sub_window_size );
+  printf( "%s: %" PRIu64 "\n", P_PUB_WINDOW_COUNT, this->pub_window_count );
+  printf( "%s: %" PRIu64 "\n", P_SUB_WINDOW_COUNT, this->sub_window_count );
   printf( "%s: %" PRIu64 " secs\n", P_PUB_WINDOW_TIME, ns_to_sec( this->pub_window_ival ) );
   printf( "%s: %" PRIu64 " secs\n", P_SUB_WINDOW_TIME, ns_to_sec( this->sub_window_ival ) );
   printf( "%s: %u secs\n", P_HEARTBEAT, this->user_db.hb_interval );
@@ -488,7 +483,6 @@ SessionMgr::start( void ) noexcept
   this->sub_db.seqno_tab.trailing_time = cur_time - this->sub_window_ival;
   this->sub_db.pub_tab.flip_time       = cur_time;
   this->sub_db.pub_tab.trailing_time   = cur_time - this->pub_window_ival;
-  this->sub_db.any_tab.gc_time         = cur_time;
 
   this->timer_ival         = (uint32_t) ( ival_ns / 250 );
   this->user_db.hb_ival_ns = ival_ns;
@@ -558,20 +552,30 @@ SessionMgr::timer_expire( uint64_t tid,  uint64_t ) noexcept
   this->console.on_log( this->log );
 
   if ( cur_mono > this->pub_window_mono_time ) {
-    if ( this->sub_db.pub_tab.flip( this->pub_window_size, cur_time ) ) {
+    uint64_t win_time = cur_mono - this->pub_window_mono_time;
+    if ( this->sub_db.pub_tab.flip( this->pub_window_size,
+                                    this->pub_window_count, cur_time,
+                                    win_time > this->pub_window_ival * 8,
+                                    win_time > this->pub_window_ival * 16 ) ) {
       this->pub_window_mono_time = cur_mono + this->pub_window_ival;
-      printf( "pub_tab rotated, count %" PRIu64 " size %" PRIu64 "\n",
-              this->sub_db.pub_tab.pub_old->pop_count(),
-              this->sub_db.pub_tab.pub_old->mem_size() );
+      if ( debug_sess || debug_window )
+        printf( "pub_tab rotated, count %" PRIu64 " size %" PRIu64 "\n",
+                this->sub_db.pub_tab.pub_old->pop_count(),
+                this->sub_db.pub_tab.pub_old->mem_size() );
     }
   }
 
   if ( cur_mono > this->sub_window_mono_time ) {
-    if ( this->sub_db.seqno_tab.flip( this->sub_window_size, cur_time ) ) {
+    uint64_t win_time = cur_mono - this->sub_window_mono_time;
+    if ( this->sub_db.seqno_tab.flip( this->sub_window_size,
+                                      this->sub_window_count, cur_time,
+                                      win_time > this->sub_window_ival * 8,
+                                      win_time > this->sub_window_ival * 16 ) ) {
       this->sub_window_mono_time = cur_mono + this->sub_window_ival;
-      printf( "sub_tab rotated, count %" PRIu64 " size %" PRIu64 "\n",
-              this->sub_db.seqno_tab.tab_old->pop_count(),
-              this->sub_db.seqno_tab.tab_old->mem_size() );
+      if ( debug_sess || debug_window )
+        printf( "sub_tab rotated, count %" PRIu64 " size %" PRIu64 "\n",
+                this->sub_db.seqno_tab.tab_old->pop_count(),
+                this->sub_db.seqno_tab.tab_old->mem_size() );
     }
   }
   this->sub_db.any_tab.gc( cur_time );
@@ -887,10 +891,16 @@ IpcRoute::on_msg( EvPublish &pub ) noexcept
       if ( this->mgr.timer_time > n.msg_loss_time )
         diff = this->mgr.timer_time - n.msg_loss_time;
       n.msg_loss_time = this->mgr.timer_time;
-      if ( seq.msg_loss <= MAX_MSG_LOSS )
+      if ( seq.msg_loss <= MAX_MSG_LOSS ) {
         loss = seq.msg_loss;
+        this->mgr.events.inbound_msg_loss( n.uid, fpub.rte.tport_id, loss );
+        this->mgr.msg_loss_count++;
+      }
+      else if ( seq.msg_loss == MSG_FRAME_LOSS ) {
+        this->mgr.events.inbound_seqno_loss( n.uid, fpub.rte.tport_id );
+        this->mgr.frame_loss_count++;
+      }
       n.msg_loss_count += loss;
-      this->mgr.events.inbound_msg_loss( n.uid, fpub.rte.tport_id, loss );
       if ( ns_to_sec( diff ) >= 10 )
         this->mgr.send_loss_notify( fpub, n, dec, loss );
     }
@@ -1473,10 +1483,14 @@ SessionMgr::dispatch_console( MsgFramePublish &fpub,  UserBridge &n,
           this->show_seqno_status( fpub, n, dec, seq, status, true );
         uint32_t loss = 1;
         n.msg_loss_time = this->timer_time;
-        if ( seq.msg_loss <= MAX_MSG_LOSS )
+        if ( seq.msg_loss <= MAX_MSG_LOSS ) {
           loss = seq.msg_loss;
+          this->events.inbound_msg_loss( n.uid, fpub.rte.tport_id, loss );
+        }
+        else if ( seq.msg_loss == MSG_FRAME_LOSS ) {
+          this->events.inbound_seqno_loss( n.uid, fpub.rte.tport_id );
+        }
         n.msg_loss_count += loss;
-        this->events.inbound_msg_loss( n.uid, fpub.rte.tport_id, loss );
       }
       else if ( debug_sess )
         this->show_seqno_status( fpub, n, dec, seq, status, true );
@@ -1972,7 +1986,7 @@ SessionMgr::publish_to( PubPtpData &ptp ) noexcept
 }
 void
 SessionMgr::send_loss_notify( const MsgFramePublish &pub,  UserBridge &n,
-                             const MsgHdrDecoder &dec,  uint32_t loss ) noexcept
+                              const MsgHdrDecoder &dec,  uint32_t loss ) noexcept
 {
   InboxBuf ibx( n.bridge_id, _LOSS );
 
@@ -1980,6 +1994,7 @@ SessionMgr::send_loss_notify( const MsgFramePublish &pub,  UserBridge &n,
   e.seqno        ()
    .subject      ( pub.subject_len )
    .idl_msg_loss ()
+   .idl_restart  ()
    .ms_tot       ()
    .ref_seqno    ();
 
@@ -1989,13 +2004,17 @@ SessionMgr::send_loss_notify( const MsgFramePublish &pub,  UserBridge &n,
   m.open( this->user_db.bridge_id.nonce, ibx.len() )
    .seqno        ( n.inbox.next_send( U_INBOX_LOSS ) )
    .subject      ( pub.subject, pub.subject_len )
-   .idl_msg_loss ( loss )
-   .ms_tot       ( n.msg_loss_count )
+   .idl_msg_loss ( loss );
+  if ( this->msg_loss_count == 0 && this->frame_loss_count != 0 )
+    m.idl_restart( true );
+  m.ms_tot       ( n.msg_loss_count )
    .ref_seqno    ( dec.seqno );
 
   uint32_t h = ibx.hash();
   m.close( e.sz, h, CABA_INBOX );
   m.sign( ibx.buf, ibx.len(), *this->user_db.session_key );
+  this->frame_loss_count = 0;
+  this->msg_loss_count   = 0;
 
   this->user_db.forward_to_primary_inbox( n, ibx, h, m.msg, m.len() );
 }
@@ -2004,14 +2023,35 @@ SessionMgr::recv_loss_notify( const MsgFramePublish &pub,  UserBridge &n,
                               const MsgHdrDecoder &dec ) noexcept
 {
   if ( dec.test( FID_SUBJECT ) ) {
-    uint64_t loss = 0, total = 0, seqno = 0;
     const char * sub    = (const char *) dec.mref[ FID_SUBJECT ].fptr;
     size_t       sublen = dec.mref[ FID_SUBJECT ].fsize;
+    uint64_t     loss = 0, total = 0, seqno = 0;
+    bool         is_restart = false;
     if ( dec.get_ival<uint64_t>( FID_IDL_MSG_LOSS, loss ) &&
          dec.get_ival<uint64_t>( FID_MS_TOT, total ) &&
          dec.get_ival<uint64_t>( FID_REF_SEQNO, seqno ) ) {
-      n.printf( "%.*s loss %lu total %lu seqno %lu from %s\n",
-                (int) sublen, sub, loss, total, seqno, pub.rte.name );
+      if ( dec.test( FID_IDL_RESTART ) )
+        cvt_number<bool>( dec.mref[ FID_IDL_RESTART ], is_restart );
+
+      n.printf( "%.*s %s %lu total %lu seqno %lu from %s\n",
+                (int) sublen, sub, ( is_restart ? "seqno loss" : "msg loss" ),
+                loss, total, seqno, pub.rte.name );
+      if ( is_restart && this->pub_window_autoscale != 0 ) {
+        uint64_t cur_mono  = this->poll.mono_ns,
+                 last_mono = this->last_autoscale + this->pub_window_ival * 2;
+        size_t   count     = this->sub_db.pub_tab.pub->pop_count(),
+                 old_count = this->sub_db.pub_tab.pub_old->pop_count();
+        if ( cur_mono > last_mono && ( count > this->pub_window_count / 2 ||
+                                       old_count >= this->pub_window_count ) ) {
+          this->last_autoscale = cur_mono;
+          uint64_t new_cnt = this->pub_window_count +
+                             this->pub_window_autoscale;
+          printf( "autscale pub_window_count %lu -> %lu\n",
+                  this->pub_window_count, new_cnt );
+          this->pub_window_count = new_cnt;
+          this->last_autoscale   = cur_mono;
+        }
+      }
     }
   }
   return true;

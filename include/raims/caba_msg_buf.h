@@ -307,6 +307,7 @@ struct MsgBufDigestT : public BMsgBufT<T> {
   T  & auth_stage ( uint16_t n )  { return this->i2( FID_AUTH_STAGE, n ); }
   T  & link_add   ( uint8_t n )   { return this->y( FID_LINK_ADD, n ); }
   T  & bloom_upd  ( uint8_t n )   { return this->y( FID_BLOOM_UPD, n ); }
+  T  & idl_restart( uint8_t n )   { return this->y( FID_IDL_RESTART, n ); }
   T  & conn_port  ( uint16_t n )  { return this->i2( FID_CONN_PORT, n ); }
   T  & idl_service( uint16_t n )  { return this->i2( FID_IDL_SERVICE, n ); }
   T  & idl_msg_loss( uint64_t n ) { return this->u( FID_IDL_MSG_LOSS, n ); }
@@ -533,6 +534,7 @@ struct MsgEst {
   MsgEst & auth_stage ( void ) { sz += fid_est( FID_AUTH_STAGE ); return *this; }
   MsgEst & link_add   ( void ) { sz += fid_est( FID_LINK_ADD ); return *this; }
   MsgEst & bloom_upd  ( void ) { sz += fid_est( FID_BLOOM_UPD ); return *this; }
+  MsgEst & idl_restart( void ) { sz += fid_est( FID_IDL_RESTART ); return *this; }
   MsgEst & conn_port  ( void ) { sz += fid_est( FID_CONN_PORT ); return *this; }
   MsgEst & idl_service( void ) { sz += fid_est( FID_IDL_SERVICE ); return *this; }
   MsgEst & idl_msg_loss( void ){ sz += fid_est( FID_IDL_MSG_LOSS ); return *this; }

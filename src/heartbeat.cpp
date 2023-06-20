@@ -708,7 +708,8 @@ UserDB::send_ping_request( UserBridge &n ) noexcept
    .sub_seqno   ()
    .link_state  ()
    .idl_service ()
-   .idl_msg_loss();
+   .idl_msg_loss()
+   .idl_restart ();
 
   MsgCat m;
   m.reserve( e.sz );
@@ -720,15 +721,25 @@ UserDB::send_ping_request( UserBridge &n ) noexcept
    .link_state( this->link_state_seqno );
 
   if ( n.inbound_msg_loss != 0 ) {
-    size_t pos;
-    if ( n.inbound_svc_loss->first( pos ) ) {
-      uint32_t svc, loss;
+    size_t   pos;
+    uint32_t svc = 0, loss = 0;
+    bool     is_restart = false;
+    if ( n.inbound_svc_loss != NULL && n.inbound_svc_loss->first( pos ) ) {
       n.inbound_svc_loss->get( pos, svc, loss );
+    }
+    else if ( n.inbound_svc_restart != NULL &&
+              n.inbound_svc_restart->first( pos ) ) {
+      n.inbound_svc_restart->get( pos, svc, loss );
+      is_restart = true;
+    }
+    if ( svc != 0 && loss != 0 ) {
       m.idl_service( svc )
        .idl_msg_loss( loss );
-
+      if ( is_restart )
+        m.idl_restart( is_restart );
       if ( debug_hb )
-        n.printf( "ping svc %u loss %u\n", svc, loss );
+        n.printf( "ping svc %u loss %u restart %s\n", svc, loss,
+                  is_restart ? "true" : "false" );
     }
   }
   uint32_t h = ibx.hash();
@@ -966,14 +977,18 @@ UserDB::recv_ping_request( MsgFramePublish &pub,  UserBridge &n,
     n.ping_recv_time = stamp;
   }
 
-  uint16_t idl_svc  = 0;
-  uint32_t idl_loss = 0;
+  uint16_t idl_svc    = 0;
+  uint32_t idl_loss   = 0;
+  bool     is_restart = false;
   if ( dec.test_2( FID_IDL_SERVICE, FID_IDL_MSG_LOSS ) ) {
     cvt_number<uint16_t>( dec.mref[ FID_IDL_SERVICE ], idl_svc );
     cvt_number<uint32_t>( dec.mref[ FID_IDL_MSG_LOSS ], idl_loss );
+    if ( dec.test( FID_IDL_RESTART ) )
+      cvt_number<bool>( dec.mref[ FID_IDL_RESTART ], is_restart );
 
     if ( debug_hb )
-      n.printf( "ping idl_svc %u idl_loss %u\n", idl_svc, idl_loss );
+      n.printf( "ping idl_svc %u idl_loss %u is_restart %s\n",
+                idl_svc, idl_loss, is_restart ? "true" : "false" );
   }
 
   MsgEst e( ibx.len() );
@@ -983,7 +998,8 @@ UserDB::recv_ping_request( MsgFramePublish &pub,  UserBridge &n,
    .tportid     ()
    .token       ()
    .idl_service ()
-   .idl_msg_loss();
+   .idl_msg_loss()
+   .idl_restart ();
 
   MsgCat m;
   m.reserve( e.sz );
@@ -1002,8 +1018,10 @@ UserDB::recv_ping_request( MsgFramePublish &pub,  UserBridge &n,
   if ( token != 0 )
     m.token( token );
   if ( idl_svc != 0 ) {
-   m.idl_service ( idl_svc )
-    .idl_msg_loss( idl_loss );
+    m.idl_service ( idl_svc )
+     .idl_msg_loss( idl_loss );
+    if ( is_restart )
+      m.idl_restart( is_restart );
   }
   uint32_t h = ibx.hash();
   m.close( e.sz, h, CABA_INBOX );
@@ -1021,8 +1039,8 @@ UserDB::recv_ping_request( MsgFramePublish &pub,  UserBridge &n,
     for ( size_t i = 0; i < count; i++ ) {
       TransportRoute *rte = this->transport_tab.ptr[ i ];
       if ( rte->is_set( TPORT_IS_IPC ) && rte->rv_svc != NULL ) {
-        rte->rv_svc->outbound_data_loss( idl_svc, idl_loss, n.host_id,
-                                         n.peer.user.val );
+        rte->rv_svc->outbound_data_loss( idl_svc, idl_loss, is_restart,
+                                         n.host_id, n.peer.user.val );
         break;
       }
     }
@@ -1089,28 +1107,35 @@ UserDB::recv_pong_result( MsgFramePublish &pub,  UserBridge &n,
   if ( dec.test_2( FID_IDL_SERVICE, FID_IDL_MSG_LOSS ) ) {
     uint16_t idl_svc  = 0;
     uint32_t idl_loss = 0, loss = 0;
+    bool     is_restart = false;
     size_t   pos;
     cvt_number<uint16_t>( dec.mref[ FID_IDL_SERVICE ], idl_svc );
     cvt_number<uint32_t>( dec.mref[ FID_IDL_MSG_LOSS ], idl_loss );
+    if ( dec.test( FID_IDL_RESTART ) )
+      cvt_number<bool>( dec.mref[ FID_IDL_RESTART ], is_restart );
 
     if ( debug_hb )
-      n.printf( "pong idl_svc %u idl_loss %u\n", idl_svc, idl_loss );
+      n.printf( "pong idl_svc %u idl_loss %u is_restart %s\n",
+                idl_svc, idl_loss, is_restart ? "true" : "false" );
 
-    if ( n.inbound_svc_loss != NULL ) {
-      if ( n.inbound_svc_loss->find( idl_svc, pos, loss ) ) {
+    UIntHashTab *& ht = ( is_restart ? n.inbound_svc_restart :
+                          n.inbound_svc_loss );
+    if ( ht != NULL ) {
+      if ( ht->find( idl_svc, pos, loss ) ) {
         if ( idl_loss >= loss ) {
-          if ( n.inbound_svc_loss->elem_count == 1 ) {
-            delete n.inbound_svc_loss;
-            n.inbound_svc_loss = NULL;
-            n.inbound_msg_loss = 0;
+          if ( ht->elem_count == 1 ) {
+            delete ht;
+            ht = NULL;
+            if ( n.inbound_svc_restart == NULL && n.inbound_svc_loss == NULL )
+              n.inbound_msg_loss = 0;
           }
           else {
-            n.inbound_svc_loss->remove( pos );
+            ht->remove( pos );
           }
         }
         else {
           loss -= idl_loss;
-          n.inbound_svc_loss->set( idl_svc, pos, loss );
+          ht->set( idl_svc, pos, loss );
         }
       }
       if ( n.inbound_msg_loss != 0 )

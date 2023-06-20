@@ -1608,3 +1608,68 @@ SubDB::queue_sub_update( NotifyQueue &sub,  uint32_t tport_id,
   else
     this->sub_stop( ctx );
 }
+
+bool
+SeqnoTab::flip( size_t win_size,  size_t win_count,  uint64_t cur_time,
+                bool double_time,  bool quad_time ) noexcept
+{
+  SeqnoT * p = this->tab;
+  size_t sz     = p->mem_size() + this->seqno_ht_size,
+         old_sz = 0;
+  if ( quad_time )
+    old_sz = this->tab_old->mem_size() + this->old_ht_size;
+  if ( old_sz > win_size || sz > win_size ) {
+    size_t count = p->pop_count();
+    if ( double_time || count > win_count ) {
+      if ( sz > this->max_size )
+        this->max_size = sz;
+      if ( count > this->max_count )
+        this->max_count = count;
+      this->wh.add( cur_time, sz, count );
+      kv::RouteLoc loc;
+      if ( this->old_ht_size > 0 ) {
+        for ( SubSeqno *s = this->tab_old->first( loc ); s != NULL;
+              s = this->tab_old->next( loc ) )
+          s->release();
+      }
+      this->tab_old->release();
+      this->tab           = this->tab_old;
+      this->old_ht_size   = this->seqno_ht_size;
+      this->seqno_ht_size = 0;
+      this->tab_old       = p;
+      this->trailing_time = this->flip_time;
+      this->flip_time     = cur_time;
+      return true;
+    }
+  }
+  return false;
+}
+
+bool
+PubTab::flip( size_t win_size,  size_t win_count,  uint64_t cur_time,
+              bool double_time,  bool quad_time ) noexcept
+{
+  PubT * p      = this->pub;
+  size_t sz     = p->mem_size(),
+         old_sz = 0;
+  if ( quad_time )
+    old_sz = this->pub_old->mem_size();
+  if ( old_sz > win_size || sz > win_size ) {
+    size_t count = p->pop_count();
+    if ( double_time || count > win_count ) {
+      if ( sz > this->max_size )
+        this->max_size = sz;
+      if ( count > this->max_count )
+        this->max_count = count;
+      this->wh.add( cur_time, sz, count );
+      this->pub_old->release();
+      this->pub           = this->pub_old;
+      this->pub_old       = p;
+      this->trailing_time = this->flip_time;
+      this->flip_time     = cur_time;
+      return true;
+    }
+  }
+  return false;
+}
+

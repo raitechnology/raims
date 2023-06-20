@@ -294,12 +294,18 @@ struct SessionMgr : public kv::EvSocket, public kv::BPData {
                         sub_window_mono_time, /* when sub window expires */
                         name_svc_mono_time;
   size_t                pub_window_size, /* maximum size of pub window */
-                        sub_window_size; /* maximum size of sub window */
+                        sub_window_size, /* maximum size of sub window */
+                        pub_window_count,/* minimum number of pubs */
+                        pub_window_autoscale,/* autoscale number of pubs */
+                        sub_window_count;/* minimum number of subs */
   uint64_t              pub_window_ival, /* pub interval of rotate */
-                        sub_window_ival; /* sub interval of rotate */
+                        sub_window_ival, /* sub interval of rotate */
+                        last_autoscale;
+  uint32_t              msg_loss_count,
+                        frame_loss_count;
   uint8_t               tcp_accept_sock_type, /* free list sock types */
                         tcp_connect_sock_type;
-  int                   tcp_timeout;
+  int                   tcp_connect_timeout;
   bool                  tcp_noencrypt,
                         tcp_ipv4,
                         tcp_ipv6,

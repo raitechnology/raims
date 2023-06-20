@@ -317,8 +317,10 @@ ConfigStartup::copy_pair_list( ConfigDB &db,  const ConfigTree::PairList &list,
                                ConfigTree::PairList &cp_list ) noexcept
 {
   for ( const ConfigTree::StringPair *sp = list.hd; sp != NULL; sp = sp->next ) {
-    ConfigTree::StringPair *p = db.make<ConfigTree::StringPair>( *sp );
-    cp_list.push_tl( p );
+    if ( ! sp->is_temp ) {
+      ConfigTree::StringPair *p = db.make<ConfigTree::StringPair>( *sp );
+      cp_list.push_tl( p );
+    }
   }
 }
 
@@ -385,11 +387,12 @@ ConfigJson::copy( const ConfigTree *tree,  int which,  const StringVal *filter,
     }
   }
   if ( ( which & PRINT_PARAMETERS ) != 0 ) {
-    parameters = this->copy( tree->parameters );
+    bool not_temp = ( which & PRINT_EXCLUDE_TEMPORARY ) != 0;
+    parameters = this->copy( tree->parameters, not_temp );
   }
   if ( ( which & PRINT_STARTUP ) != 0 ) {
     if ( listen == NULL && connect == NULL ) {
-      startup = this->copy( tree->startup );
+      startup = this->copy( tree->startup, false );
     }
     else {
       JsonArray *ar;
@@ -410,7 +413,7 @@ ConfigJson::copy( const ConfigTree *tree,  int which,  const StringVal *filter,
   }
 
   if ( ( which & PRINT_HOSTS ) != 0 ) {
-    hosts = this->copy( tree->hosts );
+    hosts = this->copy( tree->hosts, false );
   }
   if ( parameters != NULL ) this->push_field( cfg, parameters_s, parameters );
   if ( services != NULL )   this->push_field( cfg, services_s, services );
@@ -423,11 +426,11 @@ ConfigJson::copy( const ConfigTree *tree,  int which,  const StringVal *filter,
 }
 
 JsonObject *
-ConfigJson::copy( const ConfigTree::ParametersList &list ) noexcept
+ConfigJson::copy( const ConfigTree::ParametersList &list,  bool not_temp ) noexcept
 {
   JsonObject * o = NULL;
   for ( const ConfigTree::Parameters *p = list.hd; p != NULL; p = p->next ) {
-    JsonObject *l = (JsonObject *) this->copy( p->list );
+    JsonObject *l = (JsonObject *) this->copy( p->list, not_temp );
     if ( o == NULL )
       o = l;
     else {
@@ -461,9 +464,9 @@ ConfigJson::copy( const ConfigTree::Service &s ) noexcept
   this->push_field_s( svc, pri_s, s.pri );
   this->push_field_s( svc, pub_s, s.pub );
   if ( s.users.hd != NULL )
-    this->push_field( svc, users_s, this->copy( s.users ) );
+    this->push_field( svc, users_s, this->copy( s.users, false ) );
   if ( s.revoke.hd != NULL )
-    this->push_field( svc, revoke_s, this->copy( s.revoke ) );
+    this->push_field( svc, revoke_s, this->copy( s.revoke, false ) );
   return svc;
 }
 
@@ -476,7 +479,7 @@ ConfigJson::copy( const ConfigTree::Transport &t ) noexcept
   this->push_field_s( tport, tport_s, t.tport );
   this->push_field_s( tport, type_s, t.type );
   if ( t.route.hd != NULL )
-    this->push_field( tport, route_s, this->copy( t.route ) );
+    this->push_field( tport, route_s, this->copy( t.route, false ) );
   return tport;
 }
 
@@ -491,10 +494,14 @@ ConfigJson::copy( const ConfigTree::Group &g ) noexcept
 }
 
 JsonValue *
-ConfigJson::copy( const ConfigTree::PairList &pl ) noexcept
+ConfigJson::copy( const ConfigTree::PairList &pl,  bool not_temp ) noexcept
 {
   JsonObject * list = NULL;
   for ( const ConfigTree::StringPair *x = pl.hd; x != NULL; ) {
+    if ( not_temp && x->is_temp ) {
+      x = x->next;
+      continue;
+    }
     if ( x->next == NULL || ! x->name.equals( x->next->name ) ) {
       this->push_field( list, x->name, this->copy( x->value ) );
       x = x->next;
@@ -1056,6 +1063,22 @@ ConfigTree::find_transport( const char *tport,  size_t len,
         t = t->next ) {
     if ( t->tport.equals( tport, t_len ) )
       return t;
+  }
+  return NULL;
+}
+
+ConfigTree::Transport *
+ConfigTree::find_transport_type( const char *type,  size_t len,
+                                bool conn ) noexcept
+{
+  for ( ConfigTree::Transport * t = this->transports.hd; t != NULL;
+        t = t->next ) {
+    if ( t->type.equals( type, len ) ) {
+      const char * addr;
+      bool is_listen = t->get_route_str( "listen", addr );
+      if ( ( conn && ! is_listen ) || ( ! conn && is_listen ) )
+        return t;
+    }
   }
   return NULL;
 }
@@ -2048,6 +2071,35 @@ ConfigTree::ParametersList::find_sp( const char *name,
   return NULL;
 }
 
+ConfigTree::StringPair *
+ConfigTree::ParametersList::update( StringTab &st,  const StringVal &name,
+                                    const StringVal &val ) noexcept
+{
+  StringPair * sp;
+  for ( Parameters *p = this->hd; p != NULL; p = p->next ) {
+    for ( sp = p->list.hd; sp != NULL; sp = sp->next ) {
+      if ( sp->name.equals( name ) ) {
+        if ( val.len > 0 ) {
+          st.reref_string( val.val, val.len, sp->value );
+          return sp;
+        }
+        p->list.unlink( sp );
+        st.release( sp );
+        return NULL;
+      }
+    }
+  }
+  if ( val.len == 0 )
+    return NULL;
+  sp = st.make<ConfigTree::StringPair>();
+  st.ref_string( name.val, name.len, sp->name );
+  st.ref_string( val.val, val.len, sp->value );
+  if ( this->hd == NULL )
+    this->push_tl( st.make<ConfigTree::Parameters>() );
+  this->hd->list.push_tl( sp );
+  return sp;
+}
+
 bool
 ConfigTree::ParametersList::find( const char *name,  const char *&value,
                                   const char *def_value ) noexcept
@@ -2060,23 +2112,13 @@ ConfigTree::ParametersList::find( const char *name,  const char *&value,
   return sp != NULL;
 }
 
-void
+ConfigTree::StringPair *
 ConfigTree::ParametersList::set( StringTab &st,  const char *name,
                                  const char *value ) noexcept
 {
-  size_t name_len = ::strlen( name );
-  StringPair * sp = this->find_sp( name, name_len );
-  Parameters * p;
-  if ( sp == NULL ) {
-    if ( (p = this->tl) == NULL ) {
-      p = st.make<ConfigTree::Parameters>();
-      this->push_tl( p );
-    }
-    sp = st.make<ConfigTree::StringPair>();
-    p->list.push_tl( sp );
-    st.ref_string( name, name_len, sp->name );
-  }
-  st.ref_string( value, ::strlen( value ), sp->value );
+  StringVal n( name, ::strlen( name ) ),
+            v( value, value != NULL ? ::strlen( value ) : 0 );
+  return this->update( st, n, v );
 }
 
 bool
@@ -2106,6 +2148,116 @@ ConfigTree::ParametersList::remove( StringTab &st,  const char *name ) noexcept
   }
   return false;
 }
+
+bool
+ConfigTree::ParametersList::getset_bytes( StringTab &st,  const char *name,
+                                          uint64_t &n ) noexcept
+{
+  const char * val;
+  if ( this->find( name, val, NULL ) ) {
+    if ( ! ConfigTree::string_to_bytes( val, n ) ) {
+      fprintf( stderr, "bad config parameter %s, val: \"%s\"\n", name, val );
+      return false;
+    }
+  }
+  else {
+    static const uint64_t kilo = 1024, mega = 1024 * 1024;
+    StringPair *sp;
+    char buf[ 32 ];
+    CatPtr cat( buf );
+    if ( n % kilo == 0 ) {
+      if ( n % mega == 0 )
+        cat.u( n / mega ).s( "MB" ).end();
+      else
+        cat.u( n / kilo ).s( "KB" ).end();
+    }
+    else {
+      cat.u( n ).end();
+    }
+    if ( (sp = this->set( st, name, buf )) != NULL )
+      sp->is_temp = true;
+  }
+  return true;
+}
+
+bool
+ConfigTree::ParametersList::getset_nanos( StringTab &st,  const char *name,
+                                          uint64_t &n ) noexcept
+{
+  const char * val;
+  if ( this->find( name, val, NULL ) ) {
+    if ( ! ConfigTree::string_to_nanos( val, n ) ) {
+      fprintf( stderr, "bad config parameter %s, val: \"%s\"\n", name, val );
+      return false;
+    }
+  }
+  else {
+    static const uint64_t us = 1000, ms = 1000 * 1000, s = 1000 * 1000 * 1000;
+    StringPair *sp;
+    char buf[ 32 ];
+    CatPtr cat( buf );
+    if ( n % us == 0 ) {
+      if ( n % ms == 0 ) {
+        if ( n % s == 0 )
+          cat.u( n / s ).s( "s" ).end();
+        else
+          cat.u( n / ms ).s( "ms" ).end();
+      }
+      else
+        cat.u( n / us ).s( "us" ).end();
+    }
+    else {
+      cat.u( n ).end();
+    }
+    if ( (sp = this->set( st, name, buf )) != NULL )
+      sp->is_temp = true;
+  }
+  return true;
+}
+
+bool
+ConfigTree::ParametersList::getset_secs( StringTab &st,  const char *name,
+                                         uint32_t &s ) noexcept
+{
+  const char * val;
+  uint64_t u;
+  if ( this->find( name, val, NULL ) ) {
+    if ( ! ConfigTree::string_to_secs( val, u ) ) {
+      fprintf( stderr, "bad config parameter %s, val: \"%s\"\n", name, val );
+      return false;
+    }
+    s = (uint32_t) u;
+  }
+  else {
+    StringPair *sp;
+    char buf[ 32 ];
+    CatPtr cat( buf );
+    cat.u( s ).s( "s" ).end();
+    if ( (sp = this->set( st, name, buf )) != NULL )
+      sp->is_temp = true;
+  }
+  return true;
+}
+
+bool
+ConfigTree::ParametersList::getset_bool( StringTab &st,  const char *name,
+                                         bool &b ) noexcept
+{
+  const char * val;
+  if ( this->find( name, val, NULL ) ) {
+    if ( ! ConfigTree::string_to_bool( val, b ) ) {
+      fprintf( stderr, "bad config parameter %s, val: \"%s\"\n", name, val );
+      return false;
+    }
+  }
+  else {
+    StringPair *sp;
+    if ( (sp = this->set( st, name, b )) != NULL )
+      sp->is_temp = true;
+  }
+  return true;
+}
+
 
 static bool
 int_prefix( const char *s,  MDDecimal &dec,  size_t &off ) noexcept

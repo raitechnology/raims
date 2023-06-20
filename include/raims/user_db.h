@@ -295,7 +295,8 @@ struct UserBridge : public UserStateTest<UserBridge> {
                      challenge_mono_time, /* time challenge sent */
                      remove_auth_time,
                      remove_auth_mono;
-  kv::UIntHashTab  * inbound_svc_loss;    /* service msg loss map */
+  kv::UIntHashTab  * inbound_svc_loss,    /* service msg loss map */
+                   * inbound_svc_restart; /* service msg restart map */
   InboxSeqno         inbox;               /* track inbox sent/recv */
   RttHistory         rtt;
   ThrottleState      adj_req_throttle,

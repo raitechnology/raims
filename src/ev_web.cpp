@@ -281,6 +281,14 @@ WebService::process_wsmsg( WSMsg &wmsg ) noexcept
 void
 WebService::write( void ) noexcept
 {
+  if ( debug_web ) {
+    if ( this->concat_iov() ) {
+      iovec & io = this->iov[ 0 ];
+      char  * base = (char *) io.iov_base;
+      MDOutput out;
+      out.print_hex( base, io.iov_len );
+    }
+  }
   return this->EvConnection::write();
 }
 

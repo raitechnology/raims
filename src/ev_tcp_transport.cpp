@@ -40,7 +40,7 @@ EvTcpTransportOpts::parse( ConfigTree::Transport &tport,
 {
   bool ipv4, ipv6;
   if ( ! tport.get_route_int( R_TIMEOUT, this->timeout ) )
-    this->timeout = mgr.tcp_timeout;
+    this->timeout = mgr.tcp_connect_timeout;
   if ( ! tport.get_route_bool( R_EDGE, this->edge ) )
     this->edge = false;
   if ( ! tport.get_route_bool( R_IPV4ONLY, ipv4 ) )

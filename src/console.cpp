@@ -31,6 +31,7 @@
 namespace rai {
 namespace sassrv {
 extern uint32_t rv_debug;
+extern uint32_t rv_host_debug;
 }
 namespace natsmd {
 extern uint32_t nats_debug;
@@ -139,16 +140,18 @@ Console::open_log( const char *fn,  bool add_hdr ) noexcept
     os_close( this->log_fd );
     this->log_fd = -1;
   }
-  this->log_fd = os_open( fn, O_APPEND | O_WRONLY | O_CREAT, 0666 );
-  if ( this->log_fd < 0 ) {
-    ::perror( fn );
-    return false;
-  }
-  if ( add_hdr && ! Console::log_header( this->log_fd ) ) {
-    ::perror( fn );
-    os_close( this->log_fd );
-    this->log_fd = -1;
-    return false;
+  if ( fn != NULL ) {
+    this->log_fd = os_open( fn, O_APPEND | O_WRONLY | O_CREAT, 0666 );
+    if ( this->log_fd < 0 ) {
+      ::perror( fn );
+      return false;
+    }
+    if ( add_hdr && ! Console::log_header( this->log_fd ) ) {
+      ::perror( fn );
+      os_close( this->log_fd );
+      this->log_fd = -1;
+      return false;
+    }
   }
   this->log_filename = fn;
   return true;
@@ -230,12 +233,13 @@ void
 Console::parse_debug_flags( const char *arg,  size_t len,
                             int &dist_dbg ) noexcept
 {
-  dbg_flags          = 0;
-  kv_pub_debug       = 0;
-  kv_ps_debug        = 0;
-  sassrv::rv_debug   = 0;
-  natsmd::nats_debug = 0;
-  no_tcp_aes         = 0;
+  dbg_flags             = 0;
+  kv_pub_debug          = 0;
+  kv_ps_debug           = 0;
+  sassrv::rv_debug      = 0;
+  sassrv::rv_host_debug = 0;
+  natsmd::nats_debug    = 0;
+  no_tcp_aes            = 0;
 
   for ( size_t i = 0; i < debug_str_count; i++ ) {
     size_t dlen = ::strlen( debug_str[ i ] );
@@ -254,6 +258,8 @@ Console::parse_debug_flags( const char *arg,  size_t len,
     kv_ps_debug = 1;
   if ( len >= 2 && kv_memmem( arg, len, "rv", 2 ) != NULL )
     sassrv::rv_debug = 1;
+  if ( len >= 4 && kv_memmem( arg, len, "host", 4 ) != NULL )
+    sassrv::rv_host_debug = 1;
   if ( len >= 2 && kv_memmem( arg, len, "nats", 4 ) != NULL )
     natsmd::nats_debug = 1;
   if ( len >= 5 && kv_memmem( arg, len, "noaes", 5 ) != NULL )
@@ -2071,6 +2077,9 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
       }
       goto help;
 
+    case CMD_SHOW_TIME:    this->show_time( p ); break;
+    case CMD_SHOW_VERSION: this->show_version( p ); break;
+
     case CMD_DIE: {
       int status = 1;
       if ( len > 0 )
@@ -2933,35 +2942,20 @@ void
 Console::config_param( const char *param, size_t plen,
                        const char *value, size_t vlen ) noexcept
 {
-  ConfigTree::Parameters *p;
   ConfigTree::StringPair *sp;
-  for ( p = this->tree.parameters.hd; p != NULL; p = p->next ) {
-    sp = p->list.get_pair( param, plen );
-    if ( sp != NULL ) {
-      if ( vlen > 0 )
-        this->string_tab.reref_string( value, vlen, sp->value );
-      else {
-        p->list.unlink( sp );
-        this->string_tab.release( sp );
-        sp = NULL;
-        return;
-      }
-      goto check_logfile;
+  StringVal p( param, plen ), v( value, vlen );
+  sp = this->tree.parameters.update( this->string_tab, p, v );
+  if ( sp != NULL )
+    sp->is_temp = false;
+
+  if ( p.equals( "log_file" ) ) {
+    if ( this->log_filename == NULL && sp == NULL )
+      return;
+    if ( this->log_filename != NULL && sp == NULL ) {
+      this->printf( "closed log \"%s\"\n", this->log_filename );
+      this->open_log( NULL, false );
+      return;
     }
-  }
-  if ( vlen == 0 ) {
-    this->printf( "Not found: %.*s\n", (int) plen, param );
-  }
-  else {
-    p  = this->string_tab.make<ConfigTree::Parameters>();
-    sp = this->string_tab.make<ConfigTree::StringPair>();
-    this->string_tab.ref_string( param, plen, sp->name );
-    this->string_tab.ref_string( value, vlen, sp->value );
-    p->list.push_tl( sp );
-    this->tree.parameters.push_tl( p );
-  }
-check_logfile:;
-  if ( sp->name.equals( "log_file" ) ) {
     if ( this->log_filename == NULL ||
          ! sp->value.equals( this->log_filename ) ) {
       bool b = this->open_log( sp->value.val, true );
@@ -5848,90 +5842,97 @@ Console::show_buffers( ConsoleOutput *p ) noexcept
   this->print_table( p, hdr, ncols );
 }
 
+
+template<class Tab>
+static void
+show_win( Tab &t,  TabOut &out,  const char *name,
+          size_t size,  size_t count,  uint64_t start_time ) noexcept
+{
+  size_t   max_size  = t.max_size,
+           max_count = t.max_count;
+  uint64_t last_time = current_realtime_ns(),
+           time      = 0,
+           ival      = 0;
+  uint32_t j;
+  bool     b;
+
+  if ( max_size < size )   max_size  = size;
+  if ( max_count < count ) max_count = count;
+
+  for ( uint32_t k = 0; ; k++ ) {
+    TabPrint * tab = out.add_row_p();
+    uint32_t i = 0;
+    if ( k == 0 )
+      tab[ i++ ].set( name );
+    else
+      tab[ i++ ].set_null();
+
+    tab[ i++ ].set_long( count );
+    tab[ i++ ].set_long( size );
+    if ( k == 0 ) {
+      b = t.wh.first( j, time, size, count );
+      tab[ i++ ].set_null();
+    }
+    else {
+      last_time = time;
+      b = t.wh.next( j, time, size, count );
+      tab[ i++ ].set_time( last_time );
+    }
+    if ( last_time != 0 && time != 0 )
+      ival = last_time - time;
+    else if ( last_time != 0 )
+      ival = last_time - start_time;
+    else
+      ival = 0;
+    if ( ival != 0 )
+      tab[ i++ ].set_long( ival, PRINT_LATENCY );
+    else
+      tab[ i++ ].set_null();
+    if ( k == 0 ) {
+      tab[ i++ ].set_long( max_count );
+      tab[ i++ ].set_long( max_size );
+    }
+    else {
+      tab[ i++ ].set_null();
+      tab[ i++ ].set_null();
+    }
+    if ( ! b )
+      break;
+  }
+}
+
 void
 Console::show_windows( ConsoleOutput *p ) noexcept
 {
   static const uint32_t ncols = 7;
   TabOut out( this->table, this->tmp, ncols );
-  size_t count, size;
-  uint64_t last_time, min_ival, win_size, max_size = 0;
-  uint32_t i, k;
+  size_t   count, size;
+  uint64_t last_time,
+           start_time = this->user_db.start_time;
+  uint32_t i;
 
-  #define K( x, y ) ( ( k == 0 ) ? ( x ) : ( y ) )
   SeqnoTab & seq = this->sub_db.seqno_tab;
-  for ( k = 0; k < 2; k++ ) {
-    count     = K( seq.tab, seq.tab_old)->pop_count();
-    size      = K( seq.tab->mem_size() + seq.seqno_ht_size,
-                   seq.tab_old->mem_size() + seq.old_ht_size );
-    last_time = K( seq.flip_time, seq.trailing_time );
-    min_ival  = ns_to_sec( this->mgr.sub_window_ival );
-    win_size  = this->mgr.sub_window_size;
-    if ( size > seq.max_size ) seq.max_size = size;
-    max_size  = seq.max_size;
-
-    TabPrint * tab = out.add_row_p();
-    i = 0;
-    tab[ i++ ].set( K( "sub", "sub_old" ) );
-    tab[ i++ ].set_long( count );
-    tab[ i++ ].set_long( size );
-    if ( k == 0 ) {
-      tab[ i++ ].set_long( win_size );
-      tab[ i++ ].set_long( max_size );
-    }
-    else {
-      tab[ i++ ].set_null();
-      tab[ i++ ].set_null();
-    }
-    tab[ i++ ].set_time( last_time );
-    if ( k == 0 )
-      tab[ i++ ].set_long( min_ival );
-    else
-      tab[ i++ ].set_null();
-  }
+  size  = seq.tab->mem_size() + seq.seqno_ht_size;
+  count = seq.tab->pop_count();
+  show_win<SeqnoTab>( seq, out, "sub", size, count, start_time );
 
   PubTab & pub = this->sub_db.pub_tab;
-  for ( k = 0; k < 2; k++ ) {
-    count     = K( pub.pub, pub.pub_old )->pop_count();
-    size      = K( pub.pub, pub.pub_old )->mem_size();
-    last_time = K( pub.flip_time, pub.trailing_time );
-    min_ival  = ns_to_sec( this->mgr.pub_window_ival );
-    win_size  = this->mgr.pub_window_size;
-    if ( size > pub.max_size ) pub.max_size = size;
-    max_size  = pub.max_size;
-
-    TabPrint * tab = out.add_row_p();
-    i = 0;
-    tab[ i++ ].set( K( "pub", "pub_old" ) );
-    tab[ i++ ].set_long( count );
-    tab[ i++ ].set_long( size );
-    if ( k == 0 ) {
-      tab[ i++ ].set_long( win_size );
-      tab[ i++ ].set_long( max_size );
-    }
-    else {
-      tab[ i++ ].set_null();
-      tab[ i++ ].set_null();
-    }
-    tab[ i++ ].set_time( last_time );
-    if ( k == 0 )
-      tab[ i++ ].set_long( min_ival );
-    else
-      tab[ i++ ].set_null();
-  }
-  #undef K
+  size  = pub.pub->mem_size();
+  count = pub.pub->pop_count();
+  show_win<PubTab>( pub, out, "pub", size, count, start_time );
 
   AnyMatchTab & any = this->sub_db.any_tab;
-  count     = any.ht->elem_count;
-  size      = any.max_off * 8 + any.ht->mem_size();
+  size  = any.max_off * 8 + any.ht->mem_size();
+  count = any.ht->elem_count;
   last_time = any.gc_time;
 
   out.add_row()
      .set( "inbox" )
      .set_long( count )
      .set_long( size )
-     .set_null()
-     .set_null()
      .set_time( last_time )
+     .set_null()
+     .set_null()
      .set_null();
 
   RoutePDB & rdb = this->mgr.poll.sub_route;
@@ -6026,7 +6027,7 @@ Console::show_windows( ConsoleOutput *p ) noexcept
   }
 
   static const char *hdr[ ncols ] =
-    { "tab", "count", "size", "win_size", "max_size","rotate_time", "interval" };
+ { "tab", "count", "size", "rotate_time", "interval", "max_count", "max_size" };
   this->print_table( p, hdr, ncols );
 }
 
@@ -7151,5 +7152,88 @@ Console::print_data( ConsoleOutput *p,  const SubMsgData &val,
     this->print_msg( *val.pub.dec.msg );
   }
   this->flush_output( p );
+}
+
+void
+Console::show_time( ConsoleOutput *p ) noexcept
+{
+  static const size_t ncols = 2;
+  TabOut out( this->table, this->tmp, ncols );
+  char local_buf[ 64 ],
+       start_buf[ 64 ],
+       uptime_buf[ 64 ],
+       cpu_buf[ 64 ];
+  uint64_t ns = current_realtime_ns();
+  uint64_t mono_ns = current_monotonic_time_ns();
+  size_t   up_sz, cpu_sz;
+  timespec ts;
+  MDStamp stamp;
+
+  timestamp( ns, 3, local_buf, sizeof( local_buf ) );
+  timestamp( this->user_db.start_time, 3, start_buf, sizeof( start_buf ) );
+
+  stamp.stamp = ( mono_ns - this->user_db.start_mono_time ) / 1000000;
+  stamp.resolution = MD_RES_MILLISECS;
+  up_sz = stamp.get_string( uptime_buf, sizeof( uptime_buf ) );
+
+  clock_gettime( CLOCK_PROCESS_CPUTIME_ID, &ts );
+  stamp.stamp = ts.tv_sec * 1000 + ( ts.tv_nsec / 1000000 );
+  stamp.resolution = MD_RES_MILLISECS;
+  cpu_sz = stamp.get_string( cpu_buf, sizeof( cpu_buf ) );
+
+  out.add_row()
+     .set( "local" )
+     .set( local_buf );
+  out.add_row()
+     .set( "start" )
+     .set( start_buf );
+  out.add_row()
+     .set( "uptime" )
+     .set( uptime_buf, up_sz );
+  out.add_row()
+     .set( "cpu" )
+     .set( cpu_buf, cpu_sz );
+
+  const char *hdr[ ncols ] =
+   { "kind", "stamp" };
+  this->print_table( p, hdr, ncols );
+}
+
+extern "C" {
+const char *ms_get_version( void );
+const char *sassrv_get_version( void );
+const char *ds_get_version( void );
+const char *natsmd_get_version( void );
+const char *kv_get_version( void );
+const char *md_get_version( void );
+}
+void
+Console::show_version( ConsoleOutput *p ) noexcept
+{
+  static const size_t ncols = 2;
+  TabOut out( this->table, this->tmp, ncols );
+
+  out.add_row()
+     .set( "raims" )
+     .set( ms_get_version() );
+  out.add_row()
+     .set( "sassrv" )
+     .set( sassrv_get_version() );
+  out.add_row()
+     .set( "raids" )
+     .set( ds_get_version() );
+  out.add_row()
+     .set( "natsmd" )
+     .set( natsmd_get_version() );
+  out.add_row()
+     .set( "raikv" )
+     .set( kv_get_version() );
+  out.add_row()
+     .set( "raimd" )
+     .set( md_get_version() );
+
+  const char *hdr[ ncols ] =
+   { "repo", "version" };
+  this->print_table( p, hdr, ncols );
 }
 

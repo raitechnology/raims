@@ -416,6 +416,9 @@ TransportRoute::on_data_loss( EvSocket &conn,  EvPublish &pub ) noexcept
           UserBridge * n = this->user_db.bridge_tab[ uid ];
           if ( n != NULL ) {
             uint32_t msg_loss = pub.pub_status;
+            UIntHashTab *&ht = ( msg_loss == EV_PUB_RESTART ?
+                                 n->inbound_svc_restart :
+                                 n->inbound_svc_loss );
             if ( msg_loss == EV_PUB_RESTART )
               msg_loss = 1;
             user = n->peer.user;
@@ -424,21 +427,20 @@ TransportRoute::on_data_loss( EvSocket &conn,  EvPublish &pub ) noexcept
               if ( n->last_idl_pub != cur_pub ) {
                 n->last_idl_pub = cur_pub;
                 n->inbound_msg_loss += msg_loss;
-                if ( n->inbound_svc_loss == NULL ) {
-                  n->inbound_svc_loss = UIntHashTab::resize( NULL );
+                if ( ht == NULL ) {
+                  ht = UIntHashTab::resize( NULL );
                 }
                 else {
                   size_t   pos;
                   uint32_t val;
-                  if ( n->inbound_svc_loss->find( svc.rv_service, pos, val ) ) {
+                  if ( ht->find( svc.rv_service, pos, val ) ) {
                     uint64_t tmp = (uint64_t) val + (uint64_t) msg_loss;
                     if ( tmp > 0xffffffffU )
                       tmp = 0xffffffffU;
                     msg_loss = (uint32_t) tmp;
                   }
                 }
-                n->inbound_svc_loss->upsert_rsz( n->inbound_svc_loss,
-                                                 svc.rv_service, msg_loss );
+                ht->upsert_rsz( ht, svc.rv_service, msg_loss );
                 if ( n->is_set( AUTHENTICATED_STATE ) )
                   this->user_db.uid_rtt.add( n->uid );
               }

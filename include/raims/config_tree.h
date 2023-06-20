@@ -49,7 +49,8 @@ struct ConfigTree {
     StringPair * next;
     StringVal    name,    /* route var name */
                  value;   /* route var value */
-    StringPair() : next( 0 ) {}
+    bool         is_temp;
+    StringPair() : next( 0 ), is_temp( false ) {}
     StringPair( const StringPair &sp ) : next( 0 ), name( sp.name ),
       value( sp.value ) {}
     StringPair( const StringVal &nm,  const StringVal &val ) : next( 0 ),
@@ -134,15 +135,21 @@ struct ConfigTree {
     Parameters() : next( 0 ) {}
   };
   struct ParametersList : public kv::SLinkList< Parameters > {
-    StringPair* find_sp( const char *name,  size_t name_len ) noexcept;
+    StringPair *find_sp( const char *name,  size_t name_len ) noexcept;
     bool find( const char *name,  const char *&value,
                const char *def_value = NULL ) noexcept;
-    void set( StringTab &st,  const char *name,
+    StringPair *set( StringTab &st,  const char *name,
               const char *value ) noexcept;
-    void set( StringTab &st,  const char *name, bool value ) {
-      this->set( st, name, value ? "true" : "false" );
+    StringPair *set( StringTab &st,  const char *name, bool value ) {
+      return this->set( st, name, value ? "true" : "false" );
     }
+    StringPair *update( StringTab &st,  const StringVal &name,
+                        const StringVal &val ) noexcept;
     bool remove( StringTab &st,  const char *name ) noexcept;
+    bool getset_bytes( StringTab &st,  const char *name, uint64_t &n ) noexcept;
+    bool getset_nanos( StringTab &st,  const char *name, uint64_t &n ) noexcept;
+    bool getset_secs( StringTab &st,  const char *name, uint32_t &s ) noexcept;
+    bool getset_bool( StringTab &st,  const char *name,  bool &b ) noexcept;
   };
   /* services : { svc : name, type : t, subject : [ arr ], route : { f:v } } */
   struct Service {
@@ -260,6 +267,8 @@ struct ConfigTree {
   User      * find_user( Service &svc,  const char *usr,  size_t len ) noexcept;
   Transport * find_transport( const char *tport,  size_t len,
                               bool *conn = NULL ) noexcept;
+  Transport * find_transport_type( const char *type,  size_t len,
+                                   bool conn = false ) noexcept;
   void set_route_str( ConfigTree::Transport &t,  StringTab &st,
                       const char *name,  const char *value,
                       size_t value_len ) noexcept;
@@ -303,10 +312,10 @@ struct ConfigJson {
   md::JsonValue * copy( const ConfigTree::Service &s ) noexcept;
   md::JsonValue * copy( const ConfigTree::Transport &t ) noexcept;
   md::JsonValue * copy( const ConfigTree::Group &g ) noexcept;
-  md::JsonValue * copy( const ConfigTree::PairList &pl ) noexcept;
+  md::JsonValue * copy( const ConfigTree::PairList &pl,  bool not_temp ) noexcept;
   md::JsonValue * copy( const ConfigTree::StrList &sl ) noexcept;
   md::JsonValue * copy( const StringVal &s ) noexcept;
-  md::JsonObject * copy( const ConfigTree::ParametersList &list ) noexcept;
+  md::JsonObject * copy( const ConfigTree::ParametersList &list,  bool not_temp ) noexcept;
   md::JsonString * make_hostid( uint32_t ival ) noexcept;
 
   void push_array( md::JsonArray *&a,  md::JsonValue *v ) noexcept;

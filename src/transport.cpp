@@ -481,6 +481,10 @@ TransportRoute::on_msg( EvPublish &pub ) noexcept
       } while ( forward.next( tport_id ) );
     }
     if ( total_rcnt == 0 && ( fpub.flags & MSG_FRAME_IPC_ROUTE ) == 0 ) {
+      if ( debug_null || debug_tran ) {
+        n.printf( "transport_route null rte %.*s (0x%x) path %u\n",
+               (int) pub.subject_len, pub.subject, pub.subj_hash, path_select );
+      }
       n.null_route_count++;
       n.null_route_time = this->mgr.timer_time;
     }

@@ -112,8 +112,20 @@ SessionMgr::add_rvd_transports( const char *listen,  const char *http,
     rvd->is_temp = true;
     this->tree.transports.push_tl( rvd );
   }
-  if ( ! this->add_transport( *rvd, true ) )
+  if ( ! this->add_transport( *rvd, true ) ) {
+    ConfigTree::Transport * rv;
+    if ( (rv = this->tree.find_transport_type( "rv", 2, false )) != NULL ) {
+      IpcRte *el;
+      if ( this->user_db.ipc_transport != NULL ) {
+        el = this->user_db.ipc_transport->ext->find( *rv );
+        if ( el != NULL && el->listener->in_list( IN_ACTIVE_LIST ) ) {
+          fprintf( stderr, "rv listener already running\n" );
+          return true;
+        }
+      }
+    }
     return false;
+  }
   if ( ( flags & RV_NO_HTTP ) == 0 ) {
     web = this->tree.find_transport( T_WEB, T_WEB_SZ );
     if ( web == NULL ) {

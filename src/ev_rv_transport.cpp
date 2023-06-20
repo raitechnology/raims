@@ -454,6 +454,14 @@ RvTransportService::start_host( RvHost &host,  const RvHostNet &hn,
             (int) host.session_ip_len, host.session_ip,
             (int) host.sess_ip_len, host.sess_ip,
             (int) host.network_len, host.network, extra );
+
+    const char * v = ms_get_version();
+    size_t vlen = ::strlen( v );
+    if ( vlen > MAX_RV_VER_LEN - 1 )
+      vlen = MAX_RV_VER_LEN - 1;
+    ::memcpy( host.ver, v, vlen );
+    host.ver[ vlen ] = '\0';
+
     this->last_active_mono = this->rte.poll.mono_ns;
     if ( hr != NULL ) {
       hr->last_active_mono = this->last_active_mono;
@@ -493,14 +501,14 @@ RvTransportService::stop_host( RvHost &host ) noexcept
 
 void
 RvTransportService::outbound_data_loss( uint16_t svc,  uint32_t msg_loss,
-                                        uint32_t pub_host,
+                                        bool is_restart, uint32_t pub_host,
                                         const char *pub_host_id ) noexcept
 {
-  printf( "outbound_data_loss svc %u, lost %u, host %x.%s\n", svc, msg_loss,
-          pub_host, pub_host_id );
+  printf( "outbound_data_loss svc %u, lost %u, is_restart %s, host %x.%s\n",
+          svc, msg_loss, is_restart ? "true" : "false", pub_host, pub_host_id );
   RvHost *host;
   if ( this->db.get_service( host, svc ) ) {
-    host->send_outbound_data_loss( msg_loss, pub_host, pub_host_id );
+    host->send_outbound_data_loss( msg_loss, is_restart, pub_host, pub_host_id);
   }
 }
 

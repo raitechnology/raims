@@ -331,7 +331,8 @@ enum MsgFid {
   FID_QUEUE_REFS     = 90 , /* how queue many subs */
   FID_HDR_LEN        = 91 , /* len of message hdr */
   FID_SUF_LEN        = 92 , /* len of message suffix  */
-  FID_BLOOM_UPD      = 93   /* peer bloom updated  */
+  FID_BLOOM_UPD      = 93 , /* peer bloom updated  */
+  FID_IDL_RESTART    = 94   /* if is idl restart or loss */
 };
 static const int FID_TYPE_SHIFT = 8,
                  FID_MAX        = 1 << FID_TYPE_SHIFT; /* 256 */
@@ -442,6 +443,7 @@ static const char *publish_type_str[] = {
   "u_session_hello",
   "u_session_hb",
   "u_session_bye",
+  "u_session_link",
   "u_peer_add",
   "u_peer_del",
   "u_bloom_filter",
@@ -450,7 +452,7 @@ static const char *publish_type_str[] = {
   "u_sub_leave",
   "u_psub_start",
   "u_psub_stop",
-  "unused12", "unused13", "unused14", "unused15",
+  "unused13", "unused14", "unused15",
   "u_inbox_auth",
   "u_inbox_subs",
   "u_inbox_ping",
@@ -883,7 +885,8 @@ static FidTypeName fid_type_name[] = {
 { FID_QUEUE_REFS  , U_SHORT | U_INT             , XCL , 0 ,"queue_refs"      },
 { FID_HDR_LEN     , U_SHORT | U_INT             , XCL , 0 ,"hdr_len"         },
 { FID_SUF_LEN     , U_SHORT | U_INT             , XCL , 0 ,"suf_len"         },
-{ FID_BLOOM_UPD   , BOOL_1                      , XCL , 0 ,"bloom_upd"       }
+{ FID_BLOOM_UPD   , BOOL_1                      , XCL , 0 ,"bloom_upd"       },
+{ FID_IDL_RESTART , BOOL_1                      , XCL , 0 ,"idl_restart"     }
 };
 
 #endif

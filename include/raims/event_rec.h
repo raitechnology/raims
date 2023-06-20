@@ -11,43 +11,44 @@ namespace rai {
 namespace ms {
 
 enum EventType {
-  NULL_EVENT        = 0,
-  STARTUP           = 1,
-  ON_CONNECT        = 2,
-  ON_SHUTDOWN       = 3,
-  ON_TIMEOUT        = 4,
-  AUTH_ADD          = 5,
-  AUTH_REMOVE       = 6,
-  SEND_CHALLENGE    = 7,
-  RECV_CHALLENGE    = 8,
-  SEND_TRUST        = 9,
-  RECV_TRUST        = 10,
-  ADD_USER_ROUTE    = 11,
-  HB_QUEUE          = 12,
-  HB_TIMEOUT        = 13,
-  SEND_HELLO        = 14,
-  RECV_BYE          = 15,
-  RECV_ADD_ROUTE    = 16,
-  RECV_PEER_DB      = 17,
-  SEND_ADD_ROUTE    = 18,
-  SEND_OTHER_PEER   = 19,
-  SEND_PEER_DELETE  = 20,
-  RECV_SYNC_RESULT  = 21,
-  SEND_SYNC_REQUEST = 22,
-  RECV_SYNC_REQUEST = 23,
-  RECV_SYNC_FAIL    = 24,
-  SEND_ADJ_CHANGE   = 25,
-  RECV_ADJ_CHANGE   = 26,
-  SEND_ADJ_REQUEST  = 27,
-  RECV_ADJ_REQUEST  = 28,
-  SEND_ADJ          = 29,
-  RECV_ADJ_RESULT   = 30,
-  RESIZE_BLOOM      = 31,
-  RECV_BLOOM        = 32,
-  CONVERGE          = 33,
-  INBOUND_MSG_LOSS  = 34,
-  BAD_EVENT         = 35,
-  MAX_EVENT         = 36
+  NULL_EVENT         = 0,
+  STARTUP            = 1,
+  ON_CONNECT         = 2,
+  ON_SHUTDOWN        = 3,
+  ON_TIMEOUT         = 4,
+  AUTH_ADD           = 5,
+  AUTH_REMOVE        = 6,
+  SEND_CHALLENGE     = 7,
+  RECV_CHALLENGE     = 8,
+  SEND_TRUST         = 9,
+  RECV_TRUST         = 10,
+  ADD_USER_ROUTE     = 11,
+  HB_QUEUE           = 12,
+  HB_TIMEOUT         = 13,
+  SEND_HELLO         = 14,
+  RECV_BYE           = 15,
+  RECV_ADD_ROUTE     = 16,
+  RECV_PEER_DB       = 17,
+  SEND_ADD_ROUTE     = 18,
+  SEND_OTHER_PEER    = 19,
+  SEND_PEER_DELETE   = 20,
+  RECV_SYNC_RESULT   = 21,
+  SEND_SYNC_REQUEST  = 22,
+  RECV_SYNC_REQUEST  = 23,
+  RECV_SYNC_FAIL     = 24,
+  SEND_ADJ_CHANGE    = 25,
+  RECV_ADJ_CHANGE    = 26,
+  SEND_ADJ_REQUEST   = 27,
+  RECV_ADJ_REQUEST   = 28,
+  SEND_ADJ           = 29,
+  RECV_ADJ_RESULT    = 30,
+  RESIZE_BLOOM       = 31,
+  RECV_BLOOM         = 32,
+  CONVERGE           = 33,
+  INBOUND_MSG_LOSS   = 34,
+  INBOUND_SEQNO_LOSS = 35,
+  BAD_EVENT          = 36,
+  MAX_EVENT          = 37
 };
 
 static const uint32_t MASK_EVENT =   0x3f, /* 63 */
@@ -66,42 +67,43 @@ static const struct {
   const char * val;
   size_t       len;
 } event_strings[] = {
-  EVSZ( "null" ),            /* 0  */
-  EVSZ( "startup" ),         /* 1  */
-  EVSZ( "on_connect" ),      /* 2  */
-  EVSZ( "on_shutdown" ),     /* 3  */
-  EVSZ( "on_timeout" ),      /* 4  */
-  EVSZ( "auth_add" ),        /* 5  */
-  EVSZ( "auth_remove" ),     /* 6  */
-  EVSZ( "send_challenge" ),  /* 7  */
-  EVSZ( "recv_challenge" ),  /* 8  */
-  EVSZ( "send_trust" ),      /* 9  */
-  EVSZ( "recv_trust" ),      /* 10  */
-  EVSZ( "add_user_route" ),  /* 11 */
-  EVSZ( "hb_queue" ),        /* 12 */
-  EVSZ( "hb_timeout" ),      /* 13 */
-  EVSZ( "send_hello" ),      /* 14 */
-  EVSZ( "recv_bye" ),        /* 15 */
-  EVSZ( "recv_add_route" ),  /* 16 */
-  EVSZ( "recv_peer_db" ),    /* 17 */
-  EVSZ( "send_add_route" ),  /* 18 */
-  EVSZ( "send_other_peer" ), /* 19 */
-  EVSZ( "send_peer_del" ),   /* 20 */
-  EVSZ( "sync_result" ),     /* 21 */
-  EVSZ( "send_sync_req" ),   /* 22 */
-  EVSZ( "recv_sync_req" ),   /* 23 */
-  EVSZ( "recv_sync_fail" ),  /* 24 */
-  EVSZ( "send_adj_change" ), /* 25 */
-  EVSZ( "recv_adj_change" ), /* 26 */
-  EVSZ( "send_adj_req" ),    /* 27 */
-  EVSZ( "recv_adj_req" ),    /* 28 */
-  EVSZ( "send_adj" ),        /* 29 */
-  EVSZ( "recv_adj_result" ), /* 30 */
-  EVSZ( "resize_bloom" ),    /* 31 */
-  EVSZ( "recv_bloom" ),      /* 32 */
-  EVSZ( "converge" ),        /* 33 */
-  EVSZ( "inbound_msg_loss" ),/* 34 */
-  EVSZ( "bad_event" )        /* 35 */
+  EVSZ( "null" ),              /* 0  */
+  EVSZ( "startup" ),           /* 1  */
+  EVSZ( "on_connect" ),        /* 2  */
+  EVSZ( "on_shutdown" ),       /* 3  */
+  EVSZ( "on_timeout" ),        /* 4  */
+  EVSZ( "auth_add" ),          /* 5  */
+  EVSZ( "auth_remove" ),       /* 6  */
+  EVSZ( "send_challenge" ),    /* 7  */
+  EVSZ( "recv_challenge" ),    /* 8  */
+  EVSZ( "send_trust" ),        /* 9  */
+  EVSZ( "recv_trust" ),        /* 10  */
+  EVSZ( "add_user_route" ),    /* 11 */
+  EVSZ( "hb_queue" ),          /* 12 */
+  EVSZ( "hb_timeout" ),        /* 13 */
+  EVSZ( "send_hello" ),        /* 14 */
+  EVSZ( "recv_bye" ),          /* 15 */
+  EVSZ( "recv_add_route" ),    /* 16 */
+  EVSZ( "recv_peer_db" ),      /* 17 */
+  EVSZ( "send_add_route" ),    /* 18 */
+  EVSZ( "send_other_peer" ),   /* 19 */
+  EVSZ( "send_peer_del" ),     /* 20 */
+  EVSZ( "sync_result" ),       /* 21 */
+  EVSZ( "send_sync_req" ),     /* 22 */
+  EVSZ( "recv_sync_req" ),     /* 23 */
+  EVSZ( "recv_sync_fail" ),    /* 24 */
+  EVSZ( "send_adj_change" ),   /* 25 */
+  EVSZ( "recv_adj_change" ),   /* 26 */
+  EVSZ( "send_adj_req" ),      /* 27 */
+  EVSZ( "recv_adj_req" ),      /* 28 */
+  EVSZ( "send_adj" ),          /* 29 */
+  EVSZ( "recv_adj_result" ),   /* 30 */
+  EVSZ( "resize_bloom" ),      /* 31 */
+  EVSZ( "recv_bloom" ),        /* 32 */
+  EVSZ( "converge" ),          /* 33 */
+  EVSZ( "inbound_msg_loss" ),  /* 34 */
+  EVSZ( "inbound_seqno_loss" ),/* 35 */
+  EVSZ( "bad_event" )          /* 36 */
 };
 #if __cplusplus >= 201103L
 static_assert( MAX_EVENT == ( sizeof( event_strings ) / sizeof( event_strings[ 0 ] ) ), "max_events" );
@@ -186,7 +188,8 @@ struct EventRec {
             /*return sync_kind_string( (SyncKind) this->data );*/
           case RESIZE_BLOOM:
           case RECV_BLOOM:
-          case INBOUND_MSG_LOSS: {
+          case INBOUND_MSG_LOSS:
+          case INBOUND_SEQNO_LOSS: {
             size_t len = kv::uint32_to_string( this->data, buf );
             buf[ len ] = '\0';
             return buf;
@@ -454,21 +457,26 @@ struct EventRecord {
   void converge( uint16_t inv,  uint32_t uid ) {
     this->uid_event( uid, CONVERGE | HAS_DATA ).data = inv;
   }
-  void inbound_msg_loss( uint32_t uid,  uint32_t tid,  uint32_t lost ) {
+  void inbound_loss( int ev_type,  uint32_t uid,  uint32_t tid,  uint32_t lost ) {
     uint64_t   nowish = *this->cur_time >> 30;
     uint32_t   i      = this->hd;
     EventRec * ev;
     while ( (ev = this->prev( i )) != NULL ) {
       if ( ( ev->stamp >> 30 ) != nowish )
         break;
-      if ( ev->event_type() == INBOUND_MSG_LOSS &&
+      if ( ev->event_type() == ev_type &&
            ev->source_uid == uid && ev->tport_id == tid ) {
         ev->data += lost;
         return;
       }
     }
-    this->tid_event( uid, tid,
-                     INBOUND_MSG_LOSS | HAS_TPORT | HAS_DATA ).data = lost;
+    this->tid_event( uid, tid, ev_type | HAS_TPORT | HAS_DATA ).data = lost;
+  }
+  void inbound_msg_loss( uint32_t uid,  uint32_t tid,  uint32_t lost ) {
+    this->inbound_loss( INBOUND_MSG_LOSS, uid, tid, lost );
+  }
+  void inbound_seqno_loss( uint32_t uid,  uint32_t tid ) {
+    this->inbound_loss( INBOUND_SEQNO_LOSS, uid, tid, 1 );
   }
 };
 
