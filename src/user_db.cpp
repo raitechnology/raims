@@ -2068,7 +2068,7 @@ UserDB::read_hostid_cache( void ) noexcept
     perror( opath.start );
     return false;
   }
-  status = ctx.parse( (char *) map.map, 0, map.map_size, NULL, &mem, true );
+  status = ctx.parse( (char *) map.map, 0, map.map_size, NULL, mem, true );
   if ( status != 0 ) {
     fprintf( stderr, "JSON parse error in \"%s\", status %d/%s\n", opath.start,
              status, Err::err( status )->descr );

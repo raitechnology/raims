@@ -182,7 +182,7 @@ struct CabaMsg : public md::TibSassMsg {
   CabaFlags    caba;   /* first bits of the message */
 
   void * operator new( size_t, void *ptr ) { return ptr; }
-  CabaMsg( void *bb,  size_t off,  size_t end,  md::MDDict *d, md::MDMsgMem *m )
+  CabaMsg( void *bb,  size_t off,  size_t end,  md::MDDict *d, md::MDMsgMem &m )
     : md::TibSassMsg( bb, off, end, d, m ),
       sub( 0 ), subhash( 0 ), sublen( 0 ), caba( CABA_MCAST ) {}
 
@@ -192,8 +192,8 @@ struct CabaMsg : public md::TibSassMsg {
   static bool is_cabamsg( void *bb,  size_t off,  size_t end,
                           uint32_t h ) noexcept;
   static CabaMsg *unpack( void *bb,  size_t off,  size_t end,  uint32_t h,
-                          md::MDDict *d,  md::MDMsgMem *m ) noexcept;
-  static int unpack2( uint8_t *bb,  size_t off,  size_t &end,  md::MDMsgMem *m,
+                          md::MDDict *d,  md::MDMsgMem &m ) noexcept;
+  static int unpack2( uint8_t *bb,  size_t off,  size_t &end,  md::MDMsgMem &m,
                       CabaMsg *&msg ) noexcept;
   CabaMsg *submsg( void *bb,  size_t len ) noexcept;
   static void init_auto_unpack( void ) noexcept;
@@ -221,8 +221,8 @@ struct MsgFrameDecoder {
   }
   int unpack( const void *msgbuf,  size_t &msglen ) {
     this->release();
-    return CabaMsg::unpack2( (uint8_t *) msgbuf, 0, msglen,
-                             &this->mem, this->msg );
+    return CabaMsg::unpack2( (uint8_t *) msgbuf, 0, msglen, this->mem,
+                             this->msg );
   }
   void print( void ) noexcept;
   static md::MDDict *build_msg_dict( void ) noexcept;

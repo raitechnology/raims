@@ -727,7 +727,7 @@ ConfigDB::parse_stream( int fd ) noexcept
   JsonMsgCtx ctx;
   int        status;
 
-  status = ctx.parse_fd( fd, NULL, &tmp_mem, true );
+  status = ctx.parse_fd( fd, NULL, tmp_mem, true );
   if ( status != 0 ) {
     fprintf( stderr, "JSON parse error in fd %d, status %d/%s\n", fd,
              status, Err::err( status )->descr );
@@ -754,7 +754,7 @@ ConfigDB::parse_jsconfig( const char *buf,  size_t buflen,
     is_yaml = true;
   else
     is_yaml = false;
-  status = ctx.parse( (void *) buf, 0, buflen, NULL, &tmp_mem, is_yaml );
+  status = ctx.parse( (void *) buf, 0, buflen, NULL, tmp_mem, is_yaml );
   if ( status != 0 ) {
     fprintf( stderr, "JSON parse error in \"%s\", status %d/%s\n", fn,
              status, Err::err( status )->descr );
@@ -1268,7 +1268,7 @@ ConfigDB::parse_object_array( const char *where, MDMsg &msg, MDReference &mref,
   for ( size_t i = 0; i < num_entries; i++ ) {
     if ( msg.get_array_ref( mref, i, aref ) != 0 ||
          aref.ftype != MD_MESSAGE ||
-         msg.get_sub_msg( aref, amsg ) != 0 ||
+         msg.get_sub_msg( aref, amsg, NULL ) != 0 ||
          this->parse_object( where, *amsg, obj ) != 0 ) {
       fprintf( stderr, "Expecting array of objects in \"%s\", element %u\n",
                where, (uint32_t) i );
@@ -1289,7 +1289,7 @@ ConfigDB::parse_object_list( const char *where,  MDMsg &msg,  MDName &name,
   else if ( mref.ftype != MD_MESSAGE )
     status = this->config_pair( where, msg, name, mref, p->list );
   else {
-    status = msg.get_sub_msg( mref, smsg );
+    status = msg.get_sub_msg( mref, smsg, NULL );
     if ( status == 0 )
       status = this->parse_pairs( where, *smsg, p->list );
   }
@@ -1451,7 +1451,7 @@ ConfigDB::parse_transports_route( MDMsg &msg, MDName &name,
   if ( mref.ftype != MD_MESSAGE )
     status = this->config_pair( where, msg, name, mref, this->t->route );
   else {
-    status = msg.get_sub_msg( mref, rmsg );
+    status = msg.get_sub_msg( mref, rmsg, NULL );
     if ( status == 0 )
       status = this->parse_pairs( where, *rmsg, this->t->route );
   }
@@ -1506,7 +1506,7 @@ ConfigDB::parse_services_users( MDMsg &msg, MDName &,
 {
   MDMsg *rmsg;
   if ( mref.ftype != MD_MESSAGE ||
-       msg.get_sub_msg( mref, rmsg ) != 0 ||
+       msg.get_sub_msg( mref, rmsg, NULL ) != 0 ||
        this->parse_pairs( "service.users", *rmsg, this->s->users ) != 0 ) {
     fprintf( stderr, "Expecting an object in service.users\n" );
     return Err::BAD_SUB_MSG;
@@ -1519,7 +1519,7 @@ ConfigDB::parse_services_revoke( MDMsg &msg, MDName &,
 {
   MDMsg *rmsg;
   if ( mref.ftype != MD_MESSAGE ||
-       msg.get_sub_msg( mref, rmsg ) != 0 ||
+       msg.get_sub_msg( mref, rmsg, NULL ) != 0 ||
        this->parse_pairs( "service.revoke", *rmsg, this->s->revoke ) != 0 ) {
     fprintf( stderr, "Expecting an object in service.revoke\n" );
     return Err::BAD_SUB_MSG;

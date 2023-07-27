@@ -2103,6 +2103,19 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
       }
       break;
     }
+    case CMD_FDCLOSE: {
+      EvPoll & poll = this->mgr.poll;
+      EvSocket *s;
+      uint32_t n;
+      if ( (n = int_arg( arg, len )) != 0 && n <= poll.maxfd &&
+           (s = poll.sock[ n ]) != NULL ) {
+        s->idle_push( EV_CLOSE );
+      }
+      else {
+        this->outf( p, "fd (%.*s) not a socket", (int) len, arg );
+      }
+      break;
+    }
     case CMD_RESEED: {
       this->sub_db.reseed_bloom();
       this->outf( p, "bloom seed 0x%x", this->sub_db.bloom.bits->seed );
@@ -3523,7 +3536,7 @@ Console::print_json_table( ConsoleOutput *p,  const void * data,
   if ( datalen > 0 &&
     ( dp[ 0 ] != '[' && dp[ 0 ] != '{' && dp[ 0 ] != '\"' && dp[ 0 ] != '\'' ) )
     return false;
-  if ( ctx.parse( (void *) data, 0, datalen, NULL, &mem, false ) != 0 )
+  if ( ctx.parse( (void *) data, 0, datalen, NULL, mem, false ) != 0 )
     return false;
   if ( ctx.msg->get_reference( aref ) != 0 )
     return false;
@@ -3546,7 +3559,7 @@ Console::print_json_table( ConsoleOutput *p,  const void * data,
   for ( el = 0; el < num_entries; el++ ) {
     if ( ctx.msg->get_array_ref( aref, el, mref ) != 0 ||
          mref.ftype != MD_MESSAGE ||
-         ctx.msg->get_sub_msg( mref, amsg ) != 0 ||
+         ctx.msg->get_sub_msg( mref, amsg, NULL ) != 0 ||
          amsg->get_field_iter( f ) != 0 )
       continue;
     /* the column headers are the field names of the object */
@@ -7071,16 +7084,16 @@ Console::print_json_data( ConsoleOutput *p,  const SubMsgData &val,
   if ( val.datalen > 0 ) {
     if ( val.fmt != 0 )
       m = MDMsg::unpack( (void *) val.data, 0, val.datalen, val.fmt,
-                         MsgFrameDecoder::msg_dict, &mem );
+                         MsgFrameDecoder::msg_dict, mem );
     else
       m = MDMsg::unpack( (void *) val.data, 0, val.datalen, MD_STRING,
-                         NULL, &mem );
+                         NULL, mem );
   }
   else {
     void * data    = NULL;
     size_t datalen = 0;
     int fmt = val.pub.dec.msg->caba_to_rvmsg( mem, data, datalen );
-    m = MDMsg::unpack( data, 0, datalen, fmt, NULL, &mem );
+    m = MDMsg::unpack( data, 0, datalen, fmt, NULL, mem );
   }
   if ( m != NULL ) {
     if ( this->out.count > 0 )
@@ -7126,7 +7139,7 @@ Console::print_data( ConsoleOutput *p,  const SubMsgData &val,
     if ( val.fmt != 0 ) {
       MDMsgMem mem;
       MDMsg * m = MDMsg::unpack( (void *) val.data, 0, val.datalen, val.fmt,
-                                 MsgFrameDecoder::msg_dict, &mem );
+                                 MsgFrameDecoder::msg_dict, mem );
       this->printf( "%.*s%.*s%.*s n=%" PRIu64 ".%" PRIu64 " (%s @ %s via %s)\n",
               bz, bc, (int) sublen, sub, nz, nc,
               seqno_frame( val.seqno ), seqno_base( val.seqno ),

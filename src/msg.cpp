@@ -88,7 +88,7 @@ CabaMsg::is_cabamsg( void *bb,  size_t off,  size_t end,
 }
 
 int
-CabaMsg::unpack2( uint8_t *bb,  size_t off,  size_t &end,  MDMsgMem *m,
+CabaMsg::unpack2( uint8_t *bb,  size_t off,  size_t &end,  MDMsgMem &m,
                   CabaMsg *&msg ) noexcept
 {
   if ( off + 48 > end )
@@ -124,7 +124,7 @@ CabaMsg::unpack2( uint8_t *bb,  size_t off,  size_t &end,  MDMsgMem *m,
   if ( start + (size_t) sublen + 4 > end )
     return Err::INVALID_MSG;
 
-  msg = new ( m->make( sizeof( CabaMsg ) ) )
+  msg = new ( m.make( sizeof( CabaMsg ) ) )
     CabaMsg( bb, off, end, MsgFrameDecoder::msg_dict, m );
 
   msg->sub        = (const char *) &field[ 4 ];
@@ -138,7 +138,7 @@ CabaMsg::unpack2( uint8_t *bb,  size_t off,  size_t &end,  MDMsgMem *m,
 
 CabaMsg *
 CabaMsg::unpack( void *bb,  size_t off,  size_t end,  uint32_t,  MDDict *,
-                 MDMsgMem *m ) noexcept
+                 MDMsgMem &m ) noexcept
 {
   CabaMsg *msg;
   if ( CabaMsg::unpack2( (uint8_t *) bb, off, end, m, msg ) == 0 )
@@ -150,7 +150,7 @@ CabaMsg *
 CabaMsg::submsg( void *bb,  size_t len ) noexcept
 {
   return new ( this->mem->make( sizeof( CabaMsg ) ) )
-    CabaMsg( (uint8_t *) bb - 8, 0, len + 8, this->dict, this->mem );
+    CabaMsg( (uint8_t *) bb - 8, 0, len + 8, this->dict, *this->mem );
 }
 
 bool
@@ -286,7 +286,7 @@ MsgCat::print( void ) noexcept
   MDMsg  * m;
 
   m = CabaMsg::unpack( this->msg, 0, this->len(), 0, MsgFrameDecoder::msg_dict,
-                       &mem );
+                       mem );
   if ( m != NULL ) {
     m->print( &mout );
   }
@@ -300,7 +300,7 @@ MsgCat::caba_to_rvmsg( MDMsgMem &mem,  void *&data,
   MDMsg  * m;
 
   m = CabaMsg::unpack( this->msg, 0, this->len(), 0, MsgFrameDecoder::msg_dict,
-                       &tmp );
+                       tmp );
   if ( m != NULL )
     return ((CabaMsg *) m)->caba_to_rvmsg( mem, data, datalen );
   return CABA_TYPE_ID;

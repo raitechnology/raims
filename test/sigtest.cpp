@@ -52,7 +52,7 @@ msg_test( void )
   MDMsg  * msg;
 
   msg = CabaMsg::unpack( m.msg, 0, m.len(), 0, MsgFrameDecoder::msg_dict,
-                         &mem );
+                         mem );
   if ( msg != NULL ) {
     msg->print( &mout );
 

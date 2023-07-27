@@ -165,7 +165,7 @@ main( int argc, const char *argv[] )
   "   -listen            : rv listen port\n" \
   "   -no-http           : no http service\n" \
   "   -http              : port for http service (default: listen + 80)\n" \
-  "   -no-mcast          : no multicast\n" \
+  "   -no-multicast      : no multicast\n" \
   "   -console           : run with console\n" \
   "   -pidfile           : write daemon pid to file\n" \
   "   -hostid            : host identity\n" \
@@ -215,6 +215,8 @@ main( int argc, const char *argv[] )
   no_http     = get_arg( argc, argv, 0, NULL, "-no-http", NULL );
   http        = get_arg( argc, argv, 1, NULL, "-http", NULL );
   no_mcast    = get_arg( argc, argv, 0, NULL, "-no-multicast", NULL );
+  if ( no_mcast == NULL )
+    no_mcast  = get_arg( argc, argv, 0, NULL, "-no-mcast", NULL );
   use_console = get_arg( argc, argv, 0, "-c", "-console", NULL );
   pid_file    = get_arg( argc, argv, 1, NULL, "-pidfile", NULL );
   hostid      = get_arg( argc, argv, 1, "-x", "-hostid", NULL );

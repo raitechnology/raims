@@ -1007,7 +1007,7 @@ ConsoleRoute::fwd_console( EvPublish &pub,  bool is_caba ) noexcept
               suf_len     = 0;
     size_t    end         = pub.msg_len;
 
-    if ( CabaMsg::unpack2( (uint8_t *) pub.msg, 0, end, &mem, msg ) != 0 )
+    if ( CabaMsg::unpack2( (uint8_t *) pub.msg, 0, end, mem, msg ) != 0 )
       return 0;
 
     MsgFramePublish fpub( pub, msg, rte );
@@ -2046,7 +2046,7 @@ SessionMgr::recv_loss_notify( const MsgFramePublish &pub,  UserBridge &n,
           this->last_autoscale = cur_mono;
           uint64_t new_cnt = this->pub_window_count +
                              this->pub_window_autoscale;
-          printf( "autscale pub_window_count %lu -> %lu\n",
+          printf( "autoscale pub_window_count %lu -> %lu\n",
                   this->pub_window_count, new_cnt );
           this->pub_window_count = new_cnt;
           this->last_autoscale   = cur_mono;
