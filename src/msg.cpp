@@ -222,7 +222,6 @@ CabaMsg::caba_to_rvmsg( MDMsgMem &mem,  void *&data,
   size_t        buflen = ( this->msg_end - this->msg_off ) * 16;
   void        * buf    = mem.make( buflen );
   RvMsgWriter   rvmsg( buf, buflen );
-  int           status = 0;
   if ( this->get_field_iter( iter ) == 0 ) {
     if ( iter->first() == 0 ) {
       do {
@@ -233,12 +232,12 @@ CabaMsg::caba_to_rvmsg( MDMsgMem &mem,  void *&data,
           size_t flen = (size_t) t.name_len + 1;
           if ( iter->get_reference( mref ) == 0 ) {
             if ( t.cvt_fld == LIT ) {
-              status = rvmsg.append_ref( t.type_name, flen, mref );
+              rvmsg.append_ref( t.type_name, flen, mref );
             }
             else if ( t.cvt_fld == BIN ) {
               char   buf[ KV_BASE64_SIZE( 64 ) ];
               size_t len = bin_to_base64( mref.fptr, mref.fsize, buf, false );
-              status = rvmsg.append_string( t.type_name, flen, buf, len );
+              rvmsg.append_string( t.type_name, flen, buf, len );
             }
             else if ( t.cvt_fld == TIM ) {
               char   buf[ 2 + 1 + 2 + 1 + 2 + 1 ];
@@ -253,10 +252,10 @@ CabaMsg::caba_to_rvmsg( MDMsgMem &mem,  void *&data,
                 uint32_to_string( sec, &buf[ 6 ], 2 );
                 buf[ 2 ] = buf[ 5 ] = ':';
                 buf[ 8 ] = '\0';
-                status = rvmsg.append_string( t.type_name, flen, buf, 8 );
+                rvmsg.append_string( t.type_name, flen, buf, 8 );
               }
             }
-            if ( status != 0 ) {
+            if ( rvmsg.err != 0 ) {
               fprintf( stderr, "caba_to_rvmsg failed\n" );
               return CABA_TYPE_ID;
             }
