@@ -219,9 +219,8 @@ CabaMsg::caba_to_rvmsg( MDMsgMem &mem,  void *&data,
   MDFieldIter * iter;
   MDName        name;
   MDReference   mref;
-  size_t        buflen = ( this->msg_end - this->msg_off ) * 16;
-  void        * buf    = mem.make( buflen );
-  RvMsgWriter   rvmsg( buf, buflen );
+  size_t        buflen = ( this->msg_end - this->msg_off ) + 1024;
+  RvMsgWriter   rvmsg( mem, mem.make( buflen ), buflen );
   if ( this->get_field_iter( iter ) == 0 ) {
     if ( iter->first() == 0 ) {
       do {
@@ -265,7 +264,7 @@ CabaMsg::caba_to_rvmsg( MDMsgMem &mem,  void *&data,
     }
   }
   datalen = rvmsg.update_hdr();
-  data    = buf;
+  data    = rvmsg.buf;
   return RVMSG_TYPE_ID;
 }
 
