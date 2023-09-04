@@ -231,7 +231,7 @@ Console::rotate_log( void ) noexcept
 
 void
 Console::parse_debug_flags( const char *arg,  size_t len,
-                            int &dist_dbg ) noexcept
+                            int &dist_dbg,  int &check_blooms ) noexcept
 {
   dbg_flags             = 0;
   kv_pub_debug          = 0;
@@ -252,6 +252,8 @@ Console::parse_debug_flags( const char *arg,  size_t len,
   }
   if ( len >= 4 && kv_memmem( arg, len, "dist", 4 ) != NULL )
     dist_dbg = 1;
+  if ( len >= 5 && kv_memmem( arg, len, "bloom", 5 ) != NULL )
+    check_blooms = 1;
   if ( len >= 2 && kv_memmem( arg, len, "kvpub", 5 ) != NULL )
     kv_pub_debug = 1;
   if ( len >= 4 && kv_memmem( arg, len, "kvps", 4 ) != NULL )
@@ -1985,23 +1987,6 @@ Console::print_table( ConsoleOutput *p,  const char **hdr,
     ::free( width );
 }
 
-UserBridge *
-Console::find_user( const char *name,  size_t len ) noexcept
-{
-  if ( len == 1 && name[ 0 ] == '*' )
-    len = 0;
-  if ( len > 0 ) {
-    for ( uint32_t uid = 1; uid < this->user_db.next_uid; uid++ ) {
-      UserBridge * n = this->user_db.bridge_tab[ uid ];
-      if ( n != NULL && n->is_set( AUTHENTICATED_STATE ) ) {
-        if ( n->peer.user.equals( name, len ) )
-          return n;
-      }
-    }
-  }
-  return NULL;
-}
-
 static uint32_t
 int_arg( const char *arg,  size_t len ) noexcept
 {
@@ -2011,6 +1996,32 @@ int_arg( const char *arg,  size_t len ) noexcept
     len--; arg++;
   }
   return i;
+}
+
+UserBridge *
+Console::find_user( const char *name,  size_t len ) noexcept
+{
+  uint32_t uid;
+  if ( len == 1 && name[ 0 ] == '*' )
+    len = 0;
+  if ( len > 0 ) {
+    for ( uid = 1; uid < this->user_db.next_uid; uid++ ) {
+      UserBridge * n = this->user_db.bridge_tab[ uid ];
+      if ( n != NULL && n->is_set( AUTHENTICATED_STATE ) ) {
+        if ( n->peer.user.equals( name, len ) )
+          return n;
+      }
+    }
+  }
+  if ( name[ 0 ] >= '0' && name[ 1 ] <= '9' ) {
+    uid = int_arg( name, len );
+    if ( uid > 0 && uid < this->user_db.next_uid ) {
+      UserBridge * n = this->user_db.bridge_tab[ uid ];
+      if ( n != NULL && n->is_set( AUTHENTICATED_STATE ) )
+        return n;
+    }
+  }
+  return NULL;
 }
 
 bool
@@ -2114,6 +2125,14 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
       else {
         this->outf( p, "fd (%.*s) not a socket", (int) len, arg );
       }
+      break;
+    }
+    case CMD_UIDREMOVE: {
+      UserBridge * u = this->find_user( arg, len );
+      if ( u == NULL )
+        this->outf( p, "no user \"%.*s\"", (int) len, arg );
+      else
+        this->user_db.remove_authenticated( *u, BYE_CONSOLE );
       break;
     }
     case CMD_RESEED: {
@@ -2231,12 +2250,12 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
     case CMD_SHOW_RPCS:      this->show_rpcs( p ); break;
 
     case CMD_DEBUG: {
-      int    dist_dbg = 0;
+      int    dist_dbg = 0, check_blooms = 0;
       char   buf[ 80 ];
       size_t sz = 0;
       if ( len == 0 )
         goto help;
-      parse_debug_flags( arg, len, dist_dbg );
+      parse_debug_flags( arg, len, dist_dbg, check_blooms );
       for ( size_t i = 0; i < debug_str_count; i++ ) {
         if ( ( dbg_flags & ( 1 << i ) ) != 0 ) {
           if ( sz > 0 )
@@ -2254,6 +2273,10 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
       if ( dist_dbg ) {
         this->user_db.peer_dist.invalidate( INVALID_NONE, 0 );
         this->outf( p, "recalculate peer dist" );
+      }
+      if ( check_blooms ) {
+        bool b = this->user_db.check_blooms();
+        this->outf( p, "check blooms = %s", b ? "ok" : "fail" );
       }
       if ( kv_pub_debug )
         this->outf( p, "kv pub debug on" );

@@ -47,12 +47,13 @@ enum AuthStage {
   BYE_SOURCE            = 7, /* link for source dropped */
   BYE_DROPPED           = 8, /* peer sent drop notice */
   BYE_PING              = 9, /* ping late, missing */
+  BYE_CONSOLE           = 10,
 
-  AUTH_FROM_ADJ_RESULT  = 10, /* recv _I.<n>.adj_rpy, from adj_req */
-  AUTH_FROM_PEER_ADD    = 11, /* recv _Z.ADD on zombie */
-  AUTH_FROM_ADD_ROUTE   = 12, /* recv _I.<n>.add_rte on zombie */
-  AUTH_FROM_SYNC_RESULT = 13, /* recv _I.<n>.sync_rpy, from sync_rpy */
-  MAX_AUTH              = 14
+  AUTH_FROM_ADJ_RESULT  = 11, /* recv _I.<n>.adj_rpy, from adj_req */
+  AUTH_FROM_PEER_ADD    = 12, /* recv _Z.ADD on zombie */
+  AUTH_FROM_ADD_ROUTE   = 13, /* recv _I.<n>.add_rte on zombie */
+  AUTH_FROM_SYNC_RESULT = 14, /* recv _I.<n>.sync_rpy, from sync_rpy */
+  MAX_AUTH              = 15
 };
 
 static inline bool is_bye_stage( uint32_t stage ) {
@@ -85,6 +86,7 @@ static const char *auth_stage[] = {
   "source_close", /* BYE_SOURCE */
   "dropped",      /* BYE_DROPPED           _Z.DEL */
   "ping",         /* BYE_PING              _I.<nonce>.pong */
+  "console",      /* BYE_CONSOLE           */
 
   "adj_result",   /* AUTH_FROM_ADJ_RESULT  _I.<nonce>.adj_rpy */
   "peer_add",     /* AUTH_FROM_PEER_ADD    _Z.ADD */

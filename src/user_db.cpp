@@ -1216,23 +1216,47 @@ UserDB::find_adjacent_routes( void ) noexcept
                   primary->mcast.fd );
       this->add_inbox_route( n, primary );
     }
-#if 0
-    if ( hops > 0 && u_ptr->is_set( MESH_URL_STATE ) ) {
-      if ( this->start_time > n.start_time ) {
-        this->mesh_pending.update( u_ptr );
-      }
-    }
-#endif
   }
 }
-#if 0
-void
-MeshDirectList::update( UserRoute *u ) noexcept
+
+bool
+UserDB::check_blooms( void ) noexcept
 {
-  this->update( u->rte, u->mesh_url, u->mesh_url_len, u->url_hash,
-                u->n.bridge_id.nonce );
+  bool failed = false;
+  for ( uint32_t uid = 1; uid < this->next_uid; uid++ ) {
+    uint32_t no_path = 0, invalid = 0, null_bloom = 0, fd_not_set = 0;
+    if ( this->bridge_tab.ptr[ uid ] == NULL )
+      continue;
+    UserBridge &n = *this->bridge_tab.ptr[ uid ];
+    if ( ! n.is_set( AUTHENTICATED_STATE ) )
+      continue;
+
+    for ( uint8_t i = 0; i < COST_PATH_COUNT; i++ ) {
+      UidSrcPath   & path    = n.src_path[ i ];
+      ForwardCache & forward = this->forward_path[ i ];
+      if ( ! this->peer_dist.get_path( forward, uid, i, path ) ) {
+        no_path |= 1 << i;
+      }
+      else {
+        UserRoute * u_ptr = n.user_route_ptr( *this, path.tport );
+        if ( u_ptr == NULL || ! u_ptr->is_valid() )
+          invalid |= 1 << i;
+        else if ( n.bloom_rt[ i ] == NULL )
+          null_bloom |= 1 << i;
+        else if ( n.bloom_rt[ i ]->r != (uint32_t) u_ptr->mcast.fd )
+          fd_not_set |= 1 << i;
+      }
+    }
+
+    if ( ( no_path | invalid | null_bloom | fd_not_set ) != 0 ) {
+      n.printf( "check_rt no_path=%x invalid=%x null_bloom=%x fd_not_set=%x\n",
+                no_path, invalid, null_bloom, fd_not_set );
+      failed = true;
+    }
+  }
+  return ! failed;
 }
-#endif
+
 void
 MeshDirectList::update( TransportRoute &rte,  const StringVal &tport,
                         const StringVal &url,  uint32_t h,
@@ -1689,8 +1713,8 @@ UserDB::remove_authenticated( UserBridge &n,  AuthStage bye ) noexcept
     this->uid_csum ^= n.bridge_id.nonce;
     /*printf( "--- uid_auth_count %u uid_csum ", this->uid_auth_count );
     this->uid_csum.print(); printf( "\n" );*/
-
-    send_del = true;
+    if ( bye != BYE_CONSOLE )
+      send_del = true;
   }
   if ( n.test_clear( HAS_HB_STATE ) )
     this->uid_hb_count--;

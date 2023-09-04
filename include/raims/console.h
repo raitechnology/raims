@@ -646,7 +646,7 @@ struct Console : public md::MDOutput, public SubOnMsg,
   static bool log_header( int fd ) noexcept;
   bool rotate_log( void ) noexcept;
   static void parse_debug_flags( const char *arg,  size_t len,
-                                 int &dist_dbg ) noexcept;
+                                 int &dist_dbg,  int &check_blooms ) noexcept;
   size_t make_prompt( const char *where = NULL,  size_t wsz = 0 ) noexcept;
   void update_prompt( const char *where = NULL,  size_t wsz = 0 ) noexcept;
   void change_prompt( const char *where = NULL,  size_t wsz = 0 ) noexcept;
@@ -924,8 +924,9 @@ enum ConsoleCmd {
   CMD_UNMUTE_LOG        = 82, /* unmute                     */
   CMD_WEVENTS           = 83, /* write events to file       */
   CMD_FDCLOSE           = 84, /* clsoe an arbitrary socket  */
-  CMD_DIE               = 85, /* die, exit 1                */
-  CMD_QUIT              = 86, /* quit/exit                  */
+  CMD_UIDREMOVE         = 85, /* deauth a user              */
+  CMD_DIE               = 86, /* die, exit 1                */
+  CMD_QUIT              = 87, /* quit/exit                  */
 
 #define CMD_TPORT_BASE ( (int) CMD_QUIT + 1 )
   CMD_TPORT_ENUM /* config_const.h */
@@ -982,7 +983,7 @@ static const ConsoleCmdType command_type[] = {
   { CMD_SHOW_COST         , TPORT_ARG  }, /* show cost tport */
   { CMD_SHOW_STATUS       , TPORT_ARG  }, /* show status tport */
   { CMD_SHOW_TPORTS       , TPORT_ARG  }, /* show tport config */
-  { CMD_SHOW_USERS        , PEER_ARG   }, /* show user concig */
+  { CMD_SHOW_USERS        , PEER_ARG   }, /* show user config */
   { CMD_SHOW_TREE         , PEER_ARG   }, /* show tree */
   { CMD_SHOW_RUN_TPORTS   , TPORT_ARG  }, /* show running transport <tport> */
   { CMD_SHOW_RUN_SVCS     , SVC_ARG    }, /* show running service <svc> */
@@ -993,7 +994,8 @@ static const ConsoleCmdType command_type[] = {
   { CMD_SHOW_START_SVCS   , SVC_ARG    }, /* show startup service <svc> */
   { CMD_SHOW_START_USERS  , USER_ARG   }, /* show startup user <user> */
   { CMD_SHOW_START_GROUPS , GRP_ARG    }, /* show startup group <grp> */
-  { CMD_SHOW_START_PARAM  , PARM_ARG   }  /* show startup parameter <parm> */
+  { CMD_SHOW_START_PARAM  , PARM_ARG   }, /* show startup parameter <parm> */
+  { CMD_UIDREMOVE         , PEER_ARG   }  /* uidremove <user> */
 };
 #define ASZ( A ) ( sizeof( A ) / sizeof( A[ 0 ] ) )
 static const size_t num_command_types = ASZ( command_type );
@@ -1036,6 +1038,7 @@ static const ConsoleCmdString console_cmd[] = {
   { CMD_UNMUTE_LOG , "unmute"       ,0,0}, /* unmute log */
   { CMD_WEVENTS    , "wevents"      ,0,0}, /* write events to file */
   { CMD_FDCLOSE    , "fdclose"      ,0,0}, /* close an arbitrary socket */
+  { CMD_UIDREMOVE  , "uidremove"    ,0,0}, /* deauth a user  */
   { CMD_DIE        , "die"          ,0,0}, /* die exit 1 */
   { CMD_QUIT       , "quit"         ,0,0},
   { CMD_QUIT       , "exit"         ,0,0}
@@ -1183,6 +1186,7 @@ static const ConsoleCmdString help_cmd[] = {
                            DEBUG_STRING_LIST ", dist,  kvpub,  kvps,  rv, host, nats"                },
   { CMD_WEVENTS          , "wevents","F",        "Write events to file"                              },
   { CMD_FDCLOSE          , "fdclose","N",        "Close fd, disconnect without transport shutdown"   },
+  { CMD_UIDREMOVE        , "uidremove","U",      "Deauth a user"                                     },
   { CMD_DIE              , "die","[I]",          "Exit without cleanup, with status 1 or I"          },
   { CMD_QUIT             , "quit/exit","",       "Exit console"                                      }
 };

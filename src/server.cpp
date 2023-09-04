@@ -252,8 +252,8 @@ main( int argc, const char *argv[] )
     log_hdr = false;
   }
   if ( debug != NULL ) {
-    int dbg_dist = 0; /* dummy arg, can't set this yet */
-    Console::parse_debug_flags( debug, ::strlen( debug ), dbg_dist );
+    int dbg_dist = 0, check_bl = 0; /* dummy arg, can't set this yet */
+    Console::parse_debug_flags( debug, ::strlen( debug ), dbg_dist, check_bl );
   }
   MDMsgMem         mem;
   StringTab        st( mem );

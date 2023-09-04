@@ -865,6 +865,7 @@ struct UserDB {
   void set_mesh_url( UserRoute &u_rte, const MsgHdrDecoder &dec,
                      const char *src ) noexcept;
   void find_adjacent_routes( void ) noexcept;
+  bool check_blooms( void ) noexcept;
   void process_mesh_pending( uint64_t curr_mono ) noexcept;
   UserBridge * closest_peer_route( TransportRoute &rte,  UserBridge &n,
                                    uint32_t &cost ) noexcept;
