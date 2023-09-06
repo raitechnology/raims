@@ -51,7 +51,7 @@ struct ConnectCtx : public kv::EvConnectionNotify,
 
   void * operator new( size_t, void *ptr ) { return ptr; }
   ConnectCtx( kv::EvPoll &poll,  ConnectDB &d,  uint64_t id )
-    : db( d ), addr_info( poll, this ), client( 0 ), event_id( id ),
+    : db( d ), addr_info( &poll, this ), client( 0 ), event_id( id ),
       start_mono_time( 0 ), connect_tries( 0 ), timeout( 15 ),
       state( CONN_SHUTDOWN ) {}
 

@@ -312,9 +312,9 @@ RvTransportService::find_host_http( RvHost &host ) noexcept
       int          port = un.tport->get_host_port( addr, tmp, len,
                                                this->rte.mgr.tree.hosts );
       if ( port != 0 && len > 0 ) {
-        AddrInfo info;
-        if ( info.get_address(addr, port, OPT_AF_INET|OPT_LISTEN) == 0 ) {
-          for ( addrinfo * ai = info.ai; ai != NULL; ai = ai->ai_next ) {
+        CaresAddrInfo info( NULL );
+        if ( info.get_address( addr, port, OPT_AF_INET|OPT_LISTEN) == 0 ) {
+          for ( addrinfo * ai = info.addr_list; ai != NULL; ai = ai->ai_next ) {
             if ( ai->ai_family == AF_INET ) {
               host.http_addr =
                 ((struct sockaddr_in *) ai->ai_addr)->sin_addr.s_addr;

@@ -2,6 +2,7 @@
 #define __rai_raims__ev_inbox_transport_h__
 
 #include <raikv/ev_net.h>
+#include <raikv/ev_cares.h>
 #include <raims/msg.h>
 #include <raims/send_window.h>
 
@@ -341,8 +342,7 @@ struct EvInboxTransport : public kv::EvUdp {
                                uint32_t addrlen,  uint32_t url_hash ) noexcept;
   InboxPeer *resolve_dest_url( uint32_t src_uid,  const char *url,
                                uint32_t url_hash ) noexcept;
-  struct addrinfo *url_to_addrinfo( const char *url,
-                                    struct addrinfo *&a ) noexcept;
+  void url_to_addrinfo( const char *url,  kv::CaresAddrInfo &addr_info ) noexcept;
   InboxPeer *resolve_src_uid( uint32_t dest_uid,  uint32_t my_peer_id,
                               uint32_t dest_peer_id,  struct sockaddr *addr,
                               uint32_t addrlen ) noexcept;

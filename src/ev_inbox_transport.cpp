@@ -904,20 +904,18 @@ bool
 EvInboxTransport::reassign_peer( InboxPeer &p,  uint32_t src_uid,
                                  const char *url,  uint32_t url_hash ) noexcept
 {
-  struct addrinfo * a  = NULL,
-                  * ai = this->url_to_addrinfo( url, a );
+  CaresAddrInfo addr_info( NULL );
+  this->url_to_addrinfo( url, addr_info );
+  struct addrinfo * a  = addr_info.addr_list;
 
-  if ( ai == NULL || a == NULL ) {
+  if ( a == NULL || a->ai_addrlen != p.addrlen ) {
     fprintf( stderr, "unable to resolve peer: %s\n", url );
-    if ( ai != NULL )
-      ::freeaddrinfo( ai );
     return false;
   }
   this->reset_peer( p );
   this->src.insert( p, src_uid, src_uid );
   ::memcpy( (void *) p.addr, a->ai_addr, a->ai_addrlen );
   p.url_hash = url_hash;
-  ::freeaddrinfo( ai );
   printf( "%u.x Reassign DEST src_uid=%u ", p.peer_id, src_uid );
   print_peer( NULL, p );
   return true;
@@ -965,37 +963,39 @@ EvInboxTransport::resolve_dest_url( uint32_t src_uid, const char *url,
                                     uint32_t url_hash ) noexcept
 {
   d_ibx( "getaddrinfo( %s ) -> %u\n", url, src_uid );
-  struct addrinfo * a  = NULL,
-                  * ai = this->url_to_addrinfo( url, a );
-  InboxPeer       * p  = NULL;
+  CaresAddrInfo addr_info( NULL );
+  this->url_to_addrinfo( url, addr_info );
+  struct addrinfo * a = addr_info.addr_list;
+  InboxPeer       * p = NULL;
 
-  if ( ai == NULL )
-    return NULL;
   if ( a != NULL )
     p = this->resolve_dest_uid( src_uid, a->ai_addr, (uint32_t) a->ai_addrlen,
                                 url_hash );
-  ::freeaddrinfo( ai );
   return p;
 }
 
-struct addrinfo *
+void
 EvInboxTransport::url_to_addrinfo( const char *url,
-                                   struct addrinfo *&a ) noexcept
+                                   CaresAddrInfo &addr_info ) noexcept
 {
   const char * port;
   char         ip[ 1024 ];
 
   if ( ::strncmp( url, "inbox://", 8 ) != 0 )
-    return NULL;
+    return;
 
   url = &url[ 8 ];
   if ( (port = ::strrchr( url, ':' )) == NULL ||
        (size_t) ( port - url ) >= sizeof( ip ) )
-    return NULL;
+    return;
 
   ::memcpy( ip, url, port - url );
   ip[ port - url ] = '\0';
 
+  addr_info.get_address( ip, atoi( port + 1 ), OPT_AF_INET | OPT_AF_INET6 );
+  if ( addr_info.addr_list == NULL )
+    fprintf( stderr, "no addrinfo for url %s\n", url );
+#if 0
   struct addrinfo hints, * ai = NULL;
 
   ::memset( &hints, 0, sizeof( struct addrinfo ) );
@@ -1017,5 +1017,6 @@ EvInboxTransport::url_to_addrinfo( const char *url,
   fprintf( stderr, "no addrinfo for url %s\n", url );
   ::freeaddrinfo( ai );
   return NULL;
+#endif
 }
 
