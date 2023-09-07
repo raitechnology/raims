@@ -115,6 +115,7 @@ UserDB::init( const CryptPass &pwd,  ConfigTree &tree ) noexcept
   this->name_send_seqno  = 0;
   this->name_send_time   = 0;
   this->last_idle_check_ns = 0;
+  this->route_check_mono = 0;
   this->last_auth_mono   = this->start_mono_time;
   this->converge_time    = this->start_time;
   this->net_converge_time= this->start_time;
@@ -669,68 +670,74 @@ UserDB::converge_network( uint64_t current_mono_time,  uint64_t current_time,
     /*printf( "test2 inc_run_count %u\n", this->peer_dist.inc_run_count );*/
     run_peer_inc = true;
   }
-  if ( ! run_peer_inc )
-    return true;
-
-  bool b = this->peer_dist.find_inconsistent2( n, m );
-  if ( b ) {
-    if ( n != NULL && m != NULL ) {
-      bool n_less = ( n->adj_req_throttle.mono_time <=
-                      m->adj_req_throttle.mono_time );
-      if ( ! n_less ) {
-        UserBridge * x = n;
-        n = m; m = x;
-      }
-      if ( ! n->is_set( PING_STATE ) &&
-           ! n->throttle_adjacency( 0, current_mono_time ) ) {
-        /*printf( "---- find_inconsistent from %s(%u) to %s(%u) "
-           "inc_run_count %u, req_timeout %s inc_running %s found_inc %s\n",
-                 n->peer.user.val, n->uid, m->peer.user.val, m->uid,
-                 this->peer_dist.inc_run_count, req_timeout?"t":"f",
-                 this->peer_dist.inc_running?"t":"f",
-                 this->peer_dist.found_inconsistency?"t":"f" );*/
-        this->send_adjacency_request( *n, DIJKSTRA_SYNC_REQ );
-      }
-      else if ( n->ping_fail_count >= 3 )
-        m = NULL;
-    }
-    if ( n != NULL && m == NULL ) {
-      uint64_t ns, hb_timeout_ns = sec_to_ns( n->hb_interval * 2 ) + SEC_TO_NS;
-      ns = n->start_mono_time + hb_timeout_ns; /* if hb and still orphaned */
-
-      if ( this->adjacency_unknown.is_empty() && ns < current_mono_time ) {
-        d_usr( "find_inconsistent orphaned %s(%u)\n", 
-                 n->peer.user.val, n->uid );
-        this->remove_authenticated( *n,
-          n->ping_fail_count ? BYE_PING : BYE_ORPHANED );
-      }
-      else { /* n != NULL && m == NULL */
-        if ( ! n->throttle_adjacency( 0, current_mono_time ) )
+  if ( run_peer_inc ) {
+    bool b = this->peer_dist.find_inconsistent2( n, m );
+    if ( b ) {
+      if ( n != NULL && m != NULL ) {
+        bool n_less = ( n->adj_req_throttle.mono_time <=
+                        m->adj_req_throttle.mono_time );
+        if ( ! n_less ) {
+          UserBridge * x = n;
+          n = m; m = x;
+        }
+        if ( ! n->is_set( PING_STATE ) &&
+             ! n->throttle_adjacency( 0, current_mono_time ) ) {
+          /*printf( "---- find_inconsistent from %s(%u) to %s(%u) "
+             "inc_run_count %u, req_timeout %s inc_running %s found_inc %s\n",
+                   n->peer.user.val, n->uid, m->peer.user.val, m->uid,
+                   this->peer_dist.inc_run_count, req_timeout?"t":"f",
+                   this->peer_dist.inc_running?"t":"f",
+                   this->peer_dist.found_inconsistency?"t":"f" );*/
           this->send_adjacency_request( *n, DIJKSTRA_SYNC_REQ );
+        }
+        else if ( n->ping_fail_count >= 3 )
+          m = NULL;
       }
+      if ( n != NULL && m == NULL ) {
+        uint64_t ns, hb_timeout_ns;
+        hb_timeout_ns = sec_to_ns( n->hb_interval * 2 ) + SEC_TO_NS;
+        ns = n->start_mono_time + hb_timeout_ns; /* if hb and still orphaned */
+
+        if ( this->adjacency_unknown.is_empty() && ns < current_mono_time ) {
+          d_usr( "find_inconsistent orphaned %s(%u)\n",
+                   n->peer.user.val, n->uid );
+          this->remove_authenticated( *n,
+            n->ping_fail_count ? BYE_PING : BYE_ORPHANED );
+        }
+        else { /* n != NULL && m == NULL */
+          if ( ! n->throttle_adjacency( 0, current_mono_time ) )
+            this->send_adjacency_request( *n, DIJKSTRA_SYNC_REQ );
+        }
+      }
+    }
+    else {
+      if ( ! this->peer_dist.found_inconsistency &&
+           this->peer_dist.invalid_mono != 0 ) {
+        uint32_t src_uid = this->peer_dist.invalid_src_uid;
+        this->events.converge( this->peer_dist.invalid_reason, src_uid );
+        this->converge_time = current_time;
+        if ( current_time > this->net_converge_time )
+          this->net_converge_time = current_time;
+        this->converge_mono = current_mono_time;
+        uint64_t t = ( current_mono_time > this->peer_dist.invalid_mono ) ?
+                     ( current_mono_time - this->peer_dist.invalid_mono ) : 0;
+        const char * src_user = this->user.user.val;
+        if ( src_uid != 0 )
+          src_user = this->bridge_tab.ptr[ src_uid ]->peer.user.val;
+        printf(
+          "network converges %.3f secs, %u uids authenticated, %s from %s.%u\n",
+                (double) t / SEC_TO_NS, this->uid_auth_count,
+                invalidate_reason_string( this->peer_dist.invalid_reason ),
+                src_user, src_uid );
+      }
+      this->find_adjacent_routes();
     }
   }
-  else {
-    if ( ! this->peer_dist.found_inconsistency &&
-         this->peer_dist.invalid_mono != 0 ) {
-      uint32_t src_uid = this->peer_dist.invalid_src_uid;
-      this->events.converge( this->peer_dist.invalid_reason, src_uid );
-      this->converge_time = current_time;
-      if ( current_time > this->net_converge_time )
-        this->net_converge_time = current_time;
-      this->converge_mono = current_mono_time;
-      uint64_t t = ( current_mono_time > this->peer_dist.invalid_mono ) ?
-                   ( current_mono_time - this->peer_dist.invalid_mono ) : 0;
-      const char * src_user = this->user.user.val;
-      if ( src_uid != 0 )
-        src_user = this->bridge_tab.ptr[ src_uid ]->peer.user.val;
-      printf(
-        "network converges %.3f secs, %u uids authenticated, %s from %s.%u\n", 
-              (double) t / SEC_TO_NS, this->uid_auth_count,
-              invalidate_reason_string( this->peer_dist.invalid_reason ),
-              src_user, src_uid );
-    }
+  else if ( this->route_check_mono < this->converge_mono &&
+            current_mono_time > this->converge_mono + SEC_TO_NS ) {
+    this->route_check_mono = this->converge_mono;
     this->find_adjacent_routes();
+    this->check_blooms();
   }
   return false;
 }
@@ -1249,7 +1256,7 @@ UserDB::check_blooms( void ) noexcept
     }
 
     if ( ( no_path | invalid | null_bloom | fd_not_set ) != 0 ) {
-      n.printf( "check_rt no_path=%x invalid=%x null_bloom=%x fd_not_set=%x\n",
+      n.printe( "check_rt no_path=%x invalid=%x null_bloom=%x fd_not_set=%x\n",
                 no_path, invalid, null_bloom, fd_not_set );
       failed = true;
     }

@@ -311,6 +311,7 @@ struct PingReply {
 };
 
 struct ConsolePing : public ConsoleRPC {
+  kv::ArrayCount< uint32_t, 4 > fwd;
   kv::ArrayCount< PingReply, 16 > reply;
 
   void * operator new( size_t, void *ptr ) { return ptr; }
@@ -319,6 +320,7 @@ struct ConsolePing : public ConsoleRPC {
   virtual void on_data( const SubMsgData &val ) noexcept;
   virtual void init( void ) noexcept {
     this->ConsoleRPC::init();
+    this->fwd.count = 0;
     this->reply.count = 0;
   }
 };

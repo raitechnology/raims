@@ -1608,14 +1608,15 @@ SessionMgr::publish( PubMcastData &mc ) noexcept
   m.close( e.sz, h, fl );
 
   m.sign( mc.sub, mc.sublen, *this->user_db.session_key );
-
-  if ( dest_bridge_id != NULL )
+  mc.fwd_cnt = 0;
+  if ( dest_bridge_id != NULL ) {
+    mc.forward_tport[ mc.fwd_cnt++ ] = dest_bridge_id->primary_route;
     return this->user_db.forward_to_primary_inbox( *dest_bridge_id, mc.sub,
                                                  mc.sublen, h, m.msg, m.len() );
-
+  }
   ForwardCache   & forward = this->user_db.forward_path[ mc.path_select ];
   TransportRoute * rte;
-  uint32_t         tport_id;
+  uint32_t         tport_id, rcnt;
   bool             b = true;
 
   this->user_db.peer_dist.update_forward_cache( forward, 0, mc.path_select );
@@ -1627,7 +1628,10 @@ SessionMgr::publish( PubMcastData &mc ) noexcept
       EvPublish pub( mc.sub, mc.sublen, NULL, 0, m.msg, m.len(),
                      rte->sub_route, *this, h, CABA_TYPE_ID );
       pub.shard = mc.path_select;
-      b &= rte->sub_route.forward_except( pub, this->router_set );
+      rcnt = 0;
+      b &= rte->sub_route.forward_except_with_cnt( pub, this->router_set, rcnt );
+      if ( rcnt > 0 )
+        mc.forward_tport[ mc.fwd_cnt++ ] = tport_id;
     } while ( forward.next( tport_id ) );
   }
   if ( (rte = this->user_db.ipc_transport) != NULL ) {
@@ -1636,7 +1640,10 @@ SessionMgr::publish( PubMcastData &mc ) noexcept
       fmt = MD_STRING;
     EvPublish pub( mc.sub, mc.sublen, mc.inbox, mc.inbox_len,
                    mc.data, mc.datalen, rte->sub_route, *this, h, fmt );
-    b &= rte->sub_route.forward_except( pub, this->router_set );
+    rcnt = 0;
+    b &= rte->sub_route.forward_except_with_cnt( pub, this->router_set, rcnt );
+    if ( rcnt > 0 )
+      mc.forward_tport[ mc.fwd_cnt++ ] = 0;
   }
   return b;
 }

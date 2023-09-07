@@ -146,19 +146,22 @@ struct PubMcastData {
                token;     /* token rpc val */
   const void * data;      /* data to publish */
   size_t       datalen;   /* data length */
+  uint32_t     fwd_cnt,
+               forward_tport[ COST_PATH_COUNT + 1 ];
 
   PubMcastData( const char *s,  size_t sl,  const void *d,  size_t dl,
                 uint32_t f,  uint32_t rep = 0 )
     : sub( s ), inbox( 0 ), sublen( (uint16_t) sl ), inbox_len( 0 ),
       option( 0 ), path( 255 ), path_select( 0 ), fmt( f ), reply( rep ),
       subj_hash( 0 ), seqno( 0 ), stamp( 0 ), token( 0 ),
-      data( d ), datalen( dl ) {}
+      data( d ), datalen( dl ), fwd_cnt( 0 ) {}
   PubMcastData( const PubMcastData &mc )
     : sub( mc.sub ), inbox( mc.inbox ), sublen( mc.sublen ),
       inbox_len( mc.inbox_len ), option( mc.option ), path( mc.path ),
       path_select( mc.path_select ), fmt( mc.fmt ), reply( mc.reply ),
       subj_hash( mc.subj_hash ), seqno( mc.seqno ), stamp( mc.stamp ),
-      token( mc.token ), data( mc.data ), datalen( mc.datalen ) {}
+      token( mc.token ), data( mc.data ), datalen( mc.datalen ),
+      fwd_cnt( 0 ) {}
 };
 /* a publish sent point to point to an inbox */
 struct PubPtpData : public PubMcastData {

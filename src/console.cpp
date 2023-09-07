@@ -3295,6 +3295,7 @@ Console::ping_peer( ConsoleOutput *p,  const char *arg,
 
   if ( arglen == 1 && arg[ 0 ] == '*' )
     arglen = 0;
+  rpc->fwd.count = 0;
   for ( uint32_t uid = 1; uid < this->user_db.next_uid; uid++ ) {
     n = this->user_db.bridge_tab[ uid ];
     if ( n != NULL && n->is_set( AUTHENTICATED_STATE ) ) {
@@ -3311,6 +3312,8 @@ Console::ping_peer( ConsoleOutput *p,  const char *arg,
       if ( add_trace )
         mc.option = CABA_OPT_TRACE;
       this->mgr.publish( mc );
+      if ( mc.fwd_cnt == 1 )
+        rpc->fwd.push( mc.forward_tport[ 0 ] );
       rpc->count++;
     }
   }
@@ -3347,6 +3350,9 @@ Console::mcast_ping( ConsoleOutput *p,  uint8_t path,  bool add_trace ) noexcept
     if ( add_trace )
       mc.option = CABA_OPT_TRACE;
     this->mgr.publish( mc );
+    rpc->fwd.count = 0;
+    for ( uint32_t i = 0; i < mc.fwd_cnt; i++ )
+      rpc->fwd.push( mc.forward_tport[ i ] );
     rpc->reply.zero();
     rpc->reply.make( rpc->count, true );
   }
@@ -3355,9 +3361,10 @@ Console::mcast_ping( ConsoleOutput *p,  uint8_t path,  bool add_trace ) noexcept
 void
 Console::on_ping( ConsolePing &ping ) noexcept
 {
-  static const uint32_t ncols = 5;
+  static const uint32_t ncols = 6;
   TabOut out( this->table, this->tmp, ncols );
-  uint32_t p, i = 0;
+  TransportRoute *rte;
+  uint32_t p, i = 0, tid;
 
   for ( p = 0; p < ping.count; p++ ) {
     PingReply & reply = ping.reply.ptr[ p ];
@@ -3378,8 +3385,16 @@ Console::on_ping( ConsolePing &ping ) noexcept
     }
     tab[ i++ ].set_long( reply.recv_time - reply.sent_time, PRINT_LATENCY );
 
+    if ( p < ping.fwd.count &&
+         (tid = ping.fwd.ptr[ p ]) < this->user_db.transport_tab.count ) {
+      rte = this->user_db.transport_tab.ptr[ tid ];
+      tab[ i++ ].set( rte->transport.tport, tid, PRINT_ID );
+    }
+    else {
+      tab[ i++ ].set_null();
+    }
     if ( reply.tid < this->user_db.transport_tab.count ) {
-      TransportRoute *rte = this->user_db.transport_tab.ptr[ reply.tid ];
+      rte = this->user_db.transport_tab.ptr[ reply.tid ];
       tab[ i++ ].set( rte->transport.tport, reply.tid, PRINT_ID );
     }
     else
@@ -3399,7 +3414,7 @@ Console::on_ping( ConsolePing &ping ) noexcept
       tab[ i++ ].set_null();
     }
   }
-  static const char *hdr[ ncols ] = { "user", "cost", "lat", "tport", "peer_tport" };
+  static const char *hdr[ ncols ] = { "user", "cost", "lat", "send", "recv", "peer_recv" };
   for ( size_t n = 0; n < ping.out.count; n++ ) {
     ConsoleOutput * p = ping.out.ptr[ n ];
     this->print_table( p, hdr, ncols );
