@@ -2013,8 +2013,14 @@ Console::find_user( const char *name,  size_t len ) noexcept
       }
     }
   }
-  if ( name[ 0 ] >= '0' && name[ 1 ] <= '9' ) {
-    uid = int_arg( name, len );
+  return NULL;
+}
+
+UserBridge *
+Console::find_uid( const char *name,  size_t len ) noexcept
+{
+  if ( len > 0 && name[ 0 ] >= '0' && name[ 0 ] <= '9' ) {
+    uint32_t uid = int_arg( name, len );
     if ( uid > 0 && uid < this->user_db.next_uid ) {
       UserBridge * n = this->user_db.bridge_tab[ uid ];
       if ( n != NULL && n->is_set( AUTHENTICATED_STATE ) )
@@ -2129,6 +2135,8 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
     }
     case CMD_UIDREMOVE: {
       UserBridge * u = this->find_user( arg, len );
+      if ( u == NULL )
+        u = this->find_uid( arg, len );
       if ( u == NULL )
         this->outf( p, "no user \"%.*s\"", (int) len, arg );
       else
@@ -3365,7 +3373,15 @@ Console::on_ping( ConsolePing &ping ) noexcept
   TabOut out( this->table, this->tmp, ncols );
   TransportRoute *rte;
   uint32_t p, i = 0, tid;
+  BitSpace used;
 
+  for ( p = 0; p < ping.count; p++ ) {
+    PingReply & reply = ping.reply.ptr[ p ];
+    if ( reply.uid < this->user_db.bridge_tab.count ) {
+      if ( this->user_db.bridge_tab[ reply.uid ] != NULL )
+        used.add( reply.uid );
+    }
+  }
   for ( p = 0; p < ping.count; p++ ) {
     PingReply & reply = ping.reply.ptr[ p ];
     bool no_route = true;
@@ -3380,8 +3396,21 @@ Console::on_ping( ConsolePing &ping ) noexcept
       }
     }
     if ( no_route ) {
-      tab[ i++ ].set_null();
-      tab[ i++ ].set_null();
+      uint32_t uid;
+      for ( uid = 1; uid < this->user_db.bridge_tab.count; uid++ ) {
+        if ( ! used.test_set( uid ) ) {
+          UserBridge * n = this->user_db.bridge_tab[ uid ];
+          if ( n != NULL && n->is_set( AUTHENTICATED_STATE ) ) {
+            tab[ i++ ].set( n->peer.user, uid, PRINT_ID );
+            tab[ i++ ].set_null();
+            break;
+          }
+        }
+      }
+      if ( uid == this->user_db.bridge_tab.count ) {
+        tab[ i++ ].set_null();
+        tab[ i++ ].set_null();
+      }
     }
     tab[ i++ ].set_long( reply.recv_time - reply.sent_time, PRINT_LATENCY );
 

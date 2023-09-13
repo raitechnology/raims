@@ -689,6 +689,7 @@ struct Console : public md::MDOutput, public SubOnMsg,
   void tab_concat( const char *s,  const char *s2,  TabPrint &pr ) noexcept;
   void tab_nonce( const Nonce &nonce,  TabPrint &pr ) noexcept;
   UserBridge * find_user( const char *name,  size_t len ) noexcept;
+  UserBridge * find_uid( const char *name,  size_t len ) noexcept;
   virtual bool on_input( ConsoleOutput *p,  const char *buf,
                          size_t buflen ) noexcept;
   virtual void on_data( const SubMsgData &val ) noexcept;

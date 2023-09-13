@@ -146,8 +146,9 @@ struct PubMcastData {
                token;     /* token rpc val */
   const void * data;      /* data to publish */
   size_t       datalen;   /* data length */
+  static const uint32_t MAX_FWD_CNT = 32;
   uint32_t     fwd_cnt,
-               forward_tport[ COST_PATH_COUNT + 1 ];
+               forward_tport[ MAX_FWD_CNT ];
 
   PubMcastData( const char *s,  size_t sl,  const void *d,  size_t dl,
                 uint32_t f,  uint32_t rep = 0 )

@@ -1630,7 +1630,7 @@ SessionMgr::publish( PubMcastData &mc ) noexcept
       pub.shard = mc.path_select;
       rcnt = 0;
       b &= rte->sub_route.forward_except_with_cnt( pub, this->router_set, rcnt );
-      if ( rcnt > 0 )
+      if ( rcnt > 0 && mc.fwd_cnt < mc.MAX_FWD_CNT )
         mc.forward_tport[ mc.fwd_cnt++ ] = tport_id;
     } while ( forward.next( tport_id ) );
   }
@@ -1642,7 +1642,7 @@ SessionMgr::publish( PubMcastData &mc ) noexcept
                    mc.data, mc.datalen, rte->sub_route, *this, h, fmt );
     rcnt = 0;
     b &= rte->sub_route.forward_except_with_cnt( pub, this->router_set, rcnt );
-    if ( rcnt > 0 )
+    if ( rcnt > 0 && mc.fwd_cnt < mc.MAX_FWD_CNT )
       mc.forward_tport[ mc.fwd_cnt++ ] = 0;
   }
   return b;
