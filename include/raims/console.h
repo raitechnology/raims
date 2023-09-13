@@ -746,7 +746,8 @@ struct Console : public md::MDOutput, public SubOnMsg,
   void show_hosts( ConsoleOutput *p ) noexcept;
   void show_rvsub( ConsoleOutput *p ) noexcept;
   void show_rpcs( ConsoleOutput *p ) noexcept;
-  void show_adjacency( ConsoleOutput *p ) noexcept;
+  void show_adjacency( ConsoleOutput *p,  const char *arg,
+                       size_t len ) noexcept;
   void show_links( ConsoleOutput *p ) noexcept;
   void show_nodes( ConsoleOutput *p ) noexcept;
   void show_routes( ConsoleOutput *p,  uint8_t path_select ) noexcept;

@@ -2193,7 +2193,7 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
     case CMD_SHOW_PORTS:     this->show_ports( p, arg, len ); break;
     case CMD_SHOW_COST:      this->show_cost( p, arg, len ); break;
     case CMD_SHOW_STATUS:    this->show_status( p, arg, len ); break;
-    case CMD_SHOW_ADJACENCY: this->show_adjacency( p ); break;
+    case CMD_SHOW_ADJACENCY: this->show_adjacency( p, arg, len ); break;
     case CMD_SHOW_LINKS:     this->show_links( p );     break;
     case CMD_SHOW_NODES:     this->show_nodes( p );     break;
     case CMD_SHOW_ROUTES:    this->show_routes( p, int_arg( arg, len ) ); break;
@@ -4648,90 +4648,61 @@ Console::output_user_route( TabPrint &ptp,  UserRoute &u_rte ) noexcept
 }
 
 void
-Console::show_adjacency( ConsoleOutput *p ) noexcept
+Console::show_adjacency( ConsoleOutput *p,  const char *arg,
+                         size_t len ) noexcept
 {
-  static const size_t ncols = 9;
+  uint32_t   mask = 0, path = 0;
+
+  if ( len > 0 ) {
+    if ( (path = int_arg( arg, len )) < 4 )
+      mask = 1 << path;
+  }
+
+  size_t     ncols = ( mask == 0 ? 10 : 6 );
   TabOut     out( this->table, this->tmp, ncols );
   TabPrint * tab = NULL;
   uint32_t   count, i = 0, r = 0, sep,
-             uid, last_user, last_tport, j;
+             last_user, last_tport, j;
   bool       is_json = ( p != NULL && p->is_json );
+  UserBridgeList list;
 
-  count = this->user_db.transport_tab.count;
-  last_user = last_tport = -1;
-  for ( uint32_t t = 0; t < count; t++ ) {
-    TransportRoute *rte = this->user_db.transport_tab.ptr[ t ];
-    /* print users on the tport */
-    for ( bool ok = rte->uid_connected.first( uid ); ok;
-          ok = rte->uid_connected.next( uid ) ) {
-      UserBridge * n = this->user_db.bridge_tab[ uid ];
-      if ( n == NULL || ! n->is_set( AUTHENTICATED_STATE ) )
-        continue;
-
-      tab = out.make_row();
-      if ( last_user != 0 )
-        tab[ i++ ].set( this->user_db.user.user, PRINT_SELF ); /* user */
-      else
-        tab[ i++ ].set_null();
-      tab[ i++ ].set( n, PRINT_USER );
-      if ( last_tport != t ) {
-        tab[ i++ ].set( rte->transport.tport, (uint32_t) t, PRINT_ID );
-        tab[ i++ ].set( rte->transport.type );
-      }
-      while ( i < r+4 )
-        tab[ i++ ].set_null();
-      if ( ! rte->is_set( TPORT_IS_IPC ) ) {
-        for ( j = 0; j < COST_PATH_COUNT; j++ )
-          tab[ i++ ].set_int( rte->uid_connected.cost[ j ] );
-      }
-      while ( i < r+8 )
-        tab[ i++ ].set_null();
-      if ( uid == rte->uid_connected.rem_uid ) {
-        if ( rte->uid_connected.rem_tport_id != 0 )
-          tab[ i++ ].set_int( rte->uid_connected.rem_tport_id );
-      }
-      for ( r += ncols; i < r; )
-        tab[ i++ ].set_null();
-
-      last_user  = 0;
-      last_tport = (uint32_t) t;
-    }
-    /* print empty tports */
-    if ( last_tport != (uint32_t) t ) {
-      tab = out.make_row();
-      if ( last_user != 0 )
-        tab[ i++ ].set( this->user_db.user.user, PRINT_SELF ); /* user */
-      else
-        tab[ i++ ].set_null();
-      tab[ i++ ].set_null();
-      tab[ i++ ].set( rte->transport.tport, (uint32_t) t, PRINT_ID );
-      tab[ i++ ].set( rte->transport.type );
-      if ( ! rte->is_set( TPORT_IS_IPC ) ) {
-        for ( j = 0; j < COST_PATH_COUNT; j++ )
-          tab[ i++ ].set_int( rte->uid_connected.cost[ j ] );
-      }
-      for ( r += ncols; i < r; )
-        tab[ i++ ].set_null();
-      last_user  = 0;
-      last_tport = (uint32_t) t;
-    }
-  }
-  if ( i > 0 )
-    tab[ i - 1 ].typ |= PRINT_SEP;
   sep = i;
   last_user = last_tport = -1;
-  /* print each users port */
-  for ( uid = 1; uid < this->user_db.next_uid; uid++ ) {
+
+  /* if name == user              , sort by user name
+   *         == nonce | ip | host , sort by nonce
+   *         == start             , sort by start time */
+  list.push_tl( new ( this->tmp.make( sizeof( UserBridgeElem ) ) )
+                UserBridgeElem( this->user_db, 0 ) );
+  for ( uint32_t uid = 1; uid < this->user_db.next_uid; uid++ ) {
     UserBridge * n = this->user_db.bridge_tab[ uid ];
-    if ( n == NULL || ! n->is_set( AUTHENTICATED_STATE ) )
+    if ( n == NULL )
       continue;
-    count = n->adjacency.count;
+    if ( n->is_set( AUTHENTICATED_STATE ) )
+      list.push_tl( new ( this->tmp.make( sizeof( UserBridgeElem ) ) )
+                    UserBridgeElem( this->user_db, uid ) );
+  }
+  list.sort<UserBridgeList::cmp_user>();
+
+  /* print each users port */
+  for ( UserBridgeElem * el = list.hd; el != NULL; el = el->next ) {
+    UserBridge * n = NULL;
+    if ( el->uid != 0 ) {
+      n = this->user_db.bridge_tab[ el->uid ];
+      if ( n == NULL || ! n->is_set( AUTHENTICATED_STATE ) )
+        continue;
+    }
+    count = this->user_db.peer_dist.adjacency_count( el->uid );
+    if ( count == 0 )
+      continue;
     last_tport = -1;
     /* for each tport populated */
     for ( uint32_t t = 0; t < count; t++ ) {
-      AdjacencySpace *set = n->adjacency[ t ];
+      AdjacencySpace *set = this->user_db.peer_dist.adjacency_set( el->uid, t );
       uint32_t b;
       if ( set == NULL )
+        continue;
+      if ( mask != 0 && ( set->prune_path & mask ) == 0 )
         continue;
       /* for each user on the port */
       for ( bool ok = set->first( b ); ok; ok = set->next( b ) ) {
@@ -4740,8 +4711,12 @@ Console::show_adjacency( ConsoleOutput *p ) noexcept
           n2 = this->user_db.bridge_tab[ b ];
         if ( b == 0 || n2 != NULL ) {
           tab = out.make_row();
-          if ( last_user != uid )
-            tab[ i++ ].set( n, PRINT_USER );
+          if ( last_user != el->uid ) {
+            if ( n == NULL )
+              tab[ i++ ].set( this->user_db.user.user, PRINT_SELF );
+            else
+              tab[ i++ ].set( n, PRINT_USER );
+          }
           else
             tab[ i++ ].set_null();
           if ( n2 != NULL )
@@ -4762,16 +4737,24 @@ Console::show_adjacency( ConsoleOutput *p ) noexcept
           while ( i < r+4 )
             tab[ i++ ].set_null();
 
-          for ( j = 0; j < COST_PATH_COUNT; j++ )
-            tab[ i++ ].set_int( set->cost[ j ] );
-
+          if ( mask == 0 ) {
+            for ( j = 0; j < COST_PATH_COUNT; j++ )
+              tab[ i++ ].set_int( set->cost[ j ] );
+          }
+          else {
+            tab[ i++ ].set_int( set->cost[ path ] );
+          }
           if ( set->rem_tport_id != 0 ) {
             if ( set->rem_uid == b )
               tab[ i++ ].set_int( set->rem_tport_id );
           }
-          for ( r += ncols; i < r; )
+          r += ncols;
+          j  = ncols - ( mask == 0 ? 1 : 0 );
+          while ( i < j )
             tab[ i++ ].set_null();
-          last_user  = uid;
+          if ( mask == 0 )
+            tab[ i++ ].set_int( set->prune_path );
+          last_user  = el->uid;
           last_tport = t;
         }
       }
@@ -4781,10 +4764,17 @@ Console::show_adjacency( ConsoleOutput *p ) noexcept
       sep = i;
     }
   }
-  const char *hdr[ ncols ] =
-   { "user", "adj", "tport", "type", "cost", "cost2", "cost3", "cost4", "rem" };
-  this->print_table( p, hdr, ncols );
-
+  if ( ncols == 10 ) {
+    const char *hdr[ 10 ] =
+     { "user", "adj", "tport", "type", "cost", "cost2", "cost3", "cost4",
+       "rem", "prune" };
+    this->print_table( p, hdr, ncols );
+  }
+  else {
+    const char *hdr[ 6 ] =
+     { "user", "adj", "tport", "type", "cost", "rem" };
+    this->print_table( p, hdr, ncols );
+  }
   if ( ! is_json ) {
     this->printf( "consistent: %s\n",
       this->user_db.peer_dist.found_inconsistency ? "false" : "true" );
