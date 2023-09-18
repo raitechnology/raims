@@ -304,6 +304,7 @@ main( int argc, const char *argv[] )
       }
     }
   }
+#if 0
   if ( show_multicast_tree ) {
     printf( "\n--- tree:\n" );
     for ( path_sel = 0; path_sel < COST_PATH_COUNT; path_sel++ ) {
@@ -330,7 +331,7 @@ main( int argc, const char *argv[] )
     }
     printf( "\n" );
   }
-
+#endif
   if ( show_text_description ) {
     printf( "\n--- text graph:\n" );
     peer_dist.message_graph_description( out );

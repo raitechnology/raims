@@ -4,12 +4,8 @@
 #include <raims/string_tab.h>
 #include <raikv/bit_set.h>
 
-#ifndef MS_NAMESPACE
-#define MS_NAMESPACE ms
-#endif
-
 namespace rai {
-namespace MS_NAMESPACE {
+namespace ms {
 
 struct UserNonceTab;
 struct UserDB;
@@ -146,13 +142,6 @@ struct ForwardCache : public kv::UIntBitSet {
   }
 };
 
-struct UidDist {
-  uint32_t uid, dist;
-};
-struct UidMissing {
-  uint32_t uid, uid2;
-};
-
 static const uint32_t COST_MAXIMUM    = 0xffffffffU,
                       COST_DEFAULT    = 1000,
                       COST_BAD        = 1000 * 1000 * 1000; /* label bad path */
@@ -167,7 +156,6 @@ struct AdjacencySpace : public kv::BitSpace {
                    cost[ COST_PATH_COUNT ], /* cost of each path shard */
                    rem_uid,      /* uid rem_tport blongs to */
                    rem_tport_id; /* remote tport_id */
-  uint16_t         clock;     /* adjacency calc upates when route is chosen */
   uint8_t          prune_path;
   bool             is_advertised; /* whether to publish cost in hb */
 
@@ -175,7 +163,7 @@ struct AdjacencySpace : public kv::BitSpace {
   void operator delete( void *ptr ) { ::free( ptr ); }
 
   AdjacencySpace() : next_link( 0 ), uid( 0 ), tport_id( 0 ),
-        rem_uid( 0 ), rem_tport_id( 0 ), clock( 0 ),
+        rem_uid( 0 ), rem_tport_id( 0 ),
         prune_path( 0 ), is_advertised( false ) {
     for ( uint8_t i = 0; i < COST_PATH_COUNT; i++ )
       this->cost[ i ] = COST_DEFAULT;
@@ -209,25 +197,27 @@ struct AdjacencyTab : public kv::ArrayCount< AdjacencySpace *, 4 > {
   }
 };
 
-struct TmpAdjList {
-  AdjacencySpace * hd, * tl;
-  TmpAdjList() : hd( 0 ), tl( 0 ) {}
-  void push_tl( AdjacencySpace *p ) {
-    if ( p == NULL ) return;
-    if ( this->hd == NULL )
-      this->hd = p;
-    else
-      this->tl->next_link = p;
-    this->tl = p;
-    p->next_link = NULL;
-  }
-  void push_hd( AdjacencySpace *p ) {
-    if ( p == NULL ) return;
-    p->next_link = this->hd;
-    this->hd = p;
-    if ( this->tl == NULL )
-      this->tl = p;
-  }
+struct UserBridgeElem {
+  UserBridgeElem * next;
+  UserDB & user_db;
+  uint32_t uid;
+  void * operator new( size_t, void *ptr ) { return ptr; }
+  UserBridgeElem( UserDB &udb,  uint32_t id )
+    : next( 0 ), user_db( udb ), uid( id ) {}
+};
+
+struct UserBridgeList : public kv::SLinkList<UserBridgeElem> {
+  static int cmp_user( const UserBridgeElem &e1,
+                       const UserBridgeElem &e2 ) noexcept;
+  static int cmp_nonce( const UserBridgeElem &e1,
+                        const UserBridgeElem &e2 ) noexcept;
+  static int cmp_start( const UserBridgeElem &e1,
+                        const UserBridgeElem &e2 ) noexcept;
+  static int cmp_stop( const UserBridgeElem &e1,
+                       const UserBridgeElem &e2 ) noexcept;
+
+  void add_users( UserDB &user_db,  md::MDMsgMem &mem ) noexcept;
+  void add_zombie( UserDB &user_db,  md::MDMsgMem &mem ) noexcept;
 };
 
 struct UidSrcPath {
@@ -245,82 +235,55 @@ struct UidSrcPath {
   }
 };
 
-typedef kv::ArrayCount<UidSrcPath, 4> AltUidSrcPath;
-
-struct AltPath {
-  AltUidSrcPath alt;
-
-  void alternative( UidSrcPath & el ) {
-    if ( this->alt.count > 0 )
-      if ( this->alt.ptr[ 0 ].cost > el.cost )
-        this->alt.count = 0;
-    this->alt.push( el );
-  }
-  void swap( uint32_t i,  UidSrcPath & el ) {
-    UidSrcPath p;
-    p.copy( this->alt.ptr[ i ] );
-    this->alt.ptr[ i ].copy( el );
-    el.copy( p );
-  }
-  void release( void ) {
-    this->alt.clear();
-  }
-};
-
 struct PathSeqno {
   UidSrcPath * path;
   uint64_t     seqno;   /* cache update seqno */
 };
+struct UidDist {
+  uint32_t uid, dist;
+};
+struct UidMissing {
+  uint32_t uid, uid2;
+};
+struct AdjGraph;
 
 struct AdjDistance : public md::MDMsgMem {
   UserDB       & user_db;
+
   UidDist      * stack;         /* stack of uids to check for distance */
   uint32_t     * cache,         /* cache of uid distence via a tport */
                * visit,         /* minimum distance to uid */
-               * inc_list;      /* list of uids to be checked for links */
-  uint64_t     * start_time;    /* start times of uids */
+               * inc_list,      /* list of uids to be checked for links */
+               * graph_idx_order; /* order of uid in start time ordered list */
+  AdjGraph     * graph;
+
   PathSeqno      x[ COST_PATH_COUNT ]; /* x[ path_select ].port[ uid ]*/
-  kv::UIntBitSet inc_visit,     /* inconsistent check visit uid map */
-                 adj,           /* uid map masked with path for coverage */
-                 path,          /* path through the network */
-                 fwd,           /* next uid map transitioning at cost */
-                 reachable;     /* reachable uid map through tport */
+  kv::UIntBitSet inc_visit;     /* inconsistent check visit uid map */
   kv::ArrayCount< UidMissing, 8 > missing;
-  kv::ArrayCount< AdjacencySpace *, 4 > links; /* links for fwd */
-  kv::BitSpace   graph_used,    /* graph description visit map */
-                 graph_mesh;    /* mesh common peers */
+
   uint64_t       cache_seqno,   /* seqno of adjacency in cache */
                  update_seqno,  /* seqno of current adjacency */
                  prune_seqno;
+
   uint32_t       max_uid,       /* all uid < max_uid */
                  max_tport,     /* all tport < max_tport */
                  miss_tos,      /* number of missing uids in missing[] */
                  inc_hd,        /* list hd of uids in inc_list[] */
                  inc_tl,        /* list to of uids in inc_list[] */
-                 inc_run_count, /* count of inc_runs after adjacency change */
-                 max_tport_count, /* maximum tports any peer has, for graph */
-                 tport_select;  /* select which port to test */
+                 inc_run_count; /* count of inc_runs after adjacency change */
   uint64_t       last_run_mono, /* timestamp of last adjacency update */
                  invalid_mono; /* when cache was invalidated */
   uint32_t       invalid_src_uid;
-  uint16_t       adjacency_clock; /* label transitions that were taken */
   InvalidReason  invalid_reason; /* why cache was invalidated */
   bool           inc_running,   /* whether incomplete check is running */
                  found_inconsistency; /* if current or last run inconsistent */
 
   static void zero_mem( void *x,  void *y ) {
-#if __GNUC__ >= 9
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Warray-bounds"
-#endif
     ::memset( x, 0, (char *) y - (char *) x );
   }
   AdjDistance( UserDB &u ) : user_db( u ) {
-    zero_mem( &this->stack, &this->inc_visit );
-    zero_mem( &this->max_uid, &this[ 1 ] );
-#if __GNUC__ >= 9
-#pragma GCC diagnostic pop
-#endif
+    zero_mem( (void *) &this->stack, (void *) &this->inc_visit );
+    zero_mem( (void *) &this->max_uid, (void *) &this[ 1 ] );
     this->cache_seqno  = 0;
     this->update_seqno = 1;
     this->prune_seqno  = 0;
@@ -355,16 +318,12 @@ struct AdjDistance : public md::MDMsgMem {
     this->calc_forward_cache( fwd, src_uid, path_select );
   }
   void calc_forward_cache( ForwardCache &fwd,  uint32_t src_uid,
-                           uint32_t midpt_uid,  uint8_t path_select ) noexcept;
-  void calc_forward_cache( ForwardCache &fwd,  uint32_t src_uid,
                            uint8_t path_select ) noexcept;
-  bool test_forward_midpt( uint32_t midpt_uid,  uint32_t target_uid,
-                           uint8_t path_select,  uint32_t cnt ) noexcept;
   uint32_t adjacency_count( uint32_t uid ) const noexcept;
   AdjacencySpace * adjacency_set( uint32_t uid,  uint32_t i ) const noexcept;
   /*uint64_t adjacency_start( uint32_t uid ) const noexcept;*/
   void push_inc_list( uint32_t uid ) noexcept;
-  bool find_inconsistent( UserBridge *&from,  UserBridge *&to ) noexcept;
+  /*bool find_inconsistent( UserBridge *&from,  UserBridge *&to ) noexcept;*/
   bool find_inconsistent2( UserBridge *&from,  UserBridge *&to ) noexcept;
   bool match_target_set( uint32_t source_uid,  uint32_t target_uid,
                          AdjacencySpace &set ) noexcept;
@@ -392,19 +351,9 @@ struct AdjDistance : public md::MDMsgMem {
   uint32_t search_cost( uint32_t dest_uid,  uint32_t tos,
                         uint8_t path_select ) noexcept;
 
-  void zero_clocks( void ) noexcept;
-  void coverage_init( uint32_t src_uid ) noexcept;
   uint64_t get_start_time( uint32_t uid ) const noexcept;
   bool is_older( uint32_t uid,  uint32_t uid2 ) const noexcept;
-  int compare_set( AdjacencySpace *set,  AdjacencySpace *set2 ) noexcept;
-  int compare_set2( AdjacencySpace *set,  AdjacencySpace *set2 ) noexcept;
-  void push_link( AdjacencySpace *set ) noexcept;
-  static AdjacencySpace * order_path_select( AdjacencySpace *set,
-                                             uint8_t path_select ) noexcept;
-  uint32_t coverage_step( uint8_t path_select ) noexcept;
-  AdjacencySpace *coverage_link( uint32_t target_uid ) noexcept;
   void prune_adjacency_sets( void ) noexcept;
-  uint32_t calc_coverage( uint32_t src_uid,  uint8_t path_select ) noexcept;
 
   void update_path( ForwardCache &fwd,  uint8_t path_select ) {
     this->clear_cache_if_dirty();
@@ -423,7 +372,6 @@ struct AdjDistance : public md::MDMsgMem {
       return false;
     return true;
   }
-  /*void calc_reachable( TransportRoute &rte ) noexcept;*/
 
   const char * uid_name( uint32_t uid,  char *buf,  size_t buflen ) noexcept;
   const char * uid_name( uint32_t uid,  char *buf,  size_t &off,
@@ -432,174 +380,8 @@ struct AdjDistance : public md::MDMsgMem {
   const char * uid_set_names( kv::UIntBitSet &set,  char *buf,
                               size_t buflen ) noexcept;
   void message_graph_description( kv::ArrayOutput &out ) noexcept;
-  void message_graph_config( kv::ArrayOutput &out,
-                             const char *cfg_name,  bool use_loop ) noexcept;
+  void update_graph( void ) noexcept;
 };
-
-#ifdef INCLUDE_DUMMY_DEFS
-/* onlu sed for calculations in test_adj.cpp */
-struct PeerEntry {
-  ms::StringVal user, svc;
-  PeerEntry() {
-    ::memset( (void *) this, 0, sizeof( *this ) );
-  }
-  void set( const char *u,  const char *s,  ms::StringTab &st ) {
-    st.ref_string( u, ::strlen( u ), this->user );
-    st.ref_string( s, ::strlen( s ), this->svc );
-  }
-};
-
-struct TransportRoute {
-  UserDB       & user_db;
-  uint32_t       tport_id;
-  AdjacencySpace uid_connected;
-
-  void * operator new( size_t, void *ptr ) { return ptr; }
-  void operator delete( void *ptr ) { ::free( ptr ); }
-  TransportRoute( UserDB &u,  uint32_t id ) : user_db( u ), tport_id( id ) {}
-};
-
-enum { AUTHENTICATED_STATE };
-struct UserBridge {
-  AdjacencyTab adjacency;
-  uint64_t     start_time;
-  uint32_t     uid, step, cost;
-  PeerEntry    peer;
-  kv::BitSpace fwd;
-  bool is_set( int ) { return true; }
-
-  void * operator new( size_t, void *ptr ) { return ptr; }
-  void operator delete( void *ptr ) { ::free( ptr ); }
-  UserBridge( uint32_t id ) : start_time( 0 ), uid( id ), step( 0 ), cost( 0 ){}
-  ~UserBridge();
-
-  AdjacencySpace *add_link( uint32_t cost[ COST_PATH_COUNT ],
-                            const char *type,  const char *name,
-                            ms::StringTab &st ) {
-    AdjacencySpace *adj = this->adjacency.get( this->adjacency.count,
-                                               this->uid, cost );
-    if ( type != NULL )
-      st.ref_string( type, ::strlen( type ), adj->tport_type );
-    if ( name != NULL )
-      st.ref_string( name, ::strlen( name ), adj->tport );
-    return adj;
-  }
-  AdjacencySpace *add_link( uint32_t target_uid,
-                            uint32_t cost[ COST_PATH_COUNT ],
-                            const char *type,  const char *name,
-                            ms::StringTab &st ) {
-    AdjacencySpace *adj = this->add_link( cost, type, name, st );
-    adj->add( target_uid );
-    return adj;
-  }
-  AdjacencySpace *add_link( UserBridge *n,  uint32_t cost[ COST_PATH_COUNT ],
-                            const char *type,  const char *name,
-                            ms::StringTab &st ) {
-    return this->add_link( n->uid, cost, type, name, st );
-  }
-};
-
-struct TransportTab : public kv::ArrayCount< TransportRoute *, 4 > {};
-struct UserBridgeTab : public kv::ArrayCount< UserBridge *, 128 > {};
-
-struct UserDB {
-  PeerEntry     user;
-  uint32_t      next_uid, step, cost;
-  uint64_t      start_time;
-  UserBridgeTab bridge_tab;
-  TransportTab  transport_tab;
-  kv::BitSpace  uid_authenticated,
-                fwd;
-  AdjDistance   peer_dist;
-
-  UserDB() : next_uid( 1 ), step( 0 ), cost( 0 ), peer_dist( *this ) {}
-  ~UserDB();
-
-  UserBridge *add( const char *u,  const char *s,  ms::StringTab &st ) {
-    uint32_t uid = this->next_uid++;
-    UserBridge *n = new ( ::malloc( sizeof( UserBridge ) ) ) UserBridge( uid );
-    this->bridge_tab[ uid ] = n;
-    n->peer.set( u, s, st );
-    n->start_time = kv::current_realtime_ns() + (uint64_t) uid;
-    this->uid_authenticated.add( uid );
-    this->peer_dist.update_seqno++;
-    return n;
-  }
-  UserBridge *find( const char *u,  const char *s,  ms::StringTab &st ) {
-    for ( uint32_t uid = 1; uid < this->next_uid; uid++ ) {
-      if ( this->bridge_tab[ uid ]->peer.user.equals( u ) )
-        return this->bridge_tab[ uid ];
-    }
-    if ( this->user.user.len == 0 || this->user.user.equals( u ) ) {
-      if ( this->user.user.len == 0 )
-        this->user.set( u, s, st );
-      return NULL;
-    }
-    return this->add( u, s, st );
-  }
-  TransportRoute *add_tport( uint32_t cost[ COST_PATH_COUNT ],
-                             const char *type,  const char *name,
-                             ms::StringTab &st ) {
-    uint32_t tport_id = this->transport_tab.count;
-    void * p = ::malloc( sizeof( TransportRoute ) );
-    TransportRoute *t = new ( p ) TransportRoute( *this, tport_id );
-    this->transport_tab[ tport_id ] = t;
-    for ( uint8_t i = 0; i < COST_PATH_COUNT; i++ )
-      t->uid_connected.cost[ i ] = cost[ i ];
-    t->uid_connected.tport_id = tport_id;
-    if ( type != NULL )
-      st.ref_string( type, ::strlen( type ), t->uid_connected.tport_type );
-    if ( name != NULL )
-      st.ref_string( name, ::strlen( name ), t->uid_connected.tport );
-    this->peer_dist.update_seqno++;
-    return t;
-  }
-  TransportRoute *add_link( UserBridge *n,  uint32_t cost[ COST_PATH_COUNT ],
-                            const char *type,  const char *name,
-                            ms::StringTab &st,  AdjacencySpace *&spc ) {
-    TransportRoute * t = this->add_tport( cost, type, name, st );
-    t->uid_connected.add( n->uid );
-    spc = n->add_link( (uint32_t) 0, cost, type, name, st );
-    this->peer_dist.update_seqno++;
-    return t;
-  }
-  void make_link( UserBridge *x,  UserBridge *y,
-                  uint32_t cost[ COST_PATH_COUNT ],
-                  const char *type,  const char *name,  ms::StringTab &st ) {
-    AdjacencySpace *spc1, *spc2;
-    TransportRoute * t;
-    if ( x == NULL ) { /* me -> y */
-      t = this->add_link( y, cost, type, name, st, spc2 );
-      spc1 = &t->uid_connected;
-    }
-    else if ( y == NULL ) { /* x -> me */
-      t = this->add_link( x, cost, type, name, st, spc1 );
-      spc2 = &t->uid_connected;
-    }
-    else {
-      spc1 = x->add_link( y, cost, type, name, st );
-      spc2 = y->add_link( x, cost, type, name, st );
-    }
-    spc1->rem_tport_id = spc2->tport_id;
-    spc1->rem_uid      = spc2->uid;
-    spc2->rem_tport_id = spc1->tport_id;
-    spc2->rem_uid      = spc1->uid;
-  }
-  bool load_users( const char *fn,  ms::StringTab &st,
-                   uint32_t &start_uid ) noexcept;
-  bool load_users( const char *p,  size_t size,  ms::StringTab &st,
-                   uint32_t &start_uid ) noexcept;
-  void print_elements( kv::ArrayOutput &out ) noexcept;
-  void print_paths( kv::ArrayOutput &out,  uint32_t start_uid ) noexcept;
-};
-#endif
 }
-
-namespace ms {
-bool compute_message_graph( const char *start,  const char *network,
-                            size_t network_len,
-                            kv::ArrayOutput &out ) noexcept;
-}
-
 }
 #endif

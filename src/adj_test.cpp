@@ -279,7 +279,7 @@ UserDB::print_elements( kv::ArrayOutput &out ) noexcept
   }
   out.puts( " ]\n}\n" );
 }
-
+#if 0
 void
 UserDB::print_paths( kv::ArrayOutput &out,  uint32_t start_uid ) noexcept
 {
@@ -327,7 +327,7 @@ UserDB::print_paths( kv::ArrayOutput &out,  uint32_t start_uid ) noexcept
   }
   out.puts( "]\n" );
 }
-
+#endif
 UserBridge::~UserBridge()
 {
   for ( size_t i = 0; i < this->adjacency.count; i++ ) {
@@ -358,7 +358,7 @@ UserDB::~UserDB()
 bool
 rai::ms::compute_message_graph( const char *start,  const char *network,
                                 size_t network_len,
-                                kv::ArrayOutput &out ) noexcept
+                                kv::ArrayOutput &/*out*/ ) noexcept
 {
   UserDB user_db;
   md::MDMsgMem mem;
@@ -381,6 +381,6 @@ rai::ms::compute_message_graph( const char *start,  const char *network,
     }
   }
   user_db.peer_dist.clear_cache_if_dirty();
-  user_db.print_paths( out, start_uid );
+  /*user_db.print_paths( out, start_uid );*/
   return true;
 }

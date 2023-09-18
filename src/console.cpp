@@ -18,6 +18,7 @@
 #include <raims/ev_telnet.h>
 #include <raims/ev_web.h>
 #include <raims/ev_name_svc.h>
+#include <raims/adj_graph.h>
 #include <linecook/linecook.h>
 #include <linecook/ttycook.h>
 #include <raimd/json_msg.h>
@@ -4471,6 +4472,34 @@ UserBridgeList::cmp_stop( const UserBridgeElem &e1,
 }
 
 void
+UserBridgeList::add_users( UserDB &user_db,  md::MDMsgMem &mem ) noexcept
+{
+  this->push_tl( new ( mem.make( sizeof( UserBridgeElem ) ) )
+                 UserBridgeElem( user_db, 0 ) );
+  for ( uint32_t uid = 1; uid < user_db.next_uid; uid++ ) {
+    UserBridge * n = user_db.bridge_tab[ uid ];
+    if ( n == NULL || ! n->is_set( AUTHENTICATED_STATE ) )
+      continue;
+
+    this->push_tl( new ( mem.make( sizeof( UserBridgeElem ) ) )
+                   UserBridgeElem( user_db, uid ) );
+  }
+}
+
+void
+UserBridgeList::add_zombie( UserDB &user_db,  md::MDMsgMem &mem ) noexcept
+{
+  for ( uint32_t uid = 1; uid < user_db.next_uid; uid++ ) {
+    UserBridge * n = user_db.bridge_tab[ uid ];
+    if ( n == NULL || n->is_set( AUTHENTICATED_STATE ) )
+      continue;
+
+    this->push_tl( new ( mem.make( sizeof( UserBridgeElem ) ) )
+                   UserBridgeElem( user_db, uid ) );
+  }
+}
+
+void
 Console::show_peers( ConsoleOutput *p, const char *name,  size_t len ) noexcept
 {
   static const uint32_t ncols = 11;
@@ -4488,19 +4517,10 @@ Console::show_peers( ConsoleOutput *p, const char *name,  size_t len ) noexcept
       show_zombie = true;
   }
   if ( ! show_zombie )
-    list.push_tl( new ( this->tmp.make( sizeof( UserBridgeElem ) ) )
-                  UserBridgeElem( this->user_db, 0 ) );
-  for ( uint32_t uid = 1; uid < this->user_db.next_uid; uid++ ) {
-    UserBridge * n = this->user_db.bridge_tab[ uid ];
-    if ( n == NULL )
-      continue;
-    if ( ( ! n->is_set( AUTHENTICATED_STATE ) && ! show_zombie ) ||
-         ( n->is_set( AUTHENTICATED_STATE ) && show_zombie ) )
-      continue;
+    list.add_users( this->user_db, this->tmp );
+  else
+    list.add_zombie( this->user_db, this->tmp );
 
-    list.push_tl( new ( this->tmp.make( sizeof( UserBridgeElem ) ) )
-                  UserBridgeElem( this->user_db, uid ) );
-  }
   if ( len > 0 ) {
     if ( name[ 0 ] == 'u' || name[ 0 ] == 'U' )       /* user */
       list.sort<UserBridgeList::cmp_user>();
@@ -4672,26 +4692,22 @@ Console::show_adjacency( ConsoleOutput *p,  const char *arg,
   /* if name == user              , sort by user name
    *         == nonce | ip | host , sort by nonce
    *         == start             , sort by start time */
-  list.push_tl( new ( this->tmp.make( sizeof( UserBridgeElem ) ) )
-                UserBridgeElem( this->user_db, 0 ) );
-  for ( uint32_t uid = 1; uid < this->user_db.next_uid; uid++ ) {
-    UserBridge * n = this->user_db.bridge_tab[ uid ];
-    if ( n == NULL )
-      continue;
-    if ( n->is_set( AUTHENTICATED_STATE ) )
-      list.push_tl( new ( this->tmp.make( sizeof( UserBridgeElem ) ) )
-                    UserBridgeElem( this->user_db, uid ) );
-  }
-  list.sort<UserBridgeList::cmp_user>();
+  list.add_users( this->user_db, this->tmp );
+  list.sort<UserBridgeList::cmp_start>();
 
   /* print each users port */
+  ArrayCount<uint32_t, 32> uid_map;
+  if ( mask != 0 ) {
+    uint32_t start_order = 0;
+    for ( UserBridgeElem * el = list.hd; el != NULL; el = el->next ) {
+      uid_map[ el->uid ] = start_order++;
+    }
+  }
   for ( UserBridgeElem * el = list.hd; el != NULL; el = el->next ) {
     UserBridge * n = NULL;
-    if ( el->uid != 0 ) {
+    if ( el->uid != 0 )
       n = this->user_db.bridge_tab[ el->uid ];
-      if ( n == NULL || ! n->is_set( AUTHENTICATED_STATE ) )
-        continue;
-    }
+    StringVal & user = ( n == NULL ? this->user_db.user.user : n->peer.user );
     count = this->user_db.peer_dist.adjacency_count( el->uid );
     if ( count == 0 )
       continue;
@@ -4709,20 +4725,18 @@ Console::show_adjacency( ConsoleOutput *p,  const char *arg,
         UserBridge * n2 = NULL;
         if ( b != 0 )
           n2 = this->user_db.bridge_tab[ b ];
+        StringVal &user2 = ( n2 == NULL ? this->user_db.user.user :
+                             n2->peer.user );
         if ( b == 0 || n2 != NULL ) {
           tab = out.make_row();
           if ( last_user != el->uid ) {
-            if ( n == NULL )
-              tab[ i++ ].set( this->user_db.user.user, PRINT_SELF );
-            else
-              tab[ i++ ].set( n, PRINT_USER );
+            uint32_t uid = ( mask == 0 ? el->uid : uid_map.ptr[ el->uid ] );
+            tab[ i++ ].set( user, uid, PRINT_ID );
           }
           else
             tab[ i++ ].set_null();
-          if ( n2 != NULL )
-            tab[ i++ ].set( n2, PRINT_USER );
-          else
-            tab[ i++ ].set( this->user_db.user.user, PRINT_SELF );
+          uint32_t uid2 = ( mask == 0 ? b : uid_map.ptr[ b ] );
+          tab[ i++ ].set( user2, uid2, PRINT_ID );
 
           if ( last_tport != t ) {
             if ( set->tport.len > 0 )
@@ -4749,11 +4763,12 @@ Console::show_adjacency( ConsoleOutput *p,  const char *arg,
               tab[ i++ ].set_int( set->rem_tport_id );
           }
           r += ncols;
-          j  = ncols - ( mask == 0 ? 1 : 0 );
-          while ( i < j )
+          while ( i < r - 1 )
             tab[ i++ ].set_null();
           if ( mask == 0 )
             tab[ i++ ].set_int( set->prune_path );
+          if ( i < r )
+            tab[ i++ ].set_null();
           last_user  = el->uid;
           last_tport = t;
         }
@@ -5507,85 +5522,50 @@ void
 Console::show_tree( ConsoleOutput *p,  const UserBridge *src,
                     uint8_t path_select ) noexcept
 {
-  static const uint32_t ncols = 6;
+  static const uint32_t ncols = 4;
   TabOut out( this->table, this->tmp, ncols );
   AdjDistance & peer_dist = this->user_db.peer_dist;
-  char          buf[ 80 ];
-  uint32_t      src_uid = ( src != NULL ? src->uid : 0 ),
-                cost    = 0,
-                max_uid = peer_dist.max_uid;
+  uint32_t      src_uid = ( src != NULL ? src->uid : 0 );
 
   path_select &= ( COST_PATH_COUNT - 1 );
 
-  peer_dist.coverage_init( src_uid );
-  while ( (cost = peer_dist.coverage_step( path_select )) != 0 ) {
-    UIntBitSet & fwd = peer_dist.fwd;
-    uint32_t uid;
+  if ( peer_dist.graph == NULL )
+    peer_dist.update_graph();
 
-    if ( out.table.count > 0 )
-      out.row( ncols - 1 ).typ |= PRINT_SEP;
-    for ( bool ok = fwd.first( uid, max_uid ); ok;
-          ok = fwd.next( uid, max_uid ) ) {
+  uint32_t   * idx = peer_dist.graph_idx_order;
+  AdjUser    * u   = peer_dist.graph->user_tab.ptr[ idx[ src_uid ] ];
+  AdjFwdTab  & fwd = u->fwd[ path_select ];
 
-      for ( uint32_t j = 0; j < peer_dist.links.count; j++ ) {
-        AdjacencySpace * set = peer_dist.links.ptr[ j ];
-        if ( set == NULL || ! set->is_member( uid ) )
-          continue;
+  for ( uint32_t src = 0; src < u->links.count; src++ ) {
+    uint32_t j;
+    for ( j = 0; j < fwd.links.count; j++ ) {
+      if ( fwd.src.ptr[ j ] == src )
+        break;
+    }
+    if ( j < fwd.links.count ) {
+      if ( out.table.count > 0 )
+        out.row( ncols - 1 ).typ |= PRINT_SEP;
+      for (;;) {
+        TabPrint * tab = out.add_row_p();
+        uint32_t   i = 0;
+        tab[ i++ ].set_int( fwd.cost.ptr[ j ] );               /* cost */
+        AdjLink * link = fwd.links.ptr[ j ];
+        tab[ i++ ].set( link->a.user, link->a.uid, PRINT_ID ); /* source */
+        tab[ i++ ].set( link->tport, link->tid, PRINT_ID );    /* tport */
+        tab[ i++ ].set( link->b.user, link->b.uid, PRINT_ID ); /* dest */
 
-        for ( uint32_t k = 0; set != NULL; set = set->next_link, k++ ) {
-          TabPrint * tab = out.add_row_p();
-          uint32_t   i = 0;
-          tab[ i++ ].set_int( cost ); /* cost */
-          tab[ i++ ].set_int( j ); /* set */
-          tab[ i++ ].set_int( k ); /* age */
-          if ( set->uid == UserDB::MY_UID ) {
-            TransportRoute *rte =
-              this->user_db.transport_tab.ptr[ set->tport_id ];
-            tab[ i++ ].set( this->user_db.user.user, PRINT_SELF ); /* user */
-            tab[ i++ ].set( rte->transport.tport, set->tport_id, PRINT_ID );
-          }
-          else {
-            UserBridge * n = this->user_db.bridge_tab.ptr[ set->uid ];
-            tab[ i++ ].set( n, PRINT_USER ); /* user */
-            if ( set->tport.len > 0 )
-              tab[ i++ ].set( set->tport, set->tport_id, PRINT_ID );
-            else
-              tab[ i++ ].set_int( set->tport_id );
-          }
-
-          uint32_t dest_uid;
-          size_t   sz = 0;
-          for ( bool ok = set->first( dest_uid ); ok;
-                ok = set->next( dest_uid ) ) {
-            const char * dest = ( dest_uid == 0 ? this->user_db.user.user.val :
-                          this->user_db.bridge_tab.ptr[ dest_uid ]->peer.user.val );
-            size_t dest_len = ::strlen( dest );
-            if ( dest_len > 76 )
-              dest_len = 76;
-            if ( sz + dest_len + 3 > 80 ) {
-              if ( sz > 1 ) sz -= 2;
-              buf[ sz ] = '\0';
-              this->tab_string( buf, tab[ i++ ] ); /* dest */
-              tab = out.add_row_p();
-              sz = 0;
-              i = 0;
-              tab[ i++ ].set_null();
-              tab[ i++ ].set_null();
-              tab[ i++ ].set_null();
-            }
-            sz = cat80( buf, sz, dest );
-            sz = cat80( buf, sz, ", " );
-          }
-          if ( sz > 1 ) sz -= 2;
-          buf[ sz ] = '\0';
-          this->tab_string( buf, tab[ i++ ] ); /* dest */
+        for (;;) {
+          if ( ++j == fwd.links.count )
+            goto break_loop;
+          if ( src == fwd.src.ptr[ j ] )
+            break;
         }
       }
+    break_loop:;
     }
   }
-
   static const char *hdr[ ncols ] =
-    { "cost", "set", "alt", "source", "tport", "dest" };
+    { "cost", "source", "tport", "dest" };
   this->print_table( p, hdr, ncols );
 }
 

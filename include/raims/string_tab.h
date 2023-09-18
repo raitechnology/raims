@@ -103,6 +103,7 @@ struct StringTab {
       this->ref_string( sv.val, sv.len, sv );
     return sv.id;
   }
+  StringVal & add( StringVal &sv ) { this->add_string( sv ); return sv; }
   void reref_string( const char *str,  size_t len,  StringVal &sv ) {
     if ( len != sv.len || ::memcmp( str, sv.val, len ) != 0 )
       this->ref_string( str, len, sv );
@@ -111,9 +112,9 @@ struct StringTab {
   void * make_obj( size_t sz ) noexcept;
   void free_obj( size_t sz,  void *p ) noexcept;
 
-  template<class Obj>
-  Obj *make( void ) {
-    return new ( this->make_obj( sizeof( Obj ) ) ) Obj();
+  template<class Obj, class... Ts>
+  Obj *make( Ts... args ) {
+    return new ( this->make_obj( sizeof( Obj ) ) ) Obj( args... );
   }
   template<class Obj>
   void release( Obj *o ) {

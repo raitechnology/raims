@@ -575,7 +575,7 @@ struct LastTimeStamp {
   LastTimeStamp() : last_secs( 0 ), last_ms( 0 ), last_day( 0 ) {}
   void update( uint64_t stamp ) noexcept;
 };
-
+#if 0
 struct UserBridgeElem {
   UserBridgeElem * next;
   UserDB & user_db;
@@ -595,7 +595,7 @@ struct UserBridgeList : public kv::SLinkList<UserBridgeElem> {
   static int cmp_stop( const UserBridgeElem &e1,
                        const UserBridgeElem &e2 ) noexcept;
 };
-
+#endif
 struct Console : public md::MDOutput, public SubOnMsg,
                  public kv::EvTimerCallback {
   SessionMgr      & mgr;

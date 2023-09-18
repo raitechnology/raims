@@ -8,6 +8,7 @@
 #include <raims/ev_web.h>
 #include <raims/user_db.h>
 #include <raims/ev_web_tar.h>
+#include <raims/adj_graph.h>
 #include <raikv/os_file.h>
 
 using namespace rai;

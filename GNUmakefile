@@ -434,7 +434,7 @@ server_includes             := $(ds_includes) $(lc_includes)
 session_defines := -DMS_VER=$(ver_build)
 libraims_files := session user_db heartbeat auth peer link_state adjacency \
                   config user msg sub pat transport session_tport \
-		  conn_mgr console stats adj_test gen_config \
+		  conn_mgr console stats adj_graph adj_io gen_config \
 		  crypt poly1305 ec25519 ed25519 sha512 aes \
 		  ev_tcp_aes ev_tcp_transport ev_pgm_transport pgm_sock \
 		  ev_inbox_transport ev_telnet ev_web ev_rv_transport \
@@ -597,7 +597,7 @@ $(bind)/matchtest$(exe): $(matchtest_objs) $(matchtest_libs) $(lnk_dep)
 all_exes    += $(bind)/matchtest$(exe)
 all_depends += $(matchtest_deps)
 
-ms_test_adj_files := test_adj
+ms_test_adj_files := g
 ms_test_adj_objs  := $(addprefix $(objd)/, $(addsuffix .o, $(ms_test_adj_files)))
 ms_test_adj_deps  := $(addprefix $(dependd)/, $(addsuffix .d, $(ms_test_adj_files)))
 ms_test_adj_libs  :=
