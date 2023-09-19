@@ -1174,15 +1174,18 @@ UserDB::find_adjacent_routes( void ) noexcept
     }
     u_ptr    = n.user_route_ptr( *this, path.tport );
     hops     = u_ptr->rte.uid_connected.is_member( n.uid ) ? 0 : 1,
-    min_cost = peer_dist.calc_transport_cache( uid, path.tport, 0 );
+    min_cost = path.cost;
 
     if ( n.primary_route == path.tport )
       primary = u_ptr;
     else
       primary = n.primary( *this );
 
-    if ( primary != u_ptr ) {
-      my_cost = peer_dist.calc_transport_cache( uid, n.primary_route, 0 );
+    if ( u_ptr->is_valid() && primary != u_ptr ) {
+      if ( ! primary->is_valid() )
+        my_cost = COST_MAXIMUM;
+      else
+        my_cost = peer_dist.calc_transport_cache( uid, n.primary_route, 0 );
       if ( my_cost >= min_cost ) {
         if ( debug_usr )
           n.printf( "old primary route is tport %s(d=%u),"
