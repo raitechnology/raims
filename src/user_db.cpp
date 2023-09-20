@@ -116,6 +116,7 @@ UserDB::init( const CryptPass &pwd,  ConfigTree &tree ) noexcept
   this->name_send_time   = 0;
   this->last_idle_check_ns = 0;
   this->route_check_mono = 0;
+  this->bloom_check_mono = 0;
   this->last_auth_mono   = this->start_mono_time;
   this->converge_time    = this->start_time;
   this->net_converge_time= this->start_time;
@@ -674,8 +675,19 @@ UserDB::converge_network( uint64_t current_mono_time,  uint64_t current_time,
     if ( this->route_check_mono < this->converge_mono &&
          current_mono_time > this->converge_mono + SEC_TO_NS ) {
       this->route_check_mono = this->converge_mono;
+      this->bloom_check_mono = this->converge_mono + SEC_TO_NS;
       this->find_adjacent_routes();
-      this->check_blooms();
+      if ( this->check_blooms() )
+        printf( "bloom check ok\n" );
+    }
+    else if ( this->bloom_check_mono > this->converge_mono &&
+              current_mono_time > this->bloom_check_mono ) {
+      if ( ! this->check_blooms() ) {
+        fprintf( stderr, "bloom check failed\n" );
+        this->find_adjacent_routes();
+      }
+      this->bloom_check_mono += ( this->bloom_check_mono -
+                                  this->converge_mono );
     }
     return true;
   }

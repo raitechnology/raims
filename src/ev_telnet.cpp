@@ -397,7 +397,6 @@ TelnetService::flush_term( void ) noexcept
 void
 TelnetService::flush_buf( const char *out_buf,  size_t out_len ) noexcept
 {
-  /*dbg_buf( "flush_buf", out_buf, out_len );*/
   for ( size_t i = 0; ; ) {
     if ( i == out_len )
       return;
@@ -416,13 +415,17 @@ TelnetService::flush_buf( const char *out_buf,  size_t out_len ) noexcept
       }
       left = eol - ptr;
     }
-    /*dbg_buf( "append", ptr, left );*/
-    this->append( ptr, left );
-    i += left;
-    if ( need_cr ) {
-      /*dbg_buf( "append_cr", "\r\n", 2 );*/
+    if ( left == 0 ) {
       this->append( "\r\n", 2 );
       i++;
+    }
+    else {
+      this->append( ptr, left );
+      i += left;
+      if ( need_cr ) {
+        this->append( "\r\n", 2 );
+        i++;
+      }
     }
   }
 }

@@ -629,7 +629,7 @@ AdjDistance::message_graph_description( kv::ArrayOutput &out ) noexcept
     this->update_graph();
 
   AdjGraphOut put( *this->graph, out );
-  put.print_web_paths( 0 );
+  put.print_graph();
   out.s( "\n" );
 }
 

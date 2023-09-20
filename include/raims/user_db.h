@@ -598,7 +598,8 @@ struct UserDB {
                         name_send_seqno,
                         name_send_time,
                         last_idle_check_ns,
-                        route_check_mono;
+                        route_check_mono,
+                        bloom_check_mono;
   kv::rand::xoroshiro128plus rand;       /* used to generate bloom seeds */
 
   /* memory buffers for keys and peer nodes */
