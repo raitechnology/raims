@@ -367,7 +367,7 @@ UserDB::on_heartbeat( const MsgFramePublish &pub,  UserBridge &n,
     }
     if ( ! n.test_set( HAS_HB_STATE ) ) {
       UserRoute * primary = n.primary( *this );
-      if ( primary->hops() > n.user_route->hops() ) {
+      if ( ! primary->is_valid() ) {
         if ( debug_hb )
           n.printf( "hb reconnect inbox (%s)\n", rte.name );
         this->add_inbox_route( n, n.user_route );

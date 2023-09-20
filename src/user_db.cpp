@@ -1937,7 +1937,7 @@ UserDB::add_inbox_route( UserBridge &n,  UserRoute *primary ) noexcept
     /* reassign primary, deref inbox */
     if ( primary != inbox ||
          n.bloom_rt[ 0 ]->r != (uint32_t) primary->mcast.fd ) {
-      if ( debug_usr )
+      if ( debug_usr || debug_ibx )
         n.printf( "del inbox route %.*s -> %u (%s)\n",
                   (int) ibx.len(), ibx.buf, inbox->inbox.fd, inbox->rte.name );
       /*if ( this->ipc_transport != NULL &&
@@ -1967,7 +1967,7 @@ UserDB::add_inbox_route( UserBridge &n,  UserRoute *primary ) noexcept
   }
   /* add bloom for sending messages to peer */
   if ( ! primary->test_set( INBOX_ROUTE_STATE ) ) {
-    if ( debug_usr )
+    if ( debug_usr || debug_ibx )
       n.printf( "add inbox_route %.*s -> %u (%s) (bcast %u) (%s)\n",
               (int) ibx.len(), ibx.buf, primary->inbox.fd,
               primary->ucast_url.len == 0 ? "ptp" : primary->ucast_url.val,
