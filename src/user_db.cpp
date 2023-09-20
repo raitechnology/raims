@@ -677,17 +677,20 @@ UserDB::converge_network( uint64_t current_mono_time,  uint64_t current_time,
       this->route_check_mono = this->converge_mono;
       this->bloom_check_mono = this->converge_mono + SEC_TO_NS;
       this->find_adjacent_routes();
-      if ( this->check_blooms() )
-        printf( "bloom check ok\n" );
+      this->check_blooms();
     }
     else if ( this->bloom_check_mono > this->converge_mono &&
               current_mono_time > this->bloom_check_mono ) {
-      if ( ! this->check_blooms() ) {
-        fprintf( stderr, "bloom check failed\n" );
+      bool ok = this->check_blooms();
+      if ( ! ok ) {
+        fprintf( stderr, "bloom check failed 2\n" );
         this->find_adjacent_routes();
       }
-      this->bloom_check_mono += ( this->bloom_check_mono -
-                                  this->converge_mono );
+      uint64_t delta = ( this->bloom_check_mono - this->converge_mono );
+      if ( ok && delta / SEC_TO_NS > 20 ) /* stop after ok for 20 secs */
+        this->bloom_check_mono = 0;
+      else
+        this->bloom_check_mono += delta; /* pow2 backoff */
     }
     return true;
   }

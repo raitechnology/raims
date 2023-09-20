@@ -171,8 +171,9 @@ struct AdjGraphOut {
 
   void print_web_paths( uint32_t start_idx ) noexcept;
   void print_web_path( uint8_t p,  uint32_t start_idx ) noexcept;
-  void print_web_path_node( uint32_t step,  AdjFwdTab &fwd,
-                            uint32_t src,  uint32_t j ) noexcept;
+  void step_web_path_node( uint32_t step,  AdjFwdTab &fwd,  uint32_t src,
+                           uint32_t j,  UIntArrayCount &path_step,
+                           UIntArrayCount &path_cost ) noexcept;
   void print_web_path_link( uint32_t step,  AdjFwdTab &fwd, uint32_t src,
                             uint32_t j,  bool first ) noexcept;
 

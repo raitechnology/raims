@@ -15,8 +15,9 @@ static const uint32_t COST_DEFAULT = 1000;
 void
 AdjGraphOut::print( void ) noexcept
 {
-  ArrayOutput & o = this->out;
-  AdjUserTab & user_tab = this->graph.user_tab;
+  ArrayOutput & o        = this->out;
+  AdjUserTab  & user_tab = this->graph.user_tab;
+
   for ( uint32_t idx = 0; idx < user_tab.count; idx++ ) {
     AdjUser *u = user_tab.ptr[ idx ];
     for ( uint32_t j = 0; j < u->links.count; j++ ) {
@@ -32,8 +33,9 @@ AdjGraphOut::print( void ) noexcept
 void
 AdjGraphOut::print_tree( uint8_t p,  bool print_unused ) noexcept
 {
-  ArrayOutput & o = this->out;
-  AdjUserTab & user_tab = this->graph.user_tab;
+  ArrayOutput & o        = this->out;
+  AdjUserTab  & user_tab = this->graph.user_tab;
+
   for ( uint32_t idx = 0; idx < user_tab.count; idx++ ) {
     AdjUser   * u   = user_tab.ptr[ idx ];
     AdjFwdTab & fwd = u->fwd[ p ];
@@ -69,8 +71,8 @@ AdjGraphOut::print_tree_link( uint32_t indent,  AdjFwdTab &fwd,  uint32_t src,
                               uint32_t j,  uint8_t p ) noexcept
 {
   ArrayOutput & o = this->out;
-  uint32_t  cost = fwd.cost.ptr[ j ];
-  AdjLink * link = fwd.links.ptr[ j ];
+  uint32_t      cost = fwd.cost.ptr[ j ];
+  AdjLink     * link = fwd.links.ptr[ j ];
 
   uint32_t dest_idx = link->b.idx;
   o.printf( "%*s[%u] %s -> %s %s(%c)\n", indent, "", cost,
@@ -100,22 +102,34 @@ AdjGraphOut::print_web_paths( uint32_t start_idx ) noexcept
 void
 AdjGraphOut::print_web_path( uint8_t p,  uint32_t start_idx ) noexcept
 {
-  ArrayOutput & o = this->out;
-  AdjUser   * u   = this->graph.user_tab.ptr[ start_idx ];
-  AdjFwdTab & fwd = u->fwd[ p ];
-  uint32_t    src;
+  ArrayOutput  & o = this->out;
+  AdjUserTab   & user_tab = this->graph.user_tab;
+  AdjUser      * u        = user_tab.ptr[ start_idx ];
+  AdjFwdTab    & fwd      = u->fwd[ p ];
+  uint32_t       i, src;
+  UIntArrayCount path_step, path_cost;
 
-  o.printf( "{\n\"nodes\": [\n"
-          "{\"user\": \"%s\", \"uid\": %u, \"step\": %u, \"cost\": %u}",
-          u->user.val, u->idx, 0, 0 );
+  for ( i = 0; i < user_tab.count; i++ ) {
+    path_step.push( (uint32_t) -1 );
+    path_cost.push( (uint32_t) 0 );
+  }
+  path_step.ptr[ start_idx ] = 0;
   for ( src = 0; src < u->links.count; src++ ) {
     uint32_t j;
     for ( j = 0; j < fwd.links.count; j++ ) {
       if ( fwd.src.ptr[ j ] == src )
         break;
     }
-    if ( j < fwd.links.count )
-      this->print_web_path_node( 1, fwd, src, j );
+    if ( j < fwd.links.count ) {
+      this->step_web_path_node( 1, fwd, src, j, path_step, path_cost );
+    }
+  }
+  o.puts( "{\n\"nodes\": [\n" );
+  for ( i = 0; i < user_tab.count; i++ ) {
+    u = user_tab.ptr[ i ];
+    o.printf( "%s{\"user\": \"%s\", \"uid\": %u, \"step\": %d, \"cost\": %u}",
+              ( i == 0 ? "" : ",\n" ),
+              u->user.val, i, path_step.ptr[ i ], path_cost.ptr[ i ] );
   }
   o.puts( " ],\n\"links\": [\n" );
   bool first = true;
@@ -134,20 +148,23 @@ AdjGraphOut::print_web_path( uint8_t p,  uint32_t start_idx ) noexcept
 }
 
 void
-AdjGraphOut::print_web_path_node( uint32_t step,  AdjFwdTab &fwd,  uint32_t src,
-                                  uint32_t j ) noexcept
+AdjGraphOut::step_web_path_node( uint32_t step,  AdjFwdTab &fwd,  uint32_t src,
+                                 uint32_t j,  UIntArrayCount &path_step,
+                                 UIntArrayCount &path_cost ) noexcept
 {
-  ArrayOutput & o = this->out;
   uint32_t  cost = fwd.cost.ptr[ j ];
   AdjLink * link = fwd.links.ptr[ j ];
 
-  o.printf( ",\n{\"user\": \"%s\", \"uid\": %u, \"step\": %u, \"cost\": %u}",
-          link->b.user.val, link->b.idx, step, cost );
+  /*o.printf( ",\n{\"user\": \"%s\", \"uid\": %u, \"step\": %u, \"cost\": %u}",
+          link->b.user.val, link->b.idx, step, cost );*/
+  uint32_t k = link->b.idx;
+  path_step.ptr[ k ] = step;
+  path_cost.ptr[ k ] = cost;
 
   for ( uint32_t k = j + 1; k < fwd.links.count; k++ ) {
     if ( fwd.src.ptr[ k ] == src &&
          &fwd.links.ptr[ k ]->a == &link->b ) {
-      this->print_web_path_node( step + 1, fwd, src, k );
+      this->step_web_path_node( step + 1, fwd, src, k, path_step, path_cost );
     }
   }
 }
@@ -279,6 +296,7 @@ AdjGraphOut::print_graph( void ) noexcept
             pgm_type( "pgm", 3 );
   AdjLinkTab tcp, mesh, pgm;
   if ( ! this->is_cfg ) {
+    o.printf( "start %s\n", user_tab.ptr[ 0 ]->user.val );
     o.puts( "node" );
     for ( uint32_t idx = 0; idx < user_tab.count; idx++ ) {
       AdjUser *u = user_tab.ptr[ idx ];
@@ -544,6 +562,10 @@ AdjGraph::load_graph( StringTab &str_tab,  const char *p,
     ::memcpy( buf, p, linelen );
     buf[ linelen ] = '\0';
     p = &eol[ 1 ];
+    while ( linelen > 0 && buf[ linelen - 1 ] <= ' ' )
+      buf[ --linelen ] = '\0';
+    if ( linelen == 0 || buf[ 0 ] == '#' )
+      continue;
 
     ln++;
     argc = split_args( buf, args );
@@ -843,6 +865,8 @@ rai::ms::compute_message_graph( const char *start,  const char *network,
   bool      ok = false;
 
   if ( graph.load_graph( str_tab, network, network_len, start_uid ) == 0 ) {
+    for ( uint8_t p = 0; p < 4; p++ )
+      graph.compute_forward_set( p );
     AdjGraphOut put( graph, out );
     if ( start != NULL ) {
       AdjUserTab & user_tab = graph.user_tab;
