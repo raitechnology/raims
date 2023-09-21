@@ -301,6 +301,7 @@ SessionMgr::init_session( const CryptPass &pwd ) noexcept
   this->mch.len = (uint16_t) mcb.len();
   this->mch.init( mcb, _PING     , U_MCAST_PING );
   this->mch.init( mcb, _SYNC     , U_MCAST_SYNC );
+  this->mch.init( mcb, _STAT_MON , U_MCAST_STAT_MON );
 
   if ( ! this->ibx.is_full() || ! this->mch.is_full() ) {
     fprintf( stderr, "not fully initialized\n" );
@@ -586,7 +587,16 @@ SessionMgr::timer_expire( uint64_t tid,  uint64_t ) noexcept
   do {
     this->stats.mono_time += sec_to_ns( STATS_INTERVAL );
   } while ( this->stats.mono_time < cur_mono );
-  this->publish_stats( cur_time );
+  bool active = ( cur_mono < this->stats.m_stat_mono_time +
+                             sec_to_ns( M_STAT_INTERVAL ) );
+  this->publish_stats( cur_time, active );
+
+  if ( this->stats.n_stat_sub_count > 0 &&
+       cur_mono >= this->stats.m_stat_mono_time +
+       sec_to_ns( M_STAT_PUB_INTERVAL ) ) {
+    this->stats.m_stat_mono_time = cur_mono;
+    this->publish_stat_monitor();
+  }
   return true;
 }
 
@@ -1384,6 +1394,16 @@ SessionMgr::on_msg( EvPublish &pub ) noexcept
     case U_MCAST:
       return this->user_db.recv_ping_request( fpub, n, dec, true ); /* _M.ping */
 
+    case U_MCAST_STAT_MON: {
+      uint64_t stamp;
+      dec.get_ival<uint64_t>( FID_STAMP, stamp );
+      if ( stamp != 0 ) {
+        this->stats.m_stat_mono_time = this->poll.mono_ns;
+        if ( debug_sess )
+          n.printf( "stat mon active\n" );
+      }
+      break;
+    }
     case U_NORMAL:        /* _SUBJECT */
     case U_INBOX:         /* _I.Nonce.<inbox_ret> */
     case U_INBOX_TRACE:   /* _I.Nonce.trace */

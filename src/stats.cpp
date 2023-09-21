@@ -13,32 +13,33 @@ using namespace kv;
 using namespace md;
 
 void
-SessionMgr::publish_stats( uint64_t cur_time ) noexcept
+SessionMgr::publish_stats( uint64_t cur_time,  bool active ) noexcept
 {
   uint32_t     h,
                peer_len;
   const char * peer_val;
   UserBridge * peer;
 
-  bool sub_updated =
+  bool sub_updated = active &&
     ( this->stats.update_mono_time != this->sub_db.sub_update_mono_time ||
       this->stats.ipc_update_seqno != this->sub_db.update_seqno );
   if ( sub_updated ) {
     this->stats.ipc_update_seqno = this->sub_db.update_seqno;
     this->stats.update_mono_time = this->sub_db.sub_update_mono_time;
   }
-  bool n_port_subscribed =
+  bool n_port_subscribed = active &&
     ( this->stats.n_port_rcount != 0 || this->stats.n_port_ipc_rcount != 0 );
-  bool n_peer_subscribed =
+  bool n_peer_subscribed = active &&
     ( this->stats.n_peer_rcount != 0 || this->stats.n_peer_ipc_rcount != 0 );
-  bool n_all_subscribed =
+  bool n_all_subscribed = active &&
     ( this->stats.n_all_rcount != 0 || this->stats.n_all_ipc_rcount != 0 );
 
   uint64_t cache_seqno = this->user_db.peer_dist.cache_seqno;
   bool cache_synced = ( cache_seqno == this->user_db.peer_dist.update_seqno );
   bool adj_changed  = false;
 
-  if ( cache_synced && this->stats.adjacency_cache_seqno != cache_seqno ) {
+  if ( active && cache_synced &&
+       this->stats.adjacency_cache_seqno != cache_seqno ) {
     this->stats.adjacency_cache_seqno = cache_seqno;
     adj_changed = true;
     uint32_t n_adj_rcount    = 0,
@@ -357,5 +358,14 @@ SessionMgr::fwd_stat_msg( SubjectVar &s,  MsgCat &m,  uint32_t h,
     if ( debug_stat && k > 0 )
       fwd->printf( "fwd_stat(%.*s) k=%u\n", (int) s.len(), s.msg, k );
   }
+}
+
+void
+SessionMgr::publish_stat_monitor( void ) noexcept
+{
+  static const char m_stat[] = _MCAST "." _STAT_MON;
+  PubMcastData mc( m_stat, sizeof( m_stat ) - 1, NULL, 0, MD_NODATA );
+  mc.stamp = this->poll.now_ns;
+  this->publish( mc );
 }
 

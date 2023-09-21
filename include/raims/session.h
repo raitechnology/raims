@@ -387,13 +387,14 @@ struct SessionMgr : public kv::EvSocket, public kv::BPData {
                           MsgHdrDecoder &dec,  SeqnoArgs &seq,
                           int status,  bool is_session ) noexcept;
   /* publish data on a subject */
-  void publish_stats( uint64_t cur_time ) noexcept;
+  void publish_stats( uint64_t cur_time,  bool active ) noexcept;
   void fwd_port_stat_msg( SubjectVar &s,  TransportRoute *rte,  PortStats &rate,
                           PortStats &total,  uint64_t cur_time, uint32_t fd_cnt,
                           uint32_t uid_cnt,  uint32_t &rcount,
                           uint32_t &ipc_count ) noexcept;
   void fwd_stat_msg( SubjectVar &s,  MsgCat &m,  uint32_t h,
                      uint32_t &rcount,  uint32_t &ipc_count ) noexcept;
+  void publish_stat_monitor( void ) noexcept;
   bool publish( PubMcastData &mc ) noexcept;
   bool publish_any( PubMcastData &mc ) noexcept;
   bool publish_to( PubPtpData &ptp ) noexcept;

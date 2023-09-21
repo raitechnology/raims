@@ -8,6 +8,8 @@ namespace ms {
 #define _INBOX          "_I"
 /* mcast: _M.xxx */
 #define _MCAST          "_M"
+/* stats: _N.xxx */
+#define _STAT           "_N"
 
 /* session start, hb, end */
 #define _SESSION_HELLO  "_X.HELO"
@@ -60,6 +62,7 @@ namespace ms {
 #define _ANY            "any"
 #define _SYNC           "sync"
 #define _LOSS           "loss"
+#define _STAT_MON       "stat_mon"
 
 #ifdef DECLARE_SUB_CONST
 #define SUB_CONST( CON, VAL ) \

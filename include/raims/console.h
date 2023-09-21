@@ -792,6 +792,8 @@ struct Console : public md::MDOutput, public SubOnMsg,
                 const char *arg,  size_t len ) noexcept;
   uint32_t do_snap_stop( ConsoleOutput *p,  ConsoleOutput *sub_output,
                          const char *arg,  size_t len ) noexcept;
+  void check_stat_monitor( const char *arg,  size_t len,
+                           bool is_start ) noexcept;
   uint32_t do_sub( ConsoleOutput *p,  ConsoleOutput *sub_output,
                    const char *arg,  size_t len,  bool is_start ) noexcept;
   uint32_t do_psub( ConsoleOutput *p,  ConsoleOutput *sub_output,

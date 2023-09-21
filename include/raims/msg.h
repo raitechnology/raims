@@ -430,11 +430,12 @@ enum PublishType {
 
   U_MCAST_PING      = 40, /* _M.ping */
   U_MCAST_SYNC      = 41, /* _M.sync */
-  U_MCAST           = 42, /* _M.> */
+  U_MCAST_STAT_MON  = 42, /* _M.stat_mon */
+  U_MCAST           = 43, /* _M.> */
   /* other subject */
-  U_INBOX_ANY_RTE   = 43, /* _I.Nonce.any, ipc inbox */
-  MCAST_SUBJECT     = 44, /* not _XX subject */
-  UNKNOWN_SUBJECT   = 45, /* init, not resolved */
+  U_INBOX_ANY_RTE   = 44, /* _I.Nonce.any, ipc inbox */
+  MCAST_SUBJECT     = 45, /* not _XX subject */
+  UNKNOWN_SUBJECT   = 46, /* init, not resolved */
   MAX_PUB_TYPE      = 64
 };
 #ifdef INCLUDE_MSG_CONST
@@ -479,6 +480,7 @@ static const char *publish_type_str[] = {
   "u_inbox",
   "u_mcast_ping",
   "u_mcast_sync",
+  "u_mcast_stat_mon",
   "u_mcast",
   "u_inbox_any_rte",
   "mcast_subject",

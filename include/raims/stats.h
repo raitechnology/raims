@@ -6,7 +6,9 @@
 namespace rai {
 namespace ms {
 
-static const uint64_t STATS_INTERVAL = 1;
+static const uint64_t STATS_INTERVAL      = 1,
+                      M_STAT_INTERVAL     = 60,
+                      M_STAT_PUB_INTERVAL = 50;
 
 struct PortStats {
   uint64_t bs, br, ms, mr;
@@ -41,7 +43,8 @@ struct PortStats {
 typedef kv::ArrayCount< PortStats, 16 > LastArray;
 
 struct SessionStats {
-  uint64_t  update_mono_time,
+  uint64_t  m_stat_mono_time,
+            update_mono_time,
             ipc_update_seqno,
             mono_time,
             n_peer_seqno,
@@ -55,14 +58,15 @@ struct SessionStats {
             n_adj_ipc_rcount,
             n_adj_rcount,
             n_all_rcount,
-            n_all_ipc_rcount;
+            n_all_ipc_rcount,
+            n_stat_sub_count;
   LastArray last;
   PortStats last_total;
 
   SessionStats() {
-    ::memset( &this->update_mono_time, 0, 
+    ::memset( &this->m_stat_mono_time, 0, 
               (char *) (void *) &this->last -
-              (char *) (void *) &this->update_mono_time );
+              (char *) (void *) &this->m_stat_mono_time );
     this->last_total = 0;
   }
 };

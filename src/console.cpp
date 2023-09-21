@@ -2478,6 +2478,25 @@ Console::do_snap_stop( ConsoleOutput *p,  ConsoleOutput *sub_output,
   }
 }
 
+void
+Console::check_stat_monitor( const char *arg,  size_t len,
+                             bool is_start ) noexcept
+{
+  static const char n_stat[] = _STAT ".";
+  if ( len > sizeof( n_stat ) &&
+       ::memcmp( arg, n_stat, sizeof( n_stat ) - 1 ) == 0 ) {
+    if ( is_start ) {
+      if ( this->mgr.stats.n_stat_sub_count++ == 0 ) {
+        this->mgr.stats.m_stat_mono_time = this->mgr.poll.mono_ns;
+        this->mgr.publish_stat_monitor();
+      }
+    }
+    else {
+      this->mgr.stats.n_stat_sub_count -= 1;
+    }
+  }
+}
+
 uint32_t
 Console::do_sub( ConsoleOutput *p,  ConsoleOutput *sub_output,
                  const char *arg,  size_t len,  bool is_start ) noexcept
@@ -2589,6 +2608,7 @@ Console::sub_start( ConsoleOutput *sub_output,
   sub->set_sub( arg, len, h, ibx );
   sub->start_seqno = this->sub_db.console_sub_start( arg, len, inbox,
                                                      inbox_len, sub );
+  this->check_stat_monitor( arg, len, true );
   return sub;
 }
 
@@ -2642,6 +2662,7 @@ Console::sub_stop( ConsoleSubStart *sub ) noexcept
 {
   uint16_t svc = SessionMgr::sub_has_rv_service( sub->sub, sub->sublen );
 
+  this->check_stat_monitor( sub->sub, sub->sublen, false );
   this->sub_db.console_sub_stop( sub->sub, (uint16_t) sub->sublen );
   sub->is_complete = true;
   if ( svc != 0 )
@@ -2733,6 +2754,7 @@ Console::psub_start( ConsoleOutput *sub_output,  const char *arg,  size_t len,
       rv_svc->ref_count++;
   }
   sub->start_seqno = this->sub_db.console_psub_start( arg, len, fmt, sub );
+  this->check_stat_monitor( arg, len, true );
   return sub;
 }
 
@@ -2741,6 +2763,7 @@ Console::psub_stop( ConsolePSubStart *sub ) noexcept
 {
   uint16_t svc = SessionMgr::sub_has_rv_service( sub->psub, sub->psublen );
 
+  this->check_stat_monitor( sub->psub, sub->psublen, false );
   this->sub_db.console_psub_stop( sub->psub, sub->psublen, sub->pat_fmt );
   sub->is_complete = true;
   if ( svc != 0 ) {
@@ -2759,14 +2782,15 @@ Console::stop_rpc( ConsoleOutput *p,  ConsoleRPC *rpc ) noexcept
 {
   if ( rpc->out.remove( p ) && rpc->out.count == 0 ) {
     if ( rpc->type == SUB_START ) {
-      this->sub_db.console_sub_stop( ((ConsoleSubStart *) rpc)->sub,
-                                     ((ConsoleSubStart *) rpc)->sublen );
+      ConsoleSubStart *sub = (ConsoleSubStart *) rpc;
+      this->check_stat_monitor( sub->sub, sub->sublen, false );
+      this->sub_db.console_sub_stop( sub->sub, sub->sublen );
       rpc->is_complete = true;
     }
     else if ( rpc->type == PSUB_START ) {
-      this->sub_db.console_psub_stop( ((ConsolePSubStart *) rpc)->psub,
-                                      ((ConsolePSubStart *) rpc)->psublen,
-                                      ((ConsolePSubStart *) rpc)->pat_fmt );
+      ConsolePSubStart *psub = (ConsolePSubStart *) rpc;
+      this->check_stat_monitor( psub->psub, psub->psublen, false );
+      this->sub_db.console_psub_stop( psub->psub, psub->psublen, psub->pat_fmt);
       rpc->is_complete = true;
     }
   }
