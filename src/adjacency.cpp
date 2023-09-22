@@ -160,7 +160,7 @@ AdjDistance::push_inc_list( uint32_t uid ) noexcept
   this->inc_list[ --this->inc_hd ] = uid;
 }
 
-bool
+int
 AdjDistance::find_inconsistent2( UserBridge *&from,
                                  UserBridge *&to ) noexcept
 
@@ -172,17 +172,10 @@ AdjDistance::find_inconsistent2( UserBridge *&from,
     this->inc_hd = this->max_uid;
     this->miss_tos = 0;
     this->inc_visit.zero( this->max_uid );
+    this->inc_visit.add( 0 );
     this->inc_running = true;
     this->found_inconsistency = false;
-
-    size_t count = this->user_db.transport_tab.count;
-    for ( size_t i = 0; i < count; i++ ) {
-      AdjacencySpace &set = this->user_db.transport_tab.ptr[ i ]->uid_connected;
-      for ( bool ok = set.first( uid ); ok; ok = set.next( uid ) ) {
-        if ( ! this->inc_visit.test_set( uid ) )
-          this->push_inc_list( uid );
-      }
-    }
+    this->push_inc_list( 0 );
   }
   while ( this->miss_tos == 0 && this->inc_hd != this->inc_tl ) {
     uint32_t source_uid = this->inc_list[ --this->inc_tl ];
@@ -194,8 +187,6 @@ AdjDistance::find_inconsistent2( UserBridge *&from,
       if ( set == NULL )
         continue;
       for ( b = set->first( target_uid ); b; b = set->next( target_uid ) ) {
-        if ( target_uid == 0 )
-          continue;
         if ( ! this->inc_visit.test_set( target_uid ) )
           this->push_inc_list( target_uid );
         if ( ! this->match_target_set( source_uid, target_uid, *set ) ) {
@@ -211,7 +202,7 @@ AdjDistance::find_inconsistent2( UserBridge *&from,
     from = this->user_db.bridge_tab.ptr[ m.uid ];
     to   = this->user_db.bridge_tab.ptr[ m.uid2 ];
     this->found_inconsistency = true;
-    return true;
+    return LINK_MISSING;
   }
   while ( this->inc_visit.set_first( uid, this->max_uid ) ) {
     UserBridge * n = this->user_db.bridge_tab.ptr[ uid ];
@@ -221,7 +212,7 @@ AdjDistance::find_inconsistent2( UserBridge *&from,
       from = n;
       to   = NULL;
       this->found_inconsistency = true;
-      return true;
+      return UID_ORPHANED;
     }
   }
   from = NULL;
@@ -229,7 +220,7 @@ AdjDistance::find_inconsistent2( UserBridge *&from,
   this->inc_running = false;
   this->inc_run_count++;
   this->last_run_mono = kv::current_monotonic_time_ns();
-  return false;
+  return CONSISTENT;
 }
 
 bool

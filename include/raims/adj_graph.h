@@ -74,6 +74,15 @@ struct AdjVisit {
                  src;
 };
 
+struct AdjInconsistent {
+  UIntArrayCount src,
+                 missing;
+  kv::BitSpace   visit,
+                 found;
+  AdjLinkTab     missing_links;
+  uint32_t       start_idx;
+};
+
 struct AdjGraph {
   AdjUserTab     user_tab;
   md::MDMsgMem & mem;
@@ -121,6 +130,9 @@ struct AdjGraph {
                  bool is_yaml ) noexcept;
   int load_graph( StringTab &str_tab,  const char *p,
                   size_t size,  uint32_t &start_uid ) noexcept;
+
+  void init_inconsistent( uint32_t src_idx,  AdjInconsistent &inc ) noexcept;
+  void find_inconsistent( AdjInconsistent &inc ) noexcept;
 
   template<class Obj, class... Ts>
   Obj *make( Ts... args ) {

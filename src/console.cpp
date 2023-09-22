@@ -4818,18 +4818,20 @@ Console::show_adjacency( ConsoleOutput *p,  const char *arg,
     this->printf( "consistent: %s\n",
       this->user_db.peer_dist.found_inconsistency ? "false" : "true" );
 
-    UserBridge * from, * to;
-    while ( this->user_db.peer_dist.find_inconsistent2( from, to ) ) {
-      if ( from != NULL ) {
-        if ( to != NULL ) {
-          this->printf( "find_inconsistent from %s.%u to %s.%u\n",
-            from->peer.user.val, from->uid, to->peer.user.val, to->uid );
-        }
-        else {
-          this->printf( "find_inconsistent from %s.%u orphaned\n",
-            from->peer.user.val, from->uid );
-        }
-      }
+    for (;;) {
+      UserBridge * from, * to;
+      int state = this->user_db.peer_dist.find_inconsistent2( from, to );
+      if ( state == AdjDistance::CONSISTENT )
+        break;
+      const char * u1   = ( from == NULL ? this->user_db.user.user.val :
+                            from->peer.user.val );
+      const char * u2   = ( to == NULL ? this->user_db.user.user.val :
+                            to->peer.user.val );
+      uint32_t     uid1 = ( from == NULL ? 0 : from->uid ),
+                   uid2 = ( to == NULL ? 0 : to->uid );
+      printf( "find_inconsistent state %s from %s.%u to %s.%u\n",
+              state == AdjDistance::LINK_MISSING ? "link missing" : "orphaned",
+              u1, uid1, u2, uid2 );
     }
   }
 }

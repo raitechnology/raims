@@ -184,3 +184,53 @@ AdjGraph::add_fwd_set( uint8_t p,  uint32_t src_idx,  AdjVisit &visit,
   }
 }
 
+void
+AdjGraph::init_inconsistent( uint32_t src_idx,  AdjInconsistent &inc ) noexcept
+{
+  inc.src.clear();
+  inc.missing.clear();
+  inc.missing_links.clear();
+  inc.visit.reset();
+  inc.found.reset();
+
+  inc.start_idx = src_idx;
+  inc.visit.add( src_idx );
+  inc.src.push( src_idx );
+}
+
+void
+AdjGraph::find_inconsistent( AdjInconsistent &inc ) noexcept
+{
+  uint32_t src_idx;
+
+  while ( inc.src.count > 0 ) {
+    src_idx = inc.src.ptr[ --inc.src.count ];
+    AdjUser * u1 = this->user_tab.ptr[ src_idx ];
+
+    for ( uint32_t i = 0; i < u1->links.count; i++ ) {
+      AdjLink * link = u1->links.ptr[ i ];
+      if ( ! inc.visit.test_set( link->b.idx ) )
+        inc.src.push( link->b.idx );
+
+      AdjUser * u2 = this->user_tab.ptr[ link->b.idx ];
+      bool found = false;
+      for ( uint32_t j = 0; j < u2->links.count; j++ ) {
+        AdjLink * link2 = u2->links.ptr[ j ];
+        if ( &link->a == &link2->b && &link->b == &link2->a &&
+             link->type.equals( link2->type ) &&
+             link->cost_equals( link2->cost ) ) {
+          found = true;
+          break;
+        }
+      }
+      if ( ! found ) {
+        if ( ! inc.found.test_set( link->a.idx ) )
+          inc.missing.push( link->a.idx );
+        if ( ! inc.found.test_set( link->b.idx ) )
+          inc.missing.push( link->b.idx );
+        inc.missing_links.push( link );
+      }
+    }
+  }
+}
+

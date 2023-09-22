@@ -36,16 +36,18 @@ main( int argc, const char *argv[] ) noexcept
              * do_web    = get_arg( x, argc, argv, 0, "-w", "-web", NULL ),
              * do_loop   = get_arg( x, argc, argv, 0, "-l", "-loopback", NULL ),
              * show_path = get_arg( x, argc, argv, 1, "-p", "-path", "0" ),
+             * verify    = get_arg( x, argc, argv, 0, "-v", "-verify", "0" ),
              * help      = get_arg( x, argc, argv, 0, "-h", "-help", NULL );
   bool show_forward_path     = ( do_fwd != NULL || do_debug != NULL ),
        show_multicast_tree   = ( do_tree != NULL || do_debug != NULL ),
        show_graph            = ( do_graph != NULL || do_debug != NULL ),
        show_web_json         = ( do_web != NULL || do_debug != NULL ),
+       do_verify             = ( verify != NULL || do_debug != NULL ),
        use_loop              = ( do_loop != NULL ),
        generate_config       = ! ( show_forward_path ||
                                    show_multicast_tree ||
                                    show_graph ||
-                                   show_web_json );
+                                   show_web_json || do_verify );
   uint8_t path = atoi( show_path ) & 3;
 
   const char *fn = NULL;
@@ -116,6 +118,25 @@ main( int argc, const char *argv[] ) noexcept
   if ( show_web_json ) {
     if ( multi_args ) out.printf( "--- web json:\n" );
     put.print_web_paths( 0 );
+  }
+  if ( do_verify ) {
+    AdjInconsistent inc;
+    for ( uint32_t i = 0; i < graph.user_tab.count; i++ ) {
+      graph.init_inconsistent( i, inc );
+      graph.find_inconsistent( inc );
+      if ( inc.missing.count > 0 ) {
+        printf( "src %s:", graph.user_tab.ptr[ i ]->user.val );
+        for ( uint32_t j = 0; j < inc.missing.count; j++ ) {
+          AdjUser *u = graph.user_tab.ptr[ inc.missing.ptr[ j ] ];
+          printf( " %s", u->user.val );
+        }
+        for ( uint32_t k = 0; k < inc.missing_links.count; k++ ) {
+          AdjLink *l = inc.missing_links.ptr[ k ];
+          printf( " %s->%s", l->a.user.val, l->b.user.val );
+        }
+        printf( "\n" );
+      }
+    }
   }
   if ( generate_config )
     put.print_config( fn );

@@ -694,14 +694,20 @@ UserDB::converge_network( uint64_t current_mono_time,  uint64_t current_time,
     }
     return true;
   }
-  bool b = this->peer_dist.find_inconsistent2( n, m );
-  if ( b ) {
-    if ( n != NULL && m != NULL ) {
-      bool n_less = ( n->adj_req_throttle.mono_time <=
-                      m->adj_req_throttle.mono_time );
-      if ( ! n_less ) {
-        UserBridge * x = n;
-        n = m; m = x;
+  int state = this->peer_dist.find_inconsistent2( n, m );
+  if ( state != AdjDistance::CONSISTENT ) {
+    if ( state == AdjDistance::LINK_MISSING ) {
+      if ( n != NULL && m != NULL ) {
+        bool n_less = ( n->adj_req_throttle.mono_time <=
+                        m->adj_req_throttle.mono_time );
+        if ( ! n_less ) {
+          UserBridge * x = n;
+          n = m; m = x;
+        }
+      }
+      else if ( n == NULL ) {
+        n = m;
+        m = NULL;
       }
       if ( ! n->is_set( PING_STATE ) &&
            ! n->throttle_adjacency( 0, current_mono_time ) ) {
@@ -713,10 +719,12 @@ UserDB::converge_network( uint64_t current_mono_time,  uint64_t current_time,
                  this->peer_dist.found_inconsistency?"t":"f" );*/
         this->send_adjacency_request( *n, DIJKSTRA_SYNC_REQ );
       }
-      else if ( n->ping_fail_count >= 3 )
+      else if ( n->ping_fail_count >= 3 ) {
         m = NULL;
+        state = AdjDistance::UID_ORPHANED;
+      }
     }
-    if ( n != NULL && m == NULL ) {
+    if ( state == AdjDistance::UID_ORPHANED ) {
       uint64_t ns, hb_timeout_ns;
       hb_timeout_ns = sec_to_ns( n->hb_interval * 2 ) + SEC_TO_NS;
       ns = n->start_mono_time + hb_timeout_ns; /* if hb and still orphaned */

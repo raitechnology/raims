@@ -324,7 +324,8 @@ struct AdjDistance : public md::MDMsgMem {
   /*uint64_t adjacency_start( uint32_t uid ) const noexcept;*/
   void push_inc_list( uint32_t uid ) noexcept;
   /*bool find_inconsistent( UserBridge *&from,  UserBridge *&to ) noexcept;*/
-  bool find_inconsistent2( UserBridge *&from,  UserBridge *&to ) noexcept;
+  enum { CONSISTENT = 0, LINK_MISSING = 1, UID_ORPHANED = 2 };
+  int find_inconsistent2( UserBridge *&from,  UserBridge *&to ) noexcept;
   bool match_target_set( uint32_t source_uid,  uint32_t target_uid,
                          AdjacencySpace &set ) noexcept;
   uint32_t uid_refs( uint32_t from,  uint32_t to ) noexcept;
