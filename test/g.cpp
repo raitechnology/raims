@@ -36,7 +36,7 @@ main( int argc, const char *argv[] ) noexcept
              * do_web    = get_arg( x, argc, argv, 0, "-w", "-web", NULL ),
              * do_loop   = get_arg( x, argc, argv, 0, "-l", "-loopback", NULL ),
              * show_path = get_arg( x, argc, argv, 1, "-p", "-path", "0" ),
-             * verify    = get_arg( x, argc, argv, 0, "-v", "-verify", "0" ),
+             * verify    = get_arg( x, argc, argv, 0, "-v", "-verify", NULL ),
              * help      = get_arg( x, argc, argv, 0, "-h", "-help", NULL );
   bool show_forward_path     = ( do_fwd != NULL || do_debug != NULL ),
        show_multicast_tree   = ( do_tree != NULL || do_debug != NULL ),
