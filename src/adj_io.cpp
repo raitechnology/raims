@@ -31,7 +31,7 @@ AdjGraphOut::print( void ) noexcept
 }
 
 void
-AdjGraphOut::print_tree( uint8_t p,  bool print_unused ) noexcept
+AdjGraphOut::print_tree( uint16_t p,  bool print_unused ) noexcept
 {
   ArrayOutput & o        = this->out;
   AdjUserTab  & user_tab = this->graph.user_tab;
@@ -68,7 +68,7 @@ AdjGraphOut::print_tree( uint8_t p,  bool print_unused ) noexcept
 
 void
 AdjGraphOut::print_tree_link( uint32_t indent,  AdjFwdTab &fwd,  uint32_t src,
-                              uint32_t j,  uint8_t p ) noexcept
+                              uint32_t j,  uint16_t p ) noexcept
 {
   ArrayOutput & o = this->out;
   uint32_t      cost = fwd.cost.ptr[ j ];
@@ -91,16 +91,17 @@ void
 AdjGraphOut::print_web_paths( uint32_t start_idx ) noexcept
 {
   ArrayOutput & o = this->out;
+  uint32_t      path_count = this->graph.path_count;
   o.puts( "[\n" );
-  for ( uint8_t p = 0; p < 4; p++ ) {
+  for ( uint16_t p = 0; p < path_count; p++ ) {
     this->print_web_path( p, start_idx );
-    if ( p < 3 ) o.puts( ",\n" );
+    if ( p < path_count - 1 ) o.puts( ",\n" );
   }
   o.puts( "]\n" );
 }
 
 void
-AdjGraphOut::print_web_path( uint8_t p,  uint32_t start_idx ) noexcept
+AdjGraphOut::print_web_path( uint16_t p,  uint32_t start_idx ) noexcept
 {
   ArrayOutput  & o = this->out;
   AdjUserTab   & user_tab = this->graph.user_tab;
@@ -187,7 +188,7 @@ AdjGraphOut::print_web_path_link( uint32_t step,  AdjFwdTab &fwd,  uint32_t src,
 }
 
 void
-AdjGraphOut::print_fwd( uint8_t p ) noexcept
+AdjGraphOut::print_fwd( uint16_t p ) noexcept
 {
   ArrayOutput & o = this->out;
   AdjUserTab & user_tab = this->graph.user_tab;
@@ -255,35 +256,43 @@ AdjGraphOut::print_fwd( uint8_t p ) noexcept
   }
 }
 
+char *
+AdjCost::str( char *buf,  size_t len ) const noexcept
+{
+  this->str_size( buf, len );
+  return buf;
+}
+
+size_t
+AdjCost::str_size( char *buf,  size_t len ) const noexcept
+{
+  char op = this->op();
+  int n;
+  if ( op == ' ' )
+    n = ::snprintf( buf, len, "%u", this->max_cost );
+  else
+    n = ::snprintf( buf, len, "%u%c%u/%u", this->max_cost, op,
+                    this->path.num, this->path.count );
+  return n;
+}
+
 void
 AdjGraphOut::print_cost( AdjLink &link ) noexcept
 {
   ArrayOutput & o = this->out;
-  if ( ! link.cost_equals( COST_DEFAULT ) ) {
-    if ( ! link.cost_equals( link.cost[ 0 ] ) ) {
-      if ( ! this->is_cfg )
-        o.printf( " : %u %u", link.cost[ 0 ], link.cost[ 1 ] );
-      else
-        o.printf( "      cost: [ %u, %u", link.cost[ 0 ], link.cost[ 1 ] );
-      if ( link.cost[ 0 ] != link.cost[ 2 ] ||
-           link.cost[ 1 ] != link.cost[ 3 ] ) {
-        if ( ! this->is_cfg )
-          o.printf( " %u %u", link.cost[ 2 ], link.cost[ 3 ] );
-        else
-          o.printf( ", %u, %u", link.cost[ 2 ], link.cost[ 3 ] );
-      }
-      if ( this->is_cfg )
-        o.puts( " ]\n" );
-    }
-    else {
-      if ( ! this->is_cfg )
-        o.printf( " : %u", link.cost[ 0 ] );
-      else
-        o.printf( "      cost: %u\n", link.cost[ 0 ] );
-    }
+  if ( ! link.cost.equals( COST_DEFAULT ) ) {
+    if ( ! this->is_cfg )
+      o.puts( " : " );
+    else
+      o.puts( "      cost: " );
+    char op = link.cost.op();
+    if ( op == ' ' )
+      o.printf( "%u", link.cost.max_cost );
+    else
+      o.printf( "%u%c%u/%u", link.cost.max_cost, link.cost.op(),
+                link.cost.path.num, link.cost.path.count );
   }
-  if ( ! this->is_cfg )
-    o.puts( "\n" );
+  o.puts( "\n" );
 }
 
 void
@@ -510,39 +519,100 @@ split_args( char *buf, const char *args[ 500 ] ) noexcept
   }
 }
 
-static void
-parse_cost( const char **args,  int argc,  uint32_t *cost ) noexcept
+int
+AdjCost::parse( const char **args,  size_t argc ) noexcept
 {
-  int i = 0;
-  for ( ; i < 4 && i < argc; i++ ) {
-    int n = atoi( args[ i ] );
-    cost[ i ] = ( n == 0 ? COST_DEFAULT : n );
+  if ( argc == 1 )
+    return this->parse( args[ 0 ], ::strlen( args[ 0 ] ) );
+
+  this->set( COST_DEFAULT, COST_DEFAULT, 0, 1 );
+  UIntArrayCount cost_array;
+  for ( size_t i = 0; i < argc; i++ ) {
+    uint32_t n = atoi( args[ i ] );
+    if ( n != 0 )
+      cost_array.push( n );
   }
-  if ( i <= 1 ) {
-    if ( i == 0 ) cost[ 0 ] = COST_DEFAULT;
-    cost[ 1 ] = cost[ 2 ] = cost[ 3 ] = cost[ 0 ];
+  if ( cost_array.count > 0 )
+    this->set( cost_array.ptr, cost_array.count );
+  return COST_OK;
+}
+
+int
+AdjCost::parse( const char *str,  size_t len ) noexcept
+{
+  UIntArrayCount cost_array;
+  char     op   = 0;
+  uint32_t val  = 0,
+           cost = 0,
+           num  = 0;
+
+  this->set( COST_DEFAULT, COST_DEFAULT, 0, 1 );
+  for ( size_t i = 0; i < len; i++ ) {
+    if ( str[ i ] >= '0' && str[ i ] <= '9' )
+      val = val * 10 + (uint32_t) ( str[ i ] - '0' );
+    else if ( str[ i ] == '-' || str[ i ] == '_' || str[ i ] == '=' ||
+              str[ i ] == '^' ) {
+      cost = val;
+      val  = 0;
+      op   = str[ i ];
+    }
+    else if ( str[ i ] == '/' ) {
+      num  = val;
+      val  = 0;
+    }
+    else if ( str[ i ] == ' ' ) {
+      if ( val > 0 )
+        cost_array.push( val );
+      val = 0;
+    }
+    else {
+      if ( str[ i ] < ' ' )
+        break;
+      return BAD_FMT;
+    }
   }
-  if ( i == 2 ) {
-    cost[ 2 ] = cost[ 0 ];
-    cost[ 3 ] = cost[ 1 ];
+  if ( op == 0 ) {
+    if ( val != 0 ) {
+      if ( cost_array.count > 0 ) {
+        cost_array.push( val );
+        this->set( cost_array.ptr, cost_array.count );
+        return 0;
+      }
+      this->max_cost = val;
+      this->min_cost = val;
+      return COST_OK;
+    }
+    return EMPTY_COST;
   }
-  if ( i == 3 )
-    cost[ 3 ] = cost[ 0 ];
+  if ( cost == 0 )
+    return EMPTY_COST;
+  if ( val == 0 || num >= val )
+    return EMPTY_PATH;
+  this->max_cost = cost;
+  switch ( op ) {
+    case '-': this->min_cost = cost - cost / 10; break;
+    case '_': this->min_cost = cost / 10; break;
+    case '=': this->min_cost = cost / 100; break;
+    case '^': this->min_cost = cost / 1000; break;
+    default:  this->min_cost = 0;
+  }
+  if ( this->min_cost == 0 )
+    return BAD_COST;
+  this->path.num   = num;
+  this->path.count = val;
+  return COST_OK;
 }
 
 int
 AdjGraph::load_graph( StringTab &str_tab,  const char *p,
                       size_t size,  uint32_t &start_uid ) noexcept
 {
-  static uint32_t default_cost[ 4 ] =
-    { COST_DEFAULT, COST_DEFAULT, COST_DEFAULT, COST_DEFAULT };
-
   const char * args[ 500 ];
   int          argc, ln = 0;
   char         buf[ 8 * 1024 ],
                start[ 80 ];
-  uint32_t     cost_val[ 4 ],
-             * cost;
+  AdjCost      default_cost( COST_DEFAULT ),
+               cost;
   const char * end = &p[ size ];
   size_t       start_len;
 
@@ -593,8 +663,7 @@ AdjGraph::load_graph( StringTab &str_tab,  const char *p,
     cost = default_cost;
     for ( int k = 1; k < argc; k++ ) {
       if ( args[ k ][ 0 ] == ':' ) {
-        parse_cost( &args[ k + 1 ], argc - ( k + 1 ), cost_val );
-        cost = cost_val;
+        cost.parse( &args[ k + 1 ], argc - ( k + 1 ) );
         argc = k;
         break;
       }
@@ -626,11 +695,11 @@ AdjGraph::load_graph( StringTab &str_tab,  const char *p,
 
       StringVal a( args[ 1 ], ::strlen( args[ 1 ] ) ),
                 b( args[ 2 ], ::strlen( args[ 2 ] ) );
-      this->add_conn( str_tab.add( a ), str_tab.add( b ), tp, ty, cost, 4 );
+      this->add_conn( str_tab.add( a ), str_tab.add( b ), tp, ty, cost );
 
       for ( int i = 3; i < argc; i++ ) {
         StringVal c( args[ i ], ::strlen( args[ i ] ) );
-        this->add_conn( a, str_tab.add( c ), tp, ty, cost, 4 );
+        this->add_conn( a, str_tab.add( c ), tp, ty, cost );
       }
     }
     else {
@@ -639,7 +708,7 @@ AdjGraph::load_graph( StringTab &str_tab,  const char *p,
         str_tab.add_string( a );
         for ( int j = i + 1; j < argc; j++ ) {
           StringVal b( args[ j ], ::strlen( args[ j ] ) );
-          this->add_conn( a, str_tab.add( b ), tp, ty, cost, 4 );
+          this->add_conn( a, str_tab.add( b ), tp, ty, cost );
         }
       }
     }
@@ -660,8 +729,7 @@ struct AdjRec {
            tport[ 256 ],
            type[ 16 ];
   uint32_t cost[ 4 ],
-           rem,
-           prune;
+           rem;
   size_t iter_map( MDIterMap mp[ 10 ] ) {
     size_t n = 0;
     ::memset( (void *) this, 0, sizeof( *this ) );
@@ -674,7 +742,6 @@ struct AdjRec {
     mp[ n++ ].uint  ( "cost3", &cost[2], sizeof( cost[2] ) );
     mp[ n++ ].uint  ( "cost4", &cost[3], sizeof( cost[3] ) );
     mp[ n++ ].uint  ( "rem"  , &rem    , sizeof( rem     ) );
-    mp[ n++ ].uint  ( "prune", &prune  , sizeof( prune   ) );
     return 10;
   }
   size_t iter_user( MDIterMap *mp ) {
@@ -762,9 +829,9 @@ AdjGraph::load_json( StringTab &str_tab,  void *data,  size_t data_size,
         AdjUser * adj_user = this->add_user( adj, uid );
         str_tab.add_string( tp );
         str_tab.add_string( ty );
-        uint32_t cnt   = ( n == 10 ? 4 : 1 ),
-                 prune = ( n == 10 ? rec.prune : 0xff );
-        this->add_link( last_user, adj_user, tp, ty, rec.cost, cnt, prune );
+        uint32_t cnt   = ( n == 10 ? 4 : 1 );
+        AdjCost cost( rec.cost, cnt );
+        this->add_link( last_user, adj_user, tp, ty, cost );
       }
     }
   }
@@ -865,7 +932,7 @@ rai::ms::compute_message_graph( const char *start,  const char *network,
   bool      ok = false;
 
   if ( graph.load_graph( str_tab, network, network_len, start_uid ) == 0 ) {
-    for ( uint8_t p = 0; p < 4; p++ )
+    for ( uint16_t p = 0; p < graph.path_count; p++ )
       graph.compute_forward_set( p );
     AdjGraphOut put( graph, out );
     if ( start != NULL ) {

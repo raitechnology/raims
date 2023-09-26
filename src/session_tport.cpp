@@ -538,8 +538,7 @@ SessionMgr::add_mesh_accept( TransportRoute &listen_rte,
   rte->mesh_id     = listen_rte.mesh_id;
   rte->uid_in_mesh = listen_rte.uid_in_mesh;
   rte->mesh_csum   = listen_rte.mesh_csum;
-  for ( uint8_t i = 0; i < COST_PATH_COUNT; i++ )
-    rte->uid_connected.cost[ i ] = listen_rte.uid_connected.cost[ i ];
+  rte->uid_connected.cost = listen_rte.uid_connected.cost;
 
   rte->set( TPORT_IS_MESH );
   rte->mesh_url.zero();
@@ -617,8 +616,7 @@ SessionMgr::add_tcp_accept( TransportRoute &listen_rte,
 
   if ( rte == NULL )
     return false;
-  for ( uint8_t i = 0; i < COST_PATH_COUNT; i++ )
-    rte->uid_connected.cost[ i ] = listen_rte.uid_connected.cost[ i ];
+  rte->uid_connected.cost = listen_rte.uid_connected.cost;
   rte->set( TPORT_IS_TCP );
 
   conn.rte      = rte;
@@ -807,8 +805,7 @@ SessionMgr::add_mesh_connect( TransportRoute &mesh_rte,  const char *url,
   rte->uid_in_mesh   = mesh_rte.uid_in_mesh;
   rte->mesh_csum     = mesh_rte.mesh_csum;
   rte->mesh_url_hash = url_hash;
-  for ( uint8_t i = 0; i < COST_PATH_COUNT; i++ )
-    rte->uid_connected.cost[ i ] = mesh_rte.uid_connected.cost[ i ];
+  rte->uid_connected.cost = mesh_rte.uid_connected.cost;
 
   rte->set( TPORT_IS_MESH | TPORT_IS_CONNECT );
   rte->printf(

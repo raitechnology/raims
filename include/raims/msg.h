@@ -19,13 +19,13 @@ extern bool    tz_stamp_gmt;
 void update_tz_stamp( void );
 
 /*
-bytes 0 -> 3 are ver(1), type(2), opt(5), message size (24)
+bytes 0 -> 3 are ver(1), type(2), opt(5), path(8), message size (16)
  1               8               16              24              32   
 |-+-+-+-+-+-+-+-|-+-+-+-+-+-+-+-|-+-+-+-+-+-+-+-|-+-+-+-+-+-+-+-|
 |1|0 0|0 0 0 0 0|0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 0 0 0 0|
- ^ ^.^ ^.......^ ^.............................................^
- |    \    |                         |     
-ver(1)|   opt(0)                24 bit size(160)
+ ^ ^.^ ^.......^ ^.............^ ^.............................^
+ |    \    |            |                  |     
+ver(1)|   opt(0)     path(0)         16 bit size(160)
      type(0)
 bytes 4 -> 7 are the routing key hash
  1               8               16              24              32   
@@ -77,32 +77,26 @@ enum CabaTypeFlag {
   CABA_HEARTBEAT = 3, /* heartbeat (_X) */
 };
 enum CabaOptFlag {
-  CABA_OPT_NONE      = 0,
-  CABA_OPT_ACK       = 1,  /* recver ack messages */
-  CABA_OPT_TRACE     = 2,  /* routers trace messages */
-  CABA_OPT_ANY       = 4,  /* any of many */
-  CABA_OPT_MC_ONE    = 8,  /* secondary mcast route */
-  CABA_OPT_MC_TWO    = 16, /* third mcast route */
-  CABA_OPT_MC_THREE  = 24  /* fourth mcast route (1+2) */
+  CABA_OPT_NONE  = 0,
+  CABA_OPT_ACK   = 1,  /* recver ack messages */
+  CABA_OPT_TRACE = 2,  /* routers trace messages */
+  CABA_OPT_ANY   = 4   /* any of many */
 };
-                      /* <ver:1><type:2><opt:5><length bits:24> */
-static const int      CABA_VER_BITS     = 1,
-                      CABA_TYPE_BITS    = 2,
-                      CABA_OPT_BITS     = 5,
-                      CABA_LENGTH_BITS  = 32 -
-                        (CABA_VER_BITS + CABA_TYPE_BITS + CABA_OPT_BITS),
-                      CABA_OPT_MC_SHIFT = 3, /* 1 << 3 == 8 (CABA_OPT_MC_ONE) */
-                      CABA_OPT_MC_BITS  = 2; /* 0, 1, 2, 3 */
-static const uint16_t CABA_VER_MASK     = ( (uint16_t) 1 << CABA_VER_BITS ) - 1,
-                      CABA_TYPE_MASK    = ( (uint16_t) 1 << CABA_TYPE_BITS ) - 1,
-                      CABA_OPT_MASK     = ( (uint16_t) 1 << CABA_OPT_BITS ) - 1,
-                      CABA_OPT_MC_MASK  = ( (uint16_t) 1 << CABA_OPT_MC_BITS ) - 1;
-static const uint32_t CABA_LENGTH_MASK  = ( (uint32_t) 1 << CABA_LENGTH_BITS ) - 1;
-
-/* this is also true: COST_PATH_COUNT == 1 << CABA_OPT_MC_BITS */
-static inline uint8_t caba_hash_to_path( uint32_t h ) {
-  return (uint8_t) ( h >> ( 32 - CABA_OPT_MC_BITS ) );
-}
+                      /* <ver:1><type:2><opt:5><path:8><length bits:16> */
+static const int      CABA_VER_BITS    = 1,
+                      CABA_TYPE_BITS   = 2,
+                      CABA_OPT_BITS    = 5,
+                      CABA_PATH_BITS   = 8,
+                      CABA_LENGTH_BITS = 16,
+                      CABA_VER_SHIFT   = 16 - CABA_VER_BITS,
+                      CABA_TYPE_SHIFT  = CABA_VER_SHIFT  - CABA_TYPE_BITS,
+                      CABA_OPT_SHIFT   = CABA_TYPE_SHIFT - CABA_OPT_BITS,
+                      CABA_PATH_SHIFT  = CABA_OPT_SHIFT  - CABA_PATH_BITS;
+static const uint16_t CABA_VER_MASK    = ( (uint16_t) 1 << CABA_VER_BITS )  - 1,
+                      CABA_TYPE_MASK   = ( (uint16_t) 1 << CABA_TYPE_BITS ) - 1,
+                      CABA_OPT_MASK    = ( (uint16_t) 1 << CABA_OPT_BITS )  - 1,
+                      CABA_PATH_MASK   = ( (uint16_t) 1 << CABA_PATH_BITS ) - 1;
+static const uint32_t CABA_LENGTH_MASK = ( (uint32_t) 1 << CABA_LENGTH_BITS ) - 1;
 
 static inline const char *caba_type_flag_str( CabaTypeFlag fl ) {
   if ( fl == CABA_INBOX ) return "inbox";
@@ -120,59 +114,32 @@ static inline bool caba_rtr_alert( const char *sub ) {
   return ( mask & ( 1U << ( sub[ 1 ] - 'M' ) ) ) != 0;
 }
 
-static const uint16_t CABA_MSG_VERSION = 1;
+static const uint16_t CABA_MSG_VERSION = 0;
 
 struct CabaFlags {
-  /* ver(2), type(2), opt(4) */
-  static const int FLAGS_VER_SHIFT  = CABA_TYPE_BITS + CABA_OPT_BITS,
-                   FLAGS_TYPE_SHIFT = CABA_OPT_BITS,
-                   FLAGS_OPT_SHIFT  = 0;
-  uint16_t flags; /* low bits <type>, high bits <opt>, <ver> */
+  uint16_t flags;
+  static uint16_t lsh( uint16_t v, int sh, uint16_t m ) { return ( v & m ) << sh; }
+  static uint16_t rsh( uint16_t v, int sh, uint16_t m ) { return ( v >> sh ) & m; }
+
   CabaFlags( CabaTypeFlag t )
-    : flags( ( (uint16_t) CABA_MSG_VERSION << FLAGS_VER_SHIFT ) |
-             ( (uint16_t) t << FLAGS_TYPE_SHIFT ) ) {}
+    : flags( lsh( CABA_MSG_VERSION, CABA_VER_SHIFT,  CABA_VER_MASK ) |
+             lsh( t,                CABA_TYPE_SHIFT, CABA_TYPE_MASK ) ) {}
 
-  static uint16_t get_ver( uint16_t fl ) {
-    uint16_t tmp = ( fl & ( CABA_VER_MASK << FLAGS_VER_SHIFT ) );
-    return tmp >> FLAGS_VER_SHIFT;
-  }
-  static CabaTypeFlag get_type( uint16_t fl ) {
-    uint16_t tmp = ( fl & ( CABA_TYPE_MASK << FLAGS_TYPE_SHIFT ) );
-    return (CabaTypeFlag) ( tmp >> FLAGS_TYPE_SHIFT );
-  }
-  static uint16_t get_opt( uint16_t fl ) {
-    uint16_t tmp = ( fl & ( CABA_OPT_MASK << FLAGS_OPT_SHIFT ) );
-    return tmp >> FLAGS_OPT_SHIFT;
-  }
-  static uint8_t get_path( uint16_t fl ) {
-    return (uint8_t)
-      ( ( get_opt( fl ) >> CABA_OPT_MC_SHIFT ) & CABA_OPT_MC_MASK );
-  }
+  uint16_t get_ver( void ) const      { return rsh( this->flags, CABA_VER_SHIFT , CABA_VER_MASK  ); }
+  CabaTypeFlag get_type( void ) const { return (CabaTypeFlag)
+                                               rsh( this->flags, CABA_TYPE_SHIFT, CABA_TYPE_MASK ); }
+  uint16_t get_opt( void ) const      { return rsh( this->flags, CABA_OPT_SHIFT , CABA_OPT_MASK  ); }
+  uint8_t  get_path( void ) const     { return rsh( this->flags, CABA_PATH_SHIFT, CABA_PATH_MASK ); }
 
-  uint16_t get_ver( void ) const      { return get_ver( this->flags ); }
-  CabaTypeFlag get_type( void ) const { return get_type( this->flags ); }
-  uint16_t get_opt( void ) const      { return get_opt( this->flags ); }
-  uint8_t  get_path( void ) const     { return get_path( this->flags ); }
-  const char *type_str( void ) const {
-    return caba_type_flag_str( this->get_type() );
+  const char *type_str( void ) const  { return caba_type_flag_str( this->get_type() ); }
+
+  static void set( uint16_t &fl,  uint16_t v,  int sh,  uint16_t m ) {
+    fl = lsh( v, sh, m ) | ( fl & ~lsh( m, sh, m ) );
   }
-  void set_ver( uint16_t ver ) {
-    uint16_t tmp = ( this->flags & ~( CABA_VER_MASK << FLAGS_VER_SHIFT ) );
-    this->flags = tmp | ( ver << FLAGS_VER_SHIFT );
-  }
-  void set_type( CabaTypeFlag fl ) {
-    uint16_t tmp = ( this->flags & ~( CABA_TYPE_MASK << FLAGS_TYPE_SHIFT ) );
-    this->flags = tmp | ( (uint16_t) fl << FLAGS_TYPE_SHIFT );
-  }
-  void set_opt( uint16_t opt ) {
-    uint16_t tmp = ( this->flags & ~( CABA_OPT_MASK << FLAGS_OPT_SHIFT ) );
-    this->flags = tmp | ( opt << FLAGS_OPT_SHIFT );
-  }
-  void set_opt_path( uint16_t opt,  uint8_t path ) {
-    uint16_t tmp = ( this->flags & ~( CABA_OPT_MASK << FLAGS_OPT_SHIFT ) );
-    opt |= (uint16_t) path << CABA_OPT_MC_SHIFT;
-    this->flags = tmp | ( opt << FLAGS_OPT_SHIFT );
-  }
+  void set_ver( uint16_t ver )        { set( this->flags, ver, CABA_VER_SHIFT , CABA_VER_MASK  ); }
+  void set_type( CabaTypeFlag t )     { set( this->flags, t  , CABA_TYPE_SHIFT, CABA_TYPE_MASK ); }
+  void set_opt( uint16_t opt )        { set( this->flags, opt, CABA_OPT_SHIFT , CABA_OPT_MASK  ); }
+  void set_path( uint16_t p )         { set( this->flags, p  , CABA_PATH_SHIFT, CABA_PATH_MASK ); }
 };
 
 struct CabaMsg : public md::TibSassMsg {
@@ -297,42 +264,40 @@ enum MsgFid {
   FID_BS             = 58 ,
   FID_BR             = 59 ,
   FID_SUB_CNT        = 60 ,
-  FID_COST           = 61 , /* cost of link */
-  FID_COST2          = 62 , /* cost of secondary link */
-  FID_COST3          = 63 , /* cost of third link */
-  FID_COST4          = 64 , /* cost of fourth link */
-  FID_PEER           = 65 ,
-  FID_LATENCY        = 66 ,
+  FID_COST           = 61 , /* cost value */
+  FID_ADJ_COST       = 62 , /* cost of link */
+  FID_PEER           = 63 ,
+  FID_LATENCY        = 64 ,
 
-  FID_PK_DIGEST      = 67 , /* public key digest, in hb before auth */
-  FID_TPORT_TYPE     = 68 , /* tport type in adjacency msg */
-  FID_CHAIN_SEQNO    = 69 , /* previous seqno when changing time frame */
-  FID_STAMP          = 70 , /* time stamp */
-  FID_CONVERGE       = 71 , /* network convergence stamp */
-  FID_REPLY_STAMP    = 72 , /* reply time stamp */
-  FID_HB_SKEW        = 73 , /* hb system clock skew */
-  FID_PK_SIG         = 74 , /* pk key signature */
-  FID_CONN_URL       = 75 , /* connect url spec */
-  FID_CONN_PORT      = 76 , /* connect port */
-  FID_PUBKEY         = 77 , /* ec pubkey */
+  FID_PK_DIGEST      = 65 , /* public key digest, in hb before auth */
+  FID_TPORT_TYPE     = 66 , /* tport type in adjacency msg */
+  FID_CHAIN_SEQNO    = 67 , /* previous seqno when changing time frame */
+  FID_STAMP          = 68 , /* time stamp */
+  FID_CONVERGE       = 69 , /* network convergence stamp */
+  FID_REPLY_STAMP    = 70 , /* reply time stamp */
+  FID_HB_SKEW        = 71 , /* hb system clock skew */
+  FID_PK_SIG         = 72 , /* pk key signature */
+  FID_CONN_URL       = 73 , /* connect url spec */
+  FID_CONN_PORT      = 74 , /* connect port */
+  FID_PUBKEY         = 75 , /* ec pubkey */
 
-  FID_UCAST_DB       = 78 , /* ucast urls */
-  FID_UCAST_FILTER   = 79 , /* filter ucast db requests */
-  FID_IDL_SERVICE    = 80 , /* inbound data loss service */
-  FID_IDL_MSG_LOSS   = 81 , /* inbound data loss message loss */
-  FID_REM_BRIDGE     = 82 , /* remote bridge directly connected to a link */
-  FID_REM_TPORTID    = 83 , /* remote tport on the directly connected link */
-  FID_MESH_INFO      = 84 , /* status of mesh in mesh reply */
-  FID_LINK_STATE_SUM = 85 , /* sum of peers link_state seqno */
-  FID_SUB_SEQNO_SUM  = 86 , /* sum of peers sub seqno */
-  FID_HOST_ID        = 87 , /* host id */
-  FID_QUEUE          = 88 , /* queue name */
-  FID_QUEUE_HASH     = 89 , /* queue hash */
-  FID_QUEUE_REFS     = 90 , /* how queue many subs */
-  FID_HDR_LEN        = 91 , /* len of message hdr */
-  FID_SUF_LEN        = 92 , /* len of message suffix  */
-  FID_BLOOM_UPD      = 93 , /* peer bloom updated  */
-  FID_IDL_RESTART    = 94   /* if is idl restart or loss */
+  FID_UCAST_DB       = 76 , /* ucast urls */
+  FID_UCAST_FILTER   = 77 , /* filter ucast db requests */
+  FID_IDL_SERVICE    = 78 , /* inbound data loss service */
+  FID_IDL_MSG_LOSS   = 79 , /* inbound data loss message loss */
+  FID_REM_BRIDGE     = 80 , /* remote bridge directly connected to a link */
+  FID_REM_TPORTID    = 81 , /* remote tport on the directly connected link */
+  FID_MESH_INFO      = 82 , /* status of mesh in mesh reply */
+  FID_LINK_STATE_SUM = 83 , /* sum of peers link_state seqno */
+  FID_SUB_SEQNO_SUM  = 84 , /* sum of peers sub seqno */
+  FID_HOST_ID        = 85 , /* host id */
+  FID_QUEUE          = 86 , /* queue name */
+  FID_QUEUE_HASH     = 87 , /* queue hash */
+  FID_QUEUE_REFS     = 88 , /* how queue many subs */
+  FID_HDR_LEN        = 89 , /* len of message hdr */
+  FID_SUF_LEN        = 90 , /* len of message suffix  */
+  FID_BLOOM_UPD      = 91 , /* peer bloom updated  */
+  FID_IDL_RESTART    = 92   /* if is idl restart or loss */
 };
 static const int FID_TYPE_SHIFT = 8,
                  FID_MAX        = 1 << FID_TYPE_SHIFT; /* 256 */
@@ -854,9 +819,7 @@ static FidTypeName fid_type_name[] = {
 { FID_BR          , U_SHORT | U_INT | U_LONG    , LIT , 0 ,"br"              },
 { FID_SUB_CNT     , U_SHORT | U_INT | U_LONG    , LIT , 0 ,"sub_cnt"         },
 { FID_COST        , U_SHORT | U_INT             , LIT , 0 ,"cost"            },
-{ FID_COST2       , U_SHORT | U_INT             , LIT , 0 ,"cost2"           },
-{ FID_COST3       , U_SHORT | U_INT             , LIT , 0 ,"cost3"           },
-{ FID_COST4       , U_SHORT | U_INT             , LIT , 0 ,"cost4"           },
+{ FID_ADJ_COST    , SHORT_STRING                , LIT , 0 ,"adj_cost"        },
 { FID_PEER        , SHORT_STRING                , LIT , 0 ,"peer"            },
 { FID_LATENCY     , SHORT_STRING                , LIT , 0 ,"latency"         },
 

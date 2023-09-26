@@ -19,34 +19,71 @@ AdjGraph::add_user( StringVal &a,  uint32_t uid ) noexcept
   return u1;
 }
 
+uint32_t
+LCM::add( uint32_t x ) noexcept
+{
+  if ( this->count == 0 ) {
+    this->push( x );
+    this->val = x;
+    return x;
+  }
+  if ( x <= this->val ) { /* if val is already a multiple if x */
+    if ( this->val % x == 0 )
+      return this->val;
+  }
+  size_t i;
+  this->push( x );
+  this->tmp.make( this->count );
+  for ( i = 0; i < this->count; i++ )
+    this->tmp.ptr[ i ] = this->ptr[ i ];
+  for (;;) {
+    size_t j = 0;
+    for ( i = 1; i < this->count; i++ ) { /* find smallest value */
+      if ( this->tmp.ptr[ i ] < this->tmp.ptr[ j ] )
+        j = i;
+    }
+    /* if all values are equal, then found least common multiple */
+    if ( j == 0 && this->tmp.ptr[ 0 ] == this->tmp.ptr[ this->count - 1 ] ) {
+      this->val = this->tmp.ptr[ 0 ];
+      return this->val;
+    }
+    /* increase the smallest value by a multiple of itself */
+    this->tmp.ptr[ j ] += this->ptr[ j ];
+  }
+}
+
 void
 AdjGraph::add_link( AdjUser *u1,  AdjUser *u2,  StringVal &tp,
-                    StringVal &ty,  uint32_t *cost,  uint32_t cnt,
-                    uint32_t pr,  uint32_t tid ) noexcept
+                    StringVal &ty,  AdjCost &cost,
+                    uint32_t tid ) noexcept
 {
-  AdjLink * l = this->make<AdjLink>( u1, u2, &tp, &ty, cost, cnt, pr, tid );
+  AdjLink * l = this->make<AdjLink>( u1, u2, &tp, &ty, &cost, tid );
   u1->links.push( l );
+  if ( cost.path.count > 1 )
+    this->path_count = this->lcm.add( cost.path.count );
 }
 
 void
 AdjGraph::add_conn( AdjUser *u1,  AdjUser *u2,  StringVal &tp,
-                    StringVal &ty,  uint32_t *cost,  uint32_t cnt,
-                    uint32_t pr ) noexcept
+                    StringVal &ty,  AdjCost &cost ) noexcept
 {
-  AdjLink * l1 = this->make<AdjLink>( u1, u2, &tp, &ty, cost, cnt, pr, 0 );
-  AdjLink * l2 = this->make<AdjLink>( u2, u1, &tp, &ty, cost, cnt, pr, 0 );
+  AdjLink * l1 = this->make<AdjLink>( u1, u2, &tp, &ty, &cost, 0 );
+  AdjLink * l2 = this->make<AdjLink>( u2, u1, &tp, &ty, &cost, 0 );
   u1->links.push( l1 );
   u2->links.push( l2 );
+  if ( cost.path.count > 1 )
+    this->path_count = this->lcm.add( cost.path.count );
 }
 
 void
 AdjUserTab::reset( void ) noexcept
 {
-  for ( uint32_t idx = 0; idx < this->count; idx++ ) {
+  for ( size_t idx = 0; idx < this->count; idx++ ) {
     AdjUser * u = this->ptr[ idx ];
     u->links.clear();
-    for ( uint8_t p = 0; p < 4; p++ )
-      u->fwd[ p ].reset();
+    for ( size_t p = 0; p < u->fwd.count; p++ )
+      u->fwd.ptr[ p ].reset();
+    u->fwd.clear();
   }
   if ( this->ht != NULL ) {
     delete this->ht;
@@ -58,7 +95,7 @@ AdjUserTab::reset( void ) noexcept
 void
 AdjFwdTab::reset( void ) noexcept
 {
-  for ( uint32_t i = 0; i < this->links.count; i++ ) {
+  for ( size_t i = 0; i < this->links.count; i++ ) {
     this->links.ptr[ i ]->reset();
   }
   this->links.clear();
@@ -69,8 +106,9 @@ AdjFwdTab::reset( void ) noexcept
 void
 AdjLink::reset( void ) noexcept
 {
-  for ( uint8_t p = 0; p < 4; p++ )
+  for ( size_t p = 0; p < this->dest.count; p++ )
     this->dest[ p ].reset();
+  this->dest.clear();
 }
 
 AdjUser *
@@ -104,7 +142,7 @@ AdjUserTab::add( AdjUser *u ) noexcept
 }
 
 void
-AdjGraph::compute_forward_set( uint8_t p ) noexcept
+AdjGraph::compute_forward_set( uint16_t p ) noexcept
 {
   for ( uint32_t idx = 0; idx < this->user_tab.count; idx++ ) {
     AdjUser * u = this->user_tab.ptr[ idx ];
@@ -132,7 +170,7 @@ AdjGraph::compute_forward_set( uint8_t p ) noexcept
 }
 
 uint32_t
-AdjGraph::get_min_cost( uint8_t p,  AdjVisit &visit ) noexcept
+AdjGraph::get_min_cost( uint16_t p,  AdjVisit &visit ) noexcept
 {
   uint32_t idx, min_cost = 0;
   for ( bool b = visit.user.first( idx ); b; b = visit.user.next( idx ) ) {
@@ -140,12 +178,10 @@ AdjGraph::get_min_cost( uint8_t p,  AdjVisit &visit ) noexcept
     uint32_t user_cost = visit.cost[ idx ];
     for ( uint32_t i = 0; i < u->links.count; i++ ) {
       AdjLink * link = u->links.ptr[ i ];
-      if ( ( link->prune & ( 1 << p ) ) != 0 ) {
-        if ( ! visit.user.is_member( link->b.idx ) ) {
-          uint32_t cost = link->cost[ p ] + user_cost;
-          if ( cost < min_cost || min_cost == 0 )
-            min_cost = cost;
-        }
+      if ( ! visit.user.is_member( link->b.idx ) ) {
+        uint32_t cost = link->cost[ p ] + user_cost;
+        if ( cost < min_cost || min_cost == 0 )
+          min_cost = cost;
       }
     }
   }
@@ -153,7 +189,7 @@ AdjGraph::get_min_cost( uint8_t p,  AdjVisit &visit ) noexcept
 }
 
 void
-AdjGraph::add_fwd_set( uint8_t p,  uint32_t src_idx,  AdjVisit &visit,
+AdjGraph::add_fwd_set( uint16_t p,  uint32_t src_idx,  AdjVisit &visit,
                        uint32_t min_cost ) noexcept
 {
   AdjFwdTab & fwd = this->user_tab.ptr[ src_idx ]->fwd[ p ];
@@ -165,19 +201,17 @@ AdjGraph::add_fwd_set( uint8_t p,  uint32_t src_idx,  AdjVisit &visit,
     uint32_t user_cost = visit.cost[ idx ];
     for ( uint32_t i = 0; i < u->links.count; i++ ) {
       AdjLink * link = u->links.ptr[ i ];
-      if ( ( link->prune & ( 1 << p ) ) != 0 ) {
-        if ( ! visit.user.is_member( link->b.idx ) ) {
-          uint32_t cost     = link->cost[ p ] + user_cost,
-                   src_link = ( user_cost == 0 ? i : visit.src[ idx ] );
-          if ( min_cost == cost ) {
-            uint32_t dest_idx = link->b.idx;
-            visit.user.add( dest_idx );
-            visit.cost[ dest_idx ] = cost;
-            visit.src[ dest_idx ]  = src_link;
-            fwd.links.push( link );
-            fwd.cost.push( cost );
-            fwd.src.push( src_link );
-          }
+      if ( ! visit.user.is_member( link->b.idx ) ) {
+        uint32_t cost     = link->cost[ p ] + user_cost,
+                 src_link = ( user_cost == 0 ? i : visit.src[ idx ] );
+        if ( min_cost == cost ) {
+          uint32_t dest_idx = link->b.idx;
+          visit.user.add( dest_idx );
+          visit.cost[ dest_idx ] = cost;
+          visit.src[ dest_idx ]  = src_link;
+          fwd.links.push( link );
+          fwd.cost.push( cost );
+          fwd.src.push( src_link );
         }
       }
     }
@@ -218,7 +252,7 @@ AdjGraph::find_inconsistent( AdjInconsistent &inc ) noexcept
         AdjLink * link2 = u2->links.ptr[ j ];
         if ( &link->a == &link2->b && &link->b == &link2->a &&
              link->type.equals( link2->type ) &&
-             link->cost_equals( link2->cost ) ) {
+             link->cost.equals( link2->cost ) ) {
           found = true;
           break;
         }

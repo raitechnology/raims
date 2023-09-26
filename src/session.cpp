@@ -687,12 +687,11 @@ SessionMgr::parse_msg_hdr( MsgFramePublish &fpub,  bool is_ipc ) noexcept
   if ( tflag != CABA_MCAST ) {
     if ( is_ipc )
       return FRAME_STATUS_MY_MSG;
-    uint8_t i;
     /* an inbox subject */
     if ( tflag == CABA_INBOX ) {
       if ( ( dec.msg->caba.get_opt() & CABA_OPT_ANY ) == 0 ) {
         /* match _I.Nonce. + hash( _I.Nonce. ) */
-        for ( i = 0; i < fpub.prefix_cnt; i++ ) {
+        for ( uint8_t i = 0; i < fpub.prefix_cnt; i++ ) {
           if ( fpub.hash[ i ] == this->ibx.hash &&
                fpub.prefix[ i ] == this->ibx.len ) {
             const char * num = &fpub.subject[ this->ibx.len ];
@@ -729,7 +728,7 @@ SessionMgr::parse_msg_hdr( MsgFramePublish &fpub,  bool is_ipc ) noexcept
       type = this->u_tab.lookup( fpub.subj_hash, fpub.subject_len );
       if ( type == U_NORMAL ) {
         /* control message: _S.JOIN. _S.LEAV. _P.PSUB. _P.PSTP. _M. */
-        for ( i = 0; i < fpub.prefix_cnt; i++ ) {
+        for ( uint8_t i = 0; i < fpub.prefix_cnt; i++ ) {
           /* match _M. + hash( _M. ) */
           if ( fpub.hash[ i ] == this->mch.hash &&
                fpub.prefix[ i ] == this->mch.len )
@@ -745,7 +744,7 @@ SessionMgr::parse_msg_hdr( MsgFramePublish &fpub,  bool is_ipc ) noexcept
       printf( "?? %.*s %s %s (%x)\n", (int) fpub.subject_len, fpub.subject,
               caba_type_flag_str( tflag ), publish_type_to_string( type ),
               fpub.subj_hash );
-      for ( i = 0; i < fpub.prefix_cnt; i++ ) {
+      for ( uint8_t i = 0; i < fpub.prefix_cnt; i++ ) {
         printf( "[%u] = %u.%x, type %s\n", i, fpub.prefix[ i ], fpub.hash[ i ],
                 publish_type_to_string( 
                   this->u_tab.lookup( fpub.hash[ i ], fpub.prefix[ i ] ) ) );
@@ -1336,7 +1335,7 @@ SessionMgr::on_msg( EvPublish &pub ) noexcept
     case U_INBOX_UCAST_RPY: /* _I.Nonce.ucast_rpy */
     case U_INBOX_ANY_RTE:   /* _I.Nonce.any, ipc_rt inbox */
     case U_INBOX_LOSS: {    /* _I.Nonce.loss      */
-      uint8_t  path_select = dec.msg->caba.get_path();
+      uint16_t path_select = dec.msg->caba.get_path();
       uint64_t recv_seqno  = n.inbox.next_path_recv( path_select );
       if ( dec.seqno > recv_seqno ) {
         if ( recv_seqno != 0 && dec.seqno != recv_seqno + 1 ) {
@@ -1444,7 +1443,7 @@ SessionMgr::dispatch_console( MsgFramePublish &fpub,  UserBridge &n,
 
   /* if _I.Nonce.<inbox_ret>, find the inbox_ret */
   if ( dec.inbox_ret != 0 || dec.type == U_INBOX_ANY ) {
-    uint8_t  path_select = dec.msg->caba.get_path();
+    uint16_t path_select = dec.msg->caba.get_path();
     uint64_t recv_seqno  = n.inbox.next_path_recv( path_select );
     if ( recv_seqno != 0 && dec.seqno != recv_seqno + 1 ) {
       n.printf(
@@ -1580,17 +1579,14 @@ SessionMgr::publish( PubMcastData &mc ) noexcept
     }
   }
 
-  uint16_t option = mc.option;
-  option &= ~( CABA_OPT_MC_MASK << CABA_OPT_MC_SHIFT );
-  if ( fl.get_type() == CABA_MCAST ||
-       ( is_mcast_prefix && mc.path < COST_PATH_COUNT ) ) {
-    if ( mc.path >= COST_PATH_COUNT )
-      mc.path_select = caba_hash_to_path( h );
+  if ( fl.get_type() == CABA_MCAST || is_mcast_prefix ) {
+    if ( mc.path == NO_PATH )
+      mc.path_select = this->user_db.peer_dist.hash_to_path( h );
     else
-      mc.path_select = mc.path;
-    option |= mc.path_select << CABA_OPT_MC_SHIFT;
+      mc.path_select = mc.path % this->user_db.peer_dist.get_path_count();
+    fl.set_path( mc.path_select );
   }
-  fl.set_opt( option );
+  fl.set_opt( mc.option );
 
   MsgEst e( mc.sublen );
   e.seqno       ()
@@ -1639,7 +1635,7 @@ SessionMgr::publish( PubMcastData &mc ) noexcept
   uint32_t         tport_id, rcnt;
   bool             b = true;
 
-  this->user_db.peer_dist.update_forward_cache( forward, 0, mc.path_select );
+  this->user_db.peer_dist.update_path( forward, mc.path_select );
   if ( forward.first( tport_id ) ) {
     do {
       rte = this->user_db.transport_tab.ptr[ tport_id ];
@@ -1684,12 +1680,15 @@ SessionMgr::forward_uid_inbox( TransportRoute &src_rte,  EvPublish &fwd,
   InboxBuf  ibx( n->bridge_id );
   CabaFlags fl( CABA_INBOX );
 
-  uint8_t path_select = 0;
+  uint16_t path_select = 0;
   UserRoute * u_ptr = NULL;
   if ( ! fwd.is_pub_type( PUB_TYPE_SERIAL ) ) {
-    path_select          = caba_hash_to_path( fwd.subj_hash );
-    UidSrcPath  & path   = n->src_path[ path_select ];
-    UserRoute   * u_path = n->user_route_ptr( this->user_db, path.tport );
+    path_select = this->user_db.peer_dist.hash_to_path( fwd.subj_hash );
+    ForwardCache & forward = this->user_db.forward_path[ path_select ];
+    this->user_db.peer_dist.update_path( forward, path_select );
+
+    UidSrcPath & path  = forward.path[ uid ];
+    UserRoute * u_path = n->user_route_ptr( this->user_db, path.tport );
     if ( u_path->is_valid() )
       u_ptr = u_path;
   }
@@ -1733,7 +1732,8 @@ SessionMgr::forward_uid_inbox( TransportRoute &src_rte,  EvPublish &fwd,
     m.hdr_len( fwd.hdr_len );
   if ( fwd.suf_len != 0 )
     m.suf_len( fwd.suf_len );
-  fl.set_opt_path( CABA_OPT_ANY, path_select );
+  fl.set_opt( CABA_OPT_ANY );
+  fl.set_path( path_select );
 
   uint32_t h = ibx.hash();
 
@@ -1841,10 +1841,10 @@ SessionMgr::forward_ipc( TransportRoute &src_rte,  EvPublish &pub ) noexcept
 
   const void * frag = NULL;
   size_t frag_sz = 0;
-  uint8_t path_select = 0;
+  uint16_t path_select = 0;
   if ( ! pub.is_pub_type( PUB_TYPE_SERIAL ) ) {
-    path_select = caba_hash_to_path( pub.subj_hash );
-    fl.set_opt_path( 0, path_select );
+    path_select = this->user_db.peer_dist.hash_to_path( pub.subj_hash );
+    fl.set_path( path_select );
   }
   MsgEst e( pub.subject_len );
   e.seqno       ()
@@ -1901,7 +1901,7 @@ SessionMgr::forward_ipc( TransportRoute &src_rte,  EvPublish &pub ) noexcept
   bool             b = true;
 
   this->user_db.msg_send_counter[ MCAST_SUBJECT ]++;
-  this->user_db.peer_dist.update_forward_cache( forward, 0, path_select );
+  this->user_db.peer_dist.update_path( forward, path_select );
   if ( forward.first( tport_id ) ) {
     do {
       rte = this->user_db.transport_tab.ptr[ tport_id ];
@@ -2106,7 +2106,7 @@ SessionMgr::send_ack( const MsgFramePublish &pub,  UserBridge &n,
   dec.get_ival<uint64_t>( FID_SEQNO, ref_seqno );
   if ( ! dec.get_ival<uint64_t>( FID_STAMP, stamp ) || stamp == 0 )
     stamp = current_realtime_ns();
-  uint8_t  path_select = dec.msg->caba.get_path();
+  uint16_t  path_select = dec.msg->caba.get_path();
   d = this->user_db.peer_dist.calc_transport_cache( n.uid, pub.rte.tport_id,
                                                     path_select );
   MsgCat m;
