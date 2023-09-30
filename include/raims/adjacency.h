@@ -112,19 +112,11 @@ struct UidSrcPath {
 struct ForwardCache : public kv::UIntBitSet {
   uint32_t     tport_count;
   uint64_t     adjacency_cache_seqno;
-  uint64_t     bits;
   UidSrcPath * path; /* one for each uid */
 
-  ForwardCache() : tport_count( 0 ), adjacency_cache_seqno( 0 ),
-                   bits( 0 ), path( 0 ) {}
+  ForwardCache() : tport_count( 0 ), adjacency_cache_seqno( 0 ), path( 0 ) {}
   void init( uint32_t count,  uint64_t seqno,  uint64_t *p ) {
-    if ( p == NULL ) {
-      this->ptr = &this->bits;
-      this->bits = 0;
-    }
-    else {
-      this->ptr = p;
-    }
+    this->ptr = p;
     this->tport_count = count;
     this->adjacency_cache_seqno = seqno;
   }
@@ -135,13 +127,13 @@ struct ForwardCache : public kv::UIntBitSet {
     return this->kv::UIntBitSet::next( tport_id, this->tport_count );
   }
 };
- typedef kv::ArrayCount< ForwardCache, 4 > ForwardCacheArray;
+typedef kv::ArrayCount< ForwardCache, 4 > ForwardCacheArray;
 
-static const uint32_t COST_MAXIMUM = 0xffffffffU,
-                      COST_DEFAULT = 1000,
-                      COST_BAD     = 1000 * 1000 * 1000, /* label bad path */
-                      OLD_COST_PATH_COUNT = 4;
-static const uint16_t NO_PATH      = 0xffff;
+static const uint32_t COST_MAXIMUM  = 0xffffffffU,
+                      COST_DEFAULT  = 1000,
+                      COST_BAD      = 1000 * 1000 * 1000, /* label bad path */
+                      NO_PATH       = 0xffff,
+                      MAX_PATH_MASK = 0xff; /* 1 byte in protocol packet */
 
 struct AdjacencySpace : public kv::BitSpace {
   AdjacencySpace * next_link; /* tenp list for equal paths calc */
@@ -239,7 +231,8 @@ struct AdjDistance : public md::MDMsgMem {
                  inc_hd,        /* list hd of uids in inc_list[] */
                  inc_tl,        /* list to of uids in inc_list[] */
                  inc_run_count; /* count of inc_runs after adjacency change */
-  uint64_t       last_run_mono, /* timestamp of last adjacency update */
+  uint64_t       clear_stamp,
+                 last_run_mono, /* timestamp of last adjacency update */
                  invalid_mono; /* when cache was invalidated */
   uint32_t       invalid_src_uid;
   InvalidReason  invalid_reason; /* why cache was invalidated */
@@ -254,6 +247,7 @@ struct AdjDistance : public md::MDMsgMem {
     zero_mem( (void *) &this->max_uid, (void *) &this[ 1 ] );
     this->cache_seqno  = 0;
     this->update_seqno = 1;
+    this->clear_stamp  = 1;
     this->path_count   = 1;
   }
   template<class AR>
@@ -269,7 +263,7 @@ struct AdjDistance : public md::MDMsgMem {
     return this->path_count;
   }
   uint32_t hash_to_path( uint32_t h ) {
-    return h % this->get_path_count();
+    return ( h & MAX_PATH_MASK ) % this->get_path_count();
   }
   void invalidate( InvalidReason why,  uint32_t src_uid ) {
     if ( this->update_seqno++ == this->cache_seqno ) {
@@ -296,18 +290,16 @@ struct AdjDistance : public md::MDMsgMem {
 
   /* update for my forwarding ports */
   void update_path( ForwardCache &fwd,  uint16_t path_select ) {
-    if ( this->is_valid( fwd.adjacency_cache_seqno ) )
-      return;
-    this->calc_path( fwd, path_select );
+    if ( ! this->is_valid( fwd.adjacency_cache_seqno ) )
+      this->calc_path( fwd, path_select );
   }
   void calc_path( ForwardCache &fwd,  uint16_t path_select ) noexcept;
 
   /* update for src forwarding ports */
   void update_source_path( ForwardCache &fwd,  uint32_t src_uid,
                            uint16_t path_select ) {
-    if ( this->is_valid( fwd.adjacency_cache_seqno ) )
-      return;
-    this->calc_source_path( fwd, src_uid, path_select );
+    if ( ! this->is_valid( fwd.adjacency_cache_seqno ) )
+      this->calc_source_path( fwd, src_uid, path_select );
   }
   void calc_source_path( ForwardCache &fwd,  uint32_t src_uid,
                          uint16_t path_select ) noexcept;

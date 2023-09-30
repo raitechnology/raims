@@ -512,8 +512,8 @@ typedef kv::IntHashTabT< Hash128Elem, uint32_t > NodeHashTab;
 
 struct SubDB;
 struct StringTab;
+static const uint32_t MY_UID = 0;      /* bridge_tab[ 0 ] reserved for me */
 struct UserDB {
-  static const uint32_t MY_UID = 0;      /* bridge_tab[ 0 ] reserved for me */
   /* my transports */
   TransportTab          transport_tab;    /* transport array */
   ForwardCacheArray     forward_path;/* which tports fwd */

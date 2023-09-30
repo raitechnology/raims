@@ -271,8 +271,8 @@ AdjCost::str_size( char *buf,  size_t len ) const noexcept
   if ( op == ' ' )
     n = ::snprintf( buf, len, "%u", this->max_cost );
   else
-    n = ::snprintf( buf, len, "%u%c%u/%u", this->max_cost, op,
-                    this->path.num, this->path.count );
+    n = ::snprintf( buf, len, "%u%c%u%c%u/%u", this->max_cost, op,
+                    this->min_cost, op, this->path.num, this->path.count );
   return n;
 }
 
@@ -287,12 +287,17 @@ AdjGraphOut::print_cost( AdjLink &link ) noexcept
       o.puts( "      cost: " );
     char op = link.cost.op();
     if ( op == ' ' )
-      o.printf( "%u", link.cost.max_cost );
+      o.printf( "%u\n", link.cost.max_cost );
     else
-      o.printf( "%u%c%u/%u", link.cost.max_cost, link.cost.op(),
-                link.cost.path.num, link.cost.path.count );
+      o.printf( "%u%c%u%c%u/%u\n", link.cost.max_cost, op,
+            link.cost.min_cost, op, link.cost.path.num, link.cost.path.count );
+      /*o.printf( "%u%c%u/%u", link.cost.max_cost, link.cost.op(),
+                link.cost.path.num, link.cost.path.count );*/
   }
-  o.puts( "\n" );
+  else {
+    if ( ! this->is_cfg )
+      o.puts( "\n" );
+  }
 }
 
 void
@@ -541,10 +546,11 @@ int
 AdjCost::parse( const char *str,  size_t len ) noexcept
 {
   UIntArrayCount cost_array;
-  char     op   = 0;
-  uint32_t val  = 0,
-           cost = 0,
-           num  = 0;
+  char     op    = 0;
+  uint32_t val   = 0,
+           cost  = 0,
+           cost1 = 0,
+           num   = 0;
 
   this->set( COST_DEFAULT, COST_DEFAULT, 0, 1 );
   for ( size_t i = 0; i < len; i++ ) {
@@ -552,9 +558,10 @@ AdjCost::parse( const char *str,  size_t len ) noexcept
       val = val * 10 + (uint32_t) ( str[ i ] - '0' );
     else if ( str[ i ] == '-' || str[ i ] == '_' || str[ i ] == '=' ||
               str[ i ] == '^' ) {
-      cost = val;
-      val  = 0;
-      op   = str[ i ];
+      cost1 = cost;
+      cost  = val;
+      val   = 0;
+      op    = str[ i ];
     }
     else if ( str[ i ] == '/' ) {
       num  = val;
@@ -588,15 +595,21 @@ AdjCost::parse( const char *str,  size_t len ) noexcept
     return EMPTY_COST;
   if ( val == 0 || num >= val )
     return EMPTY_PATH;
-  this->max_cost = cost;
-  switch ( op ) {
-    case '-': this->min_cost = cost - cost / 10; break;
-    case '_': this->min_cost = cost / 10; break;
-    case '=': this->min_cost = cost / 100; break;
-    case '^': this->min_cost = cost / 1000; break;
-    default:  this->min_cost = 0;
+  if ( cost1 != 0 && cost1 > cost && cost != 0 ) {
+    this->max_cost = cost1;
+    this->min_cost = cost;
   }
-  if ( this->min_cost == 0 )
+  else {
+    this->max_cost = cost;
+    switch ( op ) {
+      case '-': this->min_cost = cost - cost / 10; break;
+      case '_': this->min_cost = cost / 10; break;
+      case '=': this->min_cost = cost / 100; break;
+      case '^': this->min_cost = cost / 1000; break;
+      default:  this->min_cost = 0;
+    }
+  }
+  if ( this->min_cost == 0 || this->max_cost == 0 )
     return BAD_COST;
   this->path.num   = num;
   this->path.count = val;
@@ -761,6 +774,10 @@ strlen_dig( const char *s,  uint32_t &id ) noexcept
 {
   size_t len = ::strlen( s ), i = len;
   id = 0;
+  if ( i > 2 && s[ i - 1 ] == '*' && s[ i - 2 ] == '.' ) {
+    id = 0;
+    return i - 2;
+  }
   while ( i > 0 && s[ i - 1 ] >= '0' && s[ i - 1 ] <= '9' )
     id = id * 10 + ( s[ --i ] - '0' );
   if ( i > 0 && i < len && s[ i - 1 ] == '.' )

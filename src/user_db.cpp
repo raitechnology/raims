@@ -722,11 +722,13 @@ UserDB::converge_network( uint64_t current_mono_time,  uint64_t current_time,
       }
     }
     if ( state == AdjDistance::UID_ORPHANED ) {
-      uint64_t ns, hb_timeout_ns;
+      uint64_t ns, ns2, hb_timeout_ns;
       hb_timeout_ns = sec_to_ns( n->hb_interval * 2 ) + SEC_TO_NS;
-      ns = n->start_mono_time + hb_timeout_ns; /* if hb and still orphaned */
+      ns  = n->start_mono_time + hb_timeout_ns; /* if hb and still orphaned */
+      ns2 = this->start_mono_time + hb_timeout_ns;
 
-      if ( this->adjacency_unknown.is_empty() && ns < current_mono_time ) {
+      if ( this->adjacency_unknown.is_empty() &&
+           ns < current_mono_time && ns2 < current_mono_time ) {
         d_usr( "find_inconsistent orphaned %s(%u)\n",
                  n->peer.user.val, n->uid );
         this->remove_authenticated( *n,
@@ -747,14 +749,17 @@ UserDB::converge_network( uint64_t current_mono_time,  uint64_t current_time,
       if ( current_time > this->net_converge_time )
         this->net_converge_time = current_time;
       this->converge_mono = current_mono_time;
-      uint64_t t = ( current_mono_time > this->peer_dist.invalid_mono ) ?
-                   ( current_mono_time - this->peer_dist.invalid_mono ) : 0;
+      uint32_t p = this->peer_dist.get_path_count();
+      uint64_t x = current_monotonic_time_ns();
+      uint64_t t = ( x > this->peer_dist.invalid_mono ) ?
+                   ( x - this->peer_dist.invalid_mono ) : 0;
       const char * src_user = this->user.user.val;
       if ( src_uid != 0 )
         src_user = this->bridge_tab.ptr[ src_uid ]->peer.user.val;
       printf(
-        "network converges %.3f secs, %u uids authenticated, %s from %s.%u\n",
-              (double) t / SEC_TO_NS, this->uid_auth_count,
+        "network converges %.3f secs, %u path%s, %u uids authenticated, "
+        "%s from %s.%u\n",
+              (double) t / SEC_TO_NS, p, p>1?"s":"", this->uid_auth_count,
               invalidate_reason_string( this->peer_dist.invalid_reason ),
               src_user, src_uid );
     }
@@ -1185,10 +1190,22 @@ UserDB::find_adjacent_routes( void ) noexcept
         /*this->check_bloom_route2();*/
       }
     }
+    /* if path count was larger before */
+    for ( uint32_t x = path_cnt; x < n.bloom_rt.count; x++ ) {
+      if ( n.bloom_rt.ptr[ x ] != NULL ) {
+        n.bloom_rt.ptr[ x ]->del_bloom_ref( &n.bloom );
+        n.bloom_rt.ptr[ x ]->remove_if_empty();
+        n.bloom_rt.ptr[ x ] = NULL;
+      }
+    }
+    /* update primary route */
     ForwardCache & forward = this->forward_path[ 0 ];
     UidSrcPath   & path    = forward.path[ uid ];
-    if ( path.cost == 0 )
+    if ( path.cost == 0 ) {
+      if ( debug_usr )
+        n.printf( "no primary route yet\n" );
       continue;
+    }
     u_ptr    = n.user_route_ptr( *this, path.tport );
     hops     = u_ptr->rte.uid_connected.is_member( n.uid ) ? 0 : 1,
     min_cost = path.cost;
@@ -1895,17 +1912,12 @@ UserDB::set_mesh_url( UserRoute &u_rte,  const MsgHdrDecoder &dec,
 void
 UserDB::add_bloom_routes( UserBridge &n,  TransportRoute &rte ) noexcept
 {
-  BloomRoute *rt = rte.router_rt[ 0 ];
+  BloomRoute *rt = rte.router_rt;
   if ( ! n.bloom.has_link( rt->r ) ) {
     rt->add_bloom_ref( &n.bloom );
     if ( rte.is_set( TPORT_IS_IPC ) )
       rte.sub_route.do_notify_bloom_ref( n.bloom );
-    for ( uint32_t path_select = 1; path_select < rte.router_rt.count;
-          path_select++ )
-      rte.router_rt[ path_select ]->add_bloom_ref( &n.bloom );
-    d_usr( "add_bloom_ref( %s, %s )\n", n.peer.user.val, rte.name );
   }
-  /*this->check_bloom_route2();*/
 }
 
 void

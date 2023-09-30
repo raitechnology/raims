@@ -108,6 +108,9 @@ AdjDistance::update_graph( void ) noexcept
       uint32_t b;
       for ( bool ok = set->first( b ); ok; ok = set->next( b ) ) {
         AdjUser *u2 = g.user_tab.ptr[ idx[ b ] ];
+        if ( debug_adj )
+          printf( "add %s link %s.%u -> %s.%u tid=%u\n",
+                  set->tport.val, u1->user.val, u1->uid, u2->user.val, u2->uid, t );
         g.add_link( u1, u2, set->tport, set->tport_type, set->cost, t );
       }
     }
@@ -129,6 +132,9 @@ AdjDistance::clear_cache( void ) noexcept
   }
   uint32_t uid_cnt  = this->user_db.next_uid,
            rte_cnt  = (uint32_t) this->user_db.transport_tab.count;
+  uint64_t stamp    = kv::current_monotonic_time_ns();
+  if ( stamp <= this->clear_stamp ) stamp = this->clear_stamp + 1;
+  this->clear_stamp = stamp;
   this->cache_seqno = this->update_seqno;
   this->max_tport   = rte_cnt;
   this->max_uid     = uid_cnt;
@@ -145,7 +151,7 @@ AdjDistance::clear_cache( void ) noexcept
   this->inc_hd              = 0;
   this->inc_tl              = 0;
   this->inc_run_count       = 0;
-  this->last_run_mono       = kv::current_monotonic_time_ns();
+  this->last_run_mono       = stamp;
   this->inc_running         = false;
   this->found_inconsistency = false;
 }
@@ -435,8 +441,7 @@ void
 AdjDistance::calc_path( ForwardCache &fc,  uint16_t p ) noexcept
 {
   uint32_t   count = this->adjacency_count( 0 );
-  uint64_t * m     = ( fc.size( count ) <= 1 ? NULL :
-                       this->mkar<uint64_t>( fc.size( count ) ) );
+  uint64_t * m     = this->mkar<uint64_t>( fc.size( count ) );
   fc.init( count, this->cache_seqno, m );
   fc.path = this->mkar<UidSrcPath>( this->max_uid );
 
@@ -467,9 +472,10 @@ void
 AdjDistance::calc_source_path( ForwardCache &fc,  uint32_t src_uid,
                                uint16_t p ) noexcept
 {
+  if ( src_uid == 0 )
+    return this->calc_path( fc, p );
   uint32_t   count = this->adjacency_count( 0 );
-  uint64_t * m     = ( fc.size( count ) <= 1 ? NULL :
-                       this->mkar<uint64_t>( fc.size( count ) ) );
+  uint64_t * m     = this->mkar<uint64_t>( fc.size( count ) );
   fc.init( count, this->cache_seqno, m );
 
   uint32_t * idx = this->graph_idx_order;

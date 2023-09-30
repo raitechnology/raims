@@ -208,7 +208,7 @@ struct TransportRoute : public kv::EvSocket, public kv::EvConnectionNotify,
   SessionMgr            & mgr;            /* session of transport */
   UserDB                & user_db;        /* session of transport */
   kv::RoutePublish      & sub_route;      /* bus for transport */
-  BloomRouteArray         router_rt;
+  kv::BloomRoute        * router_rt;
   kv::BitSpace            connected,      /* which fds are connected */
                           connected_auth; /* which fds are authenticated */
   BitRefCount             mesh_connected, /* shared with uid_in_mesh */
@@ -227,7 +227,7 @@ struct TransportRoute : public kv::EvSocket, public kv::EvConnectionNotify,
   StageAuth               auth[ 3 ];      /* history of last 3 hb */
   uint32_t                tport_id,       /* index in transport_tab[] */
                           hb_count,       /* count of new hb recvd */
-                          last_hb_count,  /* sends hb when new hb */
+                          hb_fast,        /* sends hb after initial connect */
                           connect_count,  /* count of connections */
                           last_connect_count, /* sends hb when new conn */
                           state;          /* TPORT_IS_... */

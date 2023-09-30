@@ -113,6 +113,8 @@ struct AdjCost {
   char op( void ) const {
     if ( this->path.num == 0 && this->path.count == 1 )
       return ' ';
+    return '_';
+#if 0
     if ( this->min_cost + this->max_cost / 10 == this->max_cost )
       return '-';
     if ( this->min_cost == this->max_cost / 10 )
@@ -120,6 +122,7 @@ struct AdjCost {
     if ( this->min_cost == this->max_cost / 100 )
       return '=';
     return '^';
+#endif
   }
 };
 

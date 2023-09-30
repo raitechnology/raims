@@ -136,12 +136,18 @@ UserDB::push_hb_time( TransportRoute &rte,  uint64_t time,  uint64_t mono ) noex
   rte.auth[ 0 ].time   = rte.hb_time;
   rte.auth[ 0 ].seqno  = rte.hb_seqno;
 
-  rte.hb_cnonce          = this->cnonce->calc();
-  rte.hb_time            = time;
+  rte.hb_cnonce    = this->cnonce->calc();
+  rte.hb_time      = time;
+  rte.hb_mono_time = mono;
   rte.hb_seqno++;
-  rte.hb_mono_time       = mono;
-  rte.last_connect_count = rte.connect_count;
-  rte.last_hb_count      = rte.hb_count;
+  if ( rte.last_connect_count != rte.connect_count ) {
+    rte.last_connect_count = rte.connect_count;
+    rte.hb_fast = 3;
+  }
+  else {
+    if ( rte.hb_fast > 0 )
+      rte.hb_fast--;
+  }
 }
 
 void
@@ -202,10 +208,11 @@ UserDB::interval_hb( uint64_t cur_mono,  uint64_t cur_time ) noexcept
       bool do_hb = false;
       if ( rte->hb_mono_time + ival < cur_mono + ival / 64 )
         do_hb = true;
-       else if ( ! rte->is_mcast() ) {
-         if ( rte->hb_count != rte->last_hb_count ||
-              rte->connect_count != rte->last_connect_count )
-           do_hb = true;
+      else if ( ! rte->is_mcast() ) {
+        if ( rte->connect_count != rte->last_connect_count ||
+             rte->hb_fast > 0 ) {
+          do_hb = true;
+        }
       }
       if ( do_hb ) {
         if ( debug_hb )

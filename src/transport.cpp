@@ -38,8 +38,8 @@ TransportRoute::TransportRoute( kv::EvPoll &p,  SessionMgr &m,
       mesh_csum( &this->mesh_csum2 ),
       hb_time( 0 ), hb_mono_time( 0 ), hb_seqno( 0 ),
       stats_seqno( 0 ), timer_id( ++m.next_timer ), delta_recv( 0 ),
-      tport_id( m.user_db.next_tport_id() ), hb_count( 0 ),
-      last_hb_count( 0 ), connect_count( 0 ), last_connect_count( 0 ),
+      tport_id( m.user_db.next_tport_id() ), hb_count( 0 ), hb_fast( 0 ),
+      connect_count( 0 ), last_connect_count( 0 ),
       state( f ), mesh_id( 0 ), dev_id( 0 ), listener( 0 ),
       connect_ctx( 0 ), notify_ctx( 0 ), pgm_tport( 0 ), ibx_tport( 0 ),
       rv_svc( 0 ), mesh_url_hash( 0 ),
@@ -142,10 +142,8 @@ TransportRoute::init( void ) noexcept
   if ( status != 0 )
     return status;
   this->mgr.router_set.add( pfd );
-  uint32_t path_cnt = this->user_db.peer_dist.get_path_count();
   /* router_rt tport causes msgs to flow from tport -> routable user subs */
-  for ( uint8_t i = 0; i < path_cnt; i++ )
-    this->router_rt[ i ] = this->sub_route.create_bloom_route( pfd, NULL, i );
+  this->router_rt = this->sub_route.create_bloom_route( pfd, NULL, ANY_SHARD );
   /*this->user_db.check_bloom_route( *this, 0 );*/
   return 0;
 }

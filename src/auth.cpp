@@ -409,12 +409,12 @@ UserDB::send_trusted( const MsgFramePublish &/*pub*/,  UserBridge &n,
                       MsgHdrDecoder & ) noexcept
 {
   InboxBuf ibx( n.bridge_id, _AUTH );
-  UserRoute      * u_ptr   = n.user_route;
-  TransportRoute & rte     = u_ptr->rte;
-  bool        in_mesh      = rte.uid_in_mesh->is_member( n.uid ),
-              is_mcast     = rte.is_mcast();
-  size_t      mesh_db_len  = 0,
-              ucast_db_len = 0;
+  UserRoute      * u_ptr    = n.user_route;
+  TransportRoute & rte      = u_ptr->rte;
+  bool        in_mesh       = rte.uid_in_mesh->is_member( n.uid ),
+              is_mcast      = rte.is_mcast();
+  size_t      mesh_db_len   = 0,
+              ucast_db_len  = 0;
   UrlDBFilter mesh_filter( n.uid, true ),
               ucast_filter( n.uid, false );
   Nonce       csum;
@@ -424,6 +424,7 @@ UserDB::send_trusted( const MsgFramePublish &/*pub*/,  UserBridge &n,
     mesh_db_len = this->mesh_db_size( rte, mesh_filter, csum );
   if ( is_mcast )
     ucast_db_len = this->ucast_db_size( rte, ucast_filter );
+
   this->events.send_trust( n.uid, n.user_route->rte.tport_id, in_mesh );
   uint64_t uptime = current_monotonic_time_ns() - this->start_mono_time;
   char     cost_buf[ 64 ];
@@ -485,74 +486,84 @@ UserDB::send_trusted( const MsgFramePublish &/*pub*/,  UserBridge &n,
     TransportRoute * rte = this->transport_tab.ptr[ tport_id ];
     if ( rte->is_set( TPORT_IS_SHUTDOWN ) )
       continue;
+    if ( ! rte->uid_connected.is_member( n.uid ) )
+      continue;
     u_ptr = NULL;
     if ( rte->is_mesh() ) {
       u_ptr = n.user_route_ptr( *this, tport_id );
       if ( ! u_ptr->is_valid() || ! u_ptr->is_set( MESH_URL_STATE ) )
-        continue;
+        u_ptr = NULL;
     }
     else if ( rte->is_mcast() ) {
       u_ptr = n.user_route_ptr( *this, tport_id );
       if ( ! u_ptr->is_valid() || ! u_ptr->is_set( UCAST_URL_STATE ) )
-        continue;
+        u_ptr = NULL;
     }
-    else {
-      continue;
-    }
+
+    UrlDBFilter mesh_filter2( n.uid, true );
+    UrlDBFilter ucast_filter2( n.uid, false );
+    csum.zero();
+    size_t mesh_db_len   = 0,
+           ucast_db_len  = 0,
+           mesh_url_len  = 0,
+           ucast_url_len = 0;
+
     if ( u_ptr != NULL ) {
-      UrlDBFilter mesh_filter2( n.uid, true );
-      UrlDBFilter ucast_filter2( n.uid, false );
-
-      csum.zero();
-      mesh_db_len  = 0;
-      ucast_db_len = 0;
-      if ( rte->is_mesh() )
+      if ( rte->is_mesh() ) {
         mesh_db_len = this->mesh_db_size( *rte, mesh_filter2, csum );
-      else
-        ucast_db_len = this->ucast_db_size( *rte, ucast_filter2 );
-      if ( mesh_db_len + ucast_db_len != 0 ) {
-        MsgEst e( ibx.len() );
-        cost_len = rte->uid_connected.cost.str_size( cost_buf,
-                                                     sizeof( cost_buf ) );
-        e.seqno     ()
-         .time      ()
-         .auth_stage()
-         .start     ()
-         .adj_cost  ( cost_len )
-         .tportid   ()
-         .tport     ( rte->transport.tport.len )
-         .mesh_url  ( u_ptr->mesh_url.len )
-         .mesh_db   ( mesh_db_len )
-         .ucast_url ( u_ptr->ucast_url.len )
-         .ucast_db  ( ucast_db_len );
-
-        MsgCat m;
-        m.reserve( e.sz );
-
-        m.open( this->bridge_id.nonce, ibx.len() )
-         .seqno     ( n.auth[ 1 ].seqno  )
-         .time      ( n.auth[ 1 ].time   )
-         .auth_stage( AUTH_TRUST         )
-         .start     ( this->start_time   );
-
-        if ( rte->uid_connected.is_advertised )
-          m.adj_cost( cost_buf, cost_len );
-        m.tportid( tport_id )
-         .tport( rte->transport.tport.val, rte->transport.tport.len )
-         .host_id( this->host_id );
-
-        if ( mesh_db_len != 0 ) {
-          m.mesh_url( u_ptr->mesh_url.val, u_ptr->mesh_url.len );
-          this->mesh_db_submsg( *rte, mesh_filter2, m );
-        }
-        if ( ucast_db_len != 0 ) {
-          m.ucast_url( u_ptr->ucast_url.val, u_ptr->ucast_url.len );
-          this->ucast_db_submsg( *rte, ucast_filter2, m );
-        }
-        m.close( e.sz, h, CABA_INBOX );
-        m.sign( ibx.buf, ibx.len(), *this->session_key );
-        b |= this->forward_to( n, ibx.buf, ibx.len(), h, m.msg, m.len(), u_ptr);
+        mesh_url_len = u_ptr->mesh_url.len;
       }
+      else {
+        ucast_db_len = this->ucast_db_size( *rte, ucast_filter2 );
+        ucast_url_len = u_ptr->ucast_url.len;
+      }
+    }
+    if ( debug_auth )
+      n.printf( "send trust tport %s.%u mesh_db %u ucast_db %u\n",
+                rte->transport.tport.val, tport_id,
+                (uint32_t) mesh_db_len, (uint32_t) ucast_db_len );
+    /*if ( mesh_db_len + ucast_db_len != 0 )*/ {
+      MsgEst e( ibx.len() );
+      cost_len = rte->uid_connected.cost.str_size( cost_buf,
+                                                   sizeof( cost_buf ) );
+      e.seqno     ()
+       .time      ()
+       .auth_stage()
+       .start     ()
+       .adj_cost  ( cost_len )
+       .tportid   ()
+       .tport     ( rte->transport.tport.len )
+       .mesh_url  ( mesh_url_len )
+       .mesh_db   ( mesh_db_len )
+       .ucast_url ( ucast_url_len )
+       .ucast_db  ( ucast_db_len );
+
+      MsgCat m;
+      m.reserve( e.sz );
+
+      m.open( this->bridge_id.nonce, ibx.len() )
+       .seqno     ( n.auth[ 1 ].seqno  )
+       .time      ( n.auth[ 1 ].time   )
+       .auth_stage( AUTH_TRUST         )
+       .start     ( this->start_time   );
+
+      if ( rte->uid_connected.is_advertised )
+        m.adj_cost( cost_buf, cost_len );
+      m.tportid( tport_id )
+       .tport( rte->transport.tport.val, rte->transport.tport.len )
+       .host_id( this->host_id );
+
+      if ( mesh_db_len != 0 && mesh_url_len != 0 ) {
+        m.mesh_url( u_ptr->mesh_url.val, u_ptr->mesh_url.len );
+        this->mesh_db_submsg( *rte, mesh_filter2, m );
+      }
+      if ( ucast_db_len != 0 && ucast_url_len != 0 ) {
+        m.ucast_url( u_ptr->ucast_url.val, u_ptr->ucast_url.len );
+        this->ucast_db_submsg( *rte, ucast_filter2, m );
+      }
+      m.close( e.sz, h, CABA_INBOX );
+      m.sign( ibx.buf, ibx.len(), *this->session_key );
+      b |= this->forward_to( n, ibx.buf, ibx.len(), h, m.msg, m.len(), u_ptr);
     }
   }
   return b;
