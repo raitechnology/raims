@@ -157,16 +157,17 @@ struct UserRoute : public UserStateTest<UserRoute> {
 };
 
 struct InboxSeqno {
-  uint64_t recv_seqno[ COST_PATH_COUNT ], /* recv side inbox seqno */
-           send_seqno[ COST_PATH_COUNT ]; /* inbox seqnos for ptp links */
-  uint8_t  recv_type[ COST_PATH_COUNT ][ 32 ],
-           send_type[ COST_PATH_COUNT ][ 32 ];
+  typedef uint8_t TypeArray[ 32 ];
+  kv::ArrayCount<uint64_t, 4> recv_seqno,
+                              send_seqno;
+  kv::ArrayCount<TypeArray, 4> recv_type,
+                               send_type;
   uint32_t * send_counter;
   void init( uint32_t *ctr ) {
-    ::memset( this->recv_seqno, 0, sizeof( this->recv_seqno ) );
-    ::memset( this->send_seqno, 0, sizeof( this->send_seqno ) );
-    ::memset( this->recv_type, 0, sizeof( this->recv_type ) );
-    ::memset( this->send_type, 0, sizeof( this->send_type ) );
+    this->recv_seqno.clear();
+    this->send_seqno.clear();
+    this->recv_type.clear();
+    this->send_type.clear();
     this->send_counter = ctr;
   }
   void set_path_recv( uint8_t path_select, uint64_t seqno,  uint8_t pub_type ) {
@@ -210,10 +211,9 @@ struct UserBridge : public UserStateTest<UserBridge> {
                      peer_hello;
   PeerEntry        & peer;                /* configuration entry */
   UserNonce          bridge_id;           /* the user hmac and nonce */
-  ForwardCache       forward_path[ COST_PATH_COUNT ]; /* which tports to fwd */
-  kv::BloomRoute   * bloom_rt[ COST_PATH_COUNT ],
-                   * bloom_uid;
-  UidSrcPath         src_path[ COST_PATH_COUNT ];
+  ForwardCacheArray  forward_path; /* which tports to fwd */
+  BloomRouteArray    bloom_rt;
+  kv::BloomRoute   * bloom_uid;
   kv::BloomRef       bloom;               /* the subs by this user */
   AdjacencyTab       adjacency;           /* what nonce routes are adjacent */
   Nonce              uid_csum,            /* current xor of adjacency */
@@ -310,8 +310,10 @@ struct UserBridge : public UserStateTest<UserBridge> {
       : peer( pentry ), bloom( seed, pentry.user.val, db ),
         adj_req_throttle( this->state, ADJACENCY_REQUEST_STATE ),
         mesh_req_throttle( this->state, MESH_REQUEST_STATE ) {
-    ::memset( this->bloom_rt, 0, sizeof( this->bloom_rt ) );
-    this->bloom_uid = NULL;
+    this->bloom_rt.count = 0;
+    this->bloom_rt.ptr   = NULL;
+    this->bloom_rt.size  = 0;
+    this->bloom_uid      = NULL;
     this->peer_key.zero();
     this->peer_hello.zero();
     this->uid_csum.zero();
@@ -510,11 +512,11 @@ typedef kv::IntHashTabT< Hash128Elem, uint32_t > NodeHashTab;
 
 struct SubDB;
 struct StringTab;
+static const uint32_t MY_UID = 0;      /* bridge_tab[ 0 ] reserved for me */
 struct UserDB {
-  static const uint32_t MY_UID = 0;      /* bridge_tab[ 0 ] reserved for me */
   /* my transports */
   TransportTab          transport_tab;    /* transport array */
-  ForwardCache          forward_path[ COST_PATH_COUNT ];/* which tports fwd */
+  ForwardCacheArray     forward_path;/* which tports fwd */
   TransportRoute      * ipc_transport;    /* transport[ 0 ], internal routes */
   kv::EvPoll          & poll;
 

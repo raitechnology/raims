@@ -135,8 +135,8 @@ struct PubMcastData {
              * inbox;
   uint16_t     sublen,    /* subject length */
                inbox_len,
-               option;    /* message options for the opt field */
-  uint8_t      path,      /* path specified */
+               option,    /* message options for the opt field */
+               path,      /* path specified */
                path_select; /* path taken */
   uint32_t     fmt,       /* format of data */
                reply,     /* if rpc style point to point reply wanted */
@@ -153,7 +153,7 @@ struct PubMcastData {
   PubMcastData( const char *s,  size_t sl,  const void *d,  size_t dl,
                 uint32_t f,  uint32_t rep = 0 )
     : sub( s ), inbox( 0 ), sublen( (uint16_t) sl ), inbox_len( 0 ),
-      option( 0 ), path( 255 ), path_select( 0 ), fmt( f ), reply( rep ),
+      option( 0 ), path( NO_PATH ), path_select( 0 ), fmt( f ), reply( rep ),
       subj_hash( 0 ), seqno( 0 ), stamp( 0 ), token( 0 ),
       data( d ), datalen( dl ), fwd_cnt( 0 ) {}
   PubMcastData( const PubMcastData &mc )

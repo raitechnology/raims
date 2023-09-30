@@ -329,7 +329,7 @@ UserDB::mcast_send( EvPublish &pub,  uint8_t path_select ) noexcept
   uint32_t         tport_id;
   bool             b = true;
 
-  this->peer_dist.update_forward_cache( forward, 0, path_select );
+  this->peer_dist.update_path( forward, path_select );
   if ( forward.first( tport_id ) ) {
     do {
       rte = this->transport_tab.ptr[ tport_id ];
@@ -378,14 +378,11 @@ UserDB::mcast_pub( const MsgFramePublish &pub,  UserBridge &n,
   bool b = true;
   if ( dec.is_mcast_type() ) {
     uint8_t path_select = pub.shard;
-    if ( path_select > 0 && n.bloom_rt[ path_select ] == NULL )
-      path_select = 0;
-
     ForwardCache   & forward = n.forward_path[ path_select ];
     TransportRoute * rte;
     uint32_t         tport_id;
 
-    this->peer_dist.update_forward_cache( forward, n.uid, path_select );
+    this->peer_dist.update_source_path( forward, n.uid, path_select );
     if ( forward.first( tport_id ) ) {
       do {
         EvPublish tmp( pub );
@@ -752,14 +749,17 @@ UserDB::converge_network( uint64_t current_mono_time,  uint64_t current_time,
       if ( current_time > this->net_converge_time )
         this->net_converge_time = current_time;
       this->converge_mono = current_mono_time;
-      uint64_t t = ( current_mono_time > this->peer_dist.invalid_mono ) ?
-                   ( current_mono_time - this->peer_dist.invalid_mono ) : 0;
+      uint32_t p = this->peer_dist.get_path_count();
+      uint64_t x = current_monotonic_time_ns();
+      uint64_t t = ( x > this->peer_dist.invalid_mono ) ?
+                   ( x - this->peer_dist.invalid_mono ) : 0;
       const char * src_user = this->user.user.val;
       if ( src_uid != 0 )
         src_user = this->bridge_tab.ptr[ src_uid ]->peer.user.val;
       printf(
-        "network converges %.3f secs, %u uids authenticated, %s from %s.%u\n",
-              (double) t / SEC_TO_NS, this->uid_auth_count,
+        "network converges %.3f secs, %u path%s, %u uids authenticated, "
+        "%s from %s.%u\n",
+              (double) t / SEC_TO_NS, p, p>1?"s":"", this->uid_auth_count,
               invalidate_reason_string( this->peer_dist.invalid_reason ),
               src_user, src_uid );
     }
@@ -1123,6 +1123,12 @@ UserDB::add_user_route( UserBridge &n,  TransportRoute &rte,  const PeerId &pid,
 void
 UserDB::find_adjacent_routes( void ) noexcept
 {
+  uint32_t path_cnt = this->peer_dist.get_path_count();
+  for ( uint32_t path_select = 0; path_select < path_cnt; path_select++ ) {
+    ForwardCache & forward = this->forward_path[ path_select ];
+    this->peer_dist.update_path( forward, path_select );
+  }
+
   for ( uint32_t uid = 1; uid < this->next_uid; uid++ ) {
     if ( this->bridge_tab.ptr[ uid ] == NULL )
       continue;
@@ -1133,12 +1139,12 @@ UserDB::find_adjacent_routes( void ) noexcept
     UserRoute * u_ptr, * primary;
     uint32_t hops, min_cost, my_cost;
 
-    for ( uint8_t i = 0; i < COST_PATH_COUNT; i++ ) {
-      UidSrcPath   & path    = n.src_path[ i ];
-      ForwardCache & forward = this->forward_path[ i ];
-      if ( ! this->peer_dist.get_path( forward, uid, i, path ) ) {
+    for ( uint32_t path_select = 0; path_select < path_cnt; path_select++ ) {
+      ForwardCache & forward = this->forward_path[ path_select ];
+      UidSrcPath   & path    = forward.path[ uid ];
+      if ( path.cost == 0 ) {
         if ( debug_usr )
-          n.printf( "no route, path %u\n", i );
+          n.printf( "no route, path %u\n", path_select );
       }
       else {
         u_ptr = n.user_route_ptr( *this, path.tport );
@@ -1169,32 +1175,35 @@ UserDB::find_adjacent_routes( void ) noexcept
           this->push_user_route( n, *u_ptr );
         }
         /* primary go to other */
-        if ( i > 0 && u_ptr->is_valid() ) {
+        if ( path_select > 0 && u_ptr->is_valid() ) {
           if ( debug_usr )
-            n.printf( "new route, path %u tport=%u (%s)\n", i, path.tport,
-                      u_ptr->rte.name );
-          if ( n.bloom_rt[ i ] != NULL ) {
-            n.bloom_rt[ i ]->del_bloom_ref( &n.bloom );
-            n.bloom_rt[ i ]->remove_if_empty();
-            n.bloom_rt[ i ] = NULL;
+            n.printf( "new route, path %u tport=%u (%s)\n", path_select,
+                      path.tport, u_ptr->rte.name );
+          if ( n.bloom_rt[ path_select ] != NULL ) {
+            n.bloom_rt[ path_select ]->del_bloom_ref( &n.bloom );
+            n.bloom_rt[ path_select ]->remove_if_empty();
+            n.bloom_rt[ path_select ] = NULL;
           }
-          n.bloom_rt[ i ] = u_ptr->rte.sub_route.create_bloom_route(
-                                               u_ptr->mcast.fd, &n.bloom, i );
+          n.bloom_rt[ path_select ] = u_ptr->rte.sub_route.create_bloom_route(
+                                       u_ptr->mcast.fd, &n.bloom, path_select );
         }
         /*this->check_bloom_route2();*/
       }
     }
-    UidSrcPath & path = n.src_path[ 0 ];
+    /* if path count was larger before */
+    for ( uint32_t x = path_cnt; x < n.bloom_rt.count; x++ ) {
+      if ( n.bloom_rt.ptr[ x ] != NULL ) {
+        n.bloom_rt.ptr[ x ]->del_bloom_ref( &n.bloom );
+        n.bloom_rt.ptr[ x ]->remove_if_empty();
+        n.bloom_rt.ptr[ x ] = NULL;
+      }
+    }
+    /* update primary route */
+    ForwardCache & forward = this->forward_path[ 0 ];
+    UidSrcPath   & path    = forward.path[ uid ];
     if ( path.cost == 0 ) {
       if ( debug_usr )
-        n.printf( "primary tport %u (%u,%u,%u,%u) [%u,%u,%u,%u]\n",
-                  n.primary_route,
-                  n.src_path[ 0 ].tport,
-                  n.src_path[ 1 ].tport, n.src_path[ 2 ].tport,
-                  n.src_path[ 3 ].tport,
-                  n.src_path[ 0 ].cost,
-                  n.src_path[ 1 ].cost, n.src_path[ 2 ].cost,
-                  n.src_path[ 3 ].cost );
+        n.printf( "no primary route yet\n" );
       continue;
     }
     u_ptr    = n.user_route_ptr( *this, path.tport );
@@ -1259,6 +1268,13 @@ bool
 UserDB::check_blooms( void ) noexcept
 {
   bool failed = false;
+
+  uint32_t path_cnt = this->peer_dist.get_path_count();
+  for ( uint32_t path_select = 0; path_select < path_cnt; path_select++ ) {
+    ForwardCache & forward = this->forward_path[ path_select ];
+    this->peer_dist.update_path( forward, path_select );
+  }
+
   for ( uint32_t uid = 1; uid < this->next_uid; uid++ ) {
     uint32_t no_path = 0, invalid = 0, null_bloom = 0, fd_not_set = 0;
     if ( this->bridge_tab.ptr[ uid ] == NULL )
@@ -1267,20 +1283,20 @@ UserDB::check_blooms( void ) noexcept
     if ( ! n.is_set( AUTHENTICATED_STATE ) )
       continue;
 
-    for ( uint8_t i = 0; i < COST_PATH_COUNT; i++ ) {
-      UidSrcPath   & path    = n.src_path[ i ];
-      ForwardCache & forward = this->forward_path[ i ];
-      if ( ! this->peer_dist.get_path( forward, uid, i, path ) ) {
-        no_path |= 1 << i;
+    for ( uint32_t path_select = 0; path_select < path_cnt; path_select++ ) {
+      ForwardCache & forward = this->forward_path[ path_select ];
+      UidSrcPath   & path    = forward.path[ uid ];
+      if ( path.cost == 0 ) {
+        no_path |= 1 << path_select;
       }
       else {
         UserRoute * u_ptr = n.user_route_ptr( *this, path.tport );
         if ( u_ptr == NULL || ! u_ptr->is_valid() )
-          invalid |= 1 << i;
-        else if ( n.bloom_rt[ i ] == NULL )
-          null_bloom |= 1 << i;
-        else if ( n.bloom_rt[ i ]->r != (uint32_t) u_ptr->mcast.fd )
-          fd_not_set |= 1 << i;
+          invalid |= 1 << path_select;
+        else if ( n.bloom_rt[ path_select ] == NULL )
+          null_bloom |= 1 << path_select;
+        else if ( n.bloom_rt[ path_select ]->r != (uint32_t) u_ptr->mcast.fd )
+          fd_not_set |= 1 << path_select;
       }
     }
 
@@ -1777,13 +1793,12 @@ UserDB::remove_authenticated( UserBridge &n,  AuthStage bye ) noexcept
        n.bloom.has_link( this->ipc_transport->fd ) )
     this->ipc_transport->sub_route.do_notify_bloom_deref( n.bloom );
   n.bloom.unlink( false );
-  for ( uint8_t i = 0; i < COST_PATH_COUNT; i++ ) {
-    if ( n.bloom_rt[ i ] != NULL ) {
-      n.bloom_rt[ i ]->remove_if_empty();
-      n.bloom_rt[ i ] = NULL;
+  uint32_t path_select = 0;
+  for ( ; path_select < n.bloom_rt.count; path_select++ ) {
+    if ( n.bloom_rt.ptr[ path_select ] != NULL ) {
+      n.bloom_rt.ptr[ path_select ]->remove_if_empty();
+      n.bloom_rt.ptr[ path_select ] = NULL;
     }
-    n.forward_path[ i ].reset();
-    n.src_path[ i ].zero();
   }
   if ( n.bloom_uid != NULL ) {
     n.bloom_uid->remove_if_empty();
@@ -1897,16 +1912,12 @@ UserDB::set_mesh_url( UserRoute &u_rte,  const MsgHdrDecoder &dec,
 void
 UserDB::add_bloom_routes( UserBridge &n,  TransportRoute &rte ) noexcept
 {
-  BloomRoute *rt = rte.router_rt[ 0 ];
+  BloomRoute *rt = rte.router_rt;
   if ( ! n.bloom.has_link( rt->r ) ) {
     rt->add_bloom_ref( &n.bloom );
     if ( rte.is_set( TPORT_IS_IPC ) )
       rte.sub_route.do_notify_bloom_ref( n.bloom );
-    for ( uint8_t i = 1; i < COST_PATH_COUNT; i++ )
-      rte.router_rt[ i ]->add_bloom_ref( &n.bloom );
-    d_usr( "add_bloom_ref( %s, %s )\n", n.peer.user.val, rte.name );
   }
-  /*this->check_bloom_route2();*/
 }
 
 void

@@ -32,6 +32,9 @@ UserDB::make_hb( TransportRoute &rte,  const char *sub,  size_t sublen,
   }
 
   uint64_t uptime = rte.hb_mono_time - this->start_mono_time;
+  char     cost_buf[ 64 ];
+  size_t   cost_len = rte.uid_connected.cost.str_size( cost_buf,
+                                                       sizeof( cost_buf ) );
   if ( uptime == 0 )
     uptime = 1;
 
@@ -57,10 +60,7 @@ UserDB::make_hb( TransportRoute &rte,  const char *sub,  size_t sublen,
    .expires       ( this->user.expires.len )
    .ucast_url     ( rte.ucast_url.len )
    .mesh_url      ( mesh_url.len )
-   .cost          ()
-   .cost2         ()
-   .cost3         ()
-   .cost4         ()
+   .adj_cost      ( cost_len )
    .tportid       ()
    .tport         ( rte.transport.tport.len )
    .host_id       ()
@@ -105,12 +105,8 @@ UserDB::make_hb( TransportRoute &rte,  const char *sub,  size_t sublen,
       m.ucast_url( rte.ucast_url.val, rte.ucast_url.len );
     if ( mesh_url.len != 0 )
       m.mesh_url( mesh_url.val, mesh_url.len );
-    if ( rte.uid_connected.is_advertised ) {
-      m.cost( rte.uid_connected.cost[ 0 ] );
-      m.cost2( rte.uid_connected.cost[ 1 ] );
-      m.cost3( rte.uid_connected.cost[ 2 ] );
-      m.cost4( rte.uid_connected.cost[ 3 ] );
-    }
+    if ( rte.uid_connected.is_advertised )
+      m.adj_cost( cost_buf, cost_len );
     m.tportid( rte.tport_id );
     m.tport  ( rte.transport.tport.val, rte.transport.tport.len );
     m.host_id( this->host_id );
@@ -140,12 +136,18 @@ UserDB::push_hb_time( TransportRoute &rte,  uint64_t time,  uint64_t mono ) noex
   rte.auth[ 0 ].time   = rte.hb_time;
   rte.auth[ 0 ].seqno  = rte.hb_seqno;
 
-  rte.hb_cnonce          = this->cnonce->calc();
-  rte.hb_time            = time;
+  rte.hb_cnonce    = this->cnonce->calc();
+  rte.hb_time      = time;
+  rte.hb_mono_time = mono;
   rte.hb_seqno++;
-  rte.hb_mono_time       = mono;
-  rte.last_connect_count = rte.connect_count;
-  rte.last_hb_count      = rte.hb_count;
+  if ( rte.last_connect_count != rte.connect_count ) {
+    rte.last_connect_count = rte.connect_count;
+    rte.hb_fast = 3;
+  }
+  else {
+    if ( rte.hb_fast > 0 )
+      rte.hb_fast--;
+  }
 }
 
 void
@@ -206,10 +208,11 @@ UserDB::interval_hb( uint64_t cur_mono,  uint64_t cur_time ) noexcept
       bool do_hb = false;
       if ( rte->hb_mono_time + ival < cur_mono + ival / 64 )
         do_hb = true;
-       else if ( ! rte->is_mcast() ) {
-         if ( rte->hb_count != rte->last_hb_count ||
-              rte->connect_count != rte->last_connect_count )
-           do_hb = true;
+      else if ( ! rte->is_mcast() ) {
+        if ( rte->connect_count != rte->last_connect_count ||
+             rte->hb_fast > 0 ) {
+          do_hb = true;
+        }
       }
       if ( do_hb ) {
         if ( debug_hb )
@@ -328,25 +331,22 @@ UserDB::on_heartbeat( const MsgFramePublish &pub,  UserBridge &n,
 #endif
   TransportRoute & rte = pub.rte;
   if ( pub.status == FRAME_STATUS_OK && n.is_set( AUTHENTICATED_STATE ) ) {
-    uint32_t  cost[ COST_PATH_COUNT ] = { COST_DEFAULT, COST_DEFAULT,
-                                          COST_DEFAULT, COST_DEFAULT },
-              rem_tport_id = 0;
     uint64_t  ms;
     StringVal tport;
+    uint32_t  rem_tport_id = 0;
 
     dec.get_ival<uint32_t>( FID_TPORTID, rem_tport_id );
     if ( dec.test( FID_TPORT ) ) {
       tport.val = (const char *) dec.mref[ FID_TPORT ].fptr;
       tport.len = dec.mref[ FID_TPORT ].fsize;
     }
+    AdjCost cost;
     bool adv_cost = false;
-    if ( dec.get_ival<uint32_t>( FID_COST, cost[ 0 ] ) ) {
-      dec.get_ival<uint32_t>( FID_COST2, cost[ 1 ] );
-      dec.get_ival<uint32_t>( FID_COST3, cost[ 2 ] );
-      dec.get_ival<uint32_t>( FID_COST4, cost[ 3 ] );
-      adv_cost = true;
+    if ( dec.test( FID_ADJ_COST ) ) {
+      if ( cost.parse( (char *) dec.mref[ FID_ADJ_COST ].fptr,
+                       dec.mref[ FID_ADJ_COST ].fsize ) == AdjCost::COST_OK )
+        adv_cost = true;
     }
-
     if ( ! rte.uid_connected.is_member( n.uid ) ) {
       if ( debug_hb )
         n.printf( "authenticated but not a uid member (%s)\n", rte.name );
@@ -375,12 +375,7 @@ UserDB::on_heartbeat( const MsgFramePublish &pub,  UserBridge &n,
       this->uid_hb_count++;
     }
     bool b;
-    if ( adv_cost ) {
-      b = rte.update_cost( n, tport, cost, rem_tport_id, "hb1" );
-    }
-    else {
-      b = rte.update_cost( n, tport, NULL, rem_tport_id, "hb2" );
-    }
+    b = rte.update_cost( n, tport, adv_cost ? &cost : NULL, rem_tport_id, "hb" );
     if ( ! b ) {
       if ( debug_hb )
         n.printf( "bad transport cost (%s)\n", rte.name );
@@ -756,7 +751,7 @@ UserDB::mcast_sync( TransportRoute &rte ) noexcept
   static const uint32_t m_sync_len = sizeof( m_sync ) - 1;
 
   ForwardCache & forward = this->forward_path[ 0 ];
-  this->peer_dist.update_forward_cache( forward, 0, 0 );
+  this->peer_dist.update_path( forward, 0 );
   if ( ! forward.is_member( rte.tport_id ) )
     return;
 

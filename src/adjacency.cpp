@@ -75,55 +75,83 @@ AdjDistance::uid_set_names( kv::UIntBitSet &set,  char *buf,
 }
 
 void
+AdjDistance::update_graph( void ) noexcept
+{
+  UserBridgeList   list;
+  UserBridgeElem * el;
+
+  this->graph = new ( this->make( sizeof( AdjGraph ) ) ) AdjGraph( *this );
+
+  list.add_users( this->user_db, *this );
+  list.sort<UserBridgeList::cmp_start>();
+
+  this->graph_idx_order = this->mkar<uint32_t>( this->max_uid );
+  uint32_t * idx = this->graph_idx_order;
+  AdjGraph & g   = *this->graph;
+
+  for ( el = list.hd; el != NULL; el = el->next ) {
+    StringVal & name = ( el->uid == 0 ? this->user_db.user.user :
+                         this->user_db.bridge_tab.ptr[ el->uid ]->peer.user );
+    AdjUser *u     = g.add_user( name, el->uid );
+    idx[ el->uid ] = u->idx;
+  }
+
+  for ( uint32_t i = 0; i < g.user_tab.count; i++ ) {
+    AdjUser * u1    = g.user_tab.ptr[ i ];
+    uint32_t  count = this->user_db.peer_dist.adjacency_count( u1->uid );
+
+    for ( uint32_t t = 0; t < count; t++ ) {
+      AdjacencySpace *set = this->user_db.peer_dist.adjacency_set( u1->uid, t );
+      if ( set == NULL )
+        continue;
+
+      uint32_t b;
+      for ( bool ok = set->first( b ); ok; ok = set->next( b ) ) {
+        AdjUser *u2 = g.user_tab.ptr[ idx[ b ] ];
+        if ( debug_adj )
+          printf( "add %s link %s.%u -> %s.%u tid=%u\n",
+                  set->tport.val, u1->user.val, u1->uid, u2->user.val, u2->uid, t );
+        g.add_link( u1, u2, set->tport, set->tport_type, set->cost, t );
+      }
+    }
+  }
+  for ( uint16_t p = 0; p < g.path_count; p++ )
+    g.compute_forward_set( p );
+}
+
+void
 AdjDistance::clear_cache( void ) noexcept
 {
   if ( this->graph != NULL ) {
     this->graph->reset();
     this->graph = NULL;
   }
-  uint32_t uid_cnt   = this->user_db.next_uid,
-           rte_cnt   = (uint32_t) this->user_db.transport_tab.count;
-  this->cache_seqno  = this->update_seqno;
-  this->prune_seqno  = 0;
-  this->max_tport    = rte_cnt;
-  this->max_uid      = uid_cnt;
+  if ( this->cache_ht != NULL ) {
+    delete this->cache_ht;
+    this->cache_ht = NULL;
+  }
+  uint32_t uid_cnt  = this->user_db.next_uid,
+           rte_cnt  = (uint32_t) this->user_db.transport_tab.count;
+  uint64_t stamp    = kv::current_monotonic_time_ns();
+  if ( stamp <= this->clear_stamp ) stamp = this->clear_stamp + 1;
+  this->clear_stamp = stamp;
+  this->cache_seqno = this->update_seqno;
+  this->max_tport   = rte_cnt;
+  this->max_uid     = uid_cnt;
   this->reuse();
+  this->update_graph();
 
-  size_t isz  = kv::UIntBitSet::size( uid_cnt ),
-         wsz  = uid_cnt * this->max_tport,
-         size = uid_cnt * sizeof( UidDist ) +    /* stack */
-                uid_cnt * sizeof( uint32_t ) +   /* visit */
-                uid_cnt * sizeof( uint32_t ) +   /* inc_list */
-                uid_cnt * sizeof( uint32_t ) +   /* graph_idx_order */
-                uid_cnt * sizeof( UidSrcPath ) * COST_PATH_COUNT + /* x */
-                isz     * sizeof( uint64_t ) +   /* inc_visit */
-                wsz     * sizeof( uint32_t ) * COST_PATH_COUNT;/* cache */
+  this->path_count    = this->graph->path_count;
+  this->stack         = this->mkar<UidDist>( uid_cnt );
+  this->visit         = this->mkar<uint32_t>( uid_cnt );
+  this->inc_list      = this->mkar<uint32_t>( uid_cnt );
+  this->inc_visit.ptr = this->mkar<uint64_t>( UIntBitSet::size( uid_cnt ) );
 
-  void     *p = this->make( size );
-  uint64_t *m = (uint64_t *) p;
-  ::memset( p, 0, size );
-  this->inc_visit.ptr = m; m += isz;
-  this->stack         = (UidDist *) m; m = &m[ uid_cnt ];
-
-  uint32_t *n = (uint32_t *) (void *) m;
-  this->cache           = n; n += wsz * COST_PATH_COUNT;
-  this->visit           = n; n += uid_cnt;
-  this->inc_list        = n; n += uid_cnt;
-  this->graph_idx_order = n; n += uid_cnt;
-
-  UidSrcPath *x = (UidSrcPath *) (void *) n;
-  for ( uint8_t i = 0; i < COST_PATH_COUNT; i++ ) {
-    this->x[ i ].path = x; x = &x[ uid_cnt ];
-  }
-
-  if ( (char *) (void *) x != (char *) p + size ) {
-    fprintf( stderr, "cache allocation is wrong\n" );
-  }
   this->miss_tos            = 0;
   this->inc_hd              = 0;
   this->inc_tl              = 0;
   this->inc_run_count       = 0;
-  this->last_run_mono       = kv::current_monotonic_time_ns();
+  this->last_run_mono       = stamp;
   this->inc_running         = false;
   this->found_inconsistency = false;
 }
@@ -233,7 +261,7 @@ AdjDistance::match_target_set( uint32_t source_uid,  uint32_t target_uid,
     if ( set.rem_tport_id < count2 ) {
       set2 = this->adjacency_set( target_uid, set.rem_tport_id );
       if ( set2 != NULL && set2->is_member( source_uid ) &&
-           ::memcmp( set.cost, set2->cost, sizeof( set.cost ) ) == 0 )
+           set.cost.equals( set2->cost ) )
         return true;
     }
   }
@@ -241,7 +269,7 @@ AdjDistance::match_target_set( uint32_t source_uid,  uint32_t target_uid,
     for ( uint32_t tport_id = 0; tport_id < count2; tport_id++ ) {
       set2 = this->adjacency_set( target_uid, tport_id );
       if ( set2 != NULL && set2->is_member( source_uid ) &&
-           ::memcmp( set.cost, set2->cost, sizeof( set.cost ) ) == 0 )
+           set.cost.equals( set2->cost ) )
         return true;
     }
   }
@@ -289,7 +317,7 @@ AdjDistance::outbound_refs( uint32_t from ) noexcept
 /* find dest through src */
 uint32_t
 AdjDistance::calc_cost( uint32_t src_uid,  uint32_t dest_uid,
-                        uint8_t path_select ) noexcept
+                        uint16_t path_select ) noexcept
 {
   uint32_t i, uid, tos = 0;
 
@@ -319,7 +347,7 @@ AdjDistance::calc_cost( uint32_t src_uid,  uint32_t dest_uid,
 
 uint32_t
 AdjDistance::search_cost( uint32_t dest_uid,  uint32_t tos,
-                          uint8_t path_select ) noexcept
+                          uint16_t path_select ) noexcept
 {
   uint32_t min_cost = COST_MAXIMUM;
 
@@ -363,10 +391,29 @@ AdjDistance::search_cost( uint32_t dest_uid,  uint32_t tos,
   }
   return min_cost;
 }
+
+uint32_t
+AdjDistance::calc_transport_cache( uint32_t dest_uid,  uint32_t tport_id,
+                                   uint16_t path_select ) noexcept
+{
+  this->clear_cache_if_dirty();
+
+  size_t   pos;
+  uint32_t h = kv_hash_uint( tport_id * this->max_uid + dest_uid ),
+           val;
+  if ( this->cache_ht == NULL )
+    this->cache_ht = kv::UIntHashTab::resize( NULL );
+  if ( this->cache_ht->find( h, pos, val ) )
+    return val;
+  val = this->calc_transport_cost( dest_uid, tport_id, path_select );
+  this->cache_ht->set_rsz( this->cache_ht, h, pos, val );
+  return val;
+}
+
 /* find dest through transport */
 uint32_t
 AdjDistance::calc_transport_cost( uint32_t dest_uid,  uint32_t tport_id,
-                                  uint8_t path_select ) noexcept
+                                  uint16_t path_select ) noexcept
 {
   AdjacencySpace * set = this->adjacency_set( 0, tport_id );
   if ( set == NULL )
@@ -390,183 +437,13 @@ AdjDistance::calc_transport_cost( uint32_t dest_uid,  uint32_t tport_id,
   return cost;
 }
 
-uint64_t
-AdjDistance::get_start_time( uint32_t uid ) const noexcept
-{
-  if ( uid == 0 )
-    return this->user_db.start_time;
-  return this->user_db.bridge_tab.ptr[ uid ]->start_time;
-}
-
-bool
-AdjDistance::is_older( uint32_t uid,  uint32_t uid2 ) const noexcept
-{
-  return this->get_start_time( uid ) < this->get_start_time( uid2 );
-}
-
 void
-AdjDistance::prune_adjacency_sets( void ) noexcept
+AdjDistance::calc_path( ForwardCache &fc,  uint16_t p ) noexcept
 {
-  kv::ArrayCount<AdjacencySpace *, 32> uid_ref;
-  this->prune_seqno = this->cache_seqno;
-  d_adj( "update prune seqno %" PRIu64 "\n", this->prune_seqno );
-
-  for ( uint32_t uid = 0; uid < this->max_uid; uid++ ) {
-    uint32_t count = this->adjacency_count( uid ),
-             rem_uid;
-    AdjacencySpace * set;
-    for ( uint32_t tport_id = 0; tport_id < count; tport_id++ ) {
-      if ( (set = this->adjacency_set( uid, tport_id )) == NULL )
-        continue;
-      set->prune_path = 0;
-    }
-    d_adj( "%s.%u adj_count %u\n", this->uid_user( uid ), uid, count );
-    for ( uint8_t path_select = 0; path_select < COST_PATH_COUNT;
-          path_select++ ) {
-      uid_ref.zero();
-      for ( uint32_t tport_id = 0; tport_id < count; tport_id++ ) {
-        if ( (set = this->adjacency_set( uid, tport_id )) == NULL )
-          continue;
-        rem_uid = set->rem_uid;
-        if ( rem_uid != 0 ) {
-          if ( ! this->user_db.uid_authenticated.is_member( rem_uid ) ) {
-            /* could be a zombie */
-            continue;
-          }
-        }
-        if ( ! set->is_member( rem_uid ) ) {
-          /* uid needs to update this set, rem_uid is not connected */
-          continue;
-        }
-        set->next_link = NULL;
-        AdjacencySpace * set2 = uid_ref[ rem_uid ];
-        /* better cost */
-        if ( set2 == NULL ||
-             set->cost[ path_select ] < set2->cost[ path_select ] ) {
-          uid_ref.ptr[ set->rem_uid ] = set;
-          continue;
-        }
-        if ( set->cost[ path_select ] > set2->cost[ path_select ] )
-          continue;
-
-        int cmp;
-        bool is_old = this->is_older( set->uid, set2->rem_uid );
-        if ( is_old )
-          cmp = ( set->tport_id < set2->tport_id ? -1 : 1 );
-        else
-          cmp = ( set->rem_tport_id < set2->rem_tport_id ? -1 : 1 );
-        /* order sets by tport_id, lowest id of the oldest peer wins  */
-        if ( cmp < 0 ) {
-          set->next_link = uid_ref.ptr[ rem_uid ];
-          uid_ref.ptr[ set->rem_uid ] = set;
-          continue;
-        }
-        /* insert into list */
-        for (;;) {
-          AdjacencySpace * next = set2->next_link;
-          if ( next == NULL ) {
-            set2->next_link = set;
-            break;
-          }
-          if ( is_old )
-            cmp = ( set->tport_id < next->tport_id ? -1 : 1 );
-          else
-            cmp = ( set->rem_tport_id < next->rem_tport_id ? -1 : 1 );
-          if ( cmp < 0 ) {
-            set->next_link = next;
-            set2->next_link = set;
-            break;
-          }
-          set2 = next;
-        }
-      }
-      /* mark links that should be used with the path_select */
-      for ( rem_uid = 0; rem_uid < uid_ref.count; rem_uid++ ) {
-        set = uid_ref.ptr[ rem_uid ];
-        if ( set == NULL )
-          continue;
-        if ( path_select == 0 || set->next_link == NULL )
-          set->prune_path |= 1 << path_select;
-        else {
-          AdjacencySpace * path_set[ COST_PATH_COUNT ];
-          uint8_t n = 0, i;
-          for ( i = 0; i < COST_PATH_COUNT; i++ ) {
-            path_set[ n++ ] = set;
-            if ( (set = set->next_link) == NULL )
-              break;
-          }
-          path_set[ path_select % n ]->prune_path |= 1 << path_select;
-        }
-      }
-    }
-    if ( debug_adj ) {
-      for ( uint32_t tport_id = 0; tport_id < count; tport_id++ ) {
-        if ( (set = this->adjacency_set( uid, tport_id )) == NULL )
-          continue;
-        printf( "%s.%u %s.%u prune_path %u\n",
-                this->uid_user( uid ), uid,
-                set->tport.val, tport_id, set->prune_path );
-      }
-    }
-  }
-}
-
-void
-AdjDistance::update_graph( void ) noexcept
-{
-  UserBridgeList   list;
-  UserBridgeElem * el;
-
-  if ( this->prune_seqno != this->cache_seqno )
-    this->prune_adjacency_sets();
-  this->graph = new ( this->make( sizeof( AdjGraph ) ) ) AdjGraph( *this );
-
-  list.add_users( this->user_db, *this );
-  list.sort<UserBridgeList::cmp_start>();
-
-  uint32_t * idx = this->graph_idx_order;
-  AdjGraph & g   = *this->graph;
-
-  for ( el = list.hd; el != NULL; el = el->next ) {
-    StringVal & name = ( el->uid == 0 ? this->user_db.user.user :
-                         this->user_db.bridge_tab.ptr[ el->uid ]->peer.user );
-    AdjUser *u     = g.add_user( name, el->uid );
-    idx[ el->uid ] = u->idx;
-  }
-
-  for ( uint32_t i = 0; i < g.user_tab.count; i++ ) {
-    AdjUser * u1    = g.user_tab.ptr[ i ];
-    uint32_t  count = this->user_db.peer_dist.adjacency_count( u1->uid );
-
-    for ( uint32_t t = 0; t < count; t++ ) {
-      AdjacencySpace *set = this->user_db.peer_dist.adjacency_set( u1->uid, t );
-      if ( set == NULL || set->prune_path == 0 )
-        continue;
-
-      uint32_t b;
-      for ( bool ok = set->first( b ); ok; ok = set->next( b ) ) {
-        AdjUser *u2 = g.user_tab.ptr[ idx[ b ] ];
-        g.add_link( u1, u2, set->tport, set->tport_type, set->cost,
-                    COST_PATH_COUNT, set->prune_path, t );
-      }
-    }
-  }
-  for ( uint8_t p = 0; p < COST_PATH_COUNT; p++ )
-    g.compute_forward_set( p );
-}
-
-void
-AdjDistance::calc_path( ForwardCache &fc,  uint8_t p ) noexcept
-{
-  if ( this->graph == NULL )
-    this->update_graph();
-
-  UidSrcPath * path  = this->x[ p ].path;
-  this->x[ p ].seqno = this->update_seqno;
-
-  for ( uint32_t uid = 0; uid < this->max_uid; uid++ )
-    path[ uid ].zero();
-  fc.init( this->adjacency_count( 0 ), this->cache_seqno );
+  uint32_t   count = this->adjacency_count( 0 );
+  uint64_t * m     = this->mkar<uint64_t>( fc.size( count ) );
+  fc.init( count, this->cache_seqno, m );
+  fc.path = this->mkar<UidSrcPath>( this->max_uid );
 
   uint32_t * idx = this->graph_idx_order;
   AdjUser  * me  = this->graph->user_tab.ptr[ idx[ 0 ] ];
@@ -577,7 +454,6 @@ AdjDistance::calc_path( ForwardCache &fc,  uint8_t p ) noexcept
     link = me->links.ptr[ src ];
     if ( link->dest[ p ].count() != 0 ) {
       fc.add( link->tid );
-      fc.fwd_count++;
     }
   }
   AdjFwdTab & fwd = me->fwd[ p ];
@@ -586,20 +462,21 @@ AdjDistance::calc_path( ForwardCache &fc,  uint8_t p ) noexcept
     link = fwd.links.ptr[ j ];
     cost = fwd.cost.ptr[ j ];
     uid  = link->b.uid;
-    path[ uid ].tport   = me->links.ptr[ src ]->tid;
-    path[ uid ].src_uid = link->a.uid;
-    path[ uid ].cost    = cost;
+    fc.path[ uid ].tport   = me->links.ptr[ src ]->tid;
+    fc.path[ uid ].src_uid = link->a.uid;
+    fc.path[ uid ].cost    = cost;
   }
 }
 
 void
-AdjDistance::calc_forward_cache( ForwardCache &fc,  uint32_t src_uid,
-                                 uint8_t p ) noexcept
+AdjDistance::calc_source_path( ForwardCache &fc,  uint32_t src_uid,
+                               uint16_t p ) noexcept
 {
-  if ( this->graph == NULL )
-    this->update_graph();
-
-  fc.init( this->adjacency_count( 0 ), this->cache_seqno );
+  if ( src_uid == 0 )
+    return this->calc_path( fc, p );
+  uint32_t   count = this->adjacency_count( 0 );
+  uint64_t * m     = this->mkar<uint64_t>( fc.size( count ) );
+  fc.init( count, this->cache_seqno, m );
 
   uint32_t * idx = this->graph_idx_order;
   AdjUser  * u   = this->graph->user_tab.ptr[ idx[ src_uid ] ];

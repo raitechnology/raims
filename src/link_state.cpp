@@ -20,17 +20,8 @@ AdjacencyRec::set_field( uint32_t fid,  MDReference &mref ) noexcept
     case FID_TPORTID:
       cvt_number<uint32_t>( mref, this->tportid );
       break;
-    case FID_COST:
-      cvt_number<uint32_t>( mref, this->cost[ 0 ] );
-      break;
-    case FID_COST2:
-      cvt_number<uint32_t>( mref, this->cost[ 1 ] );
-      break;
-    case FID_COST3:
-      cvt_number<uint32_t>( mref, this->cost[ 2 ] );
-      break;
-    case FID_COST4:
-      cvt_number<uint32_t>( mref, this->cost[ 3 ] );
+    case FID_ADJ_COST:
+      this->cost.parse( (char *) mref.fptr, mref.fsize );
       break;
     case FID_TPORT:
       this->tport_name.val = (const char *) mref.fptr;
@@ -64,21 +55,20 @@ AdjacencyRec::set_field( uint32_t fid,  MDReference &mref ) noexcept
 void
 AdjacencyRec::print( void ) const noexcept
 {
-  char buf[ NONCE_B64_LEN + 1 ], buf2[ NONCE_B64_LEN + 1 ];
+  char buf[ NONCE_B64_LEN + 1 ], buf2[ NONCE_B64_LEN + 1 ], buf3[ 64 ];
   if ( this->test( FID_REM_BRIDGE ) )
     this->rem_bridge.to_base64_str( buf2 );
   else
     buf2[ 0 ] = '\0';
   printf( "  %cnonce[%s] %ctport_name[%.*s.%.*s], %cuser[%.*s], "
-          "%ctport[%u] %ccost[%u,%u,%u,%u], "
+          "%ctport[%u] %ccost[%s], "
           "%crem_bridge[%s], %crem_tportid[%u]\n",
     this->tchar( FID_BRIDGE ),     this->nonce.to_base64_str( buf ),
     this->tchar( FID_TPORT ),      this->tport_name.len, this->tport_name.val,
                                    this->tport_type.len, this->tport_type.val,
     this->tchar( FID_USER ),       this->user.len, this->user.val,
     this->tchar( FID_TPORTID ),    this->tportid,
-    this->tchar( FID_COST ),       this->cost[ 0 ], this->cost[ 1 ],
-                                   this->cost[ 2 ], this->cost[ 3 ],
+    this->tchar( FID_ADJ_COST ),   this->cost.str( buf3, sizeof( buf3 ) ),
     this->tchar( FID_REM_BRIDGE ), buf2,
     this->tchar( FID_REM_TPORTID ), this->rem_tportid );
 }
@@ -622,11 +612,13 @@ UserDB::close_source_route( uint32_t fd ) noexcept
     if ( this->bridge_tab.ptr[ uid ] == NULL )
       continue;
     UserBridge & n = *this->bridge_tab.ptr[ uid ];
-    for ( uint8_t i = 0; i < COST_PATH_COUNT; i++ ) {
-      if ( n.bloom_rt[ i ] != NULL && n.bloom_rt[ i ]->r == fd ) {
-        n.bloom_rt[ i ]->del_bloom_ref( &n.bloom );
-        n.bloom_rt[ i ]->remove_if_empty();
-        n.bloom_rt[ i ] = NULL;
+    for ( uint32_t path_select = 0; path_select < n.bloom_rt.count;
+          path_select++ ) {
+      BloomRoute * rt = n.bloom_rt[ path_select ];
+      if ( rt != NULL && rt->r == fd ) {
+        rt->del_bloom_ref( &n.bloom );
+        rt->remove_if_empty();
+        n.bloom_rt.ptr[ path_select ] = NULL;
       }
     }
   }
@@ -648,19 +640,19 @@ UserDB::send_adjacency_change( void ) noexcept
   TransportRoute * rte;
   UserBridge     * n, * rem;
   AdjChange      * p = this->adjacency_change.hd;
+  char             cost_buf[ 64 ];
+  size_t           cost_len;
   
   this->msg_send_counter[ U_ADJACENCY ]++;
   MsgEst adj;
   for ( ; p != NULL; p = p->next ) {
     rte = this->transport_tab.ptr[ p->tportid ];
     n   = this->bridge_tab.ptr[ p->uid ];
+    cost_len = rte->uid_connected.cost.str_size( cost_buf, sizeof( cost_buf ) );
 
     adj.tportid()
        .link_add()
-       .cost()
-       .cost2()
-       .cost3()
-       .cost4()
+       .adj_cost( cost_len )
        .tport( rte->transport.tport.len )
        .tport_type( rte->transport.type.len );
     if ( n != NULL )
@@ -671,10 +663,8 @@ UserDB::send_adjacency_change( void ) noexcept
        .rem_bridge()
        .rem_tportid();
 
-    d_lnk( "send chg: %s %s cost %u,%u,%u,%u\n", p->add ? "add" : "remove",
-      n != NULL ? n->peer.user.val : this->user.user.val,
-      rte->uid_connected.cost[ 0 ], rte->uid_connected.cost[ 1 ],
-      rte->uid_connected.cost[ 2 ], rte->uid_connected.cost[ 3 ] );
+    d_lnk( "send chg: %s %s cost %s\n", p->add ? "add" : "remove",
+      n != NULL ? n->peer.user.val : this->user.user.val, cost_buf );
   }
 
   MsgEst e( Z_ADJ_SZ );
@@ -701,12 +691,11 @@ UserDB::send_adjacency_change( void ) noexcept
     this->events.send_adjacency_change( p->uid, p->add );
     n   = this->bridge_tab.ptr[ p->uid ];
     rte = this->transport_tab.ptr[ p->tportid ];
-    s.tportid( p->tportid )
+    cost_len = rte->uid_connected.cost.str_size( cost_buf, sizeof( cost_buf ) );
+    s.tportid ( p->tportid )
      .link_add( p->add )
-     .cost   ( rte->uid_connected.cost[ 0 ] )
-     .cost2  ( rte->uid_connected.cost[ 1 ] )
-     .cost3  ( rte->uid_connected.cost[ 2 ] )
-     .cost4  ( rte->uid_connected.cost[ 3 ] );
+     .adj_cost( cost_buf, cost_len );
+
     if ( tport_changed( last, p->tportid ) ) {
       s.tport     ( rte->transport.tport.val, rte->transport.tport.len )
        .tport_type( rte->transport.type.val, rte->transport.type.len );
@@ -1004,7 +993,10 @@ UserDB::adjacency_size( UserBridge *sync ) noexcept
   last  = count;
   for ( i = 0; i < count; i++ ) {
     AdjacencySpace * set = this->peer_dist.adjacency_set( sync_uid, i );
+    char     cost_buf[ 64 ];
+    size_t   cost_len;
     uint32_t rem_cnt = 0;
+
     if ( set == NULL )
       continue;
     for ( bool ok = set->first( uid ); ok; ok = set->next( uid ) ) {
@@ -1013,11 +1005,9 @@ UserDB::adjacency_size( UserBridge *sync ) noexcept
         if ( n2 == NULL )
           continue;
       }
+      cost_len = set->cost.str_size( cost_buf, sizeof( cost_buf ) );
       e.tportid()
-       .cost()
-       .cost2()
-       .cost3()
-       .cost4();
+       .adj_cost( cost_len );
       if ( tport_changed( last, i ) ) {
         e.tport     ( set->tport.len )
          .tport_type( set->tport_type.len );
@@ -1054,6 +1044,8 @@ UserDB::adjacency_submsg( UserBridge *sync,  MsgCat &m ) noexcept
   last  = count;
   for ( i = 0; i < count; i++ ) {
     AdjacencySpace * set = this->peer_dist.adjacency_set( sync_uid, i );
+    char     cost_buf[ 64 ];
+    size_t   cost_len;
     uint32_t rem_cnt = 0;
     if ( set == NULL )
       continue;
@@ -1064,11 +1056,9 @@ UserDB::adjacency_submsg( UserBridge *sync,  MsgCat &m ) noexcept
         if ( n2 == NULL )
           continue;
       }
+      cost_len = set->cost.str_size( cost_buf, sizeof( cost_buf ) );
       s.tportid( i )
-       .cost   ( set->cost[ 0 ] )
-       .cost2  ( set->cost[ 1 ] )
-       .cost3  ( set->cost[ 2 ] )
-       .cost4  ( set->cost[ 3 ] );
+       .adj_cost( cost_buf, cost_len );
       if ( tport_changed( last, i ) ) {
         s.tport     ( set->tport.val, set->tport.len )
          .tport_type( set->tport_type.val, set->tport_type.len );

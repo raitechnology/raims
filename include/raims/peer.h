@@ -304,16 +304,18 @@ struct AdjacencyRec : public MsgFldSet {
                  tport_type,
                  user;
   uint32_t       tportid,
-                 cost[ COST_PATH_COUNT ],
                  rem_tportid;
+  AdjCost        cost;
+  uint32_t       cost_old[ 4 ];
   bool           add;
   AdjacencyRec * next;
   void * operator new( size_t, void *ptr ) { return ptr; }
-  AdjacencyRec() : tportid( 0 ), rem_tportid( 0 ), add( true ), next( 0 ) {
-    for ( uint8_t i = 0; i < COST_PATH_COUNT; i++ )
-      this->cost[ i ] = COST_DEFAULT;
+  AdjacencyRec() : tportid( 0 ), rem_tportid( 0 ),
+                   cost( COST_DEFAULT ), add( true ), next( 0 ) {
     this->nonce.zero();
     this->rem_bridge.zero();
+    for ( uint32_t i = 0; i < 4; i++ )
+      this->cost_old[ i ] = COST_DEFAULT;
   }
   void copy( const AdjacencyRec &rec ) {
     uint32_t i;
@@ -325,8 +327,7 @@ struct AdjacencyRec : public MsgFldSet {
     this->tport_type  = rec.tport_type;
     this->user        = rec.user;
     this->tportid     = rec.tportid;
-    for ( i = 0; i < COST_PATH_COUNT; i++ )
-      this->cost[ i ] = rec.cost[ i ];
+    this->cost        = rec.cost;
     this->rem_tportid = rec.rem_tportid;
     this->add         = rec.add;
     this->next        = NULL;

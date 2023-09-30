@@ -48,7 +48,7 @@ main( int argc, const char *argv[] ) noexcept
                                    show_multicast_tree ||
                                    show_graph ||
                                    show_web_json || do_verify );
-  uint8_t path = atoi( show_path ) & 3;
+  uint8_t path = atoi( show_path );
 
   const char *fn = NULL;
   if ( x < argc )
@@ -96,30 +96,29 @@ main( int argc, const char *argv[] ) noexcept
   if ( status != 0 )
     return 1;
   /*graph.print();*/
-  for ( uint8_t p = 0; p < 4; p++ )
+  for ( uint8_t p = 0; p < graph.path_count; p++ )
     graph.compute_forward_set( p );
   ArrayOutput out;
   AdjGraphOut put( graph, out );
   put.use_loopback = use_loop;
-  int multi_args = show_forward_path + show_multicast_tree +
-                   show_graph + show_web_json;
   if ( show_multicast_tree ) {
-    if ( multi_args ) out.printf( "--- multicast tree (%u):\n", path );
+    out.printf( "--- multicast tree (%u/%u):\n", path, graph.path_count );
     put.print_tree( path, false );
   }
   if ( show_forward_path ) {
-    if ( multi_args ) out.printf( "--- forward path (%u):\n", path );
+    out.printf( "--- forward path (%u/%u):\n", path, graph.path_count );
     put.print_fwd( path );
   }
   if ( show_graph ) {
-    if ( multi_args ) out.printf( "--- graph description:\n" );
+    out.printf( "--- graph description:\n" );
     put.print_graph();
   }
   if ( show_web_json ) {
-    if ( multi_args ) out.printf( "--- web json:\n" );
+    out.printf( "--- web json:\n" );
     put.print_web_paths( 0 );
   }
   if ( do_verify ) {
+    out.printf( "--- verify:\n" );
     AdjInconsistent inc;
     for ( uint32_t i = 0; i < graph.user_tab.count; i++ ) {
       graph.init_inconsistent( i, inc );

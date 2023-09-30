@@ -10,7 +10,8 @@ namespace ms {
 
 struct AdjLink;
 struct AdjLinkTab : public kv::ArrayCount<AdjLink *, 8> {};
-typedef kv::ArrayCount<uint32_t, 32> UIntArrayCount;
+typedef kv::ArrayCount<uint32_t, 16> UIntArrayCount;
+typedef kv::ArrayCount<kv::BitSpace, 16> BitSpaceArray;
 
 struct AdjFwdTab {
   AdjLinkTab     links;
@@ -18,45 +19,125 @@ struct AdjFwdTab {
                  src;
   void reset( void ) noexcept;
 };
+typedef kv::ArrayCount<AdjFwdTab, 16> AdjFwdArray;
 
 struct AdjUser {
-  StringVal  user;
-  AdjLinkTab links;
-  AdjFwdTab  fwd[ 4 ];
-  uint32_t   idx,
-             uid;
+  StringVal   user;
+  AdjLinkTab  links;
+  AdjFwdArray fwd;
+  uint32_t    idx,
+              uid;
   void * operator new( size_t, void *ptr ) { return ptr; }
   AdjUser( StringVal *u,  uint32_t i ) : user( *u ), idx( 0 ), uid( i ) {}
   void reset( void ) noexcept;
 };
 
+struct AdjPath {
+  uint16_t num,
+           count;
+  AdjPath() {}
+  AdjPath( uint16_t p,  uint16_t n ) : num( p ), count( n ) {}
+  AdjPath( const AdjPath &p ) : num( p.num ), count( p.count ) {}
+  AdjPath & operator=( const AdjPath &p ) {
+    this->num   = p.num;
+    this->count = p.count;
+    return *this;
+  }
+  bool equals( const AdjPath &p ) const {
+    return p.num   == this->num &&
+           p.count == this->count;
+  }
+};
+
+struct AdjCost {
+  uint32_t max_cost,
+           min_cost;
+  AdjPath  path;
+  AdjCost() {}
+  AdjCost( uint32_t c ) : max_cost( c ), min_cost( c ), path( 0, 1 ) {}
+  AdjCost( const AdjCost &c ) :
+    max_cost( c.max_cost ), min_cost( c.min_cost ), path( c.path ) {}
+  AdjCost( const uint32_t *cost,  size_t count ) {
+    this->set( cost, count );
+  }
+  AdjCost & operator=( const AdjCost &c ) {
+    this->max_cost = c.max_cost;
+    this->min_cost = c.min_cost;
+    this->path     = c.path;
+    return *this;
+  }
+  enum { COST_OK = 0, BAD_FMT, EMPTY_COST, EMPTY_PATH, BAD_COST };
+  int parse( const char *str,  size_t len ) noexcept;
+  int parse( const char **args,  size_t argc ) noexcept;
+  char * str( char *buf,  size_t len ) const noexcept;
+  size_t str_size( char *buf,  size_t len ) const noexcept;
+  void set( uint32_t cost ) {
+    this->max_cost   = this->min_cost = cost;
+    this->path.num   = 0;
+    this->path.count = 1;
+  }
+  void set( uint32_t min_cost,  uint32_t max_cost,  uint16_t p,  uint16_t n ) {
+    this->max_cost   = max_cost;
+    this->min_cost   = min_cost;
+    this->path.num   = p;
+    this->path.count = n;
+  }
+  void set( const uint32_t *cost,  size_t count ) {
+    size_t i;
+    bool all_same = true;
+    for ( i = 1; i < count; i++ )
+      all_same &= ( cost[ 0 ] == cost[ i ] );
+    if ( all_same )
+      return this->set( cost[ 0 ] );
+    if ( count == 4 && cost[ 0 ] == cost[ 2 ] && cost[ 1 ] == cost[ 3 ] )
+      count = 2;
+    for ( i = 0; ; i++ ) {
+      uint32_t min_cost = cost[ i ],
+               max_cost = cost[ ( i + 1 ) % count ];
+      if ( min_cost < max_cost )
+        return this->set( min_cost, max_cost, i, count );
+    }
+  }
+  uint32_t operator[]( uint16_t p ) const {
+    if ( p % this->path.count == this->path.num )
+      return this->min_cost;
+    return this->max_cost;
+  }
+  bool equals( const AdjCost &c ) const {
+    return c.max_cost == this->max_cost && c.min_cost == this->min_cost &&
+           this->path.equals( c.path );
+  }
+  bool equals( uint32_t cost ) const {
+    return this->max_cost == this->min_cost && cost == this->max_cost;
+  }
+  char op( void ) const {
+    if ( this->path.num == 0 && this->path.count == 1 )
+      return ' ';
+    return '_';
+#if 0
+    if ( this->min_cost + this->max_cost / 10 == this->max_cost )
+      return '-';
+    if ( this->min_cost == this->max_cost / 10 )
+      return '_';
+    if ( this->min_cost == this->max_cost / 100 )
+      return '=';
+    return '^';
+#endif
+  }
+};
+
 struct AdjLink {
-  AdjUser    & a,
-             & b;
-  kv::BitSpace dest[ 4 ];
-  StringVal    tport,
-               type;
-  uint32_t     cost[ 4 ],
-               prune,
-               tid;
+  AdjUser      & a,
+               & b;
+  BitSpaceArray  dest;
+  StringVal      tport,
+                 type;
+  AdjCost        cost;
+  uint32_t       tid;
   void * operator new( size_t, void *ptr ) { return ptr; }
   AdjLink( AdjUser *u1,  AdjUser *u2,  StringVal *tp,  StringVal *ty,
-           uint32_t * c,  uint32_t cnt,  uint32_t pr,  uint32_t id )
-      : a( *u1 ), b( *u2 ), tport( *tp ), type( *ty ), prune( pr ), tid( id ) {
-    for ( uint32_t i = 0; i < 4; i++ ) this->cost[ i ] = c[ i % cnt ];
-  }
-  bool cost_equals( uint32_t c ) const {
-    bool b = true;
-    for ( uint32_t i = 0; i < 4; i++ )
-      b &= ( this->cost[ i ] == c );
-    return b;
-  }
-  bool cost_equals( uint32_t *c ) const {
-    bool b = true;
-    for ( uint32_t i = 0; i < 4; i++ )
-      b &= ( this->cost[ i ] == c[ i ] );
-    return b;
-  }
+           AdjCost *c,  uint32_t id )
+      : a( *u1 ), b( *u2 ), tport( *tp ), type( *ty ), cost( *c ), tid( id ) {}
   void reset( void ) noexcept;
 };
 
@@ -83,48 +164,57 @@ struct AdjInconsistent {
   uint32_t       start_idx;
 };
 
+struct LCM : public kv::ArrayCount<uint32_t, 16> {
+  kv::ArraySpace<uint32_t, 16> tmp;
+  uint32_t val;
+  uint32_t add( uint32_t x ) noexcept;
+  void reset( void ) {
+    this->clear();
+    this->tmp.reset();
+  }
+};
+
 struct AdjGraph {
   AdjUserTab     user_tab;
   md::MDMsgMem & mem;
+  LCM            lcm;
+  uint32_t       path_count;
 
   void * operator new( size_t, void *ptr ) { return ptr; }
-  AdjGraph( md::MDMsgMem &m ) : mem( m ) {}
+  AdjGraph( md::MDMsgMem &m ) : mem( m ), path_count( 1 ) {}
 
   void reset( void ) {
+    this->path_count = 1;
+    this->lcm.reset();
     this->user_tab.reset();
   }
-  void compute_forward_set( uint8_t p ) noexcept;
-  uint32_t get_min_cost( uint8_t p,  AdjVisit &visit ) noexcept;
-  void add_fwd_set( uint8_t p,  uint32_t src_id,  AdjVisit &visit,
+  void compute_forward_set( uint16_t p ) noexcept;
+  uint32_t get_min_cost( uint16_t p,  AdjVisit &visit ) noexcept;
+  void add_fwd_set( uint16_t p,  uint32_t src_id,  AdjVisit &visit,
                     uint32_t min_cost ) noexcept;
   AdjUser *add_user( StringVal &a,  uint32_t uid = 0 ) noexcept;
 
   void add_link( StringVal &a,  StringVal &b,  StringVal &tp,  StringVal &ty,
-                 uint32_t *cost,  uint32_t cnt,  uint32_t prune = -1,
-                 uint32_t tid = 0 ) {
-    this->add_link( this->add_user( a ), this->add_user( b ), tp, ty,
-                    cost, cnt, prune, tid );
+                 AdjCost &cost,  uint32_t tid = 0 ) {
+    this->add_link( this->add_user( a ), this->add_user( b ), tp, ty, cost, tid );
   }
   void add_link( AdjUser *u1,  StringVal &b,  StringVal &tp,  StringVal &ty,
-                 uint32_t *cost,  uint32_t cnt,  uint32_t prune = -1,
-                 uint32_t tid = 0 ) {
-    this->add_link( u1, this->add_user( b ), tp, ty, cost, cnt, prune, tid );
+                 AdjCost &cost,  uint32_t tid = 0 ) {
+    this->add_link( u1, this->add_user( b ), tp, ty, cost, tid );
   }
   void add_link( AdjUser *u1,  AdjUser *u2,  StringVal &tp,  StringVal &ty,
-                 uint32_t *cost,  uint32_t cnt,  uint32_t prune = -1,
-                 uint32_t tid = 0 ) noexcept;
+                 AdjCost &cost,  uint32_t tid = 0 ) noexcept;
 
   void add_conn( StringVal &a,  StringVal &b,  StringVal &tp,  StringVal &ty,
-                 uint32_t *cost,  uint32_t cnt,  uint32_t prune = -1 ) {
-    this->add_conn( this->add_user( a ), this->add_user( b ), tp, ty,
-                    cost, cnt, prune );
+                 AdjCost &cost ) {
+    this->add_conn( this->add_user( a ), this->add_user( b ), tp, ty, cost );
   }
   void add_conn( AdjUser *u1,  StringVal &b,  StringVal &tp,  StringVal &ty,
-                 uint32_t *cost,  uint32_t cnt,  uint32_t prune = -1 ) {
-    this->add_conn( u1, this->add_user( b ), tp, ty, cost, cnt, prune );
+                 AdjCost &cost ) {
+    this->add_conn( u1, this->add_user( b ), tp, ty, cost );
   }
   void add_conn( AdjUser *u1,  AdjUser *u2,  StringVal &tp,  StringVal &ty,
-                 uint32_t *cost,  uint32_t cnt,  uint32_t prune = -1 ) noexcept;
+                 AdjCost &cost ) noexcept;
 
   int load_json( StringTab &str_tab,  void *data,  size_t data_size,
                  bool is_yaml ) noexcept;
@@ -177,19 +267,19 @@ struct AdjGraphOut {
 
   void print( void ) noexcept;
 
-  void print_tree( uint8_t p,  bool print_unused ) noexcept;
+  void print_tree( uint16_t p,  bool print_unused ) noexcept;
   void print_tree_link( uint32_t indent,  AdjFwdTab &fwd,  uint32_t src,
-                        uint32_t j,  uint8_t p ) noexcept;
+                        uint32_t j,  uint16_t p ) noexcept;
 
   void print_web_paths( uint32_t start_idx ) noexcept;
-  void print_web_path( uint8_t p,  uint32_t start_idx ) noexcept;
+  void print_web_path( uint16_t p,  uint32_t start_idx ) noexcept;
   void step_web_path_node( uint32_t step,  AdjFwdTab &fwd,  uint32_t src,
                            uint32_t j,  UIntArrayCount &path_step,
                            UIntArrayCount &path_cost ) noexcept;
   void print_web_path_link( uint32_t step,  AdjFwdTab &fwd, uint32_t src,
                             uint32_t j,  bool first ) noexcept;
 
-  void print_fwd( uint8_t p ) noexcept;
+  void print_fwd( uint16_t p ) noexcept;
 
   void print_graph( void ) noexcept;
   void print_mesh( AdjLinkTab &mesh,  bool is_pgm ) noexcept;

@@ -200,13 +200,15 @@ struct MeshCsumCache {
   }
 };
 
+typedef kv::ArrayCount<kv::BloomRoute *, 4> BloomRouteArray;
+
 struct TransportRoute : public kv::EvSocket, public kv::EvConnectionNotify,
                         public kv::BPData, public StateTest<TransportRoute> {
   kv::EvPoll            & poll;           /* event poller */
   SessionMgr            & mgr;            /* session of transport */
   UserDB                & user_db;        /* session of transport */
   kv::RoutePublish      & sub_route;      /* bus for transport */
-  kv::BloomRoute        * router_rt[ COST_PATH_COUNT ]; /* router 4 subs */
+  kv::BloomRoute        * router_rt;
   kv::BitSpace            connected,      /* which fds are connected */
                           connected_auth; /* which fds are authenticated */
   BitRefCount             mesh_connected, /* shared with uid_in_mesh */
@@ -225,7 +227,7 @@ struct TransportRoute : public kv::EvSocket, public kv::EvConnectionNotify,
   StageAuth               auth[ 3 ];      /* history of last 3 hb */
   uint32_t                tport_id,       /* index in transport_tab[] */
                           hb_count,       /* count of new hb recvd */
-                          last_hb_count,  /* sends hb when new hb */
+                          hb_fast,        /* sends hb after initial connect */
                           connect_count,  /* count of connections */
                           last_connect_count, /* sends hb when new conn */
                           state;          /* TPORT_IS_... */
@@ -248,7 +250,7 @@ struct TransportRoute : public kv::EvSocket, public kv::EvConnectionNotify,
                           oldest_uid;     /* which uid is oldest connect */
   IpcRteList            * ext;            /* list of ipc listeners */
   MeshCsumCache         * mesh_cache;     /* cache of hb mesh csum */
-  uint32_t                initial_cost[ COST_PATH_COUNT ];
+  AdjCost                 initial_cost;
   ConfigTree::Service   & svc;            /* service definition */
   ConfigTree::Transport & transport;      /* transport definition */
 
@@ -275,7 +277,7 @@ struct TransportRoute : public kv::EvSocket, public kv::EvConnectionNotify,
   int init( void ) noexcept;
   void init_state( void ) noexcept;
   void set_peer_name( kv::PeerData &pd,  const char *suff ) noexcept;
-  bool update_cost( UserBridge &n,  StringVal &tport,  uint32_t *cost,
+  bool update_cost( UserBridge &n,  StringVal &tport,  AdjCost *cost,
                     uint32_t rem_tport_id,  const char *s ) noexcept;
   const char * connected_names( char *buf,  size_t buflen ) noexcept;
   /*const char * reachable_names( char *buf,  size_t buflen ) noexcept;*/

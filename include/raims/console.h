@@ -725,7 +725,7 @@ struct Console : public md::MDOutput, public SubOnMsg,
                             const char *cmd,  size_t cmdlen ) noexcept;
   bool recv_remote_request( const MsgFramePublish &pub,  UserBridge &n,
                             const MsgHdrDecoder &dec ) noexcept;
-  void mcast_ping( ConsoleOutput *p,  uint8_t path,  bool add_trace ) noexcept;
+  void mcast_ping( ConsoleOutput *p,  uint16_t path,  bool add_trace ) noexcept;
 
   void on_ping( ConsolePing &ping ) noexcept;
   bool print_json_table( ConsoleOutput *p,  const void * data,
@@ -750,7 +750,7 @@ struct Console : public md::MDOutput, public SubOnMsg,
                        size_t len ) noexcept;
   void show_links( ConsoleOutput *p ) noexcept;
   void show_nodes( ConsoleOutput *p ) noexcept;
-  void show_routes( ConsoleOutput *p,  uint8_t path_select ) noexcept;
+  void show_routes( ConsoleOutput *p,  uint16_t path_select ) noexcept;
   void show_urls( ConsoleOutput *p ) noexcept;
   void show_counters( ConsoleOutput *p ) noexcept;
   void show_sync( ConsoleOutput *p ) noexcept;
@@ -760,14 +760,14 @@ struct Console : public md::MDOutput, public SubOnMsg,
   void show_skew( ConsoleOutput *p ) noexcept;
   void show_reachable( ConsoleOutput *p ) noexcept;
   void show_tree( ConsoleOutput *p,  const UserBridge *src,
-                  uint8_t path_select ) noexcept;
-  void show_path( ConsoleOutput *p,  uint8_t path_select ) noexcept;
-  void show_forward( ConsoleOutput *p,  uint8_t path_select ) noexcept;
+                  uint16_t path_select ) noexcept;
+  void show_path( ConsoleOutput *p,  uint16_t path_select ) noexcept;
+  void show_forward( ConsoleOutput *p,  uint16_t path_select ) noexcept;
   void show_forward_all( ConsoleOutput *p ) noexcept;
   void show_fds( ConsoleOutput *p ) noexcept;
   void show_buffers( ConsoleOutput *p ) noexcept;
   void show_windows( ConsoleOutput *p ) noexcept;
-  void show_blooms( ConsoleOutput *p,  uint8_t path_select,  bool brief ) noexcept;
+  void show_blooms( ConsoleOutput *p,  uint16_t path_select,  bool brief ) noexcept;
   void show_match( ConsoleOutput *p,  const char *sub,  size_t len ) noexcept;
   void show_config( ConsoleOutput *p, bool is_start,  int which,  const char *name,
                     size_t len ) noexcept;

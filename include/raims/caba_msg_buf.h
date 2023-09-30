@@ -322,20 +322,19 @@ struct MsgBufDigestT : public BMsgBufT<T> {
   T  & bs         ( uint64_t n )  { return this->u( FID_BS, n ); }
   T  & br         ( uint64_t n )  { return this->u( FID_BR, n ); }
   T  & sub_cnt    ( uint64_t n )  { return this->u( FID_SUB_CNT, n ); }
+  T  & cost       ( uint32_t n )  { return this->i( FID_COST, n ); }
   T  & chain_seqno( uint64_t n )  { return this->u( FID_CHAIN_SEQNO, n ); }
   T  & stamp      ( uint64_t n )  { return this->u( FID_STAMP, n ); }
   T  & converge   ( uint64_t n )  { return this->u( FID_CONVERGE, n ); }
   T  & reply_stamp( uint64_t n )  { return this->u( FID_REPLY_STAMP, n ); }
   T  & hb_skew    ( uint64_t n )  { return this->u( FID_HB_SKEW, n ); }
-  T  & cost       ( uint32_t n )  { return this->i( FID_COST, n ); }
-  T  & cost2      ( uint32_t n )  { return this->i( FID_COST2, n ); }
-  T  & cost3      ( uint32_t n )  { return this->i( FID_COST3, n ); }
-  T  & cost4      ( uint32_t n )  { return this->i( FID_COST4, n ); }
   T  & host_id    ( uint32_t n )  { return this->i( FID_HOST_ID, n ); }
   T  & queue_hash ( uint32_t n )  { return this->i( FID_QUEUE_HASH, n ); }
   T  & queue_refs ( uint32_t n )  { return this->i( FID_QUEUE_REFS, n ); }
   T  & hdr_len    ( uint32_t n )  { return this->i( FID_HDR_LEN, n ); }
   T  & suf_len    ( uint32_t n )  { return this->i( FID_SUF_LEN, n ); }
+  T  & adj_cost   (  const char *in, size_t in_len ) {
+    return this->b( FID_ADJ_COST, in, (uint16_t) in_len ); }
   T  & peer       ( const char *in, size_t in_len ) {
     return this->b( FID_PEER, in, (uint16_t) in_len ); }
   T  & latency    ( const char *in, size_t in_len ) {
@@ -549,20 +548,18 @@ struct MsgEst {
   MsgEst & bs         ( void ) { sz += fid_est( FID_BS ); return *this; }
   MsgEst & br         ( void ) { sz += fid_est( FID_BR ); return *this; }
   MsgEst & sub_cnt    ( void ) { sz += fid_est( FID_SUB_CNT ); return *this; }
+  MsgEst & cost       ( void ) { sz += fid_est( FID_COST ); return *this; }
   MsgEst & chain_seqno( void ) { sz += fid_est( FID_CHAIN_SEQNO ); return *this; }
   MsgEst & stamp      ( void ) { sz += fid_est( FID_STAMP ); return *this; }
   MsgEst & converge   ( void ) { sz += fid_est( FID_CONVERGE ); return *this; }
   MsgEst & reply_stamp( void ) { sz += fid_est( FID_REPLY_STAMP ); return *this; }
   MsgEst & hb_skew    ( void ) { sz += fid_est( FID_HB_SKEW ); return *this; }
-  MsgEst & cost       ( void ) { sz += fid_est( FID_COST ); return *this; }
-  MsgEst & cost2      ( void ) { sz += fid_est( FID_COST2 ); return *this; }
-  MsgEst & cost3      ( void ) { sz += fid_est( FID_COST3 ); return *this; }
-  MsgEst & cost4      ( void ) { sz += fid_est( FID_COST4 ); return *this; }
   MsgEst & host_id    ( void ) { sz += fid_est( FID_HOST_ID ); return *this; }
   MsgEst & queue_hash ( void ) { sz += fid_est( FID_QUEUE_HASH ); return *this; }
   MsgEst & queue_refs ( void ) { sz += fid_est( FID_QUEUE_REFS ); return *this; }
   MsgEst & hdr_len    ( void ) { sz += fid_est( FID_HDR_LEN ); return *this; }
   MsgEst & suf_len    ( void ) { sz += fid_est( FID_SUF_LEN ); return *this; }
+  MsgEst & adj_cost   ( size_t l ) { sz += fid_est( FID_ADJ_COST, l ); return *this; }
   MsgEst & peer       ( size_t l ) { sz += fid_est( FID_PEER, l ); return *this; }
   MsgEst & latency    ( size_t l ) { sz += fid_est( FID_LATENCY, l ); return *this; }
 

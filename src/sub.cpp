@@ -784,7 +784,7 @@ SubDB::reseed_bloom( void ) noexcept
   ForwardCache & forward = this->user_db.forward_path[ 0 ];
   uint32_t       tport_id;
 
-  this->user_db.peer_dist.update_forward_cache( forward, 0, 0 );
+  this->user_db.peer_dist.update_path( forward, 0 );
   if ( forward.first( tport_id ) ) {
     do {
       TransportRoute *rte = this->user_db.transport_tab.ptr[ tport_id ];
@@ -854,7 +854,7 @@ SubDB::resize_bloom( void ) noexcept
     ForwardCache & forward = this->user_db.forward_path[ 0 ];
     uint32_t       tport_id;
 
-    this->user_db.peer_dist.update_forward_cache( forward, 0, 0 );
+    this->user_db.peer_dist.update_path( forward, 0 );
     if ( forward.first( tport_id ) ) {
       do {
         TransportRoute *rte = this->user_db.transport_tab.ptr[ tport_id ];

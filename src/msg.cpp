@@ -102,7 +102,7 @@ CabaMsg::unpack2( uint8_t *bb,  size_t off,  size_t &end,  MDMsgMem &m,
     len  = hash;
     hash = 0;
   }
-  if ( CabaFlags::get_ver( flags ) != CABA_MSG_VERSION )
+  if ( ( ( flags >> CABA_VER_SHIFT ) & CABA_VER_MASK ) != CABA_MSG_VERSION )
     return Err::BAD_MAGIC_NUMBER;
   if ( off + len + 8 > end ) {
     end = off + len + 8;
