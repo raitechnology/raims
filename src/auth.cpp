@@ -204,7 +204,8 @@ UserDB::on_inbox_auth( const MsgFramePublish &pub,  UserBridge &n,
     }
     if ( dec.get_ival<uint32_t>( FID_TPORTID, rem_tport_id ) ) {
       AdjCost cost;
-      if ( cost.parse( (char *) dec.mref[ FID_ADJ_COST ].fptr,
+      if ( dec.test( FID_ADJ_COST ) &&
+           cost.parse( (char *) dec.mref[ FID_ADJ_COST ].fptr,
                        dec.mref[ FID_ADJ_COST ].fsize ) == AdjCost::COST_OK )
         n.user_route->rte.update_cost( n, tport, &cost, rem_tport_id, "i1" );
       else
@@ -488,18 +489,20 @@ UserDB::send_trusted( const MsgFramePublish &/*pub*/,  UserBridge &n,
       continue;
     if ( ! rte->uid_connected.is_member( n.uid ) )
       continue;
-    u_ptr = NULL;
+    u_ptr = n.user_route_ptr( *this, tport_id );
     if ( rte->is_mesh() ) {
-      u_ptr = n.user_route_ptr( *this, tport_id );
       if ( ! u_ptr->is_valid() || ! u_ptr->is_set( MESH_URL_STATE ) )
         u_ptr = NULL;
     }
     else if ( rte->is_mcast() ) {
-      u_ptr = n.user_route_ptr( *this, tport_id );
       if ( ! u_ptr->is_valid() || ! u_ptr->is_set( UCAST_URL_STATE ) )
         u_ptr = NULL;
     }
-
+    else if ( ! u_ptr->is_valid() ) {
+      u_ptr = NULL;
+    }
+    if ( u_ptr == NULL )
+      continue;
     UrlDBFilter mesh_filter2( n.uid, true );
     UrlDBFilter ucast_filter2( n.uid, false );
     csum.zero();
@@ -508,24 +511,23 @@ UserDB::send_trusted( const MsgFramePublish &/*pub*/,  UserBridge &n,
            mesh_url_len  = 0,
            ucast_url_len = 0;
 
-    if ( u_ptr != NULL ) {
-      if ( rte->is_mesh() ) {
-        mesh_db_len = this->mesh_db_size( *rte, mesh_filter2, csum );
-        mesh_url_len = u_ptr->mesh_url.len;
-      }
-      else {
-        ucast_db_len = this->ucast_db_size( *rte, ucast_filter2 );
-        ucast_url_len = u_ptr->ucast_url.len;
-      }
+    if ( rte->is_mesh() ) {
+      mesh_db_len = this->mesh_db_size( *rte, mesh_filter2, csum );
+      mesh_url_len = u_ptr->mesh_url.len;
     }
-    if ( debug_auth )
-      n.printf( "send trust tport %s.%u mesh_db %u ucast_db %u\n",
-                rte->transport.tport.val, tport_id,
-                (uint32_t) mesh_db_len, (uint32_t) ucast_db_len );
+    else if ( rte->is_mcast() ) {
+      ucast_db_len = this->ucast_db_size( *rte, ucast_filter2 );
+      ucast_url_len = u_ptr->ucast_url.len;
+    }
     /*if ( mesh_db_len + ucast_db_len != 0 )*/ {
       MsgEst e( ibx.len() );
       cost_len = rte->uid_connected.cost.str_size( cost_buf,
                                                    sizeof( cost_buf ) );
+      if ( debug_auth )
+        n.printf( "send trust tport %s.%u mesh_db %u ucast_db %u cost %s (%s)\n",
+                  rte->transport.tport.val, tport_id,
+                  (uint32_t) mesh_db_len, (uint32_t) ucast_db_len, cost_buf,
+                  rte->uid_connected.is_advertised ? "adv" : "not" );
       e.seqno     ()
        .time      ()
        .auth_stage()
@@ -563,7 +565,7 @@ UserDB::send_trusted( const MsgFramePublish &/*pub*/,  UserBridge &n,
       }
       m.close( e.sz, h, CABA_INBOX );
       m.sign( ibx.buf, ibx.len(), *this->session_key );
-      b |= this->forward_to( n, ibx.buf, ibx.len(), h, m.msg, m.len(), u_ptr);
+      b |= this->forward_to( n, ibx.buf, ibx.len(), h, m.msg, m.len(), u_ptr );
     }
   }
   return b;
