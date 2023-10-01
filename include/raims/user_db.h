@@ -576,7 +576,8 @@ struct UserDB {
   const kv::PeerId    & my_src;
 
   /* counters, seqnos */
-  uint32_t              hb_interval,     /* seconds between _X.HB publish */
+  uint32_t              msg_send_counter[ MAX_PUB_TYPE ],
+                        hb_interval,     /* seconds between _X.HB publish */
                         reliability,     /* seconds of send/recv window */
                         next_uid,        /* next_uid available */
                         free_uid_count,  /* num uids freed */
@@ -585,7 +586,7 @@ struct UserDB {
                         uid_ping_count,
                         next_ping_uid,
                         host_id,
-                        msg_send_counter[ MAX_PUB_TYPE ];
+                        bloom_fail_cnt;
   uint64_t              send_peer_seqno, /* a unique seqno for peer multicast */
                         link_state_seqno,/* seqno of adjacency updates */
                         link_state_sum,  /* sum of all link state seqno */
