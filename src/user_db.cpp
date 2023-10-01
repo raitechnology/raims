@@ -26,9 +26,13 @@ UserDB::UserDB( EvPoll &p,  ConfigTree::User &u,  ConfigTree::Service &s,
     cnonce( 0 ), hb_keypair( 0 ),
     node_ht( 0 ), zombie_ht( 0 ), host_ht( 0 ), peer_ht( 0 ), peer_key_ht( 0 ),
     peer_keys( 0 ), peer_bloom( 0, "(peer)", p.g_bloom_db ), my_src( src ), 
-    hb_interval( HB_DEFAULT_INTERVAL ), reliability( DEFAULT_RELIABILITY ),
+
+    hb_interval( HB_DEFAULT_INTERVAL ),
+    reliability( DEFAULT_RELIABILITY ),
     next_uid( 0 ), free_uid_count( 0 ), uid_auth_count( 0 ),
-    uid_hb_count( 0 ), send_peer_seqno( 0 ), link_state_seqno( 0 ),
+    uid_hb_count( 0 ), bloom_fail_cnt( 0 ),
+
+    send_peer_seqno( 0 ), link_state_seqno( 0 ),
     link_state_sum( 0 ), mcast_send_seqno( 0 ), hb_ival_ns( 0 ),
     hb_ival_mask( 0 ), next_ping_mono( 0 ), peer_dist( *this )
 {
@@ -105,6 +109,7 @@ UserDB::init( const CryptPass &pwd,  ConfigTree &tree ) noexcept
   this->uid_hb_count     = 0; /* how many peers are trusted */
   this->uid_ping_count   = 0; /* ping counter */
   this->next_ping_uid    = 0; /* next pinged uid */
+  this->bloom_fail_cnt   = 0;
   this->send_peer_seqno  = 0; /* sequence num of peer add/del msgs */
   this->link_state_seqno = 0; /* sequence num of link state msgs */
   this->link_state_sum   = 0; /* sum of link state seqnos */
@@ -681,7 +686,14 @@ UserDB::converge_network( uint64_t current_mono_time,  uint64_t current_time,
       bool ok = this->check_blooms();
       if ( ! ok ) {
         fprintf( stderr, "bloom check failed 2\n" );
+        this->bloom_fail_cnt++;
         this->find_adjacent_routes();
+      }
+      else {
+        if ( this->bloom_fail_cnt != 0 ) {
+          printf( "bloom check ok\n" );
+          this->bloom_fail_cnt = 0;
+        }
       }
       uint64_t delta = ( this->bloom_check_mono - this->converge_mono );
       if ( ok && delta / SEC_TO_NS > 20 ) /* stop after ok for 20 secs */
@@ -1142,12 +1154,17 @@ UserDB::find_adjacent_routes( void ) noexcept
     for ( uint32_t path_select = 0; path_select < path_cnt; path_select++ ) {
       ForwardCache & forward = this->forward_path[ path_select ];
       UidSrcPath   & path    = forward.path[ uid ];
-      if ( path.cost == 0 ) {
+      u_ptr = NULL;
+      if ( path.cost != 0 ) {
+        u_ptr = n.user_route_ptr( *this, path.tport );
+        if ( ! u_ptr->is_valid() )
+          u_ptr = NULL;
+      }
+      if ( u_ptr == NULL ) {
         if ( debug_usr )
           n.printf( "no route, path %u\n", path_select );
       }
       else {
-        u_ptr = n.user_route_ptr( *this, path.tport );
         hops  = u_ptr->rte.uid_connected.is_member( n.uid ) ? 0 : 1;
         /* route through another peer */
         if ( ! u_ptr->is_set( IN_ROUTE_LIST_STATE ) && hops > 0 ) {
@@ -1538,14 +1555,19 @@ UserRoute *
 UserBridge::init_user_route( UserDB &me,  uint32_t i,  uint32_t j,
                              uint32_t id ) noexcept
 {
+  void * m;
   if ( this->u_buf[ i ] == NULL ) {
     size_t size = sizeof( UserRoute ) * ( USER_ROUTE_BASE << i );
-    void * m = ::malloc( size );
+    m = ::malloc( size );
     ::memset( m, 0, size );
     this->u_buf[ i ] = (UserRoute *) (void *) m;
   }
-  return new ( (void *) &this->u_buf[ i ][ j ] )
-             UserRoute( *this, *me.transport_tab.ptr[ id ] );
+  m = (void *) &this->u_buf[ i ][ j ];
+  if ( id < me.transport_tab.count )
+    return new ( m ) UserRoute( *this, *me.transport_tab.ptr[ id ] );
+  this->printe( "bad init_user_route tport_id %u\n", id );
+  ::memset( m, 0, sizeof( UserRoute ) );
+  return (UserRoute *) m;
 }
 
 uint32_t
