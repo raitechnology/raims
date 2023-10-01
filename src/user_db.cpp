@@ -1154,57 +1154,54 @@ UserDB::find_adjacent_routes( void ) noexcept
     for ( uint32_t path_select = 0; path_select < path_cnt; path_select++ ) {
       ForwardCache & forward = this->forward_path[ path_select ];
       UidSrcPath   & path    = forward.path[ uid ];
-      u_ptr = NULL;
-      if ( path.cost != 0 ) {
-        u_ptr = n.user_route_ptr( *this, path.tport );
-        if ( ! u_ptr->is_valid() )
-          u_ptr = NULL;
-      }
-      if ( u_ptr == NULL ) {
+
+      if ( path.cost == 0 || path.tport >= this->transport_tab.count ) {
         if ( debug_usr )
           n.printf( "no route, path %u\n", path_select );
+        if ( path.tport >= this->transport_tab.count )
+          n.printe( "no route tport %u\n", path.tport );
+        continue;
       }
-      else {
-        hops  = u_ptr->rte.uid_connected.is_member( n.uid ) ? 0 : 1;
-        /* route through another peer */
-        if ( ! u_ptr->is_set( IN_ROUTE_LIST_STATE ) && hops > 0 ) {
-          UserBridge *m = this->bridge_tab.ptr[ path.src_uid ];
-          if ( m == NULL ) {
-            n.printf( "no closest peer route, old primary tport %u\n",
-                       n.primary_route );
-            continue;
-          }
-          UserRoute *u_peer = m->user_route_ptr( *this, path.tport );
-          if ( ! u_peer->is_valid() ) {
-            n.printf( "no peer route yet, using old primary tport %u\n",
-                       n.primary_route );
-            continue;
-          }
-          u_ptr->mcast = u_peer->mcast;
-          u_ptr->inbox = u_peer->inbox;
-          u_ptr->connected( 1 );
-          if ( u_peer->is_set( UCAST_URL_STATE | UCAST_URL_SRC_STATE ) ) {
-            if ( u_peer->is_set( UCAST_URL_STATE ) )
-              this->set_ucast_url( *u_ptr, u_peer, "find" );
-            else
-              this->set_ucast_url( *u_ptr, u_peer->ucast_src, "find2" );
-          }
-          this->push_user_route( n, *u_ptr );
+
+      u_ptr = n.user_route_ptr( *this, path.tport );
+      hops  = u_ptr->rte.uid_connected.is_member( n.uid ) ? 0 : 1;
+      /* route through another peer */
+      if ( ! u_ptr->is_set( IN_ROUTE_LIST_STATE ) && hops > 0 ) {
+        UserBridge *m = this->bridge_tab.ptr[ path.src_uid ];
+        if ( m == NULL ) {
+          n.printf( "no closest peer route, old primary tport %u\n",
+                     n.primary_route );
+          continue;
         }
-        /* primary go to other */
-        if ( path_select > 0 && u_ptr->is_valid() ) {
-          if ( debug_usr )
-            n.printf( "new route, path %u tport=%u (%s)\n", path_select,
-                      path.tport, u_ptr->rte.name );
-          if ( n.bloom_rt[ path_select ] != NULL ) {
-            n.bloom_rt[ path_select ]->del_bloom_ref( &n.bloom );
-            n.bloom_rt[ path_select ]->remove_if_empty();
-            n.bloom_rt[ path_select ] = NULL;
-          }
-          n.bloom_rt[ path_select ] = u_ptr->rte.sub_route.create_bloom_route(
-                                       u_ptr->mcast.fd, &n.bloom, path_select );
+        UserRoute *u_peer = m->user_route_ptr( *this, path.tport );
+        if ( ! u_peer->is_valid() ) {
+          n.printf( "no peer route yet, using old primary tport %u\n",
+                     n.primary_route );
+          continue;
         }
-        /*this->check_bloom_route2();*/
+        u_ptr->mcast = u_peer->mcast;
+        u_ptr->inbox = u_peer->inbox;
+        u_ptr->connected( 1 );
+        if ( u_peer->is_set( UCAST_URL_STATE | UCAST_URL_SRC_STATE ) ) {
+          if ( u_peer->is_set( UCAST_URL_STATE ) )
+            this->set_ucast_url( *u_ptr, u_peer, "find" );
+          else
+            this->set_ucast_url( *u_ptr, u_peer->ucast_src, "find2" );
+        }
+        this->push_user_route( n, *u_ptr );
+      }
+      /* primary go to other */
+      if ( path_select > 0 && u_ptr->is_valid() ) {
+        if ( debug_usr )
+          n.printf( "new route, path %u tport=%u (%s)\n", path_select,
+                    path.tport, u_ptr->rte.name );
+        if ( n.bloom_rt[ path_select ] != NULL ) {
+          n.bloom_rt[ path_select ]->del_bloom_ref( &n.bloom );
+          n.bloom_rt[ path_select ]->remove_if_empty();
+          n.bloom_rt[ path_select ] = NULL;
+        }
+        n.bloom_rt[ path_select ] = u_ptr->rte.sub_route.create_bloom_route(
+                                     u_ptr->mcast.fd, &n.bloom, path_select );
       }
     }
     /* if path count was larger before */
