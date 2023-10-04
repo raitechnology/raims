@@ -202,6 +202,7 @@ TransportRoute::update_cost( UserBridge &n,  StringVal &tport,  AdjCost *cost,
   StringVal & my_tport = this->transport.tport;
   bool updated = false, cost_updated = false, ok = true;
   AdjCost update_cost( COST_DEFAULT );
+  char buf[ 64 ], buf2[ 64 ];
   if ( cost != NULL )
     update_cost = *cost;
 
@@ -219,8 +220,10 @@ TransportRoute::update_cost( UserBridge &n,  StringVal &tport,  AdjCost *cost,
   }
   if ( ! my_tport.equals( tport ) ) {
     if ( this->is_mesh() ) {
-      ok = false;
-      goto invalid_cost;
+      if ( this->uid_connected.rem_uid != n.uid ||
+           this->uid_connected.rem_tport_id != rem_tport_id )
+        n.printe( "peer tport[%.*s] mesh name not the same [%.*s]\n",
+              tport.len, tport.val, my_tport.len, my_tport.val );
     }
   }
   if ( this->uid_connected.rem_uid == 0 ) {
@@ -252,19 +255,25 @@ TransportRoute::update_cost( UserBridge &n,  StringVal &tport,  AdjCost *cost,
   }
   if ( cost != NULL ) {
     if ( ! cost2.equals( update_cost ) ) {
+      bool chg = true;
       if ( this->uid_connected.is_advertised ) {
-        ok = false;
-        goto invalid_cost;
+        chg = ( n.start_time < this->user_db.start_time );
+        n.printe( "peer tport[%.*s] cost inconsistent, %s "
+                  "cost [%s] -> [%s] fd=%u (%s)\n",
+              tport.len, tport.val, chg ? "changing" : "ignoring",
+              update_cost.str( buf, sizeof( buf ) ),
+              cost2.str( buf2, sizeof( buf2 ) ), n.user_route->mcast.fd, s );
       }
-      this->uid_connected.cost = update_cost;
-      updated = true;
-      cost_updated = true;
+      if ( chg ) {
+        this->uid_connected.cost = update_cost;
+        updated = true;
+        cost_updated = true;
+      }
     }
   }
   /* will update adjacency later if not authenticated */
   if ( ! updated )
     return true;
-  char buf[ 64 ], buf2[ 64 ];
   if ( debug_tran ) {
     n.printf( "update cost [%s] on %s (rem=%u) %s fd=%u (%s)\n",
               update_cost.str( buf, sizeof( buf ) ), this->name, rem_tport_id,
@@ -272,6 +281,7 @@ TransportRoute::update_cost( UserBridge &n,  StringVal &tport,  AdjCost *cost,
               n.user_route->mcast.fd, s );
 
   }
+#if 0
   if ( 0 ) {
 invalid_cost:;
     n.printe( "conflicting tport[%.*s] cost[%s] (advert)"
@@ -283,6 +293,7 @@ invalid_cost:;
                 this->name, rem_tport_id, n.user_route->mcast.fd, s );
     this->uid_connected.cost.max_cost = COST_BAD;
   }
+#endif
   this->user_db.peer_dist.invalidate( ADVERTISED_COST_INV, n.uid );
   this->user_db.adjacency_change.append( n.uid, this->tport_id,
                                   this->user_db.link_state_seqno + 1, true );

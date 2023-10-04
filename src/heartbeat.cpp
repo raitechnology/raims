@@ -303,6 +303,8 @@ UserDB::on_heartbeat( const MsgFramePublish &pub,  UserBridge &n,
               current_mono_time = 0;
   uint32_t    ival;
 
+  if ( debug_hb )
+    n.printf( "recv hb\n" );
   if ( ! dec.get_ival<uint64_t>( FID_UPTIME, uptime ) ||
        ! dec.get_ival<uint64_t>( FID_SEQNO, seqno ) ||
        ! dec.get_ival<uint64_t>( FID_TIME, time ) ||
@@ -374,13 +376,15 @@ UserDB::on_heartbeat( const MsgFramePublish &pub,  UserBridge &n,
       }
       this->uid_hb_count++;
     }
-    bool b;
-    b = rte.update_cost( n, tport, adv_cost ? &cost : NULL, rem_tport_id, "hb" );
+    /*bool b;*/
+    rte.update_cost( n, tport, adv_cost ? &cost : NULL, rem_tport_id, "hb" );
+#if 0
     if ( ! b ) {
       if ( debug_hb )
         n.printf( "bad transport cost (%s)\n", rte.name );
       return true;
     }
+#endif
     if ( dec.get_ival<uint64_t>( FID_MS, ms ) ) {
       EvSocket * sock;
       if ( (sock = this->poll.sock[ pub.src_route.fd ]) != NULL &&
