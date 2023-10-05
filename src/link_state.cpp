@@ -209,7 +209,8 @@ UserDB::add_unknown_adjacency( UserBridge *n,  Nonce *b_nonce ) noexcept
             discard_pending = true;
             break;
           }
-          if ( (changed |= this->add_adjacency_change( *m, *rec )) ) {
+          if ( this->add_adjacency_change( *m, *rec ) ) {
+            changed = true;
             p->rec_list = rec->next;
             fini_recs.push_tl( rec );
             applied_cnt++;
@@ -957,10 +958,15 @@ UserDB::send_adjacency_request( UserBridge &n, AdjacencyRequest reas ) noexcept
   m.reserve( e.sz );
 
   uint64_t ls_seqno = n.link_state_seqno;
-  if ( reas == DIJKSTRA_SYNC_REQ && n.null_sync_res > 5 ) {
+  if ( reas == DIJKSTRA_SYNC_REQ &&
+       ( n.null_sync_res > 5 || ( n.null_sync_res > 0 &&
+                                  n.last_req_seqno == ls_seqno ) ) ) {
     ls_seqno = 0;
-    n.printe( "restarting dijstra adjacency sync, null_sync_res > 5\n" );
+    reas = DIJKSTRA_NULL_REQ;
+    n.printe( "restarting dijstra adjacency sync, null_sync_res is %u\n",
+              n.null_sync_res );
   }
+  n.last_req_seqno = ls_seqno;
   m.open( this->bridge_id.nonce, ibx.len() )
    .seqno       ( n.inbox.next_send( U_INBOX_ADJ_REQ ) )
    .link_state  ( ls_seqno           )
@@ -974,7 +980,8 @@ UserDB::send_adjacency_request( UserBridge &n, AdjacencyRequest reas ) noexcept
   m.sign( ibx.buf, ibx.len(), *this->session_key );
 
   if ( debug_lnk )
-    n.printf( "*** send_adj_request ls=%" PRIu64 " %s for %s\n", n.link_state_seqno,
+    n.printf( "*** send_adj_request%s ls=%" PRIu64 " %s for %s\n",
+              ls_seqno == 0 ? "_restart" : "", n.link_state_seqno,
               adjacency_request_string( reas ), n.peer.user.val );
   if ( use_primary )
     return this->forward_to_primary_inbox( n, ibx, h, m.msg, m.len() );
@@ -1365,13 +1372,15 @@ UserDB::recv_adjacency_result( const MsgFramePublish &pub,  UserBridge &n,
     reas = PEER_SYNC_REQ;
 
   if ( ( which & SYNC_LINK ) != 0 ) {
-    if ( sync->null_sync_res > 5 && link_state == sync->link_state_seqno )
+    if ( ( sync->null_sync_res > 5 && link_state == sync->link_state_seqno ) ||
+         reas == DIJKSTRA_NULL_REQ )
       which |= SYNC_NULL;
     if ( link_state > sync->link_state_seqno )
       n.adj_req_throttle.req_count = 0;
     if ( link_state <= sync->link_state_seqno ) {
       if ( debug_lnk )
-        n.printf( "sync link result already have seqno %" PRIu64 "\n", link_state );
+        n.printf( "sync link result already have seqno %" PRIu64 "\n",
+                  link_state );
     }
   }
   this->events.recv_adjacency_result( n.uid, pub.rte.tport_id,
@@ -1416,7 +1425,7 @@ UserDB::recv_adjacency_result( const MsgFramePublish &pub,  UserBridge &n,
     this->peer_dist.invalidate( ADJACENCY_UPDATE_INV, sync->uid );
     sync->null_sync_res = 0;
   }
-  else if ( reas == DIJKSTRA_SYNC_REQ ) {
+  else if ( reas == DIJKSTRA_SYNC_REQ || reas == DIJKSTRA_NULL_REQ ) {
     if ( this->last_auth_mono + sec_to_ns( 5 ) < this->poll.mono_ns )
       sync->null_sync_res++;
   }

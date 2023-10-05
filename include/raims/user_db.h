@@ -235,7 +235,8 @@ struct UserBridge : public UserStateTest<UserBridge> {
                      hb_mono_time,        /* time hb recvd */
                      start_time,          /* start timestamp */
                      sub_seqno,           /* seqno used for start/stop sub */
-                     link_state_seqno;    /* seqno used for link state db */
+                     link_state_seqno,    /* seqno used for link state db */
+                     last_req_seqno;
   UserRoute        * u_buf[ 24 ];         /* indexes user_route */
   StageAuth          auth[ 2 ];           /* auth handshake state */
   uint32_t           ping_send_seqno,     /* seqnos for pings */
