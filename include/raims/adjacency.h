@@ -32,16 +32,17 @@ enum AdjacencyRequest {
   PING_SYNC_REQ     = 1, /* ping message with link state */
   HB_SYNC_REQ       = 2, /* hb message with link state */
   DIJKSTRA_SYNC_REQ = 3, /* missing link found using dijkstra */
-  AUTH_SYNC_REQ     = 4, /* auth message with link state */
-  PEER_SYNC_REQ     = 5, /* sync message containing adjacency */
-  PEERDB_SYNC_REQ   = 6, /* peer db with link state */
-  ADJ_CHG_SYNC_REQ  = 7, /* adjacency change message with link state */
-  MISSING_SYNC_REQ  = 8, /* missing sub seqno */
-  REQUEST_SYNC_REQ  = 9, /* adjacency request bounce */
-  UID_CSUM_SYNC_REQ = 10, /* uid csum not correct */
-  MCAST_SYNC_REQ    = 11, /* mcast link_state_sum and sub_seqno_sum */
-  MCAST_SYNC_RES    = 12, /* mcast link_state_sum and sub_seqno_sum */
-  MAX_ADJ_REQ       = 13
+  DIJKSTRA_NULL_REQ = 4, /* missing link null result */
+  AUTH_SYNC_REQ     = 5, /* auth message with link state */
+  PEER_SYNC_REQ     = 6, /* sync message containing adjacency */
+  PEERDB_SYNC_REQ   = 7, /* peer db with link state */
+  ADJ_CHG_SYNC_REQ  = 8, /* adjacency change message with link state */
+  MISSING_SYNC_REQ  = 9, /* missing sub seqno */
+  REQUEST_SYNC_REQ  = 10, /* adjacency request bounce */
+  UID_CSUM_SYNC_REQ = 11, /* uid csum not correct */
+  MCAST_SYNC_REQ    = 12, /* mcast link_state_sum and sub_seqno_sum */
+  MCAST_SYNC_RES    = 13, /* mcast link_state_sum and sub_seqno_sum */
+  MAX_ADJ_REQ       = 14
 };
 enum InvalidReason {
   INVALID_NONE          = 0,
@@ -75,6 +76,7 @@ static const char *adjacency_request_str[] = {
   "ping_sync",
   "hb_sync",
   "dijk_sync",
+  "dijk_null",
   "auth_sync",
   "peer_sync",
   "pdb_sync",

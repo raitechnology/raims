@@ -1261,7 +1261,8 @@ UserDB::find_adjacent_routes( void ) noexcept
           else if ( u_peer->is_set( UCAST_URL_STATE ) ) {
             if ( ! u_ptr->is_set( UCAST_URL_SRC_STATE ) ||
                  u_ptr->ucast_src != u_peer ) {
-              n.printf( "set ucast thourgh %s\n", u_peer->n.peer.user.val );
+              if ( debug_usr )
+                n.printf( "set ucast thourgh %s\n", u_peer->n.peer.user.val );
               this->set_ucast_url( *u_ptr, u_peer, "find4" );
             }
           }
