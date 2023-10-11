@@ -95,7 +95,8 @@ static const int      CABA_VER_BITS    = 1,
 static const uint16_t CABA_VER_MASK    = ( (uint16_t) 1 << CABA_VER_BITS )  - 1,
                       CABA_TYPE_MASK   = ( (uint16_t) 1 << CABA_TYPE_BITS ) - 1,
                       CABA_OPT_MASK    = ( (uint16_t) 1 << CABA_OPT_BITS )  - 1,
-                      CABA_PATH_MASK   = ( (uint16_t) 1 << CABA_PATH_BITS ) - 1;
+                      CABA_PATH_MASK   = ( (uint16_t) 1 << CABA_PATH_BITS ) - 1,
+                      CABA_PATH_COUNT  = CABA_PATH_MASK + 1;
 static const uint32_t CABA_LENGTH_MASK = ( (uint32_t) 1 << CABA_LENGTH_BITS ) - 1;
 
 static inline const char *caba_type_flag_str( CabaTypeFlag fl ) {

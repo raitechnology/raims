@@ -688,7 +688,8 @@ struct Console : public md::MDOutput, public SubOnMsg,
   void tab_string( const char *buf,  TabPrint &pr ) noexcept;
   void tab_concat( const char *s,  const char *s2,  TabPrint &pr ) noexcept;
   void tab_nonce( const Nonce &nonce,  TabPrint &pr ) noexcept;
-  UserBridge * find_user( const char *name,  size_t len ) noexcept;
+  UserBridge * find_user( const char *name,  size_t len ) const noexcept;
+  bool is_self( const char *name,  size_t len ) const noexcept;
   UserBridge * find_uid( const char *name,  size_t len ) noexcept;
   virtual bool on_input( ConsoleOutput *p,  const char *buf,
                          size_t buflen ) noexcept;
@@ -746,11 +747,12 @@ struct Console : public md::MDOutput, public SubOnMsg,
   void show_hosts( ConsoleOutput *p ) noexcept;
   void show_rvsub( ConsoleOutput *p ) noexcept;
   void show_rpcs( ConsoleOutput *p ) noexcept;
-  void show_adjacency( ConsoleOutput *p,  const char *arg,
-                       size_t len ) noexcept;
+  void show_adjacency( ConsoleOutput *p,  const uint32_t *src_uid,
+                       uint16_t path_select,  bool has_path ) noexcept;
   void show_links( ConsoleOutput *p ) noexcept;
   void show_nodes( ConsoleOutput *p ) noexcept;
-  void show_routes( ConsoleOutput *p,  uint16_t path_select ) noexcept;
+  void show_routes( ConsoleOutput *p,  const UserBridge *src,
+                    uint16_t path_select ) noexcept;
   void show_urls( ConsoleOutput *p ) noexcept;
   void show_counters( ConsoleOutput *p ) noexcept;
   void show_sync( ConsoleOutput *p ) noexcept;

@@ -334,15 +334,21 @@ main( int argc, const char *argv[] )
       fprintf( stderr, "Unable to generate user\n" );
       return 1;
     }
-    usr = st.make<ConfigTree::User>();
+    bool is_new = false;
+    if ( (usr = tree->find_user( NULL, user, ::strlen( user ) )) == NULL ) {
+      usr = st.make<ConfigTree::User>();
+      is_new = true;
+    }
     st.ref_string( user_buf.user, user_buf.user_len, usr->user );
     st.ref_string( user_buf.service, user_buf.service_len, usr->svc );
     st.ref_string( user_buf.create, user_buf.create_len, usr->create );
     st.ref_string( user_buf.pri, user_buf.pri_len, usr->pri );
     st.ref_string( user_buf.pub, user_buf.pub_len, usr->pub );
-    usr->user_id = tree->user_cnt;
     usr->is_temp = true;
-    tree->users.push_tl( usr );
+    if ( is_new ) {
+      usr->user_id = tree->user_cnt;
+      tree->users.push_tl( usr );
+    }
   }
   else {
     if ( ! UserBuf::test_user( pwd, *usr ) )

@@ -29,15 +29,19 @@ using namespace md;
 bool
 SessionMgr::add_startup_transports( void ) noexcept
 {
-  if ( ! this->add_startup_transports( R_LISTEN, R_LISTEN_SZ, true ) )
-    return false;
-  if ( ! this->add_startup_transports( R_CONNECT, R_CONNECT_SZ, false ) )
-    return false;
-  return true;
+  return this->add_startup_transports( this->tree.startup, R_LISTEN,
+                                       R_LISTEN_SZ, true ) &&
+         this->add_startup_transports( this->user.startup, R_LISTEN,
+                                       R_LISTEN_SZ, true ) &&
+         this->add_startup_transports( this->tree.startup, R_CONNECT,
+                                       R_CONNECT_SZ, false ) &&
+         this->add_startup_transports( this->user.startup, R_CONNECT,
+                                       R_CONNECT_SZ, false );
 }
 
 bool
-SessionMgr::add_startup_transports( const char *name,  size_t name_sz,
+SessionMgr::add_startup_transports( ConfigTree::ParametersList &startup,
+                                    const char *name,  size_t name_sz,
                                     bool is_listen ) noexcept
 {
   ConfigTree::Parameters * p;
@@ -45,30 +49,29 @@ SessionMgr::add_startup_transports( const char *name,  size_t name_sz,
   ConfigTree::Transport  * tport;
   TransportRoute * rte;
   size_t len;
-  for ( p = this->tree.startup.hd; p != NULL; p = p->next ) {
+  for ( p = startup.hd; p != NULL; p = p->next ) {
     for ( sp = p->list.hd; sp != NULL; sp = sp->next ) {
       if ( sp->name.equals( name, name_sz ) ) {
         for ( len = sp->value.len; len > 0 && sp->value.val[ len - 1 ] == ' ';
           len-- ) ;
         tport = this->tree.find_transport( sp->value.val, len );
         rte   = this->user_db.transport_tab.find_transport( tport );
-        if ( rte != NULL ) {
-          if ( ! rte->is_shutdown() ) {
-            fprintf( stderr,
-                     "Startup %.*s transport \"%.*s\" already running\n",
+        if ( rte == NULL || rte->is_shutdown() ) {
+          if ( tport == NULL ) {
+            fprintf( stderr, "Startup %.*s transport \"%.*s\" not found\n",
                      (int) name_sz, name,
                      (int) len, sp->value.val );
-            return true;
+            return false;
           }
+          if ( ! this->add_transport( *tport, is_listen ) )
+            return false;
         }
-        if ( tport == NULL ) {
-          fprintf( stderr, "Startup %.*s transport \"%.*s\" not found\n",
+        else {
+          fprintf( stderr,
+                   "Startup %.*s transport \"%.*s\" already running\n",
                    (int) name_sz, name,
                    (int) len, sp->value.val );
-          return false;
         }
-        if ( ! this->add_transport( *tport, is_listen ) )
-          return false;
       }
     }
   }

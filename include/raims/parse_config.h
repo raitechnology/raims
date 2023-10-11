@@ -87,6 +87,8 @@ struct ConfigDB {
   int parse_users_revoke( md::MDMsg &, md::MDName &, md::MDReference & ) noexcept;
   int parse_users_pri( md::MDMsg &, md::MDName &, md::MDReference & ) noexcept;
   int parse_users_pub( md::MDMsg &, md::MDName &, md::MDReference & ) noexcept;
+  int parse_users_parameters( md::MDMsg &, md::MDName &, md::MDReference & ) noexcept;
+  int parse_users_startup( md::MDMsg &, md::MDName &, md::MDReference & ) noexcept;
 
   int parse_services_svc( md::MDMsg &, md::MDName &, md::MDReference & ) noexcept;
   int parse_services_create( md::MDMsg &, md::MDName &, md::MDReference & ) noexcept;
