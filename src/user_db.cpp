@@ -151,7 +151,7 @@ UserDB::init( const CryptPass &pwd,  ConfigTree &tree ) noexcept
     fprintf( stderr, "user %s key pair failed to load\n", my_user.user );
     return false;
   }
-  if ( this->user.user_id < tree.user_cnt ) {
+  if ( ! this->user.is_temp ) {
     printf( "user %s key pair loaded\n", my_user.user );
   }
   else {

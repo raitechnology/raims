@@ -1435,25 +1435,29 @@ latency_string( int64_t lat,  char *buf ) noexcept
 }
 
 static size_t
-uint64_to_bits( uint64_t b,  char *buf ) noexcept
+uint64_to_bits( uint64_t *b,  uint32_t cnt,  char *buf ) noexcept
 {
   size_t sz = 0;
-  uint32_t n = 0;
-  while ( b != 0 ) {
-    if ( ( b & 1 ) != 0 ) {
-      uint32_t d = uint32_digits( n );
-      if ( sz + 1 + d < 80 ) {
-        if ( sz > 0 ) {
-          if ( buf != NULL ) buf[ sz ] = ',';
-          sz++;
+  for ( uint32_t i = 0; i < cnt; i++ ) {
+    for ( uint32_t n = 0; n < 64; n++ ) {
+      uint64_t mask = (uint64_t) 1 << n;
+
+      if ( ( b[ i ] & mask ) != 0 ) {
+        uint32_t x = i * 64 + n,
+                 d = uint32_digits( x );
+        if ( sz + 1 + d < 80 ) {
+          if ( sz > 0 ) {
+            if ( buf != NULL ) buf[ sz ] = ',';
+            sz++;
+          }
+          if ( buf != NULL )
+            uint32_to_string( x, &buf[ sz ], d );
+          sz += d;
         }
-        if ( buf != NULL )
-          uint32_to_string( n, &buf[ sz ], d );
-        sz += d;
       }
+      else if ( b[ i ] < mask )
+        break;
     }
-    b >>= 1;
-    n++;
   }
   if ( buf != NULL )
     buf[ sz ] = '\0';
@@ -1572,7 +1576,7 @@ TabPrint::width( Console &console,  char *buf ) noexcept
     case PRINT_LONG:
       return (uint32_t) uint64_digits( this->ival );
     case PRINT_BITS:
-      return uint64_to_bits( this->ival, NULL );
+      return uint64_to_bits( &this->ival, 1, NULL );
     case PRINT_PERCENT:
       return uint64_to_percent( this->ival, NULL );
     case PRINT_STAMP:
@@ -1739,7 +1743,7 @@ TabPrint::string( Console &console,  char *buf ) noexcept
       buf[ sz ] = '\0';
       return buf;
     case PRINT_BITS:
-      sz = uint64_to_bits( this->ival, buf );
+      sz = uint64_to_bits( &this->ival, 1, buf );
       buf[ sz ] = '\0';
       return buf;
     case PRINT_PERCENT:
@@ -2000,7 +2004,7 @@ int_arg( const char *arg,  size_t len ) noexcept
 }
 
 UserBridge *
-Console::find_user( const char *name,  size_t len ) noexcept
+Console::find_user( const char *name,  size_t len ) const noexcept
 {
   uint32_t uid;
   if ( len == 1 && name[ 0 ] == '*' )
@@ -2015,6 +2019,13 @@ Console::find_user( const char *name,  size_t len ) noexcept
     }
   }
   return NULL;
+}
+
+bool
+Console::is_self( const char *name,  size_t len ) const noexcept
+{
+  return this->user_db.user.user.equals( name, len ) ||
+         ( len == 4 && ::memcmp( name, "self", 4 ) == 0 );
 }
 
 UserBridge *
@@ -2194,10 +2205,8 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
     case CMD_SHOW_PORTS:     this->show_ports( p, arg, len ); break;
     case CMD_SHOW_COST:      this->show_cost( p, arg, len ); break;
     case CMD_SHOW_STATUS:    this->show_status( p, arg, len ); break;
-    case CMD_SHOW_ADJACENCY: this->show_adjacency( p, arg, len ); break;
     case CMD_SHOW_LINKS:     this->show_links( p );     break;
     case CMD_SHOW_NODES:     this->show_nodes( p );     break;
-    case CMD_SHOW_ROUTES:    this->show_routes( p, int_arg( arg, len ) ); break;
     case CMD_SHOW_URLS:      this->show_urls( p );      break;
     case CMD_SHOW_TPORTS:    this->show_tports( p, arg, len ); break;
     case CMD_SHOW_USERS:     this->show_users( p );     break;
@@ -2213,12 +2222,35 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
     case CMD_SHOW_LOSS:      this->show_loss( p );      break;
     case CMD_SHOW_SKEW:      this->show_skew( p );      break;
     case CMD_SHOW_REACHABLE: this->show_reachable( p ); break;
+
+    case CMD_SHOW_ADJACENCY:
+    case CMD_SHOW_ROUTES:
     case CMD_SHOW_TREE: {
       UserBridge * u = this->find_user( arg, len );
-      uint32_t     i = ( u == NULL ? int_arg( arg, len ) : 0 );
-      if ( u != NULL && argc > 2 )
+      uint32_t     i = (uint32_t) -1,
+                 * uid_ptr  = NULL,
+                   self_uid = 0;
+      bool         has_path = true;
+      if ( u != NULL )
+        uid_ptr = &u->uid;
+      if ( uid_ptr == NULL ) {
+        if ( this->is_self( arg, len ) )
+          uid_ptr = &self_uid;
+        else if ( len > 0 )
+          i = int_arg( arg, len );
+      }
+      if ( uid_ptr != NULL && argc > 2 )
         i = int_arg( args[ argc - 1 ], arglen[ argc - 1 ] );
-      this->show_tree( p, u, i );
+      if ( i == (uint32_t) -1 ) {
+        i = 0;
+        has_path = false;
+      }
+      switch ( cmd ) {
+        case CMD_SHOW_TREE:      this->show_tree( p, u, i );   break;
+        case CMD_SHOW_ROUTES:    this->show_routes( p, u, i ); break;
+        case CMD_SHOW_ADJACENCY: this->show_adjacency( p, uid_ptr, i, has_path ); break;
+        default: break;
+      }
       break;
     }
     case CMD_SHOW_PATH:      this->show_path( p, int_arg( arg, len ) ); break;
@@ -4693,17 +4725,9 @@ Console::output_user_route( TabPrint &ptp,  UserRoute &u_rte ) noexcept
 }
 
 void
-Console::show_adjacency( ConsoleOutput *p,  const char *arg,
-                         size_t len ) noexcept
+Console::show_adjacency( ConsoleOutput *p,  const uint32_t *src_uid,
+                         uint16_t path_select,  bool has_path ) noexcept
 {
-  uint32_t path = 0;
-  bool     has_path_arg = false;
-
-  if ( len > 0 && arg[ 0 ] >= '0' && arg[ 0 ] <= '9' ) {
-    path = int_arg( arg, len );
-    has_path_arg = true;
-  }
-
   size_t     ncols = 6;
   TabOut     out( this->table, this->tmp, ncols );
   TabPrint * tab = NULL;
@@ -4730,6 +4754,8 @@ Console::show_adjacency( ConsoleOutput *p,  const char *arg,
   }
   for ( UserBridgeElem * el = list.hd; el != NULL; el = el->next ) {
     UserBridge * n = NULL;
+    if ( src_uid != NULL && *src_uid != el->uid )
+      continue;
     if ( el->uid != 0 )
       n = this->user_db.bridge_tab[ el->uid ];
     StringVal & user = ( n == NULL ? this->user_db.user.user : n->peer.user );
@@ -4774,13 +4800,13 @@ Console::show_adjacency( ConsoleOutput *p,  const char *arg,
           while ( i < r+4 )
             tab[ i++ ].set_null();
 
-          if ( ! has_path_arg ) {
+          if ( ! has_path ) {
             char cost_buf[ 64 ];
             size_t sz = set->cost.str_size( cost_buf, sizeof( cost_buf ) );
             tab[ i++ ].set( this->tmp.stralloc( sz, cost_buf ) );
           }
           else {
-            tab[ i++ ].set_int( set->cost[ path ] );
+            tab[ i++ ].set_int( set->cost[ path_select ] );
           }
 
           if ( set->rem_tport_id != 0 ) {
@@ -4808,8 +4834,8 @@ Console::show_adjacency( ConsoleOutput *p,  const char *arg,
     uint32_t path_cnt = peer_dist.get_path_count();
     this->printf( "consistent: %s, ",
       peer_dist.found_inconsistency ? "false" : "true" );
-    if ( has_path_arg )
-      this->printf( "path %u of %u\n", path, path_cnt );
+    if ( has_path )
+      this->printf( "path %u of %u\n", path_select, path_cnt );
     else
       this->printf( "path count: %u\n", path_cnt );
 
@@ -4945,17 +4971,22 @@ Console::show_nodes( ConsoleOutput *p ) noexcept
 }
 
 void
-Console::show_routes( ConsoleOutput *p,  uint16_t path_select ) noexcept
+Console::show_routes( ConsoleOutput *p,  const UserBridge *src,
+                      uint16_t path_select ) noexcept
 {
   static const uint32_t ncols = 9;
   TabOut       out( this->table, this->tmp, ncols );
   uint32_t     i = 0;
   const char * address;
-  uint32_t     addr_len, ucast_fd, mcast_fd;
+  uint32_t     addr_len, ucast_fd, mcast_fd, uid;
   EvPoll     & poll = this->mgr.poll;
   bool         first_tport;
 
-  for ( uint32_t uid = 1; uid < this->user_db.next_uid; uid++ ) {
+  if ( src != NULL )
+    uid = src->uid;
+  else
+    uid = 1;
+  for ( ; uid < this->user_db.next_uid; uid++ ) {
     UserBridge * n = this->user_db.bridge_tab[ uid ];
     if ( n == NULL || ! n->is_set( AUTHENTICATED_STATE ) )
       continue;
@@ -4990,17 +5021,28 @@ Console::show_routes( ConsoleOutput *p,  uint16_t path_select ) noexcept
         tab[ i++ ].set_int( cost );  /* cost */
       else
         tab[ i++ ].set( "X" );  /* cost */
-      uint32_t b = 0;
+      uint64_t b[ CABA_PATH_COUNT / 64 ];
+      uint16_t path_cnt = 0, max_path = 0;
+      ::memset( b, 0, sizeof( b ) );
       for ( uint16_t path = 0; path < n->bloom_rt.count; path++ ) {
         if ( n->bloom_rt[ path ] != NULL &&
              n->bloom_rt[ path ]->r == (uint32_t) u_ptr->mcast.fd ) {
-          b |= 1U << path;
+          b[ path / 64 ] |= 1U << ( path % 64 );
+          path_cnt++;
+          max_path = path;
         }
       }
-      if ( b == 0 )
+      if ( path_cnt == 0 )
         tab[ i++ ].set_null();
-      else
-        tab[ i++ ].set_long( b, PRINT_BITS );
+      else if ( max_path < 64 )
+        tab[ i++ ].set_long( b[ 0 ], PRINT_BITS );
+      else {
+        uint32_t sz = ( max_path + 63 ) / 64;
+        size_t n = uint64_to_bits( b, sz, NULL );
+        char * s = this->tmp.str_make( n + 1 );
+        uint64_to_bits( b, sz, s );
+        tab[ i++ ].set( s );
+      }
       if ( n->primary_route == tport_id )
         tab[ i++ ].set_long( n->round_trip_time, PRINT_LATENCY ); /* lat */
       else
@@ -5061,6 +5103,8 @@ Console::show_routes( ConsoleOutput *p,  uint16_t path_select ) noexcept
         }
       }
     }
+    if ( src != NULL )
+       break;
   }
   static const char *hdr[ ncols ] = { "user", "tport", "rem", "state",
                                       "cost", "path", "lat", "fd", "route" };

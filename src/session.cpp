@@ -115,52 +115,96 @@ SessionMgr::on_write_ready( void ) noexcept
 }
 
 bool
+SessionMgr::ld_bytes( const char *name,  uint64_t &val ) noexcept
+{
+  ConfigTree::ParametersList &plist = this->tree.parameters;
+  ConfigTree::ParametersList &ulist = this->user.parameters;
+  StringTab & st = this->user_db.string_tab;
+  uint64_t x;
+  if ( ulist.get_bytes( name, x ) ) { val = x; return true; }
+  return plist.getset_bytes( st, name, val );
+}
+
+bool
+SessionMgr::ld_nanos( const char *name,  uint64_t &val ) noexcept
+{
+  ConfigTree::ParametersList &plist = this->tree.parameters;
+  ConfigTree::ParametersList &ulist = this->user.parameters;
+  StringTab & st = this->user_db.string_tab;
+  uint64_t x;
+  if ( ulist.get_nanos( name, x ) ) { val = x; return true; }
+  return plist.getset_nanos( st, name, val );
+}
+
+bool
+SessionMgr::ld_secs( const char *name,  uint32_t &val ) noexcept
+{
+  ConfigTree::ParametersList &plist = this->tree.parameters;
+  ConfigTree::ParametersList &ulist = this->user.parameters;
+  StringTab & st = this->user_db.string_tab;
+  uint32_t x;
+  if ( ulist.get_secs( name, x ) ) { val = x; return true; }
+  return plist.getset_secs( st, name, val );
+}
+
+bool
+SessionMgr::ld_bool( const char *name,  bool &val ) noexcept
+{
+  ConfigTree::ParametersList &plist = this->tree.parameters;
+  ConfigTree::ParametersList &ulist = this->user.parameters;
+  StringTab & st = this->user_db.string_tab;
+  bool x;
+  if ( ulist.get_bool( name, x ) ) { val = x; return true; }
+  return plist.getset_bool( st, name, val );
+}
+
+bool
 SessionMgr::load_parameters( void ) noexcept
 {
   const char *s = "", *val = NULL;
   /*uint64_t hb_ival, rel_ival, time_val, bytes_val, host_id;*/
-  ConfigTree::ParametersList &plist = this->tree.parameters;
-  StringTab & st = this->user_db.string_tab;
-  uint64_t tcp_write_timeout = this->poll.wr_timeout_ns,
+  uint64_t tcp_write_timeout   = this->poll.wr_timeout_ns,
            tcp_write_highwater = this->poll.send_highwater,
-           idle = this->idle_busy;
-  uint32_t tcp_conn_timeout = this->tcp_connect_timeout;
+           idle                = this->idle_busy;
+  uint32_t tcp_conn_timeout    = this->tcp_connect_timeout;
   bool ipv4_only = false, ipv6_only = false;
   bool cache_hostid = true;
 
-  if ( ! plist.getset_bytes( st, P_IDLE_BUSY, idle ) )
-    return false;
-  this->idle_busy = (uint32_t) idle;
-
-  if ( ! plist.getset_bytes( st, P_PUB_WINDOW_SIZE, this->pub_window_size ) ||
-       ! plist.getset_bytes( st, P_SUB_WINDOW_SIZE, this->sub_window_size ) ||
-       ! plist.getset_bytes( st, P_PUB_WINDOW_COUNT, this->pub_window_count ) ||
-       ! plist.getset_bytes( st, P_PUB_WINDOW_AUTOSCALE, this->pub_window_autoscale ) ||
-       ! plist.getset_bytes( st, P_SUB_WINDOW_COUNT, this->sub_window_count ) ||
-       ! plist.getset_nanos( st, P_PUB_WINDOW_TIME, this->pub_window_ival ) ||
-       ! plist.getset_nanos( st, P_SUB_WINDOW_TIME, this->sub_window_ival ) ||
-       ! plist.getset_secs( st, P_HEARTBEAT, this->user_db.hb_interval ) ||
-       ! plist.getset_secs( st, P_RELIABILITY, this->user_db.reliability ) ||
-       ! plist.getset_bool( st, P_TCP_NOENCRYPT, this->tcp_noencrypt ) ||
-       ! plist.getset_secs( st, P_TCP_CONNECT_TIMEOUT, tcp_conn_timeout ) ||
-       ! plist.getset_nanos( st, P_TCP_WRITE_TIMEOUT, tcp_write_timeout ) ||
-       ! plist.getset_bytes( st, P_TCP_WRITE_HIGHWATER, tcp_write_highwater ) ||
-       ! plist.getset_bool( st, P_TCP_IPV4ONLY, ipv4_only ) ||
-       ! plist.getset_bool( st, P_TCP_IPV6ONLY, ipv6_only ) )
+  if ( ! this->ld_bytes( P_IDLE_BUSY, idle ) ||
+       ! this->ld_bytes( P_PUB_WINDOW_SIZE, this->pub_window_size ) ||
+       ! this->ld_bytes( P_SUB_WINDOW_SIZE, this->sub_window_size ) ||
+       ! this->ld_bytes( P_PUB_WINDOW_COUNT, this->pub_window_count ) ||
+       ! this->ld_bytes( P_PUB_WINDOW_AUTOSCALE, this->pub_window_autoscale ) ||
+       ! this->ld_bytes( P_SUB_WINDOW_COUNT, this->sub_window_count ) ||
+       ! this->ld_nanos( P_PUB_WINDOW_TIME, this->pub_window_ival ) ||
+       ! this->ld_nanos( P_SUB_WINDOW_TIME, this->sub_window_ival ) ||
+       ! this->ld_secs( P_HEARTBEAT, this->user_db.hb_interval ) ||
+       ! this->ld_secs( P_RELIABILITY, this->user_db.reliability ) ||
+       ! this->ld_bool( P_TCP_NOENCRYPT, this->tcp_noencrypt ) ||
+       ! this->ld_secs( P_TCP_CONNECT_TIMEOUT, tcp_conn_timeout ) ||
+       ! this->ld_nanos( P_TCP_WRITE_TIMEOUT, tcp_write_timeout ) ||
+       ! this->ld_bytes( P_TCP_WRITE_HIGHWATER, tcp_write_highwater ) ||
+       ! this->ld_bool( P_TCP_IPV4ONLY, ipv4_only ) ||
+       ! this->ld_bool( P_TCP_IPV6ONLY, ipv6_only ) )
     return false;
 
+  this->idle_busy            = (uint32_t) idle;
   this->poll.wr_timeout_ns   = tcp_write_timeout;
   this->poll.so_keepalive_ns = tcp_write_timeout;
   this->tcp_connect_timeout  = tcp_conn_timeout;
   this->poll.send_highwater  = tcp_write_highwater;
 
-  if ( plist.find( s = P_TIMESTAMP, val, NULL ) ) {
+  ConfigTree::ParametersList &plist = this->tree.parameters;
+  ConfigTree::ParametersList &ulist = this->user.parameters;
+
+  s = P_TIMESTAMP;
+  if ( ulist.find( s, val, NULL ) || plist.find( s, val, NULL ) ) {
     if ( val != NULL &&
          ( ::strcmp( val, "gmt" ) == 0 || ::strcmp( val, "GMT" ) == 0 ) )
       tz_stamp_gmt = true;
   }
-
-  if ( plist.find( s = P_HOST_ID, val, NULL ) ) {
+  s = P_HOST_ID;
+  if ( ulist.find( s, val, NULL ) || plist.find( s, val, NULL ) ) {
     if ( val != NULL && ( val[ 0 ] == 'r' || val[ 0 ] == 'R' ) ) {
       this->user_db.host_id = this->user_db.rand.next();
       if ( val[ 1 ] != 'c' && val[ 1 ] != 'C' )

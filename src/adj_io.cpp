@@ -551,6 +551,7 @@ AdjCost::parse( const char *str,  size_t len ) noexcept
            cost  = 0,
            cost1 = 0,
            num   = 0;
+  int      x     = COST_OK;
 
   this->set( COST_DEFAULT, COST_DEFAULT, 0, 1 );
   for ( size_t i = 0; i < len; i++ ) {
@@ -571,6 +572,9 @@ AdjCost::parse( const char *str,  size_t len ) noexcept
       if ( val > 0 )
         cost_array.push( val );
       val = 0;
+    }
+    else if ( str[ i ] == 'X' || str[ i ] == 'N' ) {
+      x = COST_X;
     }
     else {
       if ( str[ i ] < ' ' )
@@ -613,25 +617,31 @@ AdjCost::parse( const char *str,  size_t len ) noexcept
     return BAD_COST;
   this->path.num   = num;
   this->path.count = val;
-  return COST_OK;
+  return x;
 }
 
 int
 AdjGraph::load_graph( StringTab &str_tab,  const char *p,
                       size_t size,  uint32_t &start_uid ) noexcept
 {
-  const char * args[ 500 ];
-  int          argc, ln = 0;
+  enum { NONE = 0, START, NODE, LINK, MESH, PGM };
+  const char * args[ 500 ], **argv;
+  int          argc, ln = 0, stmt;
   char         buf[ 8 * 1024 ],
                start[ 80 ];
+  StringVal    tport, type;
+  UserArray    users;
   AdjCost      default_cost( COST_DEFAULT ),
                cost;
+  int          cstatus = AdjCost::COST_OK;
   const char * end = &p[ size ];
   size_t       start_len;
 
   start[ 0 ] = '\0';
   start_len  = 0;
   start_uid  = 0;
+  stmt       = NONE;
+  cost       = default_cost;
   while ( p < end ) {
     size_t       linelen = end - p;
     const char * eol     = (const char *) ::memchr( p, '\n', linelen );
@@ -652,80 +662,108 @@ AdjGraph::load_graph( StringTab &str_tab,  const char *p,
 
     ln++;
     argc = split_args( buf, args );
+    argv = args;
     if ( argc == 0 )
       continue;
-    if ( ::strcmp( args[ 0 ], "start" ) == 0 ) {
-      if ( argc > 1 ) {
-        start_len = ::strlen( args[ 1 ] );
-        if ( start_len > sizeof( start ) - 1 )
-          start_len = sizeof( start ) - 1;
-        ::memcpy( start, args[ 1 ], start_len );
-        start[ start_len ] = '\0';
+
+    if ( args[ 0 ] == (const char *) buf ) {
+
+      if ( ::strcmp( args[ 0 ], "start" ) == 0 ) {
+        stmt = START;
+        if ( argc > 1 ) {
+          start_len = ::strlen( args[ 1 ] );
+          if ( start_len > sizeof( start ) - 1 )
+            start_len = sizeof( start ) - 1;
+          ::memcpy( start, args[ 1 ], start_len );
+          start[ start_len ] = '\0';
+        }
+        continue;
       }
-      continue;
+
+      if ( ::strcmp( args[ 0 ], "node" ) == 0 ) {
+        stmt = NODE;
+        this->add_users( str_tab, &args[ 1 ], argc - 1 );
+        continue;
+      }
+
+      size_t len = ::strlen( args[ 0 ] );
+      bool   add_string = true;
+      if ( ( len > 4 && ::strncmp( args[ 0 ], "tcp_", 4 ) == 0 ) ||
+           ( len > 5 && ::strncmp( args[ 0 ], "link_", 5 ) == 0 ) ) {
+        if ( stmt >= LINK )
+          this->link_users( str_tab, users, tport, type, cost, cstatus,
+                            stmt == LINK );
+        stmt = LINK;
+        cost = default_cost;
+        cstatus = AdjCost::COST_OK;
+        if ( args[ 0 ][ 3 ] == '_' )
+          tport = StringVal( &args[ 0 ][ 4 ], len - 4 );
+        else
+          tport = StringVal( &args[ 0 ][ 5 ], len - 5 );
+        type = StringVal( "tcp", 3 );
+      }
+      else if ( len > 5 && ::strncmp( args[ 0 ], "mesh_", 5 ) == 0 ) {
+        if ( stmt >= LINK )
+          this->link_users( str_tab, users, tport, type, cost, cstatus,
+                            stmt == LINK );
+        stmt = MESH;
+        cost = default_cost;
+        cstatus = AdjCost::COST_OK;
+        type = StringVal( "mesh", 4 );
+        tport = StringVal( &args[ 0 ][ 5 ], len - 5 );
+      }
+      else if ( len > 4 && ::strncmp( args[ 0 ], "pgm_", 4 ) == 0 ) {
+        if ( stmt >= LINK )
+          this->link_users( str_tab, users, tport, type, cost, cstatus,
+                            stmt == LINK );
+        stmt = PGM;
+        cost = default_cost;
+        cstatus = AdjCost::COST_OK;
+        type = StringVal( "pgm", 3 );
+        tport = StringVal( &args[ 0 ][ 4 ], len - 4 );
+      }
+      else {
+        add_string = false;
+      }
+      if ( add_string ) {
+        str_tab.add_string( tport );
+        str_tab.add_string( type );
+        argv++;
+        argc--;
+      }
     }
-    if ( ::strcmp( args[ 0 ], "node" ) == 0 ) {
-      for ( int i = 1; i < argc; i++ ) {
-        StringVal a( args[ i ], ::strlen( args[ i ] ) );
-        str_tab.add_string( a );
-        this->add_user( a );
-      }
+    else if ( stmt == NODE ) {
+      this->add_users( str_tab, args, argc );
       continue;
     }
 
-    cost = default_cost;
-    for ( int k = 1; k < argc; k++ ) {
-      if ( args[ k ][ 0 ] == ':' ) {
-        cost.parse( &args[ k + 1 ], argc - ( k + 1 ) );
+    int k;
+    for ( k = 0; k < argc; k++ ) {
+      if ( argv[ k ][ 0 ] == ':' ) {
+        cstatus = cost.parse( &argv[ k + 1 ], argc - ( k + 1 ) );
         argc = k;
         break;
       }
     }
-    char type[ 5 ];
-    int32_t i = 0;
-    const char * s = args[ 0 ], * name;
-    for ( ; *s != '\0' && *s != ' ' && *s != '_'; s++ ) {
-      if ( i < 4 )
-        type[ i++ ] = *s;
-    }
-    type[ i < 4 ? i : 4 ] = '\0';
-    if ( *s == '_' )
-      name = s + 1;
-    else
-      name = type;
 
-    if ( ::strcmp( type, "link" ) == 0 )
-      ::strcpy( type, "tcp" );
-
-    StringVal tp( name, ::strlen( name ) ),
-              ty( type, ::strlen( type ) );
-    str_tab.add_string( tp );
-    str_tab.add_string( ty );
-
-    if ( ::strcmp( type, "tcp" ) == 0 ) {
-      if ( argc < 3 )
-        continue;
-
-      StringVal a( args[ 1 ], ::strlen( args[ 1 ] ) ),
-                b( args[ 2 ], ::strlen( args[ 2 ] ) );
-      this->add_conn( str_tab.add( a ), str_tab.add( b ), tp, ty, cost );
-
-      for ( int i = 3; i < argc; i++ ) {
-        StringVal c( args[ i ], ::strlen( args[ i ] ) );
-        this->add_conn( a, str_tab.add( c ), tp, ty, cost );
-      }
-    }
-    else {
-      for ( int i = 1; i < argc; i++ ) {
-        StringVal a( args[ i ], ::strlen( args[ i ] ) );
-        str_tab.add_string( a );
-        for ( int j = i + 1; j < argc; j++ ) {
-          StringVal b( args[ j ], ::strlen( args[ j ] ) );
-          this->add_conn( a, str_tab.add( b ), tp, ty, cost );
+    switch ( stmt ) {
+      case LINK:
+      case MESH:
+      case PGM:
+        for ( k = 0; k < argc; k++ ) {
+          StringVal v( argv[ k ], ::strlen( argv[ k ] ) );
+          str_tab.add_string( v );
+          users.push( v );
         }
-      }
+        break;
+      default:
+        fprintf( stderr, "unknown stmt on line %u\n", ln );
+        break;
     }
   }
+  if ( stmt >= LINK )
+    this->link_users( str_tab, users, tport, type, cost, cstatus,
+                      stmt == LINK );
   if ( start_len > 0 ) {
     StringVal a( start, start_len );
     str_tab.add_string( a );
@@ -733,6 +771,62 @@ AdjGraph::load_graph( StringTab &str_tab,  const char *p,
     start_uid = u->idx;
   }
   return 0;
+}
+
+void
+AdjGraph::add_users( StringTab &str_tab,  const char **args,
+                     int argc ) noexcept
+{
+  for ( int i = 0; i < argc; i++ ) {
+    StringVal a( args[ i ], ::strlen( args[ i ] ) );
+    str_tab.add_string( a );
+    this->add_user( a );
+  }
+}
+
+void
+AdjGraph::link_users( StringTab &str_tab,  UserArray &users,  StringVal &tport,
+                      StringVal &type,  AdjCost &cost,  int cstatus,
+                      bool is_tcp ) noexcept
+{
+  StringVal * tport_ptr = &tport;
+  StringVal   tport_tmp;
+  if ( users.count > 1 ) {
+    for (;;) {
+      if ( cstatus == AdjCost::COST_X ) {
+        char tmp[ 256 ];
+        int n = ::snprintf( tmp, sizeof( tmp ), "%s_%u",
+                            tport.val, cost.path.num + 1 );
+        tport_tmp = StringVal( tmp, n );
+        str_tab.add_string( tport_tmp );
+        tport_ptr = &tport_tmp;
+      }
+      if ( is_tcp ) {
+        StringVal a( users.ptr[ 0 ] ),
+                  b( users.ptr[ 1 ] );
+        this->add_conn( a, b, *tport_ptr, type, cost );
+
+        for ( size_t i = 2; i < users.count; i++ ) {
+          StringVal c( users.ptr[ i ] );
+          this->add_conn( a, c, *tport_ptr, type, cost );
+        }
+      }
+      else {
+        for ( size_t i = 0; i < users.count; i++ ) {
+          StringVal a( users.ptr[ i ] );
+          for ( size_t j = i + 1; j < users.count; j++ ) {
+            StringVal b( users.ptr[ j ] );
+            this->add_conn( a, b, *tport_ptr, type, cost );
+          }
+        }
+      }
+      if ( cstatus != AdjCost::COST_X )
+        break;
+      if ( ++cost.path.num >= cost.path.count )
+        break;
+    }
+  }
+  users.count = 0;
 }
 
 namespace {
@@ -890,13 +984,32 @@ AdjGraphOut::print_config( const char *fn ) noexcept
    .s( "    create: " ).s( svc.create ).s( "\n" )
    .s( "    pri: " ).s( svc.pri ).s( "\n" )
    .s( "    pub: " ).s( svc.pub ).s( "\n" )
-   .s( "parameters:\n" )
+   .s( "    users:\n" );
+
+  AdjUserTab & user_tab = this->graph.user_tab;
+  UIntHashTab * host_ht = UIntHashTab::resize( NULL );
+  for ( uint32_t i = 0; i < user_tab.count; i++ ) {
+    AdjUser * u = user_tab.ptr[ i ];
+    UserBuf ubuf;
+    ubuf.gen_key( u->user.val, u->user.len, svc.service, svc.service_len,
+                  NULL, 0, false, pass, host_ht );
+    svc.add_user( ubuf );
+    host_ht->upsert_rsz( host_ht, ubuf.make_host_id(), 1 );
+  }
+  delete host_ht;
+  svc.sign_users( NULL, pass );
+  for ( UserElem *e = svc.users.hd; e != NULL; e = e->next ) {
+    o.s( "      \"" ).s( e->user.user ).s( "\": \"" ).s( e->sig ).s( "\"\n" );
+  }
+
+  o.s( "parameters:\n" )
    .s( "  salt_data: " ).s( (char *) salt ).s( "\n" )
    .s( "  pass_data: " ).s( (char *) pass.pass ).s( "\n" )
    .s( "transports:\n" );
   this->print_graph();
 
-  AdjUserTab & user_tab = this->graph.user_tab;
+  bool first_user = true;
+  UserElem *elem = svc.users.hd;
   for ( uint32_t i = 0; i < user_tab.count; i++ ) {
     AdjUser * u = user_tab.ptr[ i ];
     o.printf( "# ms_server -d %.*s%s.yaml -u %s", (int) prefix_len, cfg, fn,
@@ -914,26 +1027,37 @@ AdjGraphOut::print_config( const char *fn ) noexcept
     }
     o.puts( "\n" );
     if ( cnt > 0 ) {
-      o.puts( "# startup:\n" );
+      if ( first_user ) {
+        o.s( "users:\n" );
+        first_user = false;
+      }
+      o.s( "  - user: "   ).s( u->user.val ).s( "\n" )
+       .s( "    svc: "    ).s( svc.service ).s( "\n" )
+       .s( "    create: " ).s( elem->user.create ).s( "\n" )
+       .s( "    pri: "    ).s( elem->user.pri).s( "\n" )
+       .s( "    pub: "    ).s( elem->user.pub).s( "\n" )
+       .s( "    startup:\n" );
+
       if ( listen_cnt > 0 ) {
-        o.puts( "#   listen:\n" );
+        o.puts( "      listen:\n" );
         for ( j = 0; j < this->args.count; j++ ) {
           TPortArg &arg = this->args.ptr[ j ];
           if ( arg.user == u && arg.op == LISTEN ) {
-            o.printf( "#     - %s\n", arg.link->tport.val );
+            o.printf( "        - %s\n", arg.link->tport.val );
           }
         }
       }
       if ( connect_cnt > 0 ) {
-        o.puts( "#   connect:\n" );
+        o.puts( "      connect:\n" );
         for ( j = 0; j < this->args.count; j++ ) {
           TPortArg &arg = this->args.ptr[ j ];
           if ( arg.user == u && arg.op == CONNECT ) {
-            o.printf( "#     - %s\n", arg.link->tport.val );
+            o.printf( "        - %s\n", arg.link->tport.val );
           }
         }
       }
     }
+    elem = elem->next;
   }
 }
 

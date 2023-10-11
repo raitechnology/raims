@@ -98,7 +98,10 @@ timestamp_now( char *time,  size_t maxlen ) noexcept
       break;
     }
   }
-  return stamp.get_string( time, maxlen );
+  size_t sz = stamp.get_string( time, maxlen );
+  if ( sz < maxlen )
+    time[ sz ] = '\0';
+  return sz;
 }
 
 static size_t
@@ -120,7 +123,10 @@ bootstamp( char *time,  size_t maxlen,  uint64_t off ) noexcept
   }
   stamp.stamp = boot + off;
   stamp.resolution = MD_RES_SECONDS;
-  return stamp.get_string( time, maxlen );
+  size_t sz = stamp.get_string( time, maxlen );
+  if ( sz < maxlen )
+    time[ sz ] = '\0';
+  return sz;
 }
 
 /* offset for AES ctr mode enc/dec */
@@ -193,7 +199,7 @@ UserBuf::gen_tmp_key( const char *usr_svc,  const char *num,
   UIntHashTab * host_ht = UIntHashTab::resize( NULL );
   for ( const ConfigTree::User *u = tree.users.hd; u != NULL;
         u = u->next ) {
-    if ( u->user_id < tree.user_cnt ) {
+    if ( ! u->is_temp ) {
       if ( u->svc.equals( svc.svc ) ) {
         host_ht->upsert_rsz( host_ht,
           UserBuf::make_host_id( u->user.val, u->user.len,
@@ -533,7 +539,7 @@ ServiceBuf::load_service( const ConfigTree &tree,
   this->copy( s );
   for ( const ConfigTree::User *u = tree.users.hd; u != NULL;
         u = u->next ) {
-    if ( u->user_id < tree.user_cnt ) {
+    if ( ! u->is_temp ) {
       if ( u->svc.equals( s.svc ) ) {
         this->add_user( *u );
         user_cnt++;

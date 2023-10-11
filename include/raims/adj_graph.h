@@ -12,6 +12,7 @@ struct AdjLink;
 struct AdjLinkTab : public kv::ArrayCount<AdjLink *, 8> {};
 typedef kv::ArrayCount<uint32_t, 16> UIntArrayCount;
 typedef kv::ArrayCount<kv::BitSpace, 16> BitSpaceArray;
+typedef kv::ArrayCount<StringVal, 16> UserArray;
 
 struct AdjFwdTab {
   AdjLinkTab     links;
@@ -66,7 +67,7 @@ struct AdjCost {
     this->path     = c.path;
     return *this;
   }
-  enum { COST_OK = 0, BAD_FMT, EMPTY_COST, EMPTY_PATH, BAD_COST };
+  enum { COST_OK = 0, BAD_FMT, EMPTY_COST, EMPTY_PATH, BAD_COST, COST_X };
   int parse( const char *str,  size_t len ) noexcept;
   int parse( const char **args,  size_t argc ) noexcept;
   char * str( char *buf,  size_t len ) const noexcept;
@@ -220,7 +221,10 @@ struct AdjGraph {
                  bool is_yaml ) noexcept;
   int load_graph( StringTab &str_tab,  const char *p,
                   size_t size,  uint32_t &start_uid ) noexcept;
-
+  void add_users( StringTab &str_tab,  const char **args,  int argc ) noexcept;
+  void link_users( StringTab &str_tab,  UserArray &users,  StringVal &tport,
+                   StringVal &type,  AdjCost &cost,  int cstatus,
+                   bool is_tcp ) noexcept;
   void init_inconsistent( uint32_t src_idx,  AdjInconsistent &inc ) noexcept;
   void find_inconsistent( AdjInconsistent &inc ) noexcept;
 

@@ -106,26 +106,6 @@ struct ConfigTree {
     StringList( const StringList &sl ) : next( 0 ), val( sl.val ) {}
   };
   typedef kv::SLinkList<StringList> StrList;
-
-  struct User {
-    void * operator new( size_t, void *ptr ) { return ptr; }
-    User    * next;
-    StringVal user,        /* user name */
-              svc,         /* service name */
-              create,      /* create time */
-              expires,     /* if/when expires */
-              revoke,      /* revoke time */
-              pri,         /* pri base64 */
-              pub;         /* pub base64 */
-    uint32_t  user_id;     /* count 0 -> user_cnt */
-    bool      is_temp;
-                   /*entitle_cnt;*/ /* count of entitle[] */
-    User() : next( 0 ), user_id( 0 ) {}
-    User( const User &u ) : next( 0 ), user( u.user ), svc( u.svc ),
-      create( u.create ), expires( u.expires ), revoke( u.revoke ),
-      pri( u.pri ), pub( u.pub ), user_id( u.user_id ), is_temp( false ) {}
-  };
-  typedef kv::SLinkList< User > UserList;
   /* parameters : { string_pair_list } */
   struct Parameters {
     void * operator new( size_t, void *ptr ) { return ptr; }
@@ -146,11 +126,37 @@ struct ConfigTree {
     StringPair *update( StringTab &st,  const StringVal &name,
                         const StringVal &val ) noexcept;
     bool remove( StringTab &st,  const char *name ) noexcept;
+    bool get_bytes( const char *name, uint64_t &n ) noexcept;
+    bool get_nanos( const char *name, uint64_t &n ) noexcept;
+    bool get_secs( const char *name, uint32_t &s ) noexcept;
+    bool get_bool( const char *name,  bool &b ) noexcept;
     bool getset_bytes( StringTab &st,  const char *name, uint64_t &n ) noexcept;
     bool getset_nanos( StringTab &st,  const char *name, uint64_t &n ) noexcept;
     bool getset_secs( StringTab &st,  const char *name, uint32_t &s ) noexcept;
     bool getset_bool( StringTab &st,  const char *name,  bool &b ) noexcept;
   };
+
+  struct User {
+    void * operator new( size_t, void *ptr ) { return ptr; }
+    User         * next;
+    StringVal      user,        /* user name */
+                   svc,         /* service name */
+                   create,      /* create time */
+                   expires,     /* if/when expires */
+                   revoke,      /* revoke time */
+                   pri,         /* pri base64 */
+                   pub;         /* pub base64 */
+    ParametersList parameters,
+                   startup;
+    uint32_t       user_id;     /* count 0 -> user_cnt */
+    bool           is_temp;
+                   /*entitle_cnt;*/ /* count of entitle[] */
+    User() : next( 0 ), user_id( 0 ) {}
+    User( const User &u ) : next( 0 ), user( u.user ), svc( u.svc ),
+      create( u.create ), expires( u.expires ), revoke( u.revoke ),
+      pri( u.pri ), pub( u.pub ), user_id( u.user_id ), is_temp( false ) {}
+  };
+  typedef kv::SLinkList< User > UserList;
   /* services : { svc : name, type : t, subject : [ arr ], route : { f:v } } */
   struct Service {
     void * operator new( size_t, void *ptr ) { return ptr; }
@@ -264,7 +270,7 @@ struct ConfigTree {
   bool resolve( const char *us,  User *&usrp,  Service *&svcp ) noexcept;
 
   Service   * find_service( const char *svc,  size_t len ) noexcept;
-  User      * find_user( Service &svc,  const char *usr,  size_t len ) noexcept;
+  User      * find_user( Service *svc,  const char *usr,  size_t len ) noexcept;
   Transport * find_transport( const char *tport,  size_t len,
                               bool *conn = NULL ) noexcept;
   Transport * find_transport_type( const char *type,  size_t len,

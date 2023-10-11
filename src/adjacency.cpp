@@ -399,14 +399,22 @@ AdjDistance::calc_transport_cache( uint32_t dest_uid,  uint32_t tport_id,
   this->clear_cache_if_dirty();
 
   size_t   pos;
-  uint32_t h = kv_hash_uint( tport_id * this->max_uid + dest_uid ),
-           val;
-  if ( this->cache_ht == NULL )
-    this->cache_ht = kv::UIntHashTab::resize( NULL );
-  if ( this->cache_ht->find( h, pos, val ) )
-    return val;
+  uint64_t max_u = (uint64_t) this->max_uid,
+           max_t = (uint64_t) this->max_tport,
+           path  = (uint64_t) path_select * max_u * max_t,
+           idx   = path + (uint64_t) tport_id * max_u + (uint64_t) dest_uid;
+  uint32_t h = 0, val;
+
+  if ( idx <= (uint64_t) 0xffffffffU ) { /* only cache 32 bits */
+    h = kv_hash_uint( (uint32_t) idx );
+    if ( this->cache_ht == NULL )
+      this->cache_ht = kv::UIntHashTab::resize( NULL );
+    if ( this->cache_ht->find( h, pos, val ) )
+      return val;
+  }
   val = this->calc_transport_cost( dest_uid, tport_id, path_select );
-  this->cache_ht->set_rsz( this->cache_ht, h, pos, val );
+  if ( h != 0 )
+    this->cache_ht->set_rsz( this->cache_ht, h, pos, val );
   return val;
 }
 

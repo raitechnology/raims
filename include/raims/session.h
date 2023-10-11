@@ -321,6 +321,10 @@ struct SessionMgr : public kv::EvSocket, public kv::BPData {
               ConfigTree::User &u,  ConfigTree::Service &s,
               StringTab &st,  ConfigStartup &start ) noexcept;
   int init_sock( void ) noexcept;
+  bool ld_bytes( const char *name,  uint64_t &val ) noexcept;
+  bool ld_nanos( const char *name,  uint64_t &val ) noexcept;
+  bool ld_secs( const char *name,  uint32_t &val ) noexcept;
+  bool ld_bool( const char *name,  bool &val ) noexcept;
   bool load_parameters( void ) noexcept;
   bool add_transport( ConfigTree::Transport &t,  bool is_listener ) noexcept;
   bool add_transport2( ConfigTree::Transport &t,  bool is_listener,
@@ -331,7 +335,8 @@ struct SessionMgr : public kv::EvSocket, public kv::BPData {
                     bool start_host ) noexcept;
   bool start_transport( TransportRoute &rte,  bool is_listener ) noexcept;
   bool add_startup_transports( void ) noexcept;
-  bool add_startup_transports( const char *name,  size_t name_sz,
+  bool add_startup_transports( ConfigTree::ParametersList &startup,
+                               const char *name,  size_t name_sz,
                                bool is_listen ) noexcept;
   bool add_rvd_transports( const char *listen,  const char *http,
                            int flags ) noexcept;
