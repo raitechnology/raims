@@ -596,6 +596,8 @@ struct UserDB {
                         hb_ival_mask,    /* ping ival = pow2 hb_ival * 1.5 */
                         next_ping_mono,  /* when next ping is sent */
                         last_auth_mono,  /* when last uid was authenticated */
+                        last_add_mono,
+                        last_rem_mono,
                         converge_time,   /* time of convergence */
                         converge_mono,   /* convergence mono time */
                         net_converge_time, /* time that network agrees */

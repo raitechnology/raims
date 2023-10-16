@@ -157,7 +157,7 @@ struct HashOrder {
 };
 struct HashOrderCmp {
   static uint32_t key( HashOrder &v ) { return v.h; }
-  static bool less( HashOrder &v1,  HashOrder v2 ) { return v1.h < v2.h; }
+  static bool less( HashOrder &v1,  HashOrder &v2 ) { return v1.h < v2.h; }
 };
 
 void

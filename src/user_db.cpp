@@ -123,6 +123,8 @@ UserDB::init( const CryptPass &pwd,  ConfigTree &tree ) noexcept
   this->route_check_mono = 0;
   this->bloom_check_mono = 0;
   this->last_auth_mono   = this->start_mono_time;
+  this->last_add_mono    = this->start_mono_time;
+  this->last_rem_mono    = this->start_mono_time;
   this->converge_time    = this->start_time;
   this->net_converge_time= this->start_time;
   this->converge_mono    = this->start_mono_time;
@@ -734,13 +736,15 @@ UserDB::converge_network( uint64_t current_mono_time,  uint64_t current_time,
       }
     }
     if ( state == AdjDistance::UID_ORPHANED ) {
-      uint64_t ns, ns2, hb_timeout_ns;
+      uint64_t ns, ns2, ns3, hb_timeout_ns;
       hb_timeout_ns = sec_to_ns( n->hb_interval * 2 ) + SEC_TO_NS;
       ns  = n->start_mono_time + hb_timeout_ns; /* if hb and still orphaned */
       ns2 = this->start_mono_time + hb_timeout_ns;
+      ns3 = this->last_add_mono + hb_timeout_ns / 4;
 
       if ( this->adjacency_unknown.is_empty() &&
-           ns < current_mono_time && ns2 < current_mono_time ) {
+           ns < current_mono_time && ns2 < current_mono_time &&
+           ns3 < current_mono_time ) {
         d_usr( "find_inconsistent orphaned %s(%u)\n",
                  n->peer.user.val, n->uid );
         this->remove_authenticated( *n,
@@ -1637,6 +1641,7 @@ UserDB::add_authenticated( UserBridge &n,
   bool         send_add = false;
 
   this->last_auth_mono = cur_mono;
+  this->last_add_mono  = cur_mono;
   if ( n.is_set( ZOMBIE_STATE ) ) {
     if ( n.last_auth_type == BYE_BYE ) {
       n.printf( "refusing to auth bye bye\n" );
@@ -1761,17 +1766,19 @@ UserDB::add_authenticated( UserBridge &n,
 void
 UserDB::remove_authenticated( UserBridge &n,  AuthStage bye ) noexcept
 {
-  size_t n_pos;
-  bool   send_del = false;
+  uint64_t cur_mono = current_monotonic_time_ns();
+  size_t   n_pos;
+  bool     send_del = false;
 
-  this->last_auth_mono = current_monotonic_time_ns();
+  this->last_auth_mono = cur_mono;
+  this->last_rem_mono  = cur_mono;
   n.last_auth_type = bye;
   /*if ( debug_usr )*/
     n.printn( "remove auth %s %s\n", auth_stage_string( bye ),
                n.is_set( ZOMBIE_STATE ) ? "zombie" : "" );
   if ( n.test_clear( AUTHENTICATED_STATE ) ) {
     n.remove_auth_time = this->poll.now_ns;
-    n.remove_auth_mono = this->last_auth_mono;
+    n.remove_auth_mono = cur_mono;
     this->events.auth_remove( n.uid, bye );
     this->uid_authenticated.remove( n.uid );
     this->uid_rtt.remove( n.uid );
@@ -1779,7 +1786,7 @@ UserDB::remove_authenticated( UserBridge &n,  AuthStage bye ) noexcept
     if ( bye != BYE_HB_TIMEOUT && bye != BYE_PING )
       this->remove_adjacency( n );
     this->uid_auth_count--;
-    this->sub_db.sub_update_mono_time = this->last_auth_mono;
+    this->sub_db.sub_update_mono_time = cur_mono;
     d_usr( "--- uid_auth_count=%u -%s\n", this->uid_auth_count,
             n.peer.user.val );
     this->uid_csum ^= n.bridge_id.nonce;
