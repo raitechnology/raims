@@ -128,17 +128,20 @@ struct AdjCost {
 };
 
 struct AdjLink {
-  AdjUser      & a,
-               & b;
-  BitSpaceArray  dest;
-  StringVal      tport,
-                 type;
-  AdjCost        cost;
-  uint32_t       tid;
+  AdjUser      & a,       /* source of link */
+               & b;       /* dest of link */
+  BitSpaceArray  dest;    /* map of users reached for each path */
+  StringVal      tport,   /* name of link */
+                 type;    /* type: tcp, mesh, pgm */
+  AdjCost        cost;    /* cost of link */
+  uint32_t       tid,     /* transport id at user a */
+                 link_num,/* globally inique link number */
+                 idx;     /* index a.links[] */
   void * operator new( size_t, void *ptr ) { return ptr; }
   AdjLink( AdjUser *u1,  AdjUser *u2,  StringVal *tp,  StringVal *ty,
-           AdjCost *c,  uint32_t id )
-      : a( *u1 ), b( *u2 ), tport( *tp ), type( *ty ), cost( *c ), tid( id ) {}
+           AdjCost *c,  uint32_t id,  uint32_t n,  uint32_t i )
+      : a( *u1 ), b( *u2 ), tport( *tp ), type( *ty ), cost( *c ), tid( id ),
+        link_num( n ), idx( i ) {}
   void reset( void ) noexcept;
 };
 
@@ -151,9 +154,9 @@ struct AdjUserTab : public kv::ArrayCount<AdjUser *, 32> {
 };
 
 struct AdjVisit {
-  kv::BitSpace   user;
-  UIntArrayCount cost,
-                 src;
+  kv::BitSpace   user; /* track which users visited */
+  UIntArrayCount cost, /* cost of transitions */
+                 src;  /* the source link used to get here (the user link idx) */
 };
 
 struct AdjInconsistent {
@@ -176,23 +179,30 @@ struct LCM : public kv::ArrayCount<uint32_t, 16> {
 };
 
 struct AdjGraph {
-  AdjUserTab     user_tab;
-  md::MDMsgMem & mem;
-  LCM            lcm;
-  uint32_t       path_count;
+  AdjUserTab     user_tab;   /* users in the graph with the links */
+  md::MDMsgMem & mem;        /* allocation for graph structures and names */
+  LCM            lcm;        /* least common multiple */
+  uint32_t       link_count, /* total count of links */
+                 path_count, /* number paths calculated and recommended */
+                 max_links,  /* max number of links a single user has */
+                 max_alt;    /* max alt paths available from any one user */
 
   void * operator new( size_t, void *ptr ) { return ptr; }
-  AdjGraph( md::MDMsgMem &m ) : mem( m ), path_count( 1 ) {}
-
+  AdjGraph( md::MDMsgMem &m ) : mem( m ), link_count( 0 ), path_count( 1 ),
+                                max_links( 0 ), max_alt( 0 ) {}
   void reset( void ) {
+    this->link_count = 0;
     this->path_count = 1;
+    this->max_links  = 0;
+    this->max_alt    = 0;
     this->lcm.reset();
     this->user_tab.reset();
   }
   void compute_forward_set( uint16_t p ) noexcept;
-  uint32_t get_min_cost( uint16_t p,  AdjVisit &visit ) noexcept;
-  void add_fwd_set( uint16_t p,  uint32_t src_id,  AdjVisit &visit,
-                    uint32_t min_cost ) noexcept;
+  uint32_t get_min_cost( uint16_t p,  AdjVisit &visit,  AdjLinkTab &links,
+                         kv::BitSpace &dup,  uint32_t &dup_count ) noexcept;
+  void add_fwd_set( AdjFwdTab &fwd,  AdjLink &link,  AdjVisit &visit,
+                    uint32_t cost ) noexcept;
   AdjUser *add_user( StringVal &a,  uint32_t uid = 0 ) noexcept;
 
   void add_link( StringVal &a,  StringVal &b,  StringVal &tp,  StringVal &ty,
@@ -283,6 +293,7 @@ struct AdjGraphOut {
   void print_web_path_link( uint32_t step,  AdjFwdTab &fwd, uint32_t src,
                             uint32_t j,  bool first ) noexcept;
 
+  void print_mask( uint16_t p ) noexcept;
   void print_fwd( uint16_t p ) noexcept;
 
   void print_graph( void ) noexcept;

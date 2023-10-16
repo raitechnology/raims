@@ -75,9 +75,10 @@ AdjGraphOut::print_tree_link( uint32_t indent,  AdjFwdTab &fwd,  uint32_t src,
   AdjLink     * link = fwd.links.ptr[ j ];
 
   uint32_t dest_idx = link->b.idx;
-  o.printf( "%*s[%u] %s -> %s %s(%c)\n", indent, "", cost,
-          link->a.user.val, link->b.user.val,
-          link->tport.val, link->dest[ p ].is_member( dest_idx ) ? '+' : '-' );
+  o.printf( "%*s[%u] %s -> %s %s(%c/%u)\n", indent, "", cost,
+          link->a.user.val, link->b.user.val, link->tport.val,
+          link->dest[ p ].is_member( dest_idx ) ? '+' : '-',
+          link->link_num );
 
   for ( uint32_t k = j + 1; k < fwd.links.count; k++ ) {
     if ( fwd.src.ptr[ k ] == src &&
@@ -188,6 +189,22 @@ AdjGraphOut::print_web_path_link( uint32_t step,  AdjFwdTab &fwd,  uint32_t src,
 }
 
 void
+AdjGraphOut::print_mask( uint16_t p ) noexcept
+{
+  ArrayOutput & o = this->out;
+  AdjUserTab & user_tab = this->graph.user_tab;
+  for ( uint32_t idx = 0; idx < user_tab.count; idx++ ) {
+    AdjUser   * u   = user_tab.ptr[ idx ];
+    AdjFwdTab & fwd = u->fwd[ p ];
+    o.printf( "(%s", u->user.val );
+    for ( uint32_t i = 0; i < fwd.links.count; i++ )
+      o.printf( ",%u", fwd.links.ptr[ i ]->link_num );
+    o.puts( ") " );
+  }
+  o.puts( "\n" );
+}
+
+void
 AdjGraphOut::print_fwd( uint16_t p ) noexcept
 {
   ArrayOutput & o = this->out;
@@ -198,8 +215,8 @@ AdjGraphOut::print_fwd( uint16_t p ) noexcept
     for ( uint32_t j = 0; j < u->links.count; j++ ) {
       bool first = true;
       uint32_t idx = 0;
-      for ( bool b = u->links.ptr[ j ]->dest[ p ].first( idx ); b;
-            b = u->links.ptr[ j ]->dest[ p ].next( idx ) ) {
+      BitSpace & dest = u->links.ptr[ j ]->dest[ p ];
+      for ( bool b = dest.first( idx ); b; b = dest.next( idx ) ) {
         if ( first ) {
           o.printf( "  %s ->", u->links.ptr[ j ]->tport.val );
           first = false;
@@ -408,7 +425,9 @@ AdjGraphOut::print_tcp( AdjLinkTab &tcp ) noexcept
   uint32_t i, j, k = 0;
   bool eat_single_connections = false;
 
-  while ( k < tcp.count ) {
+  while ( tcp.count > 0 ) {
+    if ( k >= tcp.count )
+      k = 0;
     AdjLink *link = tcp.ptr[ k ],
             *test;
     BitSpace used;
@@ -426,10 +445,8 @@ AdjGraphOut::print_tcp( AdjLinkTab &tcp ) noexcept
     }
     if ( used.is_empty() ) {
       if ( ! eat_single_connections ) {
-        if ( ++k == tcp.count ) {
+        if ( ++k == tcp.count )
           eat_single_connections = true;
-          k = 0;
-        }
         continue;
       }
       this->print_link( *link );
@@ -1034,8 +1051,8 @@ AdjGraphOut::print_config( const char *fn ) noexcept
       o.s( "  - user: "   ).s( u->user.val ).s( "\n" )
        .s( "    svc: "    ).s( svc.service ).s( "\n" )
        .s( "    create: " ).s( elem->user.create ).s( "\n" )
-       .s( "    pri: "    ).s( elem->user.pri).s( "\n" )
-       .s( "    pub: "    ).s( elem->user.pub).s( "\n" )
+       .s( "    pri: "    ).s( elem->user.pri ).s( "\n" )
+       .s( "    pub: "    ).s( elem->user.pub ).s( "\n" )
        .s( "    startup:\n" );
 
       if ( listen_cnt > 0 ) {
