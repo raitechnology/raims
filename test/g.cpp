@@ -37,6 +37,7 @@ main( int argc, const char *argv[] ) noexcept
              * do_loop   = get_arg( x, argc, argv, 0, "-l", "-loopback", NULL ),
              * show_path = get_arg( x, argc, argv, 1, "-p", "-path", "0" ),
              * verify    = get_arg( x, argc, argv, 0, "-v", "-verify", NULL ),
+             * no_cfg    = get_arg( x, argc, argv, 0, "-x", "-nocfg", NULL ),
              * help      = get_arg( x, argc, argv, 0, "-h", "-help", NULL );
   bool show_forward_path     = ( do_fwd != NULL || do_debug != NULL ),
        show_multicast_tree   = ( do_tree != NULL || do_debug != NULL ),
@@ -45,10 +46,10 @@ main( int argc, const char *argv[] ) noexcept
        do_verify             = ( verify != NULL || do_debug != NULL ),
        use_loop              = ( do_loop != NULL ),
        generate_config       = ! ( show_forward_path ||
-                                   show_multicast_tree ||
-                                   show_graph ||
-                                   show_web_json || do_verify );
-  uint8_t path = atoi( show_path );
+                                   show_multicast_tree || show_graph ||
+                                   show_web_json || do_verify ) &&
+                                   ( no_cfg == NULL );
+  uint32_t path = atoi( show_path );
 
   const char *fn = NULL;
   if ( x < argc )
@@ -92,14 +93,14 @@ main( int argc, const char *argv[] ) noexcept
   else
     status = graph.load_graph( str_tab, (const char *) map.map, map.map_size,
                                start_uid );
-
   if ( status != 0 )
     return 1;
   /*graph.print();*/
-  for ( uint8_t p = 0; p < graph.path_count; p++ )
-    graph.compute_forward_set( p );
   ArrayOutput out;
   AdjGraphOut put( graph, out );
+  graph.compute_forward_set( 0 );
+  for ( uint16_t p = 1; p < graph.path_count; p++ )
+    graph.compute_forward_set( p );
   put.use_loopback = use_loop;
   if ( show_multicast_tree ) {
     out.printf( "--- multicast tree (%u/%u):\n", path, graph.path_count );

@@ -115,7 +115,8 @@ AdjDistance::update_graph( void ) noexcept
       }
     }
   }
-  for ( uint16_t p = 0; p < g.path_count; p++ )
+  g.compute_forward_set( 0 );
+  for ( uint16_t p = 1; p < g.path_count; p++ )
     g.compute_forward_set( p );
 }
 
