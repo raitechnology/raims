@@ -149,15 +149,20 @@ UserDB::save_unknown_adjacency( UserBridge &n,  TransportRoute &rte,
     p->uid              = n.uid;
     p->reason           = ADJ_RESULT_SYNC;
     p->pending_seqno    = ++this->adjacency_unknown.pending_seqno;
-    p->rec_list         = (AdjacencyRec *) (void *) &p[ 1 ];
     p->rec_count        = rec_count;
-    AdjacencyRec * cpy = p->rec_list;
-    for ( uint32_t i = 0; i < rec_count; i++ ) {
-      cpy[ i ].copy( *recs );
-      cpy[ i ].next = &cpy[ i + 1 ];
-      recs = recs->next;
+    if ( rec_count == 0 ) {
+      p->rec_list = NULL;
     }
-    cpy[ rec_count - 1 ].next = NULL;
+    else {
+      p->rec_list = (AdjacencyRec *) (void *) &p[ 1 ];
+      AdjacencyRec * cpy = p->rec_list;
+      for ( uint32_t i = 0; i < rec_count; i++ ) {
+        cpy[ i ].copy( *recs );
+        cpy[ i ].next = &cpy[ i + 1 ];
+        recs = recs->next;
+      }
+      cpy[ rec_count - 1 ].next = NULL;
+    }
   }
   else {
     p   = sav;
