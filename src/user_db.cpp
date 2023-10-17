@@ -1273,8 +1273,8 @@ UserDB::find_adjacent_routes( void ) noexcept
         }
       }
     }
-    if ( n.bloom_rt[ 0 ] != NULL &&
-         (uint32_t) primary->mcast.fd != n.bloom_rt[ 0 ]->r ) {
+    if ( n.bloom_rt[ 0 ] == NULL || ( n.bloom_rt[ 0 ] != NULL &&
+           (uint32_t) primary->mcast.fd != n.bloom_rt[ 0 ]->r ) ) {
       if ( debug_usr )
         n.printf( "updating primary route, new mcast_fd %u\n",
                   primary->mcast.fd );
