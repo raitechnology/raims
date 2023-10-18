@@ -1435,7 +1435,7 @@ UserDB::process_unknown_adjacency( uint64_t current_mono_time ) noexcept
            UserPendingRoute::pending_timeout_total >= current_mono_time )
       continue;
 
-    if ( p->request_count > 5 ) {
+    if ( p->request_count > 5 || p->rec_count == 0 ) {
       next = p->next;
       this->adjacency_unknown.pop( p );
       this->remove_pending_peer( NULL, p->pending_seqno );
