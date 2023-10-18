@@ -1145,7 +1145,7 @@ UserDB::find_adjacent_routes( void ) noexcept
     this->peer_dist.update_path( forward, path_select );
   }
 
-  for ( uint32_t uid = 1; uid < this->next_uid; uid++ ) {
+  for ( uint32_t uid = 1; uid < this->peer_dist.max_uid; uid++ ) {
     if ( this->bridge_tab.ptr[ uid ] == NULL )
       continue;
     UserBridge &n = *this->bridge_tab.ptr[ uid ];
@@ -1294,7 +1294,7 @@ UserDB::check_blooms( void ) noexcept
     this->peer_dist.update_path( forward, path_select );
   }
 
-  for ( uint32_t uid = 1; uid < this->next_uid; uid++ ) {
+  for ( uint32_t uid = 1; uid < this->peer_dist.max_uid; uid++ ) {
     uint32_t no_path = 0, invalid = 0, null_bloom = 0, fd_not_set = 0;
     if ( this->bridge_tab.ptr[ uid ] == NULL )
       continue;
