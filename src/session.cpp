@@ -1732,7 +1732,7 @@ SessionMgr::forward_uid_inbox( TransportRoute &src_rte,  EvPublish &fwd,
     this->user_db.peer_dist.update_path( forward, path_select );
 
     UidSrcPath & path  = forward.path[ uid ];
-    UserRoute * u_path = n->user_route_ptr( this->user_db, path.tport );
+    UserRoute * u_path = n->user_route_ptr( this->user_db, path.tport, 1 );
     if ( u_path->is_valid() )
       u_ptr = u_path;
   }
@@ -2176,6 +2176,7 @@ SessionMgr::loop( uint32_t &idle ) noexcept
 {
   int status;
   uint32_t idle_count = idle;
+  uint64_t last;
   if ( this->poll.quit >= 5 )
     return false;
   if ( (status = this->poll.dispatch()) == EvPoll::DISPATCH_IDLE ) {
@@ -2183,7 +2184,9 @@ SessionMgr::loop( uint32_t &idle ) noexcept
     idle_count++;
     if ( idle_count > this->idle_busy ) {
       timeout = 100;
-      if ( ! this->user_db.peer_dist.clear_cache_if_dirty() ) {
+      last = this->user_db.peer_dist.last_run_mono + (uint64_t) 1000000;
+      if ( last < this->poll.mono_ns &&
+           ! this->user_db.peer_dist.clear_cache_if_dirty() ) {
         if ( this->user_db.converge_network( this->poll.mono_ns,
                                              this->poll.now_ns, false ) )
           timeout = 0;

@@ -424,18 +424,20 @@ TransportRoute::on_msg( EvPublish &pub ) noexcept
                                           pub.subject_len )) != NULL ) {
     ForwardCache & forward = this->user_db.forward_path[ path_select ];
     this->user_db.peer_dist.update_path( forward, path_select );
-    UidSrcPath & path = forward.path[ dst->uid ];
-    if ( path.tport != this->tport_id && path.cost != 0 ) {
-      UserRoute * u_path = dst->user_route_ptr( this->user_db, path.tport );
-      if ( u_path->is_valid() ) {
-        d_tran( "transport_route: inbox (%.*s) -> %u\n",
-                (int) pub.subject_len, pub.subject, path.tport );
-        /*this->msgs_sent++;
-        this->bytes_sent += pub.msg_len;*/
-        bool b = this->user_db.forward_to_inbox(
-                   *dst, pub.subject, pub.subject_len, pub.subj_hash,
-                   pub.msg, pub.msg_len, this, NULL, 0, pub.src_route, u_path );
-        return this->check_flow_control( b );
+    if ( dst->uid < this->user_db.peer_dist.max_uid ) {
+      UidSrcPath & path = forward.path[ dst->uid ];
+      if ( path.tport != this->tport_id && path.cost != 0 ) {
+        UserRoute * u_path = dst->user_route_ptr( this->user_db, path.tport, 26 );
+        if ( u_path->is_valid() ) {
+          d_tran( "transport_route: inbox (%.*s) -> %u\n",
+                  (int) pub.subject_len, pub.subject, path.tport );
+          /*this->msgs_sent++;
+          this->bytes_sent += pub.msg_len;*/
+          bool b = this->user_db.forward_to_inbox(
+                     *dst, pub.subject, pub.subject_len, pub.subj_hash,
+                     pub.msg, pub.msg_len, this, NULL, 0, pub.src_route, u_path );
+          return this->check_flow_control( b );
+        }
       }
     }
   }

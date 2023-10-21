@@ -123,6 +123,8 @@ AdjDistance::update_graph( void ) noexcept
 void
 AdjDistance::clear_cache( void ) noexcept
 {
+  uint64_t stamp = kv::current_monotonic_time_ns();
+
   if ( this->graph != NULL ) {
     this->graph->reset();
     this->graph = NULL;
@@ -133,9 +135,6 @@ AdjDistance::clear_cache( void ) noexcept
   }
   uint32_t uid_cnt  = this->user_db.next_uid,
            rte_cnt  = (uint32_t) this->user_db.transport_tab.count;
-  uint64_t stamp    = kv::current_monotonic_time_ns();
-  if ( stamp <= this->clear_stamp ) stamp = this->clear_stamp + 1;
-  this->clear_stamp = stamp;
   this->cache_seqno = this->update_seqno;
   this->max_tport   = rte_cnt;
   this->max_uid     = uid_cnt;
@@ -155,6 +154,9 @@ AdjDistance::clear_cache( void ) noexcept
   this->last_run_mono       = stamp;
   this->inc_running         = false;
   this->found_inconsistency = false;
+
+  this->adjacency_run_count++;
+  this->adjacency_run_time += kv::current_monotonic_time_ns() - stamp;
 }
 
 uint32_t

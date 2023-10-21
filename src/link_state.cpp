@@ -315,7 +315,7 @@ UserDB::push_source_route( UserBridge &n ) noexcept
   UserRoute * u_ptr;
   uint32_t    count = (uint32_t) this->transport_tab.count;
   for ( uint32_t i = 0; i < count; i++ ) {
-    if ( (u_ptr = n.user_route_ptr( *this, i )) == NULL )
+    if ( (u_ptr = n.user_route_ptr( *this, i, 24 )) == NULL )
       break;
     if ( u_ptr->is_valid() ) {
       if ( this->is_peer_sock_valid( u_ptr->mcast ) )
@@ -359,7 +359,7 @@ UserDB::pop_source_route( UserBridge &n ) noexcept
     n.printf( "pop_source_route\n" );
   uint32_t count = (uint32_t) this->transport_tab.count;
   for ( uint32_t i = 0; i < count; i++ ) {
-    UserRoute * u_ptr = n.user_route_ptr( *this, i );
+    UserRoute * u_ptr = n.user_route_ptr( *this, i, 25 );
     if ( u_ptr != NULL && u_ptr->is_valid() )
       this->pop_user_route( n, *u_ptr );
   }
@@ -461,9 +461,7 @@ UserDB::push_connected_user_route( UserBridge &n,  UserRoute &u_rte ) noexcept
     if ( debug_lnk )
       printf( "push sys_route %u\n", fd );
     rte.connected_auth.add( fd );
-    /*this->check_bloom_route( rte, fd );*/
-    if ( ! this->peer_bloom.has_link( fd ) )
-      rte.sub_route.create_bloom_route( fd, &this->peer_bloom, 0 );
+    rte.sub_route.create_bloom_route( fd, &this->peer_bloom, 0 );
   }
   if ( this->start_time > n.start_time ) {
     if ( n.start_time == 0 )
