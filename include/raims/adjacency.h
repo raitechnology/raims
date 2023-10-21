@@ -228,18 +228,19 @@ struct AdjDistance : public md::MDMsgMem {
                  update_seqno;  /* seqno of current adjacency */
   uint32_t       max_uid,       /* all uid < max_uid */
                  max_tport,     /* all tport < max_tport */
-                 path_count,
+                 path_count,    /* count of paths found in graph */
                  miss_tos,      /* number of missing uids in missing[] */
                  inc_hd,        /* list hd of uids in inc_list[] */
                  inc_tl,        /* list to of uids in inc_list[] */
                  inc_run_count; /* count of inc_runs after adjacency change */
-  uint64_t       clear_stamp,
-                 last_run_mono, /* timestamp of last adjacency update */
+  uint64_t       last_run_mono, /* timestamp of last adjacency update */
                  invalid_mono; /* when cache was invalidated */
   uint32_t       invalid_src_uid;
   InvalidReason  invalid_reason; /* why cache was invalidated */
   bool           inc_running,   /* whether incomplete check is running */
                  found_inconsistency; /* if current or last run inconsistent */
+  uint64_t       adjacency_run_time; /* cpu time used to calculate */
+  uint32_t       adjacency_run_count;/* count of calculations */
 
   static void zero_mem( void *x,  void *y ) {
     ::memset( x, 0, (char *) y - (char *) x );
@@ -249,7 +250,6 @@ struct AdjDistance : public md::MDMsgMem {
     zero_mem( (void *) &this->max_uid, (void *) &this[ 1 ] );
     this->cache_seqno  = 0;
     this->update_seqno = 1;
-    this->clear_stamp  = 1;
     this->path_count   = 1;
   }
   template<class AR>

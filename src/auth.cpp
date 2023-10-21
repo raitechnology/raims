@@ -489,7 +489,7 @@ UserDB::send_trusted( const MsgFramePublish &/*pub*/,  UserBridge &n,
       continue;
     if ( ! rte->uid_connected.is_member( n.uid ) )
       continue;
-    u_ptr = n.user_route_ptr( *this, tport_id );
+    u_ptr = n.user_route_ptr( *this, tport_id, 13 );
     if ( rte->is_mesh() ) {
       if ( ! u_ptr->is_valid() || ! u_ptr->is_set( MESH_URL_STATE ) )
         u_ptr = NULL;

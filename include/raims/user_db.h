@@ -329,7 +329,7 @@ struct UserBridge : public UserStateTest<UserBridge> {
   }
   static const uint32_t USER_ROUTE_SHIFT = 4,
                         USER_ROUTE_BASE  = ( 1U << USER_ROUTE_SHIFT );
-  UserRoute * user_route_ptr( UserDB &me,  uint32_t id ) {
+  UserRoute * user_route_ptr( UserDB &me,  uint32_t id,  int w ) {
     uint32_t i = 31 - kv_clzw( ( id >> USER_ROUTE_SHIFT ) + 1 ),
              j = id - ( ( ( 1 << i ) - 1 ) << USER_ROUTE_SHIFT );
     if ( this->u_buf[ i ] != NULL ) {
@@ -337,7 +337,7 @@ struct UserBridge : public UserStateTest<UserBridge> {
       if ( u_ptr->is_init() )
         return u_ptr;
     }
-    return this->init_user_route( me, i, j, id );
+    return this->init_user_route( me, i, j, id, w );
   }
   void user_route_reset( void ) {
     for ( uint32_t i = 0; i < 24; i++ ) {
@@ -352,9 +352,9 @@ struct UserBridge : public UserStateTest<UserBridge> {
     }
   }
   UserRoute * init_user_route( UserDB &me,  uint32_t i,  uint32_t j,
-                               uint32_t id ) noexcept;
+                               uint32_t id,  int w ) noexcept;
   UserRoute * primary( UserDB &me ) {
-    return this->user_route_ptr( me, this->primary_route );
+    return this->user_route_ptr( me, this->primary_route, 0 );
   }
   double rtt_us( void ) const {
     return (double) this->round_trip_time / 1000.0;

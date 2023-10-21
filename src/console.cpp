@@ -4056,7 +4056,7 @@ PortOutput::output( void ( PortOutput::*put )( void ) ) noexcept
       UserBridge * n = this->user_db.bridge_tab[ uid ];
       if ( n == NULL || ! n->is_set( AUTHENTICATED_STATE ) )
         continue;
-      UserRoute * u_ptr = n->user_route_ptr( this->user_db, this->tport_id );
+      UserRoute * u_ptr = n->user_route_ptr( this->user_db, this->tport_id, 27 );
       if ( rte->is_mcast() ) {
         ucast_fd = (uint32_t) u_ptr->inbox.fd;
         this->init( rte, P_IS_REMOTE | P_IS_INBOX, ucast_fd, n );
@@ -4838,6 +4838,10 @@ Console::show_adjacency( ConsoleOutput *p,  const uint32_t *src_uid,
       this->printf( "path %u of %u\n", path_select, path_cnt );
     else
       this->printf( "path count: %u\n", path_cnt );
+    char lbuf[ 80 ];
+    latency_string( peer_dist.adjacency_run_time, lbuf );
+    this->printf( "times calculated: %u, cpu used: %s\n",
+      peer_dist.adjacency_run_count, lbuf );
 
     for (;;) {
       UserBridge * from, * to;
@@ -4999,7 +5003,7 @@ Console::show_routes( ConsoleOutput *p,  const UserBridge *src,
     uint32_t count = this->user_db.transport_tab.count;
     first_tport = true;
     for ( uint32_t tport_id = 0; tport_id < count; tport_id++ ) {
-      UserRoute *u_ptr = n->user_route_ptr( this->user_db, tport_id );
+      UserRoute *u_ptr = n->user_route_ptr( this->user_db, tport_id, 28 );
       if ( ! u_ptr->is_valid() )
         continue;
 
@@ -5190,7 +5194,7 @@ Console::show_urls( ConsoleOutput *p ) noexcept
 
     uint32_t count = this->user_db.transport_tab.count;
     for ( uint32_t tport_id = 0; tport_id < count; tport_id++ ) {
-      UserRoute *u_ptr = n->user_route_ptr( this->user_db, tport_id );
+      UserRoute *u_ptr = n->user_route_ptr( this->user_db, tport_id, 29 );
       if ( ! u_ptr->is_valid() )
         continue;
 

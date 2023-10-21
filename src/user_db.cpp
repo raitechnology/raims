@@ -236,7 +236,7 @@ UserDB::find_inbox_peer( UserBridge &n,  UserRoute &u_rte ) noexcept
   uint32_t tmp_cost;
   UserBridge *m = this->closest_peer_route( u_rte.rte, n, tmp_cost );
   if ( m != NULL ) {
-    UserRoute *u_peer = m->user_route_ptr( *this, u_rte.rte.tport_id );
+    UserRoute *u_peer = m->user_route_ptr( *this, u_rte.rte.tport_id, 2 );
     if ( u_peer->is_valid() &&
          u_peer->is_set( UCAST_URL_STATE | UCAST_URL_SRC_STATE ) ) {
       u_rte.mcast = u_peer->mcast;
@@ -847,7 +847,7 @@ UserDB::lookup_bridge( MsgFramePublish &pub, const MsgHdrDecoder &dec ) noexcept
   if ( this->node_ht->find( bridge, n_pos, uid ) ) {
     n = this->bridge_tab[ uid ];
     if ( n != NULL ) {
-      UserRoute *u_ptr = n->user_route_ptr( *this, pub.rte.tport_id );
+      UserRoute *u_ptr = n->user_route_ptr( *this, pub.rte.tport_id, 3 );
       n->user_route = u_ptr;
       if ( ! u_ptr->is_valid() ||
            ( ! u_ptr->mcast.equals( pub.src_route ) &&
@@ -878,7 +878,7 @@ UserDB::lookup_user( MsgFramePublish &pub,  const MsgHdrDecoder &dec ) noexcept
   if ( this->node_ht->find( bridge, n_pos, uid ) ) {
     n = this->bridge_tab[ uid ];
     if ( n != NULL ) {
-      UserRoute *u_ptr = n->user_route_ptr( *this, pub.rte.tport_id );
+      UserRoute *u_ptr = n->user_route_ptr( *this, pub.rte.tport_id, 4 );
       n->user_route = u_ptr;
       if ( ! u_ptr->is_valid() ||
            ( ! u_ptr->mcast.equals( pub.src_route ) &&
@@ -1094,7 +1094,7 @@ UserDB::add_user_route( UserBridge &n,  TransportRoute &rte,  const PeerId &pid,
   d_usr( "add_user_route( %s, %s, %s, fd=%u, hops=%u )\n",
          dec.get_type_string(), n.peer.user.val, rte.name, mcast.fd, hops );
 
-  u_ptr = n.user_route_ptr( *this, rte.tport_id );
+  u_ptr = n.user_route_ptr( *this, rte.tport_id, 5 );
   if ( mcast.equals( rte.inbox ) || mcast.equals( rte.mcast ) ) {
     mcast = rte.mcast;
     inbox = rte.inbox;
@@ -1167,7 +1167,7 @@ UserDB::find_adjacent_routes( void ) noexcept
         continue;
       }
 
-      u_ptr = n.user_route_ptr( *this, path.tport );
+      u_ptr = n.user_route_ptr( *this, path.tport, 6 );
       hops  = u_ptr->rte.uid_connected.is_member( n.uid ) ? 0 : 1;
       /* route through another peer */
       if ( ! u_ptr->is_set( IN_ROUTE_LIST_STATE ) && hops > 0 ) {
@@ -1177,7 +1177,7 @@ UserDB::find_adjacent_routes( void ) noexcept
                      n.primary_route );
           continue;
         }
-        UserRoute *u_peer = m->user_route_ptr( *this, path.tport );
+        UserRoute *u_peer = m->user_route_ptr( *this, path.tport, 7 );
         if ( ! u_peer->is_valid() ) {
           n.printf( "no peer route yet, using old primary tport %u\n",
                      n.primary_route );
@@ -1224,7 +1224,7 @@ UserDB::find_adjacent_routes( void ) noexcept
         n.printf( "no primary route yet\n" );
       continue;
     }
-    u_ptr    = n.user_route_ptr( *this, path.tport );
+    u_ptr    = n.user_route_ptr( *this, path.tport, 8 );
     hops     = u_ptr->rte.uid_connected.is_member( n.uid ) ? 0 : 1,
     min_cost = path.cost;
 
@@ -1251,7 +1251,7 @@ UserDB::find_adjacent_routes( void ) noexcept
       UserBridge *m = this->bridge_tab.ptr[ path.src_uid ];
       /*UserBridge *m = this->closest_peer_route( u_ptr->rte, n, tmp_cost );*/
       if ( m != NULL ) {
-        UserRoute *u_peer = m->user_route_ptr( *this, path.tport );
+        UserRoute *u_peer = m->user_route_ptr( *this, path.tport, 9 );
         if ( u_peer->mcast.equals( u_ptr->mcast ) &&
              u_peer->inbox.equals( u_ptr->inbox ) ) {
 
@@ -1309,7 +1309,7 @@ UserDB::check_blooms( void ) noexcept
         no_path |= 1 << path_select;
       }
       else {
-        UserRoute * u_ptr = n.user_route_ptr( *this, path.tport );
+        UserRoute * u_ptr = n.user_route_ptr( *this, path.tport, 10 );
         if ( u_ptr == NULL || ! u_ptr->is_valid() )
           invalid |= 1 << path_select;
         else if ( n.bloom_rt[ path_select ] == NULL )
@@ -1323,6 +1323,18 @@ UserDB::check_blooms( void ) noexcept
       n.printe( "check_rt no_path=%x invalid=%x null_bloom=%x fd_not_set=%x\n",
                 no_path, invalid, null_bloom, fd_not_set );
       failed = true;
+    }
+
+    uint32_t count = (uint32_t) this->transport_tab.count;
+    for ( uint32_t tport_id = 0; tport_id < count; tport_id++ ) {
+      TransportRoute & rte = *this->transport_tab.ptr[ tport_id ];
+      BloomRoute *rt = rte.router_rt;
+      if ( ! n.bloom.has_route( rt ) ) {
+        n.printe( "fix bloom link for %s\n", rte.name );
+        rt->add_bloom_ref( &n.bloom );
+        if ( rte.is_set( TPORT_IS_IPC ) )
+          rte.sub_route.do_notify_bloom_ref( n.bloom );
+      }
     }
   }
   return ! failed;
@@ -1396,7 +1408,7 @@ UserDB::process_mesh_pending( uint64_t curr_mono ) noexcept
             }
           }
           else {
-            UserRoute * u_ptr = n->user_route_ptr( *this, m->rte.tport_id );
+            UserRoute * u_ptr = n->user_route_ptr( *this, m->rte.tport_id, 11 );
             if ( u_ptr->url_hash != m->url_hash ||
                  ! u_ptr->is_set( UCAST_URL_STATE ) )
               this->set_ucast_url( *u_ptr, m->mesh_url.val, m->mesh_url.len,
@@ -1555,7 +1567,7 @@ UserDB::add_user2( const UserNonce &user_bridge_id,  PeerEntry &peer,
 
 UserRoute *
 UserBridge::init_user_route( UserDB &me,  uint32_t i,  uint32_t j,
-                             uint32_t id ) noexcept
+                             uint32_t id,  int w ) noexcept
 {
   void * m;
   if ( this->u_buf[ i ] == NULL ) {
@@ -1567,7 +1579,7 @@ UserBridge::init_user_route( UserDB &me,  uint32_t i,  uint32_t j,
   m = (void *) &this->u_buf[ i ][ j ];
   if ( id < me.transport_tab.count )
     return new ( m ) UserRoute( *this, *me.transport_tab.ptr[ id ] );
-  this->printe( "bad init_user_route tport_id %u\n", id );
+  this->printe( "bad init_user_route tport_id %u where %d\n", id, w );
   ::memset( m, 0, sizeof( UserRoute ) );
   return (UserRoute *) m;
 }
@@ -1817,7 +1829,7 @@ UserDB::remove_authenticated( UserBridge &n,  AuthStage bye ) noexcept
   n.hb_seqno = 0;
 
   if ( this->ipc_transport != NULL &&
-       n.bloom.has_link( this->ipc_transport->fd ) )
+       n.bloom.has_route( this->ipc_transport->router_rt ) )
     this->ipc_transport->sub_route.do_notify_bloom_deref( n.bloom );
   n.bloom.unlink( false );
   uint32_t path_select = 0;
@@ -1940,7 +1952,7 @@ void
 UserDB::add_bloom_routes( UserBridge &n,  TransportRoute &rte ) noexcept
 {
   BloomRoute *rt = rte.router_rt;
-  if ( ! n.bloom.has_link( rt->r ) ) {
+  if ( ! n.bloom.has_route( rt ) ) {
     rt->add_bloom_ref( &n.bloom );
     if ( rte.is_set( TPORT_IS_IPC ) )
       rte.sub_route.do_notify_bloom_ref( n.bloom );
@@ -1973,7 +1985,7 @@ UserDB::add_inbox_route( UserBridge &n,  UserRoute *primary ) noexcept
   if ( primary == NULL ) {
     uint32_t primary_route = n.primary_route;
     for ( uint32_t tport_id = 0; tport_id < count; tport_id++ ) {
-      UserRoute * u_ptr = n.user_route_ptr( *this, tport_id );
+      UserRoute * u_ptr = n.user_route_ptr( *this, tport_id, 12 );
       if ( u_ptr->is_valid() ) {
         if ( primary == NULL ||
              this->peer_dist.calc_transport_cache( n.uid, tport_id, 0 ) <
