@@ -215,7 +215,8 @@ AdjGraphOut::print_fwd( uint16_t p ) noexcept
     for ( uint32_t j = 0; j < u->links.count; j++ ) {
       bool first = true;
       uint32_t idx = 0;
-      BitSpace & dest = u->links.ptr[ j ]->dest[ p ];
+      AdjLink  * link = u->links.ptr[ j ];
+      BitSpace & dest = link->dest[ p ];
       for ( bool b = dest.first( idx ); b; b = dest.next( idx ) ) {
         if ( first ) {
           o.printf( "  %s ->", u->links.ptr[ j ]->tport.val );
@@ -1016,12 +1017,13 @@ AdjGraphOut::print_config( const char *fn ) noexcept
   delete host_ht;
   svc.sign_users( NULL, pass );
   for ( UserElem *e = svc.users.hd; e != NULL; e = e->next ) {
-    o.s( "      \"" ).s( e->user.user ).s( "\": \"" ).s( e->sig ).s( "\"\n" );
+    o.s( "      \"" ).b( e->user.user, e->user.user_len ).s( "\": \"" )
+     .b( e->sig, e->sig_len ).s( "\"\n" );
   }
 
   o.s( "parameters:\n" )
-   .s( "  salt_data: " ).s( (char *) salt ).s( "\n" )
-   .s( "  pass_data: " ).s( (char *) pass.pass ).s( "\n" )
+   .s( "  salt_data: " ).b( (char *) salt, salt_len ).s( "\n" )
+   .s( "  pass_data: " ).b( (char *) pass.pass, pass.pass_len ).s( "\n" )
    .s( "transports:\n" );
   this->print_graph();
 
@@ -1049,10 +1051,10 @@ AdjGraphOut::print_config( const char *fn ) noexcept
         first_user = false;
       }
       o.s( "  - user: "   ).s( u->user.val ).s( "\n" )
-       .s( "    svc: "    ).s( svc.service ).s( "\n" )
-       .s( "    create: " ).s( elem->user.create ).s( "\n" )
-       .s( "    pri: "    ).s( elem->user.pri ).s( "\n" )
-       .s( "    pub: "    ).s( elem->user.pub ).s( "\n" )
+       .s( "    svc: "    ).b( svc.service, svc.service_len ).s( "\n" )
+       .s( "    create: " ).b( elem->user.create, elem->user.create_len ).s( "\n" )
+       .s( "    pri: "    ).b( elem->user.pri, elem->user.pri_len ).s( "\n" )
+       .s( "    pub: "    ).b( elem->user.pub, elem->user.pub_len ).s( "\n" )
        .s( "    startup:\n" );
 
       if ( listen_cnt > 0 ) {
