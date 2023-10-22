@@ -91,6 +91,8 @@ AdjUserTab::reset( void ) noexcept
 {
   for ( size_t idx = 0; idx < this->count; idx++ ) {
     AdjUser * u = this->ptr[ idx ];
+    for ( size_t j = 0; j < u->links.count; j++ )
+      u->links.ptr[ j ]->reset();
     u->links.clear();
     for ( size_t p = 0; p < u->fwd.count; p++ )
       u->fwd.ptr[ p ].reset();
@@ -106,9 +108,6 @@ AdjUserTab::reset( void ) noexcept
 void
 AdjFwdTab::reset( void ) noexcept
 {
-  for ( size_t i = 0; i < this->links.count; i++ ) {
-    this->links.ptr[ i ]->reset();
-  }
   this->links.clear();
   this->cost.clear();
   this->src.clear();
@@ -118,7 +117,7 @@ void
 AdjLink::reset( void ) noexcept
 {
   for ( size_t p = 0; p < this->dest.count; p++ )
-    this->dest[ p ].reset();
+    this->dest.ptr[ p ].reset();
   this->dest.clear();
 }
 
