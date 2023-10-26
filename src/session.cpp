@@ -74,8 +74,8 @@ SessionMgr::SessionMgr( EvPoll &p,  Logger &l,  ConfigTree &c,
              sub_window_ival( sec_to_ns( 10 ) ),
              last_autoscale( 0 ), msg_loss_count( 0 ), frame_loss_count( 0 ),
              tcp_connect_timeout( 10 ), tcp_noencrypt( false ),
-             tcp_ipv4( true ), tcp_ipv6( true ), session_started( false ),
-             idle_busy( 16 )
+             tcp_ipv4( true ), tcp_ipv6( true ), want_msg_loss_errors( true ),
+             session_started( false ), idle_busy( 16 )
 {
   this->sock_opts = OPT_NO_POLL;
   this->bp_flags  = BP_FORWARD | BP_NOTIFY;
@@ -167,8 +167,10 @@ SessionMgr::load_parameters( void ) noexcept
            tcp_write_highwater = this->poll.send_highwater,
            idle                = this->idle_busy;
   uint32_t tcp_conn_timeout    = this->tcp_connect_timeout;
-  bool ipv4_only = false, ipv6_only = false;
-  bool cache_hostid = true;
+  bool ipv4_only     = false,
+       ipv6_only     = false,
+       want_msg_loss = true,
+       cache_hostid  = true;
 
   if ( ! this->ld_bytes( P_IDLE_BUSY, idle ) ||
        ! this->ld_bytes( P_PUB_WINDOW_SIZE, this->pub_window_size ) ||
@@ -185,7 +187,8 @@ SessionMgr::load_parameters( void ) noexcept
        ! this->ld_nanos( P_TCP_WRITE_TIMEOUT, tcp_write_timeout ) ||
        ! this->ld_bytes( P_TCP_WRITE_HIGHWATER, tcp_write_highwater ) ||
        ! this->ld_bool( P_TCP_IPV4ONLY, ipv4_only ) ||
-       ! this->ld_bool( P_TCP_IPV6ONLY, ipv6_only ) )
+       ! this->ld_bool( P_TCP_IPV6ONLY, ipv6_only ) ||
+       ! this->ld_bool( P_MSG_LOSS_ERRORS, want_msg_loss ) )
     return false;
 
   this->idle_busy            = (uint32_t) idle;
@@ -239,6 +242,8 @@ SessionMgr::load_parameters( void ) noexcept
     this->tcp_ipv6 = true;
     this->tcp_ipv4 = false;
   }
+  this->want_msg_loss_errors = want_msg_loss;
+  this->sub_db.set_msg_loss_mode( want_msg_loss );
   update_tz_stamp();
   return true;
 }
@@ -500,6 +505,7 @@ SessionMgr::start( void ) noexcept
   printf( "%s: %s\n", P_TCP_IPV6ONLY, this->tcp_ipv4 &&
                                       ! this->tcp_ipv6 ? "true" : "false" );
   printf( "%s: %s\n", P_TCP_NOENCRYPT, this->tcp_noencrypt ? "true" : "false" );
+  printf( "%s: %s\n", P_MSG_LOSS_ERRORS, this->want_msg_loss_errors ? "true" : "false" );
 
   char hstr[ 32 ], ipstr[ 32 ];
   TransportRvHost::ip4_hex_string( this->user_db.host_id, hstr );
@@ -888,15 +894,25 @@ IpcRoute::on_msg( EvPublish &pub ) noexcept
   }
   SeqnoArgs seq( this->mgr.timer_time );
   uint32_t  fmt = 0, hdr_len = 0, suf_len = 0;
+  uint16_t  path_select = dec.msg->caba.get_path(),
+            opt         = dec.msg->caba.get_opt();
 
   dec.get_ival<uint64_t>( FID_CHAIN_SEQNO, seq.chain_seqno );
   dec.get_ival<uint64_t>( FID_TIME, seq.time );
   dec.get_ival<uint32_t>( FID_FMT, fmt );
   dec.get_ival<uint32_t>( FID_HDR_LEN, hdr_len );
   dec.get_ival<uint32_t>( FID_SUF_LEN, suf_len );
-  SeqnoStatus status = this->sub_db.match_seqno( fpub, seq );
 
-  uint16_t opt = dec.msg->caba.get_opt();
+  SeqnoStatus status;
+  if ( ( opt & CABA_OPT_GLSNO ) == 0 )
+    status = this->sub_db.match_seqno( fpub, seq );
+  else if ( dec.seqno > n.glob_recv_seqno[ path_select ] ) {
+    n.glob_recv_seqno[ path_select ] = dec.seqno;
+    status = SEQNO_UID_NEXT;
+  }
+  else {
+    status = SEQNO_UID_REPEAT;
+  }
   if ( ( fpub.flags & MSG_FRAME_ACK_CONTROL ) == 0 ) {
     fpub.flags |= MSG_FRAME_ACK_CONTROL;
     if ( opt != CABA_OPT_NONE ) {
@@ -1609,6 +1625,55 @@ SessionMgr::publish( PubMcastData &mc ) noexcept
     if ( caba_rtr_alert( mc.sub ) )
       fl.set_type( CABA_RTR_ALERT );
   }
+
+  if ( fl.get_type() == CABA_MCAST || is_mcast_prefix ) {
+    if ( mc.path == NO_PATH )
+      mc.path_select = this->user_db.peer_dist.hash_to_path( h );
+    else
+      mc.path_select = mc.path % this->user_db.peer_dist.get_path_count();
+    fl.set_path( mc.path_select );
+  }
+
+  if ( need_seqno ) {
+    RouteLoc loc;
+    Pub * p = this->sub_db.pub_tab.pub->find( h, mc.sub, mc.sublen, loc );
+
+    if ( p == NULL ) {
+      IpcSubjectMatch & sm = this->sub_db.ipc_sub_match;
+      switch ( sm.match( mc.sub, mc.sublen ) ) {
+        case IPC_NO_MATCH:
+          p = this->sub_db.pub_tab.upsert( h, mc.sub, mc.sublen, loc );
+          if ( p == NULL )
+            return false;
+          mc.seqno = p->next_seqno( loc.is_new, time, this->timer_time,
+                                    this->converge_seqno, chain_seqno );
+          this->user_db.msg_send_counter[ MCAST_SUBJECT ]++;
+          break;
+
+        case IPC_IS_INBOX:
+        case IPC_IS_INBOX_PREFIX: {
+          const char * host;
+          size_t       host_len;
+          sm.host( host, host_len );
+          uint32_t uid = this->sub_db.host_match( host, host_len );
+          dest_bridge_id = this->user_db.bridge_tab[ uid ];
+          if ( dest_bridge_id != NULL ) {
+            mc.seqno = dest_bridge_id->inbox.next_send( U_INBOX );
+            fl.set_type( CABA_INBOX );
+            break;
+          }
+        } /* FALLTHRU */
+        default:
+          mc.seqno   = ++this->user_db.glob_send_seqno[ mc.path_select ];
+          mc.option |= CABA_OPT_GLSNO;
+          time = 0;
+          chain_seqno = 0;
+          this->user_db.msg_send_counter[ MCAST_SUBJECT ]++;
+          break;
+      }
+    }
+  }
+#if 0
   if ( need_seqno ) {
     RouteLoc loc;
     Pub * p = this->sub_db.pub_tab.upsert( h, mc.sub, mc.sublen, loc );
@@ -1622,14 +1687,7 @@ SessionMgr::publish( PubMcastData &mc ) noexcept
       printf( "seqno frame jump\n" );
     }
   }
-
-  if ( fl.get_type() == CABA_MCAST || is_mcast_prefix ) {
-    if ( mc.path == NO_PATH )
-      mc.path_select = this->user_db.peer_dist.hash_to_path( h );
-    else
-      mc.path_select = mc.path % this->user_db.peer_dist.get_path_count();
-    fl.set_path( mc.path_select );
-  }
+#endif
   fl.set_opt( mc.option );
 
   MsgEst e( mc.sublen );
@@ -1857,26 +1915,40 @@ SessionMgr::forward_ipc( TransportRoute &src_rte,  EvPublish &pub ) noexcept
 {
   if ( pub.is_queue_pub() )
     return this->forward_ipc_queue( src_rte, pub );
-  CabaFlags fl( CABA_MCAST );
-  RouteLoc  loc;
-  Pub * p = this->sub_db.pub_tab.pub->find( pub.subj_hash, pub.subject,
-                                            pub.subject_len, loc );
-  if ( p == NULL ) {
+
+  IpcSubjectMatch & sm = this->sub_db.ipc_sub_match;
+  uint32_t x = sm.match( pub.subject, pub.subject_len );
+  if ( x == IPC_IS_INBOX || x == IPC_IS_INBOX_PREFIX ) {
     const char * host;
     size_t       host_len;
-    if ( SubDB::match_inbox( pub.subject, pub.subject_len, host, host_len ) )
-      return this->forward_inbox( src_rte, pub, host, host_len );
-    p = this->sub_db.pub_tab.upsert( pub.subj_hash, pub.subject,
-                                     pub.subject_len, loc );
+    sm.host( host, host_len );
+    return this->forward_inbox( src_rte, pub, host, host_len );
+  }
+
+  CabaFlags fl( CABA_MCAST );
+  RouteLoc  loc;
+  uint64_t  time, chain_seqno, seqno;
+  uint16_t  path_select = 0;
+
+  if ( ! pub.is_pub_type( PUB_TYPE_SERIAL ) ) {
+    path_select = this->user_db.peer_dist.hash_to_path( pub.subj_hash );
+    fl.set_path( path_select );
+  }
+  if ( x == IPC_NO_MATCH ) {
+    Pub * p = this->sub_db.pub_tab.upsert( pub.subj_hash, pub.subject,
+                                           pub.subject_len, loc );
     if ( p == NULL ) {
       fprintf( stderr, "error forward_ipc\n" );
       return true;
     }
+    seqno = p->next_seqno( loc.is_new, time, this->timer_time,
+                           this->converge_seqno, chain_seqno );
   }
-  uint64_t time, seqno, chain_seqno;
-  seqno = p->next_seqno( loc.is_new, time, this->timer_time,
-                         this->converge_seqno, chain_seqno );
-
+  else {
+    time = chain_seqno = 0;
+    seqno = ++this->user_db.glob_send_seqno[ path_select ];
+    fl.set_opt( CABA_OPT_GLSNO );
+  }
   d_sess( "-> fwd_ipc: %.*s seqno %" PRIu64 " reply %.*s "
           "(len=%u, from %s, fd %d, enc %x)\n",
           (int) pub.subject_len, pub.subject, seqno,
@@ -1885,11 +1957,6 @@ SessionMgr::forward_ipc( TransportRoute &src_rte,  EvPublish &pub ) noexcept
 
   const void * frag = NULL;
   size_t frag_sz = 0;
-  uint16_t path_select = 0;
-  if ( ! pub.is_pub_type( PUB_TYPE_SERIAL ) ) {
-    path_select = this->user_db.peer_dist.hash_to_path( pub.subj_hash );
-    fl.set_path( path_select );
-  }
   MsgEst e( pub.subject_len );
   e.seqno       ()
    .chain_seqno ()

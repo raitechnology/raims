@@ -98,7 +98,7 @@ SUB_CONST( N_ALL   , ( _STAT_ALL     "." ) )
                     /* prefix string size */
 /* hashes of above */
 EX uint32_t hello_h, hb_h, bye_h, name_h, link_h, add_h, del_h, blm_h, adj_h,
-            join_h, leave_h, psub_h, pstop_h;
+            join_h, leave_h, psub_h, pstop_h, xox_hash[ 256 ];
 #undef SUB_CONST
 #undef EX
 

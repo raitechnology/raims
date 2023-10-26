@@ -1043,9 +1043,9 @@ static inline int src_type_flag( NotifySub &sub ) {
     fl |= IS_QUEUE;
   switch ( SubDB::match_ipc_any( sub.subject, sub.subject_len ) ) {
     default: break;
-    case SubDB::IPC_IS_INBOX_PREFIX:
-    case SubDB::IPC_IS_INBOX: fl |= IS_INBOX; break;
-    case SubDB::IPC_IS_QUEUE: fl |= IS_QUEUE; break;
+    case IPC_IS_INBOX_PREFIX:
+    case IPC_IS_INBOX: fl |= IS_INBOX; break;
+    /*case IPC_IS_QUEUE: fl |= IS_QUEUE; break;*/
   }
   return fl;
 }
@@ -1055,9 +1055,9 @@ static inline int src_type_flag( NotifyPattern &pat ) {
     fl |= IS_QUEUE;
   switch ( SubDB::match_ipc_any( pat.pattern, pat.pattern_len ) ) {
     default: break;
-    case SubDB::IPC_IS_INBOX_PREFIX:
-    case SubDB::IPC_IS_INBOX: fl |= IS_INBOX; break;
-    case SubDB::IPC_IS_QUEUE: fl |= IS_QUEUE; break;
+    case IPC_IS_INBOX_PREFIX:
+    case IPC_IS_INBOX: fl |= IS_INBOX; break;
+    /*case IPC_IS_QUEUE: fl |= IS_QUEUE; break;*/
   }
   return fl;
 }

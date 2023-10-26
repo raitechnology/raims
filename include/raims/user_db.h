@@ -187,6 +187,7 @@ struct InboxSeqno {
     return seqno;
   }
 };
+typedef kv::ArrayCount<uint64_t, 4> GlobSeqno;
 
 struct Rtt {
   uint64_t latency,
@@ -299,6 +300,7 @@ struct UserBridge : public UserStateTest<UserBridge> {
   kv::UIntHashTab  * inbound_svc_loss,    /* service msg loss map */
                    * inbound_svc_restart; /* service msg restart map */
   InboxSeqno         inbox;               /* track inbox sent/recv */
+  GlobSeqno          glob_recv_seqno;     /* seqno by path for mcast */
   RttHistory         rtt;
   ThrottleState      adj_req_throttle,
                      mesh_req_throttle;
@@ -606,6 +608,7 @@ struct UserDB {
                         last_idle_check_ns,
                         route_check_mono,
                         bloom_check_mono;
+  GlobSeqno             glob_send_seqno; /* seqno by path mcast */
   kv::rand::xoroshiro128plus rand;       /* used to generate bloom seeds */
 
   /* memory buffers for keys and peer nodes */

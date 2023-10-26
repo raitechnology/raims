@@ -80,7 +80,8 @@ enum CabaOptFlag {
   CABA_OPT_NONE  = 0,
   CABA_OPT_ACK   = 1,  /* recver ack messages */
   CABA_OPT_TRACE = 2,  /* routers trace messages */
-  CABA_OPT_ANY   = 4   /* any of many */
+  CABA_OPT_ANY   = 4,  /* any of many */
+  CABA_OPT_GLSNO = 8   /* global seqno */
 };
                       /* <ver:1><type:2><opt:5><path:8><length bits:16> */
 static const int      CABA_VER_BITS    = 1,

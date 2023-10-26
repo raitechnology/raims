@@ -109,6 +109,7 @@ main( int argc, const char *argv[] )
              * no_perm     = NULL,
              * foreground  = NULL,
              * background  = NULL,
+             * no_msg_loss = NULL,
              * listen      = NULL,
              * no_http     = NULL,
              * http        = NULL,
@@ -166,13 +167,14 @@ main( int argc, const char *argv[] )
   "   -no-http           : no http service\n" \
   "   -http              : port for http service (default: listen + 80)\n" \
   "   -no-multicast      : no multicast\n" \
+  "   -no-msg-loss       : no msg loss errors\n" \
   "   -console           : run with console\n" \
   "   -pidfile           : write daemon pid to file\n" \
   "   -hostid            : host identity\n" \
   "   -debug             : debug flags\n"
 
   #define MS_SERVER_HELP \
-  "[-d dir] [-a file] -u user.svc -t tport.listen [...]\n" \
+  "[-d file/dir] -u user.svc -t tport.listen [...]\n" \
   "   -d dir         : config dir/file (default: config)\n" \
   "   -u user.svc    : user name (default: hostname)\n" \
   "   -t tport.list  : transport name + listen or connect\n" \
@@ -184,7 +186,8 @@ main( int argc, const char *argv[] )
   "   -D dbnum       : default db num\n" \
   "   -x hostid      : host identity\n" \
   "   -c             : run with console\n" \
-  "   -b             : fork and detach from terminal\n"
+  "   -b             : fork and detach from terminal\n" \
+  "   -e             : no message loss errors\n"
 
   get_help    = get_arg( argc, argv, 0, "-h", "-help", NULL );
   if ( get_help == NULL )
@@ -227,6 +230,7 @@ main( int argc, const char *argv[] )
   map_file    = get_arg( argc, argv, 1, "-m", NULL, NULL );
   db_num      = get_arg( argc, argv, 1, "-D", NULL, NULL );
   background  = get_arg( argc, argv, 0, "-b", NULL, NULL );
+  no_msg_loss = get_arg( argc, argv, 0, "-e", "-no-msg-loss", NULL );
 
   if ( use_console != NULL )
     background = NULL;
@@ -285,6 +289,8 @@ main( int argc, const char *argv[] )
     tree->parameters.set( st, P_PID_FILE, pid_file );
   if ( hostid != NULL )
     tree->parameters.set( st, P_HOST_ID, hostid );
+  if ( no_msg_loss != NULL )
+    tree->parameters.set( st, P_MSG_LOSS_ERRORS, false );
 
   ConfigTree::User      * usr   = NULL;
   ConfigTree::Service   * svc   = NULL;

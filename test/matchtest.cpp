@@ -22,27 +22,26 @@ main( int argc, char *argv[] )
   };
   static const char *type[] =
     { "NO_MATCH", "IS_QUEUE", "IS_INBOX", "IS_INBOX_PREFIX" };
-  const char * pre = "", * name = "", * subj = "";
-  size_t       pre_len = 0, name_len = 0, subj_len = 0;
+  static const char *ipc_subj[ 3 ] = { "_QUEUE.", "_INBOX.", "_INBOX" };
+  static size_t      ipc_len[ 3 ]  = { 7, 7, 6 };
+
   for ( int i = 1; i < argc; i++ ) {
     const char * s = argv[ i ];
-    int n = SubDB::match_ipc_subject( s, ::strlen( s ), pre, pre_len,
-                                      name, name_len, subj, subj_len,
-                                    SubDB::IPC_IS_QUEUE | SubDB::IPC_IS_INBOX );
+    IpcSubjectMatch m( ipc_subj, ipc_len, 3 );
+    int n = m.match( s, ::strlen( s ) );
     printf( "%s s=\"%s\" pre=\"%.*s\" name=\"%.*s\" subj=\"%.*s\"\n",
-            type[ n ], s, (int) pre_len, pre, (int) name_len, name,
-            (int) subj_len, subj );
+            type[ n ], s, (int) m.pre_len, m.pre, (int) m.name_len, m.name,
+            (int) m.subj_len, m.subj );
   }
   if ( argc != 1 )
     return 0;
   for ( int i = 0; test[ i ] != NULL; i++ ) {
     const char * s = test[ i ];
-    int n = SubDB::match_ipc_subject( s, ::strlen( s ), pre, pre_len,
-                                      name, name_len, subj, subj_len,
-                                    SubDB::IPC_IS_QUEUE | SubDB::IPC_IS_INBOX );
+    IpcSubjectMatch m( ipc_subj, ipc_len, 3 );
+    int n = m.match( s, ::strlen( s ) );
     printf( "%s s=\"%s\" pre=\"%.*s\" name=\"%.*s\" subj=\"%.*s\"\n",
-            type[ n ], s, (int) pre_len, pre, (int) name_len, name,
-            (int) subj_len, subj );
+            type[ n ], s, (int) m.pre_len, m.pre, (int) m.name_len, m.name,
+            (int) m.subj_len, m.subj );
   }
   return 0;
 }
