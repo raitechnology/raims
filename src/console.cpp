@@ -4838,10 +4838,13 @@ Console::show_adjacency( ConsoleOutput *p,  const uint32_t *src_uid,
       this->printf( "path %u of %u\n", path_select, path_cnt );
     else
       this->printf( "path count: %u\n", path_cnt );
-    char lbuf[ 80 ];
-    latency_string( peer_dist.adjacency_run_time, lbuf );
-    this->printf( "times calculated: %u, cpu used: %s\n",
-      peer_dist.adjacency_run_count, lbuf );
+    char lbuf1[ 80 ], lbuf2[ 80 ];
+    latency_string( peer_dist.adjacency_run_time, lbuf1 );
+    latency_string( peer_dist.adjacency_this_time, lbuf2 );
+    this->printf( "current calc: %u, cpu: %s; "
+                  "total calc: %u, total cpu: %s\n",
+      peer_dist.adjacency_this_count, lbuf2,
+      peer_dist.adjacency_run_count, lbuf1 );
 
     for (;;) {
       UserBridge * from, * to;
@@ -5580,7 +5583,7 @@ Console::show_tree( ConsoleOutput *p,  const UserBridge *src,
   uint32_t      src_uid = ( src != NULL ? src->uid : 0 );
 
   if ( peer_dist.graph == NULL )
-    peer_dist.update_graph();
+    peer_dist.update_graph( true );
 
   uint32_t   * idx = peer_dist.graph_idx_order;
   AdjUser    * u   = peer_dist.graph->user_tab.ptr[ idx[ src_uid ] ];
@@ -7263,10 +7266,12 @@ Console::show_time( ConsoleOutput *p ) noexcept
   char local_buf[ 64 ],
        start_buf[ 64 ],
        uptime_buf[ 64 ],
-       cpu_buf[ 64 ];
-  uint64_t ns = current_realtime_ns();
+       cpu_buf[ 64 ],
+       adj_buf[ 64 ],
+       last_buf[ 64 ];
+  uint64_t ns      = current_realtime_ns();
   uint64_t mono_ns = current_monotonic_time_ns();
-  size_t   up_sz, cpu_sz;
+  size_t   up_sz, cpu_sz, adj_sz, last_sz;
   timespec ts;
   MDStamp stamp;
 
@@ -7278,9 +7283,18 @@ Console::show_time( ConsoleOutput *p ) noexcept
   up_sz = stamp.get_string( uptime_buf, sizeof( uptime_buf ) );
 
   clock_gettime( CLOCK_PROCESS_CPUTIME_ID, &ts );
-  stamp.stamp = ts.tv_sec * 1000 + ( ts.tv_nsec / 1000000 );
-  stamp.resolution = MD_RES_MILLISECS;
+  stamp.stamp = ts.tv_sec * 1000000 + ( ts.tv_nsec / 1000 );
+  stamp.resolution = MD_RES_MICROSECS;
   cpu_sz = stamp.get_string( cpu_buf, sizeof( cpu_buf ) );
+
+  AdjDistance & peer_dist = this->user_db.peer_dist;
+  stamp.stamp = peer_dist.adjacency_run_time / 1000;
+  stamp.resolution = MD_RES_MICROSECS;
+  adj_sz = stamp.get_string( adj_buf, sizeof( adj_buf ) );
+
+  stamp.stamp = peer_dist.adjacency_this_time / 1000;
+  stamp.resolution = MD_RES_MICROSECS;
+  last_sz = stamp.get_string( last_buf, sizeof( last_buf ) );
 
   out.add_row()
      .set( "local" )
@@ -7294,6 +7308,12 @@ Console::show_time( ConsoleOutput *p ) noexcept
   out.add_row()
      .set( "cpu" )
      .set( cpu_buf, cpu_sz );
+  out.add_row()
+     .set( "adj" )
+     .set( adj_buf, adj_sz );
+  out.add_row()
+     .set( "last" )
+     .set( last_buf, last_sz );
 
   const char *hdr[ ncols ] =
    { "kind", "stamp" };

@@ -75,7 +75,7 @@ AdjDistance::uid_set_names( kv::UIntBitSet &set,  char *buf,
 }
 
 void
-AdjDistance::update_graph( void ) noexcept
+AdjDistance::update_graph( bool all_paths ) noexcept
 {
   UserBridgeList   list;
   UserBridgeElem * el;
@@ -115,16 +115,46 @@ AdjDistance::update_graph( void ) noexcept
       }
     }
   }
-  g.compute_forward_set( 0 );
-  for ( uint16_t p = 1; p < g.path_count; p++ )
-    g.compute_forward_set( p );
+  this->compute_path( 0 );
+  if ( all_paths ) {
+    for ( uint16_t p = 1; p < g.path_count; p++ )
+      this->compute_path( p );
+  }
+}
+
+void
+AdjDistance::compute_path( uint16_t p ) noexcept
+{
+  uint64_t stamp = 0;
+  if ( p == 0 ) {
+    stamp = kv::current_monotonic_time_ns();
+    this->graph->compute_forward_set( 0 );
+    this->path_count = this->graph->path_count;
+    this->path_computed.ptr =
+      this->mkar<uint64_t>( UIntBitSet::size( this->path_count ) );
+
+    this->adjacency_run_count++;
+    this->adjacency_this_time  = 0;
+    this->adjacency_this_count = 0;
+    this->last_run_mono        = stamp;
+  }
+  else if ( ! this->path_computed.is_member( p ) ) {
+    stamp = kv::current_monotonic_time_ns();
+    this->graph->compute_forward_set( p );
+  }
+  if ( stamp != 0 ) {
+    this->path_computed.add( p );
+    stamp = kv::current_monotonic_time_ns() - stamp;
+
+    this->adjacency_this_count++;
+    this->adjacency_this_time += stamp;
+    this->adjacency_run_time  += stamp;
+  }
 }
 
 void
 AdjDistance::clear_cache( void ) noexcept
 {
-  uint64_t stamp = kv::current_monotonic_time_ns();
-
   if ( this->graph != NULL ) {
     this->graph->reset();
     this->graph = NULL;
@@ -139,9 +169,8 @@ AdjDistance::clear_cache( void ) noexcept
   this->max_tport   = rte_cnt;
   this->max_uid     = uid_cnt;
   this->reuse();
-  this->update_graph();
+  this->update_graph( false );
 
-  this->path_count    = this->graph->path_count;
   this->stack         = this->mkar<UidDist>( uid_cnt );
   this->visit         = this->mkar<uint32_t>( uid_cnt );
   this->inc_list      = this->mkar<uint32_t>( uid_cnt );
@@ -151,12 +180,8 @@ AdjDistance::clear_cache( void ) noexcept
   this->inc_hd              = 0;
   this->inc_tl              = 0;
   this->inc_run_count       = 0;
-  this->last_run_mono       = stamp;
   this->inc_running         = false;
   this->found_inconsistency = false;
-
-  this->adjacency_run_count++;
-  this->adjacency_run_time += kv::current_monotonic_time_ns() - stamp;
 }
 
 uint32_t
@@ -451,6 +476,8 @@ AdjDistance::calc_transport_cost( uint32_t dest_uid,  uint32_t tport_id,
 void
 AdjDistance::calc_path( ForwardCache &fc,  uint16_t p ) noexcept
 {
+  if ( p > 0 )
+    this->compute_path( p );
   uint32_t   count = this->adjacency_count( 0 );
   uint64_t * m     = this->mkar<uint64_t>( fc.size( count ) );
   fc.init( count, this->cache_seqno, m );
@@ -485,6 +512,8 @@ AdjDistance::calc_source_path( ForwardCache &fc,  uint32_t src_uid,
 {
   if ( src_uid == 0 )
     return this->calc_path( fc, p );
+  if ( p > 0 )
+    this->compute_path( p );
   uint32_t   count = this->adjacency_count( 0 );
   uint64_t * m     = this->mkar<uint64_t>( fc.size( count ) );
   fc.init( count, this->cache_seqno, m );
@@ -505,7 +534,7 @@ void
 AdjDistance::message_graph_description( kv::ArrayOutput &out ) noexcept
 {
   if ( this->graph == NULL )
-    this->update_graph();
+    this->update_graph( true );
 
   AdjGraphOut put( *this->graph, out );
   put.print_graph();

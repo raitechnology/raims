@@ -221,7 +221,8 @@ struct AdjDistance : public md::MDMsgMem {
   AdjGraph        * graph;
   kv::UIntHashTab * cache_ht;
 
-  kv::UIntBitSet inc_visit;     /* inconsistent check visit uid map */
+  kv::UIntBitSet inc_visit,     /* inconsistent check visit uid map */
+                 path_computed; /* path computed bools */
   kv::ArrayCount< UidMissing, 8 > missing;
 
   uint64_t       cache_seqno,   /* seqno of adjacency in cache */
@@ -234,13 +235,15 @@ struct AdjDistance : public md::MDMsgMem {
                  inc_tl,        /* list to of uids in inc_list[] */
                  inc_run_count; /* count of inc_runs after adjacency change */
   uint64_t       last_run_mono, /* timestamp of last adjacency update */
-                 invalid_mono; /* when cache was invalidated */
+                 invalid_mono;  /* when cache was invalidated */
   uint32_t       invalid_src_uid;
-  InvalidReason  invalid_reason; /* why cache was invalidated */
+  InvalidReason  invalid_reason;/* why cache was invalidated */
   bool           inc_running,   /* whether incomplete check is running */
-                 found_inconsistency; /* if current or last run inconsistent */
-  uint64_t       adjacency_run_time; /* cpu time used to calculate */
-  uint32_t       adjacency_run_count;/* count of calculations */
+                 found_inconsistency;  /* if current or last run inconsistent */
+  uint64_t       adjacency_run_time,   /* cpu time used to calculate */
+                 adjacency_this_time;  /* current time used for this adj */
+  uint32_t       adjacency_run_count,  /* count of calculations */
+                 adjacency_this_count; /* count of calculations for this adj */
 
   static void zero_mem( void *x,  void *y ) {
     ::memset( x, 0, (char *) y - (char *) x );
@@ -264,6 +267,7 @@ struct AdjDistance : public md::MDMsgMem {
       this->clear_cache();
     return this->path_count;
   }
+  void compute_path( uint16_t p ) noexcept;
   uint32_t hash_to_path( uint32_t h ) {
     return ( h & MAX_PATH_MASK ) % this->get_path_count();
   }
@@ -334,7 +338,7 @@ struct AdjDistance : public md::MDMsgMem {
   const char * uid_set_names( kv::UIntBitSet &set,  char *buf,
                               size_t buflen ) noexcept;
   void message_graph_description( kv::ArrayOutput &out ) noexcept;
-  void update_graph( void ) noexcept;
+  void update_graph( bool all_paths ) noexcept;
 };
 }
 }

@@ -261,7 +261,8 @@ struct UserBridge : public UserStateTest<UserBridge> {
                      sync_sum_req_adj,
                      sync_sum_res,
                      sync_sum_res_adj,
-                     null_sync_res;
+                     null_sync_res,
+                     orphaned_count;
   AuthStage          last_auth_type;
   uint64_t           null_route_count,
                      null_route_time,
@@ -296,7 +297,8 @@ struct UserBridge : public UserStateTest<UserBridge> {
                      auth_mono_time,      /* when auth happens */
                      challenge_mono_time, /* time challenge sent */
                      remove_auth_time,
-                     remove_auth_mono;
+                     remove_auth_mono,
+                     orphaned_mono_time;
   kv::UIntHashTab  * inbound_svc_loss,    /* service msg loss map */
                    * inbound_svc_restart; /* service msg restart map */
   InboxSeqno         inbox;               /* track inbox sent/recv */
