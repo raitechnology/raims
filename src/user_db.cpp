@@ -736,14 +736,17 @@ UserDB::converge_network( uint64_t current_mono_time,  uint64_t current_time,
       }
     }
     if ( state == AdjDistance::UID_ORPHANED ) {
-      uint64_t ns, ns2, ns3, hb_timeout_ns;
+      uint64_t ns, ns1, ns2, ns3, hb_timeout_ns;
       hb_timeout_ns = sec_to_ns( n->hb_interval * 2 ) + SEC_TO_NS;
       ns  = n->start_mono_time + hb_timeout_ns; /* if hb and still orphaned */
+      ns1 = n->orphaned_mono_time + n->orphaned_count * SEC_TO_NS;
       ns2 = this->start_mono_time + hb_timeout_ns;
       ns3 = this->last_add_mono + hb_timeout_ns / 4;
 
       if ( this->adjacency_unknown.is_empty() &&
-           ns < current_mono_time && ns2 < current_mono_time &&
+           ns  < current_mono_time &&
+           ns1 < current_mono_time &&
+           ns2 < current_mono_time &&
            ns3 < current_mono_time ) {
         d_usr( "find_inconsistent orphaned %s(%u)\n",
                  n->peer.user.val, n->uid );
@@ -1784,7 +1787,9 @@ UserDB::remove_authenticated( UserBridge &n,  AuthStage bye ) noexcept
 
   this->last_auth_mono = cur_mono;
   this->last_rem_mono  = cur_mono;
-  n.last_auth_type = bye;
+  n.orphaned_mono_time = ( bye == BYE_ORPHANED ? cur_mono : 0 );
+  n.orphaned_count     = ( bye == BYE_ORPHANED ? n.orphaned_count+1 : 0 );
+  n.last_auth_type     = bye;
   /*if ( debug_usr )*/
     n.printn( "remove auth %s %s\n", auth_stage_string( bye ),
                n.is_set( ZOMBIE_STATE ) ? "zombie" : "" );
