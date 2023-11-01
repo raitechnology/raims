@@ -2243,7 +2243,6 @@ SessionMgr::loop( uint32_t &idle ) noexcept
 {
   int status;
   uint32_t idle_count = idle;
-  uint64_t last;
   if ( this->poll.quit >= 5 )
     return false;
   if ( (status = this->poll.dispatch()) == EvPoll::DISPATCH_IDLE ) {
@@ -2251,9 +2250,7 @@ SessionMgr::loop( uint32_t &idle ) noexcept
     idle_count++;
     if ( idle_count > this->idle_busy ) {
       timeout = 100;
-      last = this->user_db.peer_dist.last_run_mono + (uint64_t) 1000000;
-      if ( last < this->poll.mono_ns &&
-           ! this->user_db.peer_dist.clear_cache_if_dirty() ) {
+      if ( ! this->user_db.peer_dist.clear_cache_if_dirty() ) {
         if ( this->user_db.converge_network( this->poll.mono_ns,
                                              this->poll.now_ns, false ) )
           timeout = 0;

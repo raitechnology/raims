@@ -851,6 +851,8 @@ struct UserDB {
                            uint64_t current_time ) noexcept;
   bool converge_network( uint64_t current_mono_time,
                          uint64_t current_time, bool req_timeout ) noexcept;
+  void find_inconsistent( uint64_t current_mono_time,
+                          uint64_t current_time ) noexcept;
   UserBridge * lookup_bridge( MsgFramePublish &pub,
                               const MsgHdrDecoder &dec ) noexcept;
   UserBridge * lookup_user( MsgFramePublish &pub,

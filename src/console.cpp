@@ -7312,6 +7312,9 @@ Console::show_time( ConsoleOutput *p ) noexcept
      .set( "adj" )
      .set( adj_buf, adj_sz );
   out.add_row()
+     .set( "adjcnt" )
+     .set_int( peer_dist.adjacency_run_count );
+  out.add_row()
      .set( "last" )
      .set( last_buf, last_sz );
 

@@ -656,7 +656,6 @@ bool
 UserDB::converge_network( uint64_t current_mono_time,  uint64_t current_time,
                           bool req_timeout ) noexcept
 {
-  UserBridge *n, *m;
   bool run_peer_inc = false;
   this->peer_dist.clear_cache_if_dirty();
   if ( this->peer_dist.inc_run_count == 0 || req_timeout ||
@@ -705,7 +704,17 @@ UserDB::converge_network( uint64_t current_mono_time,  uint64_t current_time,
     }
     return true;
   }
+  this->find_inconsistent( current_mono_time, current_time );
+  return false;
+}
+
+void
+UserDB::find_inconsistent( uint64_t current_mono_time,
+                           uint64_t current_time ) noexcept
+{
+  UserBridge *n, *m;
   int state = this->peer_dist.find_inconsistent2( n, m );
+
   if ( state != AdjDistance::CONSISTENT ) {
     if ( state == AdjDistance::LINK_MISSING ) {
       if ( n != NULL && m != NULL ) {
@@ -758,33 +767,32 @@ UserDB::converge_network( uint64_t current_mono_time,  uint64_t current_time,
           this->send_adjacency_request( *n, DIJKSTRA_SYNC_REQ );
       }
     }
+    return;
   }
-  else {
-    if ( ! this->peer_dist.found_inconsistency &&
-         this->peer_dist.invalid_mono != 0 ) {
-      uint32_t src_uid = this->peer_dist.invalid_src_uid;
-      this->events.converge( this->peer_dist.invalid_reason, src_uid );
-      this->converge_time = current_time;
-      if ( current_time > this->net_converge_time )
-        this->net_converge_time = current_time;
-      this->converge_mono = current_mono_time;
-      uint32_t p = this->peer_dist.get_path_count();
-      uint64_t x = current_monotonic_time_ns();
-      uint64_t t = ( x > this->peer_dist.invalid_mono ) ?
-                   ( x - this->peer_dist.invalid_mono ) : 0;
-      const char * src_user = this->user.user.val;
-      if ( src_uid != 0 )
-        src_user = this->bridge_tab.ptr[ src_uid ]->peer.user.val;
-      printf(
-        "network converges %.3f secs, %u path%s, %u uids authenticated, "
-        "%s from %s.%u\n",
-              (double) t / SEC_TO_NS, p, p>1?"s":"", this->uid_auth_count,
-              invalidate_reason_string( this->peer_dist.invalid_reason ),
-              src_user, src_uid );
-    }
-    this->find_adjacent_routes();
+
+  if ( ! this->peer_dist.found_inconsistency &&
+       this->peer_dist.invalid_mono != 0 ) {
+    uint32_t src_uid = this->peer_dist.invalid_src_uid;
+    this->events.converge( this->peer_dist.invalid_reason, src_uid );
+    this->converge_time = current_time;
+    if ( current_time > this->net_converge_time )
+      this->net_converge_time = current_time;
+    this->converge_mono = current_mono_time;
+    uint32_t p = this->peer_dist.get_path_count();
+    uint64_t x = current_monotonic_time_ns();
+    uint64_t t = ( x > this->peer_dist.invalid_mono ) ?
+                 ( x - this->peer_dist.invalid_mono ) : 0;
+    const char * src_user = this->user.user.val;
+    if ( src_uid != 0 )
+      src_user = this->bridge_tab.ptr[ src_uid ]->peer.user.val;
+    printf(
+      "network converges %.3f secs, %u path%s, %u uids authenticated, "
+      "%s from %s.%u\n",
+            (double) t / SEC_TO_NS, p, p>1?"s":"", this->uid_auth_count,
+            invalidate_reason_string( this->peer_dist.invalid_reason ),
+            src_user, src_uid );
   }
-  return false;
+  this->find_adjacent_routes();
 }
 
 const char *
