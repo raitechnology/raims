@@ -264,9 +264,10 @@ struct AdjDistance : public md::MDMsgMem {
   }
   uint32_t get_path_count( void ) {
     if ( this->cache_seqno != this->update_seqno )
-      this->clear_cache();
+      return this->calc_path_count();
     return this->path_count;
   }
+  uint32_t calc_path_count( void ) noexcept;
   void compute_path( uint16_t p ) noexcept;
   uint32_t hash_to_path( uint32_t h ) {
     return ( h & MAX_PATH_MASK ) % this->get_path_count();
