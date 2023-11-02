@@ -134,6 +134,7 @@ AdjDistance::compute_path( uint16_t p ) noexcept
     this->path_count = this->graph->path_count;
     this->adjacency_run_count++;
     this->path_computed.add( 0 );
+    this->graph_seqno = this->update_seqno;
   }
   if ( ! this->path_computed.is_member( p ) ) {
     if ( stamp == 0 )
@@ -190,7 +191,8 @@ AdjDistance::clear_cache( void ) noexcept
 uint32_t
 AdjDistance::calc_path_count( void ) noexcept
 {
-  this->clear_cache();
+  if ( this->cache_seqno != this->update_seqno )
+    this->clear_cache();
   this->compute_path( 0 );
   return this->path_count;
 }
@@ -235,6 +237,7 @@ AdjDistance::find_inconsistent2( UserBridge *&from,
   uint32_t uid;
   this->clear_cache_if_dirty();
   if ( ! this->inc_running ) {
+    this->start_run_mono = kv::current_monotonic_time_ns();
     this->inc_tl = this->max_uid;
     this->inc_hd = this->max_uid;
     this->miss_tos = 0;
@@ -287,6 +290,7 @@ AdjDistance::find_inconsistent2( UserBridge *&from,
   this->inc_running = false;
   this->inc_run_count++;
   this->last_run_mono = kv::current_monotonic_time_ns();
+  this->total_run_time += this->last_run_mono - this->start_run_mono;
   return CONSISTENT;
 }
 
