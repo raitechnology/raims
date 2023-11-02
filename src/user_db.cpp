@@ -1331,8 +1331,9 @@ UserDB::check_blooms( void ) noexcept
     }
 
     if ( ( no_path | invalid | null_bloom | fd_not_set ) != 0 ) {
-      n.printe( "check_rt no_path=%x invalid=%x null_bloom=%x fd_not_set=%x\n",
-                no_path, invalid, null_bloom, fd_not_set );
+      if ( debug_usr )
+        n.printf("check_rt no_path=%x invalid=%x null_bloom=%x fd_not_set=%x\n",
+                 no_path, invalid, null_bloom, fd_not_set );
       failed = true;
     }
 

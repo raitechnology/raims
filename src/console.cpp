@@ -7268,10 +7268,11 @@ Console::show_time( ConsoleOutput *p ) noexcept
        uptime_buf[ 64 ],
        cpu_buf[ 64 ],
        adj_buf[ 64 ],
-       last_buf[ 64 ];
+       last_buf[ 64 ],
+       run_buf[ 64 ];
   uint64_t ns      = current_realtime_ns();
   uint64_t mono_ns = current_monotonic_time_ns();
-  size_t   up_sz, cpu_sz, adj_sz, last_sz;
+  size_t   up_sz, cpu_sz, adj_sz, last_sz, run_sz;
   timespec ts;
   MDStamp stamp;
 
@@ -7296,6 +7297,10 @@ Console::show_time( ConsoleOutput *p ) noexcept
   stamp.resolution = MD_RES_MICROSECS;
   last_sz = stamp.get_string( last_buf, sizeof( last_buf ) );
 
+  stamp.stamp = peer_dist.total_run_time / 1000;
+  stamp.resolution = MD_RES_MICROSECS;
+  run_sz = stamp.get_string( run_buf, sizeof( run_buf ) );
+
   out.add_row()
      .set( "local" )
      .set( local_buf );
@@ -7317,6 +7322,12 @@ Console::show_time( ConsoleOutput *p ) noexcept
   out.add_row()
      .set( "last" )
      .set( last_buf, last_sz );
+  out.add_row()
+     .set( "run" )
+     .set( run_buf, run_sz );
+  out.add_row()
+     .set( "runcnt" )
+     .set_int( peer_dist.inc_run_count );
 
   const char *hdr[ ncols ] =
    { "kind", "stamp" };

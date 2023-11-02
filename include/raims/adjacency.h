@@ -226,6 +226,7 @@ struct AdjDistance : public md::MDMsgMem {
   kv::ArrayCount< UidMissing, 8 > missing;
 
   uint64_t       cache_seqno,   /* seqno of adjacency in cache */
+                 graph_seqno,   /* seqno of graph */
                  update_seqno;  /* seqno of current adjacency */
   uint32_t       max_uid,       /* all uid < max_uid */
                  max_tport,     /* all tport < max_tport */
@@ -235,7 +236,9 @@ struct AdjDistance : public md::MDMsgMem {
                  inc_tl,        /* list to of uids in inc_list[] */
                  inc_run_count; /* count of inc_runs after adjacency change */
   uint64_t       last_run_mono, /* timestamp of last adjacency update */
-                 invalid_mono;  /* when cache was invalidated */
+                 invalid_mono,  /* when cache was invalidated */
+                 start_run_mono,
+                 total_run_time;
   uint32_t       invalid_src_uid;
   InvalidReason  invalid_reason;/* why cache was invalidated */
   bool           inc_running,   /* whether incomplete check is running */
@@ -252,6 +255,7 @@ struct AdjDistance : public md::MDMsgMem {
     zero_mem( (void *) &this->stack, (void *) &this->inc_visit );
     zero_mem( (void *) &this->max_uid, (void *) &this[ 1 ] );
     this->cache_seqno  = 0;
+    this->graph_seqno  = 0;
     this->update_seqno = 1;
     this->path_count   = 1;
   }
@@ -263,7 +267,7 @@ struct AdjDistance : public md::MDMsgMem {
     return (AR *) p;
   }
   uint32_t get_path_count( void ) {
-    if ( this->cache_seqno != this->update_seqno )
+    if ( this->graph_seqno != this->update_seqno )
       return this->calc_path_count();
     return this->path_count;
   }
