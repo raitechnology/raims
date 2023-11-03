@@ -234,7 +234,8 @@ struct AdjDistance : public md::MDMsgMem {
                  miss_tos,      /* number of missing uids in missing[] */
                  inc_hd,        /* list hd of uids in inc_list[] */
                  inc_tl,        /* list to of uids in inc_list[] */
-                 inc_run_count; /* count of inc_runs after adjacency change */
+                 inc_run_count, /* count of inc_runs after adjacency change */
+                 total_run_count;
   uint64_t       last_run_mono, /* timestamp of last adjacency update */
                  invalid_mono,  /* when cache was invalidated */
                  start_run_mono,
