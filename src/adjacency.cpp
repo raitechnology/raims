@@ -77,6 +77,9 @@ AdjDistance::uid_set_names( kv::UIntBitSet &set,  char *buf,
 void
 AdjDistance::update_graph( bool all_paths ) noexcept
 {
+  if ( this->cache_seqno != this->update_seqno )
+    this->clear_cache();
+
   UserBridgeList   list;
   UserBridgeElem * el;
 
@@ -168,7 +171,6 @@ AdjDistance::clear_cache( void ) noexcept
   this->max_tport   = rte_cnt;
   this->max_uid     = uid_cnt;
   this->reuse();
-  /*this->update_graph( false );*/
 
   this->stack             = this->mkar<UidDist>( uid_cnt );
   this->visit             = this->mkar<uint32_t>( uid_cnt );
