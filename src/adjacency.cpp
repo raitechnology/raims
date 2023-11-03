@@ -289,6 +289,7 @@ AdjDistance::find_inconsistent2( UserBridge *&from,
   to   = NULL;
   this->inc_running = false;
   this->inc_run_count++;
+  this->total_run_count++;
   this->last_run_mono = kv::current_monotonic_time_ns();
   this->total_run_time += this->last_run_mono - this->start_run_mono;
   return CONSISTENT;

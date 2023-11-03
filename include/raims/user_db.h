@@ -604,6 +604,7 @@ struct UserDB {
                         last_rem_mono,
                         converge_time,   /* time of convergence */
                         converge_mono,   /* convergence mono time */
+                        consistent_mono,
                         net_converge_time, /* time that network agrees */
                         name_send_seqno,
                         name_send_time,
@@ -851,6 +852,8 @@ struct UserDB {
                            uint64_t current_time ) noexcept;
   bool converge_network( uint64_t current_mono_time,
                          uint64_t current_time, bool req_timeout ) noexcept;
+  void finish_converge_network( uint64_t current_mono_time,
+                                uint64_t current_time ) noexcept;
   void find_inconsistent( uint64_t current_mono_time,
                           uint64_t current_time ) noexcept;
   UserBridge * lookup_bridge( MsgFramePublish &pub,

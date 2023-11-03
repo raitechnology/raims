@@ -7327,7 +7327,7 @@ Console::show_time( ConsoleOutput *p ) noexcept
      .set( run_buf, run_sz );
   out.add_row()
      .set( "runcnt" )
-     .set_int( peer_dist.inc_run_count );
+     .set_int( peer_dist.total_run_count );
 
   const char *hdr[ ncols ] =
    { "kind", "stamp" };
