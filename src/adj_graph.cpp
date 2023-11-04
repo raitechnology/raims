@@ -221,8 +221,7 @@ AdjGraph::compute_forward_set( uint16_t p ) noexcept
   }
   if ( p == 0 ) {
     if ( this->max_alt > this->path_count )
-      this->path_count = ( this->max_alt >= 16 ? 16 :
-                           this->max_alt >= 8  ? 8 : 4 );
+      this->path_count = ( this->max_alt >= 8 ? 8 : 4 );
   }
 }
 
