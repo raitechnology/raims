@@ -53,7 +53,8 @@ enum InvalidReason {
   ADJACENCY_UPDATE_INV  = 5, /* recvd an adjacency sync from peer */
   ADD_TRANSPORT_INV     = 6, /* added a new transport */
   ADVERTISED_COST_INV   = 7, /* transport advertised a different cost */
-  MAX_INVALIDATE        = 8
+  ADD_USER_INV          = 8, /* added a new user */
+  MAX_INVALIDATE        = 9
 };
 
 #ifdef INCLUDE_PEER_CONST
@@ -95,7 +96,8 @@ static const char *invalid_reason_str[] = {
   "adj_change",
   "adj_update",
   "add_tport",
-  "adv_cost"
+  "adv_cost",
+  "add_user"
 };
 #if __cplusplus >= 201103L
 static_assert( MAX_REASON_SYNC == ( sizeof( peer_sync_reason_str ) / sizeof( peer_sync_reason_str[ 0 ] ) ), "peer_sync_reason" );
