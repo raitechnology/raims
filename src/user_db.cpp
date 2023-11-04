@@ -1623,6 +1623,7 @@ UserDB::new_uid( void ) noexcept
 {
   uint32_t uid = this->next_uid++; /* make sure hash( id ) is unique */
   this->bridge_tab.make( this->next_uid, true );
+  this->peer_dist.invalidate( ADD_USER_INV, uid );
   return uid;
 }
 
