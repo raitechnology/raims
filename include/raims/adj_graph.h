@@ -207,7 +207,8 @@ struct AdjGraph {
 
   void add_link( StringVal &a,  StringVal &b,  StringVal &tp,  StringVal &ty,
                  AdjCost &cost,  uint32_t tid = 0 ) {
-    this->add_link( this->add_user( a ), this->add_user( b ), tp, ty, cost, tid );
+    AdjUser *u1 = this->add_user( a ), *u2 = this->add_user( b );
+    this->add_link( u1, u2, tp, ty, cost, tid );
   }
   void add_link( AdjUser *u1,  StringVal &b,  StringVal &tp,  StringVal &ty,
                  AdjCost &cost,  uint32_t tid = 0 ) {
@@ -218,7 +219,8 @@ struct AdjGraph {
 
   void add_conn( StringVal &a,  StringVal &b,  StringVal &tp,  StringVal &ty,
                  AdjCost &cost ) {
-    this->add_conn( this->add_user( a ), this->add_user( b ), tp, ty, cost );
+    AdjUser *u1 = this->add_user( a ), *u2 = this->add_user( b );
+    this->add_conn( u1, u2, tp, ty, cost );
   }
   void add_conn( AdjUser *u1,  StringVal &b,  StringVal &tp,  StringVal &ty,
                  AdjCost &cost ) {

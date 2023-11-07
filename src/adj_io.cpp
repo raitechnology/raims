@@ -1005,16 +1005,10 @@ AdjGraphOut::print_config( const char *fn ) noexcept
    .s( "    users:\n" );
 
   AdjUserTab & user_tab = this->graph.user_tab;
-  UIntHashTab * host_ht = UIntHashTab::resize( NULL );
   for ( uint32_t i = 0; i < user_tab.count; i++ ) {
     AdjUser * u = user_tab.ptr[ i ];
-    UserBuf ubuf;
-    ubuf.gen_key( u->user.val, u->user.len, svc.service, svc.service_len,
-                  NULL, 0, false, pass, host_ht );
-    svc.add_user( ubuf );
-    host_ht->upsert_rsz( host_ht, ubuf.make_host_id(), 1 );
+    svc.add_user( u->user.val, u->user.len );
   }
-  delete host_ht;
   svc.sign_users( NULL, pass );
   for ( UserElem *e = svc.users.hd; e != NULL; e = e->next ) {
     o.s( "      \"" ).b( e->user.user, e->user.user_len ).s( "\": \"" )
@@ -1028,9 +1022,9 @@ AdjGraphOut::print_config( const char *fn ) noexcept
   this->print_graph();
 
   bool first_user = true;
-  UserElem *elem = svc.users.hd;
   for ( uint32_t i = 0; i < user_tab.count; i++ ) {
-    AdjUser * u = user_tab.ptr[ i ];
+    AdjUser  * u    = user_tab.ptr[ i ];
+    UserElem * elem = svc.users.find( u->user.val, u->user.len );
     o.printf( "# ms_server -d %.*s%s.yaml -u %s", (int) prefix_len, cfg, fn,
               u->user.val );
     uint32_t j, cnt = 0, connect_cnt = 0, listen_cnt = 0;
@@ -1076,7 +1070,6 @@ AdjGraphOut::print_config( const char *fn ) noexcept
         }
       }
     }
-    elem = elem->next;
   }
 }
 
