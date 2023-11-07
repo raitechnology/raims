@@ -151,7 +151,7 @@ struct ConfigTree {
     uint32_t       user_id;     /* count 0 -> user_cnt */
     bool           is_temp;
                    /*entitle_cnt;*/ /* count of entitle[] */
-    User() : next( 0 ), user_id( 0 ) {}
+    User() : next( 0 ), user_id( 0 ), is_temp( false ) {}
     User( const User &u ) : next( 0 ), user( u.user ), svc( u.svc ),
       create( u.create ), expires( u.expires ), revoke( u.revoke ),
       pri( u.pri ), pub( u.pub ), user_id( u.user_id ), is_temp( false ) {}

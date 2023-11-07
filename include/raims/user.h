@@ -95,6 +95,12 @@ struct UserBuf {
               expires_len( 0 ), revoke_len( 0 ), pri_len( 0 ), pub_len( 0 ) {}
   UserBuf( const UserBuf &b )          { this->copy( b ); }
   UserBuf( const ConfigTree::User &u ) { this->copy( u ); }
+  UserBuf( const char *u,  size_t ulen,  const char *s,  size_t slen )
+    : user_len( 0 ), service_len( 0 ), create_len( 0 ), expires_len( 0 ),
+      revoke_len( 0 ), pri_len( 0 ), pub_len( 0 ) {
+    copy_max( this->user, this->user_len, MAX_USER_LEN, u, ulen );
+    copy_max( this->service, this->service_len, MAX_SERVICE_LEN, s, slen );
+  }
   ~UserBuf() {
     this->zero();
   }
@@ -180,6 +186,8 @@ struct UserElem {
     this->sig_len = b.sig_len;
     ::memcpy( this->sig, b.sig, DSA_CIPHER_SIGN_B64_LEN );
   }
+  UserElem( const char *user,  size_t user_len,  const char *svc, size_t svc_len )
+    : next( 0 ), revoke( 0 ), user( user, user_len, svc, svc_len ) {}
   ~UserElem() {
     this->sig_len = 0;
     ::memset( this->sig, 0, sizeof( this->sig ) );
@@ -235,8 +243,26 @@ struct UserHmacData {
   bool decrypt( const CryptPass &pwd,  WhichPubPri get_op ) noexcept;
 };
 
-typedef kv::SLinkList<UserElem> UserList;
-typedef kv::SLinkList<RevokeElem> RevokeList;
+struct UserList : public kv::SLinkList<UserElem> {
+  UserElem *find( const char *user,  size_t user_len ) {
+    for ( UserElem *u = this->hd; u != NULL; u = u->next ) {
+      if ( u->user.user_len == user_len &&
+           ::memcmp( u->user.user, user, user_len ) == 0 )
+        return u;
+    }
+    return NULL;
+  }
+};
+struct RevokeList : public kv::SLinkList<RevokeElem> {
+  RevokeElem *find( const char *user,  size_t user_len ) {
+    for ( RevokeElem *u = this->hd; u != NULL; u = u->next ) {
+      if ( u->user->user.user_len == user_len &&
+           ::memcmp( u->user->user.user, user, user_len ) == 0 )
+        return u;
+    }
+    return NULL;
+  }
+};
 
 struct ServiceBuf {
   char       service[ MAX_SERVICE_LEN ],
@@ -292,6 +318,7 @@ struct ServiceBuf {
   void add_user( const UserBuf &u ) noexcept;
   void add_user( const UserElem &u ) noexcept;
   void add_user( const ConfigTree::User &u ) noexcept;
+  void add_user( const char *user,  size_t user_len ) noexcept;
   /* remove all instances of user */
   bool remove_user( const char *user,  size_t user_len ) noexcept;
   /* revoke all instances of user */
