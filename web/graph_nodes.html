@@ -140,7 +140,9 @@
 
     var max_uid = 0;
     var cur_path = 0;
-    function reload_graph( n ) {
+    function reload_graph() {
+      let sel = document.getElementById("showpath");
+      let n = sel.selectedIndex;
       if ( graphs != null ) {
         cy.elements().remove();
         cy.add( transform( graphs[ n ] ) );
@@ -171,28 +173,43 @@
       }
       return elements;
     };
-    function init_select( gn ) {
+    function init_select( gn, length ) {
       let sel = document.getElementById("select");
       let text = document.getElementById("text");
-      let found_start = false;
-      for ( i = 0; i < gn.length; i++ ) {
+      let found_start = 0, found_length = 0;
+      let i = 0;
+      for ( ; i < gn.length; i++ ) {
         let opt = document.createElement("option");
         opt.text  = gn[ i ].user;
         opt.value = gn[ i ].user;
-        if ( ! found_start ) {
-          if ( text.value.includes( "start " + opt.value ) ) {
-            opt.selected = true;
-            found_start = true;
+        let start = "start " + opt.value;
+        if ( start.length > found_length ) {
+          if ( text.value.includes( start ) ) {
+            found_start  = i + 1;
+            found_length = start.length;
           }
         }
+        sel.appendChild( opt );
+      }
+      if ( found_start != 0 )
+        sel.selectedIndex = found_start - 1;
+
+      sel = document.getElementById("showpath");
+      for ( i = 0; i < length; i++ ) {
+        let opt = document.createElement("option");
+        opt.text = i;
+        opt.value = i;
+        opt.selected = ( i == 0 ? true : false );
         sel.appendChild( opt );
       }
     }
 
     window.onload = function() {
       make_topbar( 3, false );
-      init_graph( graphs == null ? null : transform( graphs[ 0 ] ) );
-      init_select( graphs[ 0 ].nodes );
+      if ( graphs != null ) {
+        init_graph( transform( graphs[ 0 ] ) );
+        init_select( graphs[ 0 ].nodes, graphs.length );
+      }
     };
 
     function saveAsSvg() {
@@ -214,9 +231,9 @@
       a.click();
     };
     function getSvgUrl() {
-      var svgContent = cy.svg({scale: 1, full: true, bg: '#ffffff'});
-      var blob = new Blob([svgContent], {type:"image/svg+xml;charset=utf-8"});
-      var url = window.URL.createObjectURL(blob);
+      let svg_content = cy.svg({scale: 1, full: true, bg: '#ffffff'});
+      let blob = new Blob([svg_content], {type:"image/svg+xml;charset=utf-8"});
+      let url = window.URL.createObjectURL(blob);
       return url;
     };
   </script>
@@ -234,10 +251,7 @@
           <input id="savesvg" type="text" value="path1.svg"></input>
           <button style="color: white; background-color: #008CBA" onclick="window.location=getSvgUrl()">View SVG</button>
           <p>
-          <input type="radio" id="p0" checked="true" style="color: white; background-color: #007070" onclick="reload_graph(0)">Path 1</input>
-          <input type="radio" id="p1" style="color: white; background-color: #007070" onclick="reload_graph(1)">Path 2</input>
-          <input type="radio" id="p2" style="color: white; background-color: #007070" onclick="reload_graph(2)">Path 3</input>
-          <input type="radio" id="p3" style="color: white; background-color: #007070" onclick="reload_graph(3)">Path 4</input>
+          Show path: <select style="color: white; background-color: #008CBA" id="showpath" onchange="reload_graph()"></select>
           </p>
           </div>
           <div id="show">
