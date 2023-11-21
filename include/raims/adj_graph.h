@@ -149,6 +149,7 @@ struct AdjUserTab : public kv::ArrayCount<AdjUser *, 32> {
   kv::UIntHashTab * ht;
   AdjUserTab() : ht( 0 ) {}
   AdjUser * find( StringVal &user,  uint32_t uid ) noexcept;
+  AdjUser * find2( StringVal &user ) noexcept;
   void add( AdjUser *u ) noexcept;
   void reset( void ) noexcept;
 };
@@ -229,6 +230,7 @@ struct AdjGraph {
   void add_conn( AdjUser *u1,  AdjUser *u2,  StringVal &tp,  StringVal &ty,
                  AdjCost &cost ) noexcept;
 
+  enum { G_NONE = 0, G_START, G_NODE, G_LINK, G_MESH, G_CUBE, G_PGM };
   int load_json( StringTab &str_tab,  void *data,  size_t data_size,
                  bool is_yaml ) noexcept;
   int load_graph( StringTab &str_tab,  const char *p,
@@ -236,7 +238,7 @@ struct AdjGraph {
   void add_users( StringTab &str_tab,  const char **args,  int argc ) noexcept;
   void link_users( StringTab &str_tab,  UserArray &users,  StringVal &tport,
                    StringVal &type,  AdjCost &cost,  int cstatus,
-                   bool is_tcp ) noexcept;
+                   int stmt ) noexcept;
   void init_inconsistent( uint32_t src_idx,  AdjInconsistent &inc ) noexcept;
   void find_inconsistent( AdjInconsistent &inc ) noexcept;
 
@@ -298,7 +300,7 @@ struct AdjGraphOut {
   void print_mask( uint16_t p ) noexcept;
   void print_fwd( uint16_t p ) noexcept;
 
-  void print_graph( void ) noexcept;
+  void print_graph( uint32_t start_idx ) noexcept;
   void print_mesh( AdjLinkTab &mesh,  bool is_pgm ) noexcept;
   void print_tcp( AdjLinkTab &tcp ) noexcept;
   void print_link( AdjLink &link ) noexcept;
@@ -307,9 +309,6 @@ struct AdjGraphOut {
   void print_config( const char *fn ) noexcept;
 };
 
-bool compute_message_graph( const char *start,  const char *network,
-                            size_t network_len,
-                            kv::ArrayOutput &out ) noexcept;
 }
 }
 #endif

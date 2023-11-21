@@ -9,6 +9,29 @@ using namespace rai;
 using namespace kv;
 using namespace ms;
 
+static uint32_t link_h[ 1024 ],
+                path_h[ 256 ];
+static int      init_adj_hash = 0;
+static void
+adj_hash_init( void ) noexcept
+{
+  size_t i;
+  uint32_t x = 0x4cf5ad43, y = 0x2745937f;
+  rand::xoroshiro128plus rng;
+  rng.static_init( x, y );
+  for ( i = 0; i < 256; i++ )
+    path_h[ i ] = rng.next();
+  x ^= path_h[ 0 ];
+  y ^= path_h[ 255 ];
+  rng.static_init( x, y );
+  for ( i = 0; i < 1024; i++ )
+    link_h[ i ] = rng.next();
+  init_adj_hash = 1;
+}
+
+static uint32_t
+rol32( uint32_t x, int r ) { return ((x << r) | (x >> (32 - r))); }
+
 AdjUser *
 AdjGraph::add_user( StringVal &a,  uint32_t uid ) noexcept
 {
@@ -128,6 +151,8 @@ AdjUserTab::find( StringVal &user,  uint32_t uid ) noexcept
   uint32_t i;
   AdjUser * u = ( this->ht != NULL &&
                   this->ht->find( user.id, pos, i ) ? this->ptr[ i ] : NULL );
+  if ( u == NULL )
+    u = this->find2( user );
   if ( u != NULL ) {
     if ( u->uid == uid )
       return u;
@@ -136,6 +161,17 @@ AdjUserTab::find( StringVal &user,  uint32_t uid ) noexcept
       if ( user.equals( this->ptr[ i ]->user ) && this->ptr[ i ]->uid == uid )
         return this->ptr[ i ];
     }
+  }
+  return NULL;
+}
+
+AdjUser *
+AdjUserTab::find2( StringVal &user ) noexcept
+{
+  /* dup user names with different uids */
+  for ( uint32_t i = 0; i < this->count; i++ ) {
+    if ( this->ptr[ i ]->user.equals( user ) )
+      return this->ptr[ i ];
   }
   return NULL;
 }
@@ -156,7 +192,11 @@ struct HashOrder {
 };
 struct HashOrderCmp {
   static uint32_t key( HashOrder &v ) { return v.h; }
-  static bool less( HashOrder &v1,  HashOrder &v2 ) { return v1.h < v2.h; }
+  static bool less( HashOrder &v1,  HashOrder &v2 ) {
+    if ( v1.h < v2.h ) return true;
+    if ( v1.h > v2.h ) return false;
+    return v1.val < v2.val;
+  }
 };
 
 void
@@ -168,6 +208,9 @@ AdjGraph::compute_forward_set( uint16_t p ) noexcept
   AdjLinkTab   links;
   BitSpace     dup;
   HashOrder  * elem;
+
+  if ( ! init_adj_hash )
+    adj_hash_init();
 
   for ( uint32_t idx = 0; idx < this->user_tab.count; idx++ ) {
     AdjUser   * u   = this->user_tab.ptr[ idx ];
@@ -195,11 +238,17 @@ AdjGraph::compute_forward_set( uint16_t p ) noexcept
         elem = spc2.make( count );
         for ( x = 0; x < count; x++ ) {
           uint32_t n = links.ptr[ x ]->link_num;
-          elem[ x ].h   = kv_hash_uint2( n, p );
+          uint32_t ph = path_h[ p & 255 ],
+                   lh = rol32( link_h[ n & 1023 ], p & 31 );
+          while ( n > 1023 ) {
+            n >>= 10;
+            lh ^= rol32( link_h[ n & 1023 ], p & 31 );
+          }
+          elem[ x ].h   = rol32( lh ^ ph, p & 31 );
           elem[ x ].val = x;
         }
 
-        sort.init( elem, count, ~0, false );
+        sort.init( elem, count, ~0, true );
         sort.sort();
 
         for ( x = 0; x < count; x++ ) {
@@ -221,7 +270,8 @@ AdjGraph::compute_forward_set( uint16_t p ) noexcept
   }
   if ( p == 0 ) {
     if ( this->max_alt > this->path_count )
-      this->path_count = ( this->max_alt >= 8 ? 8 : 4 );
+      this->path_count = ( this->max_alt >= 8 ? 8 :
+                           this->max_alt >= 4 ? 4 : 2 );
   }
 }
 

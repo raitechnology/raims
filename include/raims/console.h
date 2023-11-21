@@ -639,6 +639,7 @@ struct Console : public md::MDOutput, public SubOnMsg,
                     log_rate_total,
                     max_terminal_log_rate;
   uint32_t          last_rate;
+  kv::ArrayCount<char, 256> graph_state;
 
   static const size_t TS_ERR_OFF = LastTimeStamp::TS_LEN,
                       TS_HDR_LEN = LastTimeStamp::TS_LEN + 2;

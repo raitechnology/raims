@@ -29,6 +29,7 @@ struct WebReqData {
              * mime,         /* mime derived from path */
              * graph,        /* graph computation json */
              * graph_source, /* graph source description */
+             * graph_state,
              * trail;
   size_t       path_len,
                cmd_len,
@@ -37,6 +38,7 @@ struct WebReqData {
                mime_len,
                graph_len,
                graph_source_len,
+               graph_state_len,
                trail_len;
   char         paren;        /* template variable paren @(var) or @{var} */
   bool         is_immutable; /* data is read only, gzipped */

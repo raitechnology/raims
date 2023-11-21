@@ -112,7 +112,7 @@ main( int argc, const char *argv[] ) noexcept
   }
   if ( show_graph ) {
     out.printf( "--- graph description:\n" );
-    put.print_graph();
+    put.print_graph( 0 );
   }
   if ( show_web_json ) {
     out.printf( "--- web json:\n" );

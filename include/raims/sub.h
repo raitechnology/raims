@@ -783,10 +783,12 @@ struct IpcSubjectMatch {
   const char ** match_sub;
   size_t      * match_len,
                 match_cnt;
-  uint32_t      no_match_value;
+  uint32_t      no_match_value,
+                no_svc_value;
   IpcSubjectMatch( const char **m, size_t *l,  size_t cnt,
                    uint32_t n = IPC_NO_MATCH )
-    : match_sub( m ), match_len( l ), match_cnt( cnt ), no_match_value( n ) {}
+    : match_sub( m ), match_len( l ), match_cnt( cnt ),
+      no_match_value( n ), no_svc_value( n ) {}
   int match( const char *str,  size_t str_len ) noexcept;
   void host( const char *&host,  size_t &host_len ) noexcept;
 };
