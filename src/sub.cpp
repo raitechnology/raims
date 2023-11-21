@@ -49,6 +49,7 @@ SubDB::set_msg_loss_mode( bool want_msg_loss_errors ) noexcept
     this->ipc_sub_match.match_cnt = sizeof( match_extra_subj ) /
                                     sizeof( match_extra_subj[ 0 ] );
     this->ipc_sub_match.no_match_value = IPC_NO_MATCH;
+    this->ipc_sub_match.no_svc_value   = this->ipc_sub_match.match_cnt + 1;
   }
   else {
     this->ipc_sub_match.match_sub = match_inbox_subj;
@@ -56,6 +57,7 @@ SubDB::set_msg_loss_mode( bool want_msg_loss_errors ) noexcept
     this->ipc_sub_match.match_cnt = sizeof( match_inbox_subj ) /
                                     sizeof( match_inbox_subj[ 0 ] );
     this->ipc_sub_match.no_match_value = this->ipc_sub_match.match_cnt + 1;
+    this->ipc_sub_match.no_svc_value   = this->ipc_sub_match.match_cnt + 1;
   }
 }
 
@@ -1514,6 +1516,7 @@ int
 IpcSubjectMatch::match( const char *str,  size_t str_len ) noexcept
 {
   const char * e = &str[ str_len ];
+  bool  has_svc  = false;
 
   this->pre      = NULL;
   this->name     = str;
@@ -1523,8 +1526,19 @@ IpcSubjectMatch::match( const char *str,  size_t str_len ) noexcept
   this->subj_len = 0;
 
   if ( str[ 0 ] == '_' ) {
-    const char * p = (const char *) ::memchr( str, '.', str_len );
-    if ( p != NULL ) {
+    const char * p;
+    size_t       digit_count = 0, non_digit_count = 0;
+
+    for ( p = &str[ 1 ]; p < e; p++ ) {
+      if ( p[ 0 ] == '.' )
+        break;
+      if ( p[ 0 ] >= '0' && p[ 0 ] <= '9' )
+        digit_count++;
+      else
+        non_digit_count++;
+    }
+    if ( p < e ) {
+      has_svc = ( non_digit_count == 0 && digit_count > 0 && digit_count <= 5 );
       this->pre_len  = p - str;
       this->name     = p + 1;
       this->name_len = e - this->name;
@@ -1541,6 +1555,8 @@ IpcSubjectMatch::match( const char *str,  size_t str_len ) noexcept
       return k + 1;
     }
   }
+  if ( ! has_svc )
+    return this->no_svc_value;
   return this->no_match_value;
 }
 

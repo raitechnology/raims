@@ -242,7 +242,8 @@ struct AdjDistance : public md::MDMsgMem {
                  invalid_mono,  /* when cache was invalidated */
                  start_run_mono,
                  total_run_time;
-  uint32_t       invalid_src_uid;
+  uint32_t       invalid_src_uid,
+                 graph_csum;
   InvalidReason  invalid_reason;/* why cache was invalidated */
   bool           inc_running,   /* whether incomplete check is running */
                  found_inconsistency;  /* if current or last run inconsistent */
@@ -347,6 +348,9 @@ struct AdjDistance : public md::MDMsgMem {
                               size_t buflen ) noexcept;
   void message_graph_description( kv::ArrayOutput &out ) noexcept;
   void update_graph( bool all_paths ) noexcept;
+  bool compute_message_graph( const char *start,  const char *network,
+                              size_t network_len,
+                              kv::ArrayOutput &out ) noexcept;
 };
 }
 }

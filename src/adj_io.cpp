@@ -321,7 +321,7 @@ AdjGraphOut::print_cost( AdjLink &link ) noexcept
 }
 
 void
-AdjGraphOut::print_graph( void ) noexcept
+AdjGraphOut::print_graph( uint32_t start_idx ) noexcept
 {
   ArrayOutput & o = this->out;
   AdjUserTab & user_tab = this->graph.user_tab;
@@ -332,7 +332,7 @@ AdjGraphOut::print_graph( void ) noexcept
   if ( user_tab.count == 0 )
     return;
   if ( ! this->is_cfg ) {
-    o.printf( "start %s\n", user_tab.ptr[ 0 ]->user.val );
+    o.printf( "start %s\n", user_tab.ptr[ start_idx ]->user.val );
     o.puts( "node" );
     for ( uint32_t idx = 0; idx < user_tab.count; idx++ ) {
       AdjUser *u = user_tab.ptr[ idx ];
@@ -361,9 +361,16 @@ void
 AdjGraphOut::print_mesh( AdjLinkTab &mesh,  bool is_pgm ) noexcept
 {
   ArrayOutput & o = this->out;
-  while ( mesh.count > 0 ) {
-    AdjLink *link = mesh.first();
+  BitSpace unused;
+  uint32_t i, j, k;
+
+  for ( i = 0; i < mesh.count; i++ )
+    unused.add( i );
+
+  while ( unused.first( k ) ) {
+    AdjLink *link = mesh.ptr[ k ];
     BitSpace used;
+    unused.remove( k );
     if ( ! this->is_cfg )
       o.printf( "%s_%s", link->type.val, link->tport.val );
     else {
@@ -388,21 +395,17 @@ AdjGraphOut::print_mesh( AdjLinkTab &mesh,  bool is_pgm ) noexcept
                   this->tport_counter++ + 5000 );
       }
     }
-    for ( uint32_t j = 0; j < mesh.count; ) {
+    for ( bool b = unused.first( j ); b; b = unused.next( j ) ) {
       AdjLink *test = mesh.ptr[ j ];
       if ( test->tport.equals( link->tport ) ) {
         if ( ! used.test_set( test->a.idx ) ) {
           if ( ! this->is_cfg )
             o.printf( " %s", test->a.user.val );
         }
-        mesh.pop( j );
-      }
-      else {
-        j++;
+        unused.remove( j );
       }
     }
     if ( this->is_cfg ) {
-      uint32_t i;
       if ( ! this->use_loopback && ! is_pgm ) {
         o.puts( "      connect: " );
         if ( used.count() > 1 )
@@ -427,67 +430,76 @@ AdjGraphOut::print_mesh( AdjLinkTab &mesh,  bool is_pgm ) noexcept
 void
 AdjGraphOut::print_tcp( AdjLinkTab &tcp ) noexcept
 {
-  uint32_t i, j, k = 0;
-  bool eat_single_connections = false;
+  ArrayCount< BitSpace, 4 > queue;
+  BitSpace  unused,
+            used;
+  AdjLink * link,
+          * test;
+  uint32_t  i, j, k = 0;
 
-  while ( tcp.count > 0 ) {
-    if ( k >= tcp.count )
-      k = 0;
-    AdjLink *link = tcp.ptr[ k ],
-            *test;
-    BitSpace used;
+  for ( i = 0; i < tcp.count; i++ )
+    unused.add( i );
 
-    for ( j = 0; j < tcp.count; ) {
-      test = tcp.ptr[ j ];
-      if ( test != link && &link->a == &test->a &&
-           link->tport.equals( test->tport ) ) {
-        used.add( test->b.idx );
-        tcp.pop( j );
+  /* find star connections */
+  for ( bool b = unused.first( k ); b; b = unused.next( k ) ) {
+    link = tcp.ptr[ k ];
+    used.zero();
+    for ( bool b = unused.first( j ); b; b = unused.next( j ) ) {
+      if ( j != k ) {
+        test = tcp.ptr[ j ];
+        if ( &link->a == &test->a && link->tport.equals( test->tport ) ) {
+          used.add( j );
+          unused.remove( j );
+        }
+      }
+    }
+    if ( ! used.is_empty() ) {
+      unused.remove( k );
+      used.add( k );
+      BitSpace &n = queue.push( NULL );
+      n.add( used );
+    }
+  }
+  /* star with multiple connections */
+  for ( size_t x = 0; x < queue.count; x++ ) {
+    BitSpace &n = queue[ x ];
+    link = NULL;
+    for ( bool b = n.first( k ); b; b = n.next( k ) ) {
+      AdjLink * cur = tcp.ptr[ k ];
+      if ( link == NULL ) {
+        link = cur;
+        this->print_link( *link );
       }
       else {
-        j++;
-      }
-    }
-    if ( used.is_empty() ) {
-      if ( ! eat_single_connections ) {
-        if ( ++k == tcp.count )
-          eat_single_connections = true;
-        continue;
-      }
-      this->print_link( *link );
-      tcp.pop( 0 );
-      for ( j = 0; j < tcp.count; j++ ) {
-        test = tcp.ptr[ j ];
-        if ( &test->a == &link->b && &test->b == &link->a ) {
-          tcp.pop( j );
-          break;
-        }
-      }
-    }
-    else {
-      this->print_link( *link );
-      for ( bool b = used.first( i ); b; b = used.next( i ) ) {
-        AdjUser * u = this->graph.user_tab.ptr[ i ];
+        AdjUser * u = &cur->b;
         this->print_connect( *link, *u );
       }
-      for ( j = 0; j < tcp.count; j++ ) {
-        if ( tcp.ptr[ j ] == link ) {
-          tcp.pop( j );
+      for ( bool c = unused.first( j ); c; c = unused.next( j ) ) {
+        test = tcp.ptr[ j ];
+        if ( &test->a == &cur->b && &test->b == &cur->a ) {
+          unused.remove( j );
           break;
         }
       }
-      used.add( link->b.idx );
-      for ( bool b = used.first( i ); b; b = used.next( i ) ) {
-        for ( j = 0; j < tcp.count; j++ ) {
-          test = tcp.ptr[ j ];
-          if ( &link->a == &test->b && test->a.idx == i ) {
-            tcp.pop( j );
-            break;
-          }
-        }
+    }
+    n.reset();
+    this->print_cost( *link );
+  }
+  /* single connections */
+  for ( bool b = unused.first( k ); b; b = unused.next( k ) ) {
+    link = tcp.ptr[ k ];
+
+    this->print_link( *link );
+    this->print_cost( *link );
+
+    unused.remove( k );
+    for ( bool b = unused.first( j ); b; b = unused.next( j ) ) {
+      test = tcp.ptr[ j ];
+      if ( &test->a == &link->b && &test->b == &link->a ) {
+        unused.remove( j );
+        break;
       }
     }
-    this->print_cost( *link );
   }
 }
 
@@ -646,7 +658,6 @@ int
 AdjGraph::load_graph( StringTab &str_tab,  const char *p,
                       size_t size,  uint32_t &start_uid ) noexcept
 {
-  enum { NONE = 0, START, NODE, LINK, MESH, PGM };
   const char * args[ 500 ], **argv;
   int          argc, ln = 0, stmt;
   char         buf[ 8 * 1024 ],
@@ -662,7 +673,7 @@ AdjGraph::load_graph( StringTab &str_tab,  const char *p,
   start[ 0 ] = '\0';
   start_len  = 0;
   start_uid  = 0;
-  stmt       = NONE;
+  stmt       = G_NONE;
   cost       = default_cost;
   while ( p < end ) {
     size_t       linelen = end - p;
@@ -691,7 +702,7 @@ AdjGraph::load_graph( StringTab &str_tab,  const char *p,
     if ( args[ 0 ] == (const char *) buf ) {
 
       if ( ::strcmp( args[ 0 ], "start" ) == 0 ) {
-        stmt = START;
+        stmt = G_START;
         if ( argc > 1 ) {
           start_len = ::strlen( args[ 1 ] );
           if ( start_len > sizeof( start ) - 1 )
@@ -703,7 +714,7 @@ AdjGraph::load_graph( StringTab &str_tab,  const char *p,
       }
 
       if ( ::strcmp( args[ 0 ], "node" ) == 0 ) {
-        stmt = NODE;
+        stmt = G_NODE;
         this->add_users( str_tab, &args[ 1 ], argc - 1 );
         continue;
       }
@@ -712,10 +723,9 @@ AdjGraph::load_graph( StringTab &str_tab,  const char *p,
       bool   add_string = true;
       if ( ( len > 4 && ::strncmp( args[ 0 ], "tcp_", 4 ) == 0 ) ||
            ( len > 5 && ::strncmp( args[ 0 ], "link_", 5 ) == 0 ) ) {
-        if ( stmt >= LINK )
-          this->link_users( str_tab, users, tport, type, cost, cstatus,
-                            stmt == LINK );
-        stmt = LINK;
+        if ( stmt >= G_LINK )
+          this->link_users( str_tab, users, tport, type, cost, cstatus, stmt );
+        stmt = G_LINK;
         cost = default_cost;
         cstatus = AdjCost::COST_OK;
         if ( args[ 0 ][ 3 ] == '_' )
@@ -725,20 +735,27 @@ AdjGraph::load_graph( StringTab &str_tab,  const char *p,
         type = StringVal( "tcp", 3 );
       }
       else if ( len > 5 && ::strncmp( args[ 0 ], "mesh_", 5 ) == 0 ) {
-        if ( stmt >= LINK )
-          this->link_users( str_tab, users, tport, type, cost, cstatus,
-                            stmt == LINK );
-        stmt = MESH;
+        if ( stmt >= G_LINK )
+          this->link_users( str_tab, users, tport, type, cost, cstatus, stmt );
+        stmt = G_MESH;
         cost = default_cost;
         cstatus = AdjCost::COST_OK;
         type = StringVal( "mesh", 4 );
         tport = StringVal( &args[ 0 ][ 5 ], len - 5 );
       }
+      else if ( len > 5 && ::strncmp( args[ 0 ], "cube_", 5 ) == 0 ) {
+        if ( stmt >= G_CUBE )
+          this->link_users( str_tab, users, tport, type, cost, cstatus, stmt );
+        stmt = G_CUBE;
+        cost = default_cost;
+        cstatus = AdjCost::COST_OK;
+        type = StringVal( "tcp", 3 );
+        tport = StringVal( &args[ 0 ][ 5 ], len - 5 );
+      }
       else if ( len > 4 && ::strncmp( args[ 0 ], "pgm_", 4 ) == 0 ) {
-        if ( stmt >= LINK )
-          this->link_users( str_tab, users, tport, type, cost, cstatus,
-                            stmt == LINK );
-        stmt = PGM;
+        if ( stmt >= G_LINK )
+          this->link_users( str_tab, users, tport, type, cost, cstatus, stmt );
+        stmt = G_PGM;
         cost = default_cost;
         cstatus = AdjCost::COST_OK;
         type = StringVal( "pgm", 3 );
@@ -754,7 +771,7 @@ AdjGraph::load_graph( StringTab &str_tab,  const char *p,
         argc--;
       }
     }
-    else if ( stmt == NODE ) {
+    else if ( stmt == G_NODE ) {
       this->add_users( str_tab, args, argc );
       continue;
     }
@@ -769,9 +786,10 @@ AdjGraph::load_graph( StringTab &str_tab,  const char *p,
     }
 
     switch ( stmt ) {
-      case LINK:
-      case MESH:
-      case PGM:
+      case G_LINK:
+      case G_MESH:
+      case G_PGM:
+      case G_CUBE:
         for ( k = 0; k < argc; k++ ) {
           StringVal v( argv[ k ], ::strlen( argv[ k ] ) );
           str_tab.add_string( v );
@@ -783,9 +801,8 @@ AdjGraph::load_graph( StringTab &str_tab,  const char *p,
         break;
     }
   }
-  if ( stmt >= LINK )
-    this->link_users( str_tab, users, tport, type, cost, cstatus,
-                      stmt == LINK );
+  if ( stmt >= G_LINK )
+    this->link_users( str_tab, users, tport, type, cost, cstatus, stmt );
   if ( start_len > 0 ) {
     StringVal a( start, start_len );
     str_tab.add_string( a );
@@ -809,21 +826,21 @@ AdjGraph::add_users( StringTab &str_tab,  const char **args,
 void
 AdjGraph::link_users( StringTab &str_tab,  UserArray &users,  StringVal &tport,
                       StringVal &type,  AdjCost &cost,  int cstatus,
-                      bool is_tcp ) noexcept
+                      int stmt ) noexcept
 {
   StringVal * tport_ptr = &tport;
-  StringVal   tport_tmp;
+  StringVal   tport_tmp, tport_tmp2;
   if ( users.count > 1 ) {
     for (;;) {
       if ( cstatus == AdjCost::COST_X ) {
         char tmp[ 256 ];
-        int n = ::snprintf( tmp, sizeof( tmp ), "%s_%u",
-                            tport.val, cost.path.num + 1 );
+        CatPtr cat( tmp );
+        size_t n = cat.s( tport.val ).s( "_" ).i( cost.path.num + 1 ).end();
         tport_tmp = StringVal( tmp, n );
         str_tab.add_string( tport_tmp );
         tport_ptr = &tport_tmp;
       }
-      if ( is_tcp ) {
+      if ( stmt == G_LINK ) {
         StringVal a( users.ptr[ 0 ] ),
                   b( users.ptr[ 1 ] );
         this->add_conn( a, b, *tport_ptr, type, cost );
@@ -831,6 +848,24 @@ AdjGraph::link_users( StringTab &str_tab,  UserArray &users,  StringVal &tport,
         for ( size_t i = 2; i < users.count; i++ ) {
           StringVal c( users.ptr[ i ] );
           this->add_conn( a, c, *tport_ptr, type, cost );
+        }
+      }
+      else if ( stmt == G_CUBE ) {
+        StringVal tport_base = *tport_ptr;
+        for ( size_t i = 0; i < users.count; i++ ) {
+          StringVal a( users.ptr[ i ] );
+          char tmp[ 256 ];
+          CatPtr cat( tmp );
+          size_t n = cat.s( tport_base.val ).s( "_v" ).u( i + 1 ).end();
+          tport_tmp2 = StringVal( tmp, n );
+          str_tab.add_string( tport_tmp2 );
+          for ( size_t j = 1; j < users.count; j *= 2 ) {
+            size_t k =  i ^ j;
+            if ( k < users.count ) {
+              StringVal b( users.ptr[ k ] );
+              this->add_conn( a, b, tport_tmp2, type, cost );
+            }
+          }
         }
       }
       else {
@@ -1023,7 +1058,7 @@ AdjGraphOut::print_config( const char *fn ) noexcept
    .s( "  salt_data: " ).b( (char *) salt, salt_len ).s( "\n" )
    .s( "  pass_data: " ).b( (char *) pass.pass, pass.pass_len ).s( "\n" )
    .s( "transports:\n" );
-  this->print_graph();
+  this->print_graph( 0 );
 
   bool first_user = true;
   for ( uint32_t i = 0; i < user_tab.count; i++ ) {
@@ -1077,35 +1112,3 @@ AdjGraphOut::print_config( const char *fn ) noexcept
   }
 }
 
-bool
-rai::ms::compute_message_graph( const char *start,  const char *network,
-                                size_t network_len,
-                                kv::ArrayOutput &out ) noexcept
-{
-  MDMsgMem  tmp_mem;
-  AdjGraph  graph( tmp_mem );
-  StringTab str_tab( tmp_mem );
-  uint32_t  start_uid = 0;
-  bool      ok = false;
-
-  if ( graph.load_graph( str_tab, network, network_len, start_uid ) == 0 ) {
-    for ( uint16_t p = 0; p < graph.path_count; p++ )
-      graph.compute_forward_set( p );
-    AdjGraphOut put( graph, out );
-    if ( start != NULL ) {
-      AdjUserTab & user_tab = graph.user_tab;
-      size_t len = ::strlen( start );
-      for ( uint32_t i = 0; i < user_tab.count; i++ ) {
-        AdjUser * u = user_tab.ptr[ i ];
-        if ( u->user.equals( start, len ) ) {
-          start_uid = u->idx;
-          break;
-        }
-      }
-    }
-    put.print_web_paths( start_uid );
-    ok = true;
-  }
-  graph.reset();
-  return ok;
-}

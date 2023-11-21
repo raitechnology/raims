@@ -84,6 +84,7 @@ AdjDistance::update_graph( bool all_paths ) noexcept
   UserBridgeElem * el;
 
   this->graph = new ( this->make( sizeof( AdjGraph ) ) ) AdjGraph( *this );
+  this->graph_csum = 0;
 
   list.add_users( this->user_db, *this );
   list.sort<UserBridgeList::cmp_start>();
@@ -101,10 +102,10 @@ AdjDistance::update_graph( bool all_paths ) noexcept
 
   for ( uint32_t i = 0; i < g.user_tab.count; i++ ) {
     AdjUser * u1    = g.user_tab.ptr[ i ];
-    uint32_t  count = this->user_db.peer_dist.adjacency_count( u1->uid );
+    uint32_t  count = this->adjacency_count( u1->uid );
 
     for ( uint32_t t = 0; t < count; t++ ) {
-      AdjacencySpace *set = this->user_db.peer_dist.adjacency_set( u1->uid, t );
+      AdjacencySpace *set = this->adjacency_set( u1->uid, t );
       if ( set == NULL )
         continue;
 
@@ -546,6 +547,28 @@ AdjDistance::calc_source_path( ForwardCache &fc,  uint32_t src_uid,
   }
 }
 
+static uint32_t
+get_graph_csum( const char *str,  size_t len ) noexcept
+{
+  uint32_t sum = 0;
+  const char * s = str,
+             * e = &str[ len ];
+  for (;;) {
+    const char * p = (const char *) ::memchr( s, '\n', e - s );
+    if ( p == NULL ) {
+      if ( s < e )
+        sum = kv_crc_c( s, e - s, sum );
+      return sum;
+    }
+    size_t len = p - s;
+    if ( len > 0 && p[ -1 ] == '\r' )
+      len--;
+    if ( len > 0 )
+      sum = kv_crc_c( s, len, sum );
+    s = &p[ 1 ];
+  }
+}
+
 void
 AdjDistance::message_graph_description( kv::ArrayOutput &out ) noexcept
 {
@@ -553,7 +576,77 @@ AdjDistance::message_graph_description( kv::ArrayOutput &out ) noexcept
     this->update_graph( true );
 
   AdjGraphOut put( *this->graph, out );
-  put.print_graph();
+  put.print_graph( this->graph_idx_order[ 0 ] );
   out.s( "\n" );
+  const char * p = (const char *) ::memchr( out.ptr, '\n', out.count );
+  if ( p != NULL ) {
+    size_t len = &out.ptr[ out.count ] - &p[ 1 ];
+    /*uint32_t n = p - out.ptr;
+    if ( n > 0 && p[ -1 ] == '\r' )
+      n--;*/
+    this->graph_csum = get_graph_csum( &p[ 1 ], len );
+  }
 }
 
+bool
+AdjDistance::compute_message_graph( const char *start,  const char *network,
+                                    size_t network_len,
+                                    kv::ArrayOutput &out ) noexcept
+{
+  if ( this->graph == NULL )
+    this->update_graph( true );
+
+  AdjUser * u = NULL;
+  uint32_t  start_uid = 0;
+  bool      ok = false;
+
+  const char * p = (const char *) ::memchr( network, '\n', network_len );
+  if ( p != NULL ) {
+    size_t len = &network[ network_len ] - &p[ 1 ];
+    uint32_t n = p - network;
+    if ( n > 0 && p[ -1 ] == '\r' )
+      n--;
+    if ( ::memcmp( network, "start ", 6 ) == 0 ) {
+      n = n - 6;
+      if ( start == NULL ) {
+        StringVal s( &network[ 6 ], n );
+        u = this->graph->user_tab.find2( s );
+      }
+      network = &p[ 1 ];
+      network_len = len;
+    }
+  }
+  uint32_t csum = get_graph_csum( network, network_len );
+  if ( csum == this->graph_csum ) {
+    AdjGraphOut put( *this->graph, out );
+    if ( u == NULL && start != NULL ) {
+      StringVal s( start, ::strlen( start ) );
+      u = this->graph->user_tab.find2( s );
+    }
+    if ( u != NULL )
+      start_uid = u->idx;
+    put.print_web_paths( start_uid );
+    ok = true;
+  }
+  if ( ! ok ) {
+    MDMsgMem  tmp_mem;
+    AdjGraph  tmp_graph( tmp_mem );
+    StringTab str_tab( tmp_mem );
+    if ( tmp_graph.load_graph( str_tab, network, network_len,
+                               start_uid ) == 0 ) {
+      for ( uint16_t p = 0; p < tmp_graph.path_count; p++ )
+        tmp_graph.compute_forward_set( p );
+      AdjGraphOut put( tmp_graph, out );
+      if ( u == NULL && start != NULL ) {
+        StringVal s( start, ::strlen( start ) );
+        u = tmp_graph.user_tab.find2( s );
+      }
+      if ( u != NULL )
+        start_uid = u->idx;
+      put.print_web_paths( start_uid );
+      ok = true;
+      tmp_graph.reset();
+    }
+  }
+  return ok;
+}
