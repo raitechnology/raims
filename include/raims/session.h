@@ -327,6 +327,7 @@ struct SessionMgr : public kv::EvSocket, public kv::BPData {
   bool ld_secs( const char *name,  uint32_t &val ) noexcept;
   bool ld_bool( const char *name,  bool &val ) noexcept;
   bool load_parameters( void ) noexcept;
+  bool reload_parameters( void ) noexcept;
   bool add_transport( ConfigTree::Transport &t,  bool is_listener ) noexcept;
   bool add_transport2( ConfigTree::Transport &t,  bool is_listener,
                        TransportRoute *&rte ) noexcept;

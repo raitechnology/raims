@@ -83,7 +83,8 @@ AdjDistance::update_graph( bool all_paths ) noexcept
   UserBridgeList   list;
   UserBridgeElem * el;
 
-  this->graph = new ( this->make( sizeof( AdjGraph ) ) ) AdjGraph( *this );
+  this->graph = new ( this->make( sizeof( AdjGraph ) ) )
+                AdjGraph( *this, this->path_limit );
   this->graph_csum = 0;
 
   list.add_users( this->user_db, *this );
@@ -630,7 +631,7 @@ AdjDistance::compute_message_graph( const char *start,  const char *network,
   }
   if ( ! ok ) {
     MDMsgMem  tmp_mem;
-    AdjGraph  tmp_graph( tmp_mem );
+    AdjGraph  tmp_graph( tmp_mem, this->path_limit );
     StringTab str_tab( tmp_mem );
     if ( tmp_graph.load_graph( str_tab, network, network_len,
                                start_uid ) == 0 ) {

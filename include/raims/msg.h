@@ -299,7 +299,8 @@ enum MsgFid {
   FID_HDR_LEN        = 89 , /* len of message hdr */
   FID_SUF_LEN        = 90 , /* len of message suffix  */
   FID_BLOOM_UPD      = 91 , /* peer bloom updated  */
-  FID_IDL_RESTART    = 92   /* if is idl restart or loss */
+  FID_IDL_RESTART    = 92 , /* if is idl restart or loss */
+  FID_PATH_LIMIT     = 93   /* limit on path count */
 };
 static const int FID_TYPE_SHIFT = 8,
                  FID_MAX        = 1 << FID_TYPE_SHIFT; /* 256 */
@@ -853,7 +854,8 @@ static FidTypeName fid_type_name[] = {
 { FID_HDR_LEN     , U_SHORT | U_INT             , XCL , 0 ,"hdr_len"         },
 { FID_SUF_LEN     , U_SHORT | U_INT             , XCL , 0 ,"suf_len"         },
 { FID_BLOOM_UPD   , BOOL_1                      , XCL , 0 ,"bloom_upd"       },
-{ FID_IDL_RESTART , BOOL_1                      , XCL , 0 ,"idl_restart"     }
+{ FID_IDL_RESTART , BOOL_1                      , XCL , 0 ,"idl_restart"     },
+{ FID_PATH_LIMIT  , U_SHORT | U_INT             , XCL , 0 ,"path_limit"      }
 };
 
 #endif

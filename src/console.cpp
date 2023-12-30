@@ -3067,6 +3067,9 @@ Console::config_param( const char *param, size_t plen,
         this->next_rotate = 1;
     }
   }
+  else {
+    this->mgr.reload_parameters();
+  }
 }
 
 void

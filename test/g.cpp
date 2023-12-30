@@ -38,6 +38,7 @@ main( int argc, const char *argv[] ) noexcept
              * show_path = get_arg( x, argc, argv, 1, "-p", "-path", "0" ),
              * verify    = get_arg( x, argc, argv, 0, "-v", "-verify", NULL ),
              * no_cfg    = get_arg( x, argc, argv, 0, "-x", "-nocfg", NULL ),
+             * path_lim  = get_arg( x, argc, argv, 1, "-m", "-limit", "8" ),
              * help      = get_arg( x, argc, argv, 0, "-h", "-help", NULL );
   bool show_forward_path     = ( do_fwd != NULL || do_debug != NULL ),
        show_multicast_tree   = ( do_tree != NULL || do_debug != NULL ),
@@ -49,14 +50,15 @@ main( int argc, const char *argv[] ) noexcept
                                    show_multicast_tree || show_graph ||
                                    show_web_json || do_verify ) &&
                                    ( no_cfg == NULL );
-  uint32_t path = atoi( show_path );
+  uint32_t path = atoi( show_path ),
+           limit = atoi( path_lim );
 
   const char *fn = NULL;
   if ( x < argc )
     fn = argv[ x ];
   if ( help != NULL || fn == NULL ) {
     fprintf( stderr,
-             "%s [-g] [-f] [-t] [-g] [-w] [-l] file\n"
+             "%s [-g] [-f] [-t] [-g] [-w] [-l] [-p n] [-m n] file\n"
              "  -d   = same as -c,-f,-t,-g,-w\n"
              "  -f   = show forward cache\n"
              "  -t   = show multicast tree\n"
@@ -64,6 +66,7 @@ main( int argc, const char *argv[] ) noexcept
              "  -w   = show web json network\n"
              "  -l   = use device in config file\n"
              "  -p   = print path for fwd or graph\n"
+             "  -m   = max path limit\n"
              "  file = network text description\n"
              "if no option, then generate yaml config file\n"
              "if no input file, then use included test\n",
@@ -71,28 +74,47 @@ main( int argc, const char *argv[] ) noexcept
     return 1;
   }
 
+  char * input_buf = NULL;
+  size_t input_buf_size = 0, input_off = 0;
+  size_t len = ( fn != NULL ? ::strlen( fn ) : 0 );
   MapFile map( fn );
-  if ( ! map.open() ) {
-    perror( fn );
-    return 1;
+  if ( fn[ 0 ] == '-' && fn[ 1 ] == '\0' ) {
+    for (;;) {
+      if ( input_off == input_buf_size ) {
+        size_t sz = ( input_buf_size == 0 ? 4096 : input_buf_size * 2 );
+        input_buf = (char *) ::realloc( input_buf, sz );
+        input_buf_size = sz;
+      }
+      size_t n = fread( &input_buf[ input_off ], 1,
+                        input_buf_size - input_off, stdin );
+      if ( n == 0 )
+        break;
+      input_off += n;
+    }
+  }
+  else {
+    if ( ! map.open() ) {
+      perror( fn );
+      return 1;
+    }
+    input_buf = (char *) map.map;
+    input_off = map.map_size;
   }
   MDMsgMem   tmp_mem;
-  AdjGraph   graph( tmp_mem );
+  AdjGraph   graph( tmp_mem, limit );
   StringTab  str_tab( tmp_mem );
-  size_t     len = ( fn != NULL ? ::strlen( fn ) : 0 );
   uint32_t   start_uid;
   int        status = 1;
   bool       is_yaml = false;
   
-  if ( kv_strcasecmp( &fn[ len - 5 ], ".yaml" ) == 0 )
+  if ( len > 5 && kv_strcasecmp( &fn[ len - 5 ], ".yaml" ) == 0 )
     is_yaml = true;
   if ( is_yaml ||
-       kv_strcasecmp( &fn[ len - 5 ], ".json" ) == 0 ||
-       kv_strcasecmp( &fn[ len - 3 ], ".js" ) == 0 )
-    status = graph.load_json( str_tab, map.map, map.map_size, is_yaml );
+       ( len > 5 && kv_strcasecmp( &fn[ len - 5 ], ".json" ) == 0 ) ||
+       ( len > 3 && kv_strcasecmp( &fn[ len - 3 ], ".js" ) == 0 ) )
+    status = graph.load_json( str_tab, input_buf, input_off, is_yaml );
   else
-    status = graph.load_graph( str_tab, (const char *) map.map, map.map_size,
-                               start_uid );
+    status = graph.load_graph( str_tab, input_buf, input_off, start_uid );
   if ( status != 0 )
     return 1;
   /*graph.print();*/
