@@ -333,6 +333,7 @@ struct MsgBufDigestT : public BMsgBufT<T> {
   T  & queue_refs ( uint32_t n )  { return this->i( FID_QUEUE_REFS, n ); }
   T  & hdr_len    ( uint32_t n )  { return this->i( FID_HDR_LEN, n ); }
   T  & suf_len    ( uint32_t n )  { return this->i( FID_SUF_LEN, n ); }
+  T  & path_limit ( uint32_t n )  { return this->i( FID_PATH_LIMIT, n ); }
   T  & adj_cost   (  const char *in, size_t in_len ) {
     return this->b( FID_ADJ_COST, in, (uint16_t) in_len ); }
   T  & peer       ( const char *in, size_t in_len ) {
@@ -559,6 +560,7 @@ struct MsgEst {
   MsgEst & queue_refs ( void ) { sz += fid_est( FID_QUEUE_REFS ); return *this; }
   MsgEst & hdr_len    ( void ) { sz += fid_est( FID_HDR_LEN ); return *this; }
   MsgEst & suf_len    ( void ) { sz += fid_est( FID_SUF_LEN ); return *this; }
+  MsgEst & path_limit ( void ) { sz += fid_est( FID_PATH_LIMIT ); return *this; }
   MsgEst & adj_cost   ( size_t l ) { sz += fid_est( FID_ADJ_COST, l ); return *this; }
   MsgEst & peer       ( size_t l ) { sz += fid_est( FID_PEER, l ); return *this; }
   MsgEst & latency    ( size_t l ) { sz += fid_est( FID_LATENCY, l ); return *this; }

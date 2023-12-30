@@ -186,11 +186,13 @@ struct AdjGraph {
   uint32_t       link_count, /* total count of links */
                  path_count, /* number paths calculated and recommended */
                  max_links,  /* max number of links a single user has */
-                 max_alt;    /* max alt paths available from any one user */
+                 max_alt,    /* max alt paths available from any one user */
+                 path_limit; /* limit of how many paths are implicitly created */
 
   void * operator new( size_t, void *ptr ) { return ptr; }
-  AdjGraph( md::MDMsgMem &m ) : mem( m ), link_count( 0 ), path_count( 1 ),
-                                max_links( 0 ), max_alt( 0 ) {}
+  AdjGraph( md::MDMsgMem &m,  uint32_t pl )
+    : mem( m ), link_count( 0 ), path_count( 1 ), max_links( 0 ), max_alt( 0 ),
+      path_limit( pl ) {}
   void reset( void ) {
     this->link_count = 0;
     this->path_count = 1;

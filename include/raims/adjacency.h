@@ -54,7 +54,8 @@ enum InvalidReason {
   ADD_TRANSPORT_INV     = 6, /* added a new transport */
   ADVERTISED_COST_INV   = 7, /* transport advertised a different cost */
   ADD_USER_INV          = 8, /* added a new user */
-  MAX_INVALIDATE        = 9
+  PATH_LIMIT_INV        = 9, /* changed path limit */
+  MAX_INVALIDATE        = 10
 };
 
 #ifdef INCLUDE_PEER_CONST
@@ -97,7 +98,8 @@ static const char *invalid_reason_str[] = {
   "adj_update",
   "add_tport",
   "adv_cost",
-  "add_user"
+  "add_user",
+  "path_limit"
 };
 #if __cplusplus >= 201103L
 static_assert( MAX_REASON_SYNC == ( sizeof( peer_sync_reason_str ) / sizeof( peer_sync_reason_str[ 0 ] ) ), "peer_sync_reason" );
@@ -133,11 +135,12 @@ struct ForwardCache : public kv::UIntBitSet {
 };
 typedef kv::ArrayCount< ForwardCache, 4 > ForwardCacheArray;
 
-static const uint32_t COST_MAXIMUM  = 0xffffffffU,
-                      COST_DEFAULT  = 1000,
-                      COST_BAD      = 1000 * 1000 * 1000, /* label bad path */
-                      NO_PATH       = 0xffff,
-                      MAX_PATH_MASK = 0xff; /* 1 byte in protocol packet */
+static const uint32_t COST_MAXIMUM       = 0xffffffffU,
+                      COST_DEFAULT       = 1000,
+                      COST_BAD           = 1000 * 1000 * 1000, /* label bad path */
+                      NO_PATH            = 0xffff,
+                      DEFAULT_PATH_LIMIT = 8,
+                      MAX_PATH_MASK      = 0xff; /* 1 byte in protocol packet */
 
 struct AdjacencySpace : public kv::BitSpace {
   AdjacencySpace * next_link; /* tenp list for equal paths calc */
@@ -233,6 +236,7 @@ struct AdjDistance : public md::MDMsgMem {
   uint32_t       max_uid,       /* all uid < max_uid */
                  max_tport,     /* all tport < max_tport */
                  path_count,    /* count of paths found in graph */
+                 path_limit,    /* limit of number of paths */
                  miss_tos,      /* number of missing uids in missing[] */
                  inc_hd,        /* list hd of uids in inc_list[] */
                  inc_tl,        /* list to of uids in inc_list[] */
@@ -262,6 +266,7 @@ struct AdjDistance : public md::MDMsgMem {
     this->graph_seqno  = 0;
     this->update_seqno = 1;
     this->path_count   = 1;
+    this->path_limit   = DEFAULT_PATH_LIMIT; /* 8 */
   }
   template<class AR>
   AR *mkar( size_t elcnt ) {

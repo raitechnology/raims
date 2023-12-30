@@ -165,7 +165,8 @@ SessionMgr::load_parameters( void ) noexcept
   /*uint64_t hb_ival, rel_ival, time_val, bytes_val, host_id;*/
   uint64_t tcp_write_timeout   = this->poll.wr_timeout_ns,
            tcp_write_highwater = this->poll.send_highwater,
-           idle                = this->idle_busy;
+           idle                = this->idle_busy,
+           limit               = this->user_db.peer_dist.path_limit;
   uint32_t tcp_conn_timeout    = this->tcp_connect_timeout;
   bool ipv4_only     = false,
        ipv6_only     = false,
@@ -188,7 +189,8 @@ SessionMgr::load_parameters( void ) noexcept
        ! this->ld_bytes( P_TCP_WRITE_HIGHWATER, tcp_write_highwater ) ||
        ! this->ld_bool( P_TCP_IPV4ONLY, ipv4_only ) ||
        ! this->ld_bool( P_TCP_IPV6ONLY, ipv6_only ) ||
-       ! this->ld_bool( P_MSG_LOSS_ERRORS, want_msg_loss ) )
+       ! this->ld_bool( P_MSG_LOSS_ERRORS, want_msg_loss ) ||
+       ! this->ld_bytes( P_PATH_LIMIT, limit ) )
     return false;
 
   this->idle_busy            = (uint32_t) idle;
@@ -196,6 +198,10 @@ SessionMgr::load_parameters( void ) noexcept
   this->poll.so_keepalive_ns = tcp_write_timeout;
   this->tcp_connect_timeout  = tcp_conn_timeout;
   this->poll.send_highwater  = tcp_write_highwater;
+  if ( limit > MAX_PATH_MASK )
+    limit = MAX_PATH_MASK + 1;
+  if ( limit > 0 )
+    this->user_db.peer_dist.path_limit = (uint32_t) limit;
 
   ConfigTree::ParametersList &plist = this->tree.parameters;
   ConfigTree::ParametersList &ulist = this->user.parameters;
@@ -245,6 +251,120 @@ SessionMgr::load_parameters( void ) noexcept
   this->want_msg_loss_errors = want_msg_loss;
   this->sub_db.set_msg_loss_mode( want_msg_loss );
   update_tz_stamp();
+  return true;
+}
+
+bool
+SessionMgr::reload_parameters( void ) noexcept
+{
+  uint64_t tmp_pub_window_size      = this->pub_window_size,
+           tmp_sub_window_size      = this->sub_window_size,
+           tmp_pub_window_count     = this->pub_window_count,
+           tmp_pub_window_autoscale = this->pub_window_autoscale,
+           tmp_sub_window_count     = this->sub_window_count,
+           tmp_pub_window_ival      = this->pub_window_ival,
+           tmp_sub_window_ival      = this->sub_window_ival;
+  uint32_t tmp_hb_interval          = this->user_db.hb_interval,
+           tmp_reliability          = this->user_db.reliability;
+  bool     tmp_tcp_noencrypt        = this->tcp_noencrypt;
+  uint64_t tmp_tcp_write_timeout    = this->poll.wr_timeout_ns,
+           tmp_tcp_write_highwater  = this->poll.send_highwater,
+           tmp_idle                 = this->idle_busy,
+           tmp_limit                = this->user_db.peer_dist.path_limit;
+  uint32_t tmp_tcp_conn_timeout     = this->tcp_connect_timeout;
+  bool     tmp_want_msg_loss        = this->want_msg_loss_errors;
+
+  if ( ! this->ld_bytes( P_IDLE_BUSY, tmp_idle ) ||
+       ! this->ld_bytes( P_PUB_WINDOW_SIZE, tmp_pub_window_size ) ||
+       ! this->ld_bytes( P_SUB_WINDOW_SIZE, tmp_sub_window_size ) ||
+       ! this->ld_bytes( P_PUB_WINDOW_COUNT, tmp_pub_window_count ) ||
+       ! this->ld_bytes( P_PUB_WINDOW_AUTOSCALE, tmp_pub_window_autoscale ) ||
+       ! this->ld_bytes( P_SUB_WINDOW_COUNT, tmp_sub_window_count ) ||
+       ! this->ld_nanos( P_PUB_WINDOW_TIME, tmp_pub_window_ival ) ||
+       ! this->ld_nanos( P_SUB_WINDOW_TIME, tmp_sub_window_ival ) ||
+       ! this->ld_secs( P_HEARTBEAT, tmp_hb_interval ) ||
+       ! this->ld_secs( P_RELIABILITY, tmp_reliability ) ||
+       ! this->ld_bool( P_TCP_NOENCRYPT, tmp_tcp_noencrypt ) ||
+       ! this->ld_secs( P_TCP_CONNECT_TIMEOUT, tmp_tcp_conn_timeout ) ||
+       ! this->ld_nanos( P_TCP_WRITE_TIMEOUT, tmp_tcp_write_timeout ) ||
+       ! this->ld_bytes( P_TCP_WRITE_HIGHWATER, tmp_tcp_write_highwater ) ||
+       ! this->ld_bool( P_MSG_LOSS_ERRORS, tmp_want_msg_loss ) ||
+       ! this->ld_bytes( P_PATH_LIMIT, tmp_limit ) )
+    return false;
+
+  if ( tmp_pub_window_size      != this->pub_window_size ) {
+    this->pub_window_size = tmp_pub_window_size;
+    printf( "pub_window_size %lu\n", (long unsigned) tmp_pub_window_size );
+  }
+  if ( tmp_sub_window_size      != this->sub_window_size ) {
+    this->sub_window_size = tmp_sub_window_size;
+    printf( "sub_window_size %lu\n", (long unsigned) tmp_sub_window_size );
+  }
+  if ( tmp_pub_window_count     != this->pub_window_count ) {
+    this->pub_window_count = tmp_pub_window_count;
+    printf( "pub_window_count %lu\n", (long unsigned) tmp_pub_window_count );
+  }
+  if ( tmp_pub_window_autoscale != this->pub_window_autoscale ) {
+    this->pub_window_autoscale = tmp_pub_window_autoscale;
+    printf( "pub_window_autoscale %lu\n",
+            (long unsigned) tmp_pub_window_autoscale );
+  }
+  if ( tmp_sub_window_count     != this->sub_window_count ) {
+    this->sub_window_count = tmp_sub_window_count;
+    printf( "sub_window_count %lu\n", (long unsigned) tmp_sub_window_count );
+  }
+  if ( tmp_pub_window_ival      != this->pub_window_ival ) {
+    this->pub_window_ival = tmp_pub_window_ival;
+    printf( "pub_window_ival %lu\n", (long unsigned) tmp_pub_window_ival );
+  }
+  if ( tmp_sub_window_ival      != this->sub_window_ival ) {
+    this->sub_window_ival = tmp_sub_window_ival;
+    printf( "sub_window_ival %lu\n", (long unsigned) tmp_sub_window_ival );
+  }
+  if ( tmp_hb_interval          != this->user_db.hb_interval ) {
+    this->user_db.hb_interval = tmp_hb_interval;
+    printf( "hb_interval %u\n", tmp_hb_interval );
+  }
+  if ( tmp_reliability          != this->user_db.reliability ) {
+    this->user_db.reliability = tmp_reliability;
+    printf( "reliability %u\n", tmp_reliability );
+  }
+  if ( tmp_tcp_noencrypt        != this->tcp_noencrypt ) {
+    this->tcp_noencrypt = tmp_tcp_noencrypt;
+    printf( "tcp_noencrypt %s\n", tmp_tcp_noencrypt ? "true" : "false" );
+  }
+  if ( tmp_tcp_write_timeout    != this->poll.wr_timeout_ns ) {
+    this->poll.wr_timeout_ns = tmp_tcp_write_timeout;
+    this->poll.so_keepalive_ns = tmp_tcp_write_timeout;
+    printf( "tcp_write_timeout %lu\n", (long unsigned) tmp_tcp_write_timeout );
+  }
+  if ( tmp_tcp_write_highwater  != this->poll.send_highwater ) {
+    this->poll.send_highwater = tmp_tcp_write_highwater;
+    printf( "tcp_write_highwater %lu\n", (long unsigned) tmp_tcp_write_highwater );
+  }
+  if ( tmp_idle                 != this->idle_busy ) {
+    this->idle_busy = (uint32_t) tmp_idle;
+    printf( "idle_busy %lu\n", (long unsigned) tmp_idle );
+  }
+  if ( tmp_limit                != this->user_db.peer_dist.path_limit ) {
+    if ( tmp_limit > MAX_PATH_MASK )
+      tmp_limit = MAX_PATH_MASK + 1;
+    if ( tmp_limit > 0 ) {
+      this->user_db.peer_dist.path_limit = (uint32_t) tmp_limit;
+      printf( "path_limit %u\n", (uint32_t) tmp_limit );
+      this->user_db.peer_dist.invalidate( PATH_LIMIT_INV, 0 );
+    }
+  }
+  if ( tmp_tcp_conn_timeout     != (uint32_t) this->tcp_connect_timeout ) {
+    this->tcp_connect_timeout = tmp_tcp_conn_timeout;
+    printf( "tcp_connect_timeout %u\n", tmp_tcp_conn_timeout );
+  }
+  if ( tmp_want_msg_loss        != this->want_msg_loss_errors ) {
+    this->want_msg_loss_errors = tmp_want_msg_loss;
+    this->sub_db.set_msg_loss_mode( tmp_want_msg_loss );
+    printf( "msg_loss_errors %s\n", tmp_want_msg_loss ? "true" : "false" );
+  }
+
   return true;
 }
 
@@ -506,6 +626,7 @@ SessionMgr::start( void ) noexcept
                                       ! this->tcp_ipv6 ? "true" : "false" );
   printf( "%s: %s\n", P_TCP_NOENCRYPT, this->tcp_noencrypt ? "true" : "false" );
   printf( "%s: %s\n", P_MSG_LOSS_ERRORS, this->want_msg_loss_errors ? "true" : "false" );
+  printf( "%s: %u\n", P_PATH_LIMIT, this->user_db.peer_dist.path_limit );
 
   char hstr[ 32 ], ipstr[ 32 ];
   TransportRvHost::ip4_hex_string( this->user_db.host_id, hstr );

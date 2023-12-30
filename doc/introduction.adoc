@@ -4,26 +4,52 @@ Introduction
 Description
 ~~~~~~~~~~~
 
-Rai MS is a Link State based protocol for the construction of Pub/Sub messaging
-systems which allows for loops and redundancies in the network connections
-between peers.  It has 4 different types of network transports:
+Rai MS is a Link State based protocol for the construction of Publish/Subscribe
+messaging systems, which allows for loops and redundancies in network
+connections between peers and supports PGM (Pragmatic General Multicast) based
+multicast along with TCP point-to-point style internetworking.  Here are the
+main features:
 
-1. OpenPGM based multicast, with an unicast inbox protocol.
+1. **Link State Protocol**: This is a type of network protocol used to manage
+how nodes (or routers) share information. In a Link State protocol, each node
+has a map of the network and calculates the best path for data to travel. This
+method is beneficial for efficiently managing Pub/Sub systems, where messages
+need to be distributed effectively.  Among the advantages of Link State
+protocols over other routing methods are fast convergence, efficient routing,
+and load balancing.
 
-2. TCP point to point connections.
+2. **Pub/Sub Messaging**: In Pub/Sub systems, publishers send messages without
+specifying the receivers. Subscribers express interest in certain types of
+messages and receive only those. This model is widely used in real-time data
+distribution and event-driven architectures.
 
-3. Mesh TCP all to all connections.
+3. **Inbox Point to Point**: Each subscriber can have an Inbox subject
+associated with it to allow messaging between two endpoints and for optimizing
+the delivery path.
 
-4. Local bridging compatible with RV, NATS, Redis.
+4. **Loops and Redundancies**: The protocol's ability to handle loops and
+redundancies is crucial. In networking, loops can cause problems like repeated
+data transmission. However, in certain designs, controlled loops and
+redundancies can provide alternative paths for data, enhancing reliability and
+avoiding single points of failure.
 
-The first 3 transports may be interconnected with redundancies.  The local
-bridging transports strips or adds the meta-data of the message that allows for
-routing through the network, so it can't be looped.
+5. **PGM Based Multicast**: PGM is a reliable multicast transport protocol. In
+multicast, data is sent from one source to multiple destinations
+simultaneously. PGM ensures that all intended recipients in a multicast group
+receive the data, which is ideal for applications where data delivery is
+critical.
 
-It uses a best effort delivery system.  It serializes messages based on subject
-so that streams are delivered in order discarding duplicates, but messages
-which are lost in transit because of node or network failures, are not
-retransmitted.
+6. **TCP Point-to-Point Internetworking**: TCP can be used for setting up a
+direct and reliable link between two nodes in the network, providing a stable
+channel for data exchange.  AES encryption is employed by default on TCP links
+between peers.
+
+7. **RV, NATS, and Redis Clients**: The client protocol is compatible with RV,
+NATS Core, and Redis protocols.  These can interoperate, with transparent
+binary and JSON message conversion between endpoints.
+
+8. **Message Authentication**: All messages that flow between peers are
+authenticated and can't be forged, corrupted, or replayed.
 
 Architecture
 ~~~~~~~~~~~~
@@ -31,11 +57,14 @@ Architecture
 Authentication
 ^^^^^^^^^^^^^^
 
-A ECDSA key pair is generated for a service and for each user that is
-pre-configured.  A ECDH key is generated for by peer on startup for a key
-exchange that establishes a 32 byte session key.  This session key is used to
-authenticate messages sent and received.  Each peer in the system has a unique
-session key so that a message from any one of them can be authenticated.
+A ECDSA (Elliptic Curve Digital Signature Algorithm) key pair is generated for
+a service and for each user that is pre-configured.  A ECDH (Elliptic Curve
+Diffie-Hellman) key pair is generated for by peer on startup for a key exchange
+that establishes a 32 byte session key.  This session key is used to
+authenticate messages sent and received using a MAC (Message Authentication
+Code) to verify the source.  Each peer in the system has a unique session key
+so that a message sent from any one of them can be authenticated.
+
 This is described further in <<authentication>>.
 
 Console Interface
@@ -72,7 +101,7 @@ uses a btree of subjects:
 
 More about this in the <<network>> section.
 
-Link-State Database
+Link-State Protocol
 ^^^^^^^^^^^^^^^^^^^
 
 The first thing a node does after authentication, is download the peers LSDB
@@ -102,7 +131,7 @@ peer and a node may be reachable via multiple transports.  The unique
 feature identifying this link is the bridge id, tport id pair.
 
 ----
-  { bridge id, tport name, peer name, tport id, cost }
+  { bridge id, tport name, peer name, tport id, cost, remote tport name, remote tport id }
 ----
 
 A delta update of the LSDB, whether link change or subscription change is
@@ -287,7 +316,7 @@ networks can be defined and connected.  This following defines a mesh endpoint
 and saves it to the startup config.
 
 ----
-  $ ms_server -u B.test -c
+  $ ms_server -u A.test -c
   05:54:26.267  session A.test[RthXjJscfuvnG2+J1/PJ1w] started, start time 1644818066.265990830
   A.test[RthXjJscfuvnG2+J1/PJ1w]@tracy[249]> configure transport mytran
   A.test[RthXjJscfuvnG2+J1/PJ1w]@tracy[250](mytran)> type mesh
@@ -306,9 +335,8 @@ and saves it to the startup config.
   05:55:09.937  network converges 0.003 secs, 0 uids authenticated, add_tport
   A.test[RthXjJscfuvnG2+J1/PJ1w]@tracy[256]> save
   config saved
-  05:55:12.790  update file A/param.yaml            -- parameter config
-  05:55:12.790  create file A/startup.yaml          -- startup config
-  05:55:12.790  create file A/tport_mytran.yaml     -- transport
+  05:55:12.790  create file config/startup.yaml          -- startup config
+  05:55:12.790  create file config/tport_mytran.yaml     -- transport
 ----
 
 The files are described in the <<configuration>> section and the

@@ -65,6 +65,7 @@ UserDB::make_hb( TransportRoute &rte,  const char *sub,  size_t sublen,
    .tport         ( rte.transport.tport.len )
    .host_id       ()
    .ms            ()
+   .path_limit    ()
    .version       ( ver_len )
    .pk_digest     ();
 
@@ -120,6 +121,8 @@ UserDB::make_hb( TransportRoute &rte,  const char *sub,  size_t sublen,
         m.ms( sock->msgs_sent );
       }
     }
+    if ( this->peer_dist.path_limit != DEFAULT_PATH_LIMIT )
+      m.path_limit( this->peer_dist.path_limit );
     m.version( ver_str, ver_len );
   }
   m.pk_digest();
@@ -501,6 +504,17 @@ UserDB::on_heartbeat( const MsgFramePublish &pub,  UserBridge &n,
     cvt_number<uint64_t>( dec.mref[ FID_CONVERGE ], converge );
     if ( converge > this->net_converge_time )
       this->net_converge_time = converge;
+  }
+  if ( dec.test( FID_PATH_LIMIT ) ||
+       this->peer_dist.path_limit != DEFAULT_PATH_LIMIT ) {
+    uint32_t path_limit = DEFAULT_PATH_LIMIT;
+    if ( dec.test( FID_PATH_LIMIT ) )
+      cvt_number<uint32_t>( dec.mref[ FID_PATH_LIMIT ], path_limit );
+    if ( path_limit > 0 && path_limit != this->peer_dist.path_limit &&
+         n.start_time < this->start_time ) {
+      this->peer_dist.path_limit = path_limit;
+      this->peer_dist.invalidate( PATH_LIMIT_INV, n.uid );
+    }
   }
   if ( dec.test_2( FID_LINK_STATE, FID_SUB_SEQNO ) ) {
     uint64_t link_seqno     = 0,

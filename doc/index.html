@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta http-equiv="X-UA-Compatible" content="IE=edge">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="generator" content="Asciidoctor 2.0.17">
+<meta name="generator" content="Asciidoctor 2.0.20">
 <meta name="author" content="v1.0, 2022">
 <title>Rai Multicast Services Guide</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Open+Sans:300,300italic,400,400italic,600,600italic%7CNoto+Serif:400,400italic,700,700italic%7CDroid+Sans+Mono:400,700">
@@ -85,10 +85,10 @@ code{font-family:"Droid Sans Mono","DejaVu Sans Mono",monospace;font-weight:400;
 ul,ol,dl{line-height:1.6;margin-bottom:1.25em;list-style-position:outside;font-family:inherit}
 ul,ol{margin-left:1.5em}
 ul li ul,ul li ol{margin-left:1.25em;margin-bottom:0}
-ul.square li ul,ul.circle li ul,ul.disc li ul{list-style:inherit}
-ul.square{list-style-type:square}
 ul.circle{list-style-type:circle}
 ul.disc{list-style-type:disc}
+ul.square{list-style-type:square}
+ul.circle ul:not([class]),ul.disc ul:not([class]),ul.square ul:not([class]){list-style:inherit}
 ol li ul,ol li ol{margin-left:1.25em;margin-bottom:0}
 dl dt{margin-bottom:.3125em;font-weight:bold}
 dl dd{margin-bottom:1.25em}
@@ -209,13 +209,10 @@ table.tableblock.fit-content>caption.title{white-space:nowrap;width:0}
 .admonitionblock>table td.content{padding-left:1.125em;padding-right:1.25em;border-left:1px solid #dddddf;color:rgba(0,0,0,.6);word-wrap:anywhere}
 .admonitionblock>table td.content>:last-child>:last-child{margin-bottom:0}
 .exampleblock>.content{border:1px solid #e6e6e6;margin-bottom:1.25em;padding:1.25em;background:#fff;border-radius:4px}
-.exampleblock>.content>:first-child{margin-top:0}
-.exampleblock>.content>:last-child{margin-bottom:0}
 .sidebarblock{border:1px solid #dbdbd6;margin-bottom:1.25em;padding:1.25em;background:#f3f3f2;border-radius:4px}
-.sidebarblock>:first-child{margin-top:0}
-.sidebarblock>:last-child{margin-bottom:0}
 .sidebarblock>.content>.title{color:#7a2518;margin-top:0;text-align:center}
-.exampleblock>.content>:last-child>:last-child,.exampleblock>.content .olist>ol>li:last-child>:last-child,.exampleblock>.content .ulist>ul>li:last-child>:last-child,.exampleblock>.content .qlist>ol>li:last-child>:last-child,.sidebarblock>.content>:last-child>:last-child,.sidebarblock>.content .olist>ol>li:last-child>:last-child,.sidebarblock>.content .ulist>ul>li:last-child>:last-child,.sidebarblock>.content .qlist>ol>li:last-child>:last-child{margin-bottom:0}
+.exampleblock>.content>:first-child,.sidebarblock>.content>:first-child{margin-top:0}
+.exampleblock>.content>:last-child,.exampleblock>.content>:last-child>:last-child,.exampleblock>.content .olist>ol>li:last-child>:last-child,.exampleblock>.content .ulist>ul>li:last-child>:last-child,.exampleblock>.content .qlist>ol>li:last-child>:last-child,.sidebarblock>.content>:last-child,.sidebarblock>.content>:last-child>:last-child,.sidebarblock>.content .olist>ol>li:last-child>:last-child,.sidebarblock>.content .ulist>ul>li:last-child>:last-child,.sidebarblock>.content .qlist>ol>li:last-child>:last-child{margin-bottom:0}
 .literalblock pre,.listingblock>.content>pre{border-radius:4px;overflow-x:auto;padding:1em;font-size:.8125em}
 @media screen and (min-width:768px){.literalblock pre,.listingblock>.content>pre{font-size:.90625em}}
 @media screen and (min-width:1280px){.literalblock pre,.listingblock>.content>pre{font-size:1em}}
@@ -394,7 +391,7 @@ b.conum *{color:inherit!important}
 dt,th.tableblock,td.content,div.footnote{text-rendering:optimizeLegibility}
 h1,h2,p,td.content,span.alt,summary{letter-spacing:-.01em}
 p strong,td.content strong,div.footnote strong{letter-spacing:-.005em}
-p,blockquote,dt,td.content,span.alt,summary{font-size:1.0625rem}
+p,blockquote,dt,td.content,td.hdlist1,span.alt,summary{font-size:1.0625rem}
 p{margin-bottom:1.25rem}
 .sidebarblock p,.sidebarblock dt,.sidebarblock td.content,p.tableblock{font-size:1em}
 .exampleblock>.content{background:#fffef7;border-color:#e0e0dc;box-shadow:0 1px 4px #e0e0dc}
@@ -559,36 +556,64 @@ body.book #toc,body.book #preamble,body.book h1.sect0,body.book .sect1>h2{page-b
 <div class="sect2">
 <h3 id="_description">Description</h3>
 <div class="paragraph">
-<p>Rai MS is a Link State based protocol for the construction of Pub/Sub messaging
-systems which allows for loops and redundancies in the network connections
-between peers.  It has 4 different types of network transports:</p>
+<p>Rai MS is a Link State based protocol for the construction of Publish/Subscribe
+messaging systems, which allows for loops and redundancies in network
+connections between peers and supports PGM (Pragmatic General Multicast) based
+multicast along with TCP point-to-point style internetworking.  Here are the
+main features:</p>
 </div>
 <div class="olist arabic">
 <ol class="arabic">
 <li>
-<p>OpenPGM based multicast, with an unicast inbox protocol.</p>
+<p><strong>Link State Protocol</strong>: This is a type of network protocol used to manage
+how nodes (or routers) share information. In a Link State protocol, each node
+has a map of the network and calculates the best path for data to travel. This
+method is beneficial for efficiently managing Pub/Sub systems, where messages
+need to be distributed effectively.  Among the advantages of Link State
+protocols over other routing methods are fast convergence, efficient routing,
+and load balancing.</p>
 </li>
 <li>
-<p>TCP point to point connections.</p>
+<p><strong>Pub/Sub Messaging</strong>: In Pub/Sub systems, publishers send messages without
+specifying the receivers. Subscribers express interest in certain types of
+messages and receive only those. This model is widely used in real-time data
+distribution and event-driven architectures.</p>
 </li>
 <li>
-<p>Mesh TCP all to all connections.</p>
+<p><strong>Inbox Point to Point</strong>: Each subscriber can have an Inbox subject
+associated with it to allow messaging between two endpoints and for optimizing
+the delivery path.</p>
 </li>
 <li>
-<p>Local bridging compatible with RV, NATS, Redis.</p>
+<p><strong>Loops and Redundancies</strong>: The protocol&#8217;s ability to handle loops and
+redundancies is crucial. In networking, loops can cause problems like repeated
+data transmission. However, in certain designs, controlled loops and
+redundancies can provide alternative paths for data, enhancing reliability and
+avoiding single points of failure.</p>
+</li>
+<li>
+<p><strong>PGM Based Multicast</strong>: PGM is a reliable multicast transport protocol. In
+multicast, data is sent from one source to multiple destinations
+simultaneously. PGM ensures that all intended recipients in a multicast group
+receive the data, which is ideal for applications where data delivery is
+critical.</p>
+</li>
+<li>
+<p><strong>TCP Point-to-Point Internetworking</strong>: TCP can be used for setting up a
+direct and reliable link between two nodes in the network, providing a stable
+channel for data exchange.  AES encryption is employed by default on TCP links
+between peers.</p>
+</li>
+<li>
+<p><strong>RV, NATS, and Redis Clients</strong>: The client protocol is compatible with RV,
+NATS Core, and Redis protocols.  These can interoperate, with transparent
+binary and JSON message conversion between endpoints.</p>
+</li>
+<li>
+<p><strong>Message Authentication</strong>: All messages that flow between peers are
+authenticated and can&#8217;t be forged, corrupted, or replayed.</p>
 </li>
 </ol>
-</div>
-<div class="paragraph">
-<p>The first 3 transports may be interconnected with redundancies.  The local
-bridging transports strips or adds the meta-data of the message that allows for
-routing through the network, so it can&#8217;t be looped.</p>
-</div>
-<div class="paragraph">
-<p>It uses a best effort delivery system.  It serializes messages based on subject
-so that streams are delivered in order discarding duplicates, but messages
-which are lost in transit because of node or network failures, are not
-retransmitted.</p>
 </div>
 </div>
 <div class="sect2">
@@ -596,12 +621,16 @@ retransmitted.</p>
 <div class="sect3">
 <h4 id="_authentication">Authentication</h4>
 <div class="paragraph">
-<p>A ECDSA key pair is generated for a service and for each user that is
-pre-configured.  A ECDH key is generated for by peer on startup for a key
-exchange that establishes a 32 byte session key.  This session key is used to
-authenticate messages sent and received.  Each peer in the system has a unique
-session key so that a message from any one of them can be authenticated.
-This is described further in <a href="#authentication">Authentication</a>.</p>
+<p>A ECDSA (Elliptic Curve Digital Signature Algorithm) key pair is generated for
+a service and for each user that is pre-configured.  A ECDH (Elliptic Curve
+Diffie-Hellman) key pair is generated for by peer on startup for a key exchange
+that establishes a 32 byte session key.  This session key is used to
+authenticate messages sent and received using a MAC (Message Authentication
+Code) to verify the source.  Each peer in the system has a unique session key
+so that a message sent from any one of them can be authenticated.</p>
+</div>
+<div class="paragraph">
+<p>This is described further in <a href="#authentication">Authentication</a>.</p>
 </div>
 </div>
 <div class="sect3">
@@ -644,7 +673,7 @@ uses a btree of subjects:</p>
 </div>
 </div>
 <div class="sect3">
-<h4 id="_link_state_database">Link-State Database</h4>
+<h4 id="_link_state_protocol">Link-State Protocol</h4>
 <div class="paragraph">
 <p>The first thing a node does after authentication, is download the peers LSDB
 (Link-State DB), which first consists of records for every other peer:</p>
@@ -678,7 +707,7 @@ feature identifying this link is the bridge id, tport id pair.</p>
 </div>
 <div class="listingblock">
 <div class="content">
-<pre>  { bridge id, tport name, peer name, tport id, cost }</pre>
+<pre>  { bridge id, tport name, peer name, tport id, cost, remote tport name, remote tport id }</pre>
 </div>
 </div>
 <div class="paragraph">
@@ -907,7 +936,7 @@ and saves it to the startup config.</p>
 </div>
 <div class="listingblock">
 <div class="content">
-<pre>  $ ms_server -u B.test -c
+<pre>  $ ms_server -u A.test -c
   05:54:26.267  session A.test[RthXjJscfuvnG2+J1/PJ1w] started, start time 1644818066.265990830
   A.test[RthXjJscfuvnG2+J1/PJ1w]@tracy[249]&gt; configure transport mytran
   A.test[RthXjJscfuvnG2+J1/PJ1w]@tracy[250](mytran)&gt; type mesh
@@ -926,9 +955,8 @@ and saves it to the startup config.</p>
   05:55:09.937  network converges 0.003 secs, 0 uids authenticated, add_tport
   A.test[RthXjJscfuvnG2+J1/PJ1w]@tracy[256]&gt; save
   config saved
-  05:55:12.790  update file A/param.yaml            -- parameter config
-  05:55:12.790  create file A/startup.yaml          -- startup config
-  05:55:12.790  create file A/tport_mytran.yaml     -- transport</pre>
+  05:55:12.790  create file config/startup.yaml          -- startup config
+  05:55:12.790  create file config/tport_mytran.yaml     -- transport</pre>
 </div>
 </div>
 <div class="paragraph">
