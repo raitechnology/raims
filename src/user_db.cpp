@@ -741,6 +741,8 @@ UserDB::finish_converge_network( uint64_t current_mono_time,
   const char * src_user = this->user.user.val;
   if ( src_uid != 0 )
     src_user = this->bridge_tab.ptr[ src_uid ]->peer.user.val;
+  if ( t == x )
+    t = 0;
   printf(
     "network converges %.3f secs, %u path%s, %u uids authenticated, "
     "%s from %s.%u\n",

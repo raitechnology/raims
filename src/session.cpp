@@ -166,7 +166,8 @@ SessionMgr::load_parameters( void ) noexcept
   uint64_t tcp_write_timeout   = this->poll.wr_timeout_ns,
            tcp_write_highwater = this->poll.send_highwater,
            idle                = this->idle_busy,
-           limit               = this->user_db.peer_dist.path_limit;
+           limit               = this->user_db.peer_dist.path_limit,
+           rate                = this->poll.blocked_read_rate;
   uint32_t tcp_conn_timeout    = this->tcp_connect_timeout;
   bool ipv4_only     = false,
        ipv6_only     = false,
@@ -190,7 +191,8 @@ SessionMgr::load_parameters( void ) noexcept
        ! this->ld_bool( P_TCP_IPV4ONLY, ipv4_only ) ||
        ! this->ld_bool( P_TCP_IPV6ONLY, ipv6_only ) ||
        ! this->ld_bool( P_MSG_LOSS_ERRORS, want_msg_loss ) ||
-       ! this->ld_bytes( P_PATH_LIMIT, limit ) )
+       ! this->ld_bytes( P_PATH_LIMIT, limit ) ||
+       ! this->ld_bytes( P_BLOCKED_READ_RATE, rate ) )
     return false;
 
   this->idle_busy            = (uint32_t) idle;
@@ -202,6 +204,7 @@ SessionMgr::load_parameters( void ) noexcept
     limit = MAX_PATH_MASK + 1;
   if ( limit > 0 )
     this->user_db.peer_dist.path_limit = (uint32_t) limit;
+  this->poll.blocked_read_rate = rate;
 
   ConfigTree::ParametersList &plist = this->tree.parameters;
   ConfigTree::ParametersList &ulist = this->user.parameters;
@@ -270,7 +273,8 @@ SessionMgr::reload_parameters( void ) noexcept
   uint64_t tmp_tcp_write_timeout    = this->poll.wr_timeout_ns,
            tmp_tcp_write_highwater  = this->poll.send_highwater,
            tmp_idle                 = this->idle_busy,
-           tmp_limit                = this->user_db.peer_dist.path_limit;
+           tmp_limit                = this->user_db.peer_dist.path_limit,
+           tmp_blocked_read_rate    = this->poll.blocked_read_rate;
   uint32_t tmp_tcp_conn_timeout     = this->tcp_connect_timeout;
   bool     tmp_want_msg_loss        = this->want_msg_loss_errors;
 
@@ -289,7 +293,8 @@ SessionMgr::reload_parameters( void ) noexcept
        ! this->ld_nanos( P_TCP_WRITE_TIMEOUT, tmp_tcp_write_timeout ) ||
        ! this->ld_bytes( P_TCP_WRITE_HIGHWATER, tmp_tcp_write_highwater ) ||
        ! this->ld_bool( P_MSG_LOSS_ERRORS, tmp_want_msg_loss ) ||
-       ! this->ld_bytes( P_PATH_LIMIT, tmp_limit ) )
+       ! this->ld_bytes( P_PATH_LIMIT, tmp_limit ) ||
+       ! this->ld_bytes( P_BLOCKED_READ_RATE, tmp_blocked_read_rate ) )
     return false;
 
   if ( tmp_pub_window_size      != this->pub_window_size ) {
@@ -363,6 +368,10 @@ SessionMgr::reload_parameters( void ) noexcept
     this->want_msg_loss_errors = tmp_want_msg_loss;
     this->sub_db.set_msg_loss_mode( tmp_want_msg_loss );
     printf( "msg_loss_errors %s\n", tmp_want_msg_loss ? "true" : "false" );
+  }
+  if ( tmp_blocked_read_rate != this->poll.blocked_read_rate ) {
+    this->poll.blocked_read_rate = tmp_blocked_read_rate;
+    printf( "blocked_read_rate %lu bytes\n", (long unsigned) tmp_blocked_read_rate );
   }
 
   return true;
@@ -627,6 +636,7 @@ SessionMgr::start( void ) noexcept
   printf( "%s: %s\n", P_TCP_NOENCRYPT, this->tcp_noencrypt ? "true" : "false" );
   printf( "%s: %s\n", P_MSG_LOSS_ERRORS, this->want_msg_loss_errors ? "true" : "false" );
   printf( "%s: %u\n", P_PATH_LIMIT, this->user_db.peer_dist.path_limit );
+  printf( "%s: %" PRIu64 " bytes\n", P_BLOCKED_READ_RATE, this->poll.blocked_read_rate );
 
   char hstr[ 32 ], ipstr[ 32 ];
   TransportRvHost::ip4_hex_string( this->user_db.host_id, hstr );
