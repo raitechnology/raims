@@ -1,8 +1,7 @@
 #ifndef __rai__raims__adjacency_h__
 #define __rai__raims__adjacency_h__
 
-#include <raims/string_tab.h>
-#include <raikv/bit_set.h>
+#include <raims/adj_graph.h>
 
 namespace rai {
 namespace ms {
@@ -33,16 +32,17 @@ enum AdjacencyRequest {
   PING_SYNC_REQ     = 1, /* ping message with link state */
   HB_SYNC_REQ       = 2, /* hb message with link state */
   DIJKSTRA_SYNC_REQ = 3, /* missing link found using dijkstra */
-  AUTH_SYNC_REQ     = 4, /* auth message with link state */
-  PEER_SYNC_REQ     = 5, /* sync message containing adjacency */
-  PEERDB_SYNC_REQ   = 6, /* peer db with link state */
-  ADJ_CHG_SYNC_REQ  = 7, /* adjacency change message with link state */
-  MISSING_SYNC_REQ  = 8, /* missing sub seqno */
-  REQUEST_SYNC_REQ  = 9, /* adjacency request bounce */
-  UID_CSUM_SYNC_REQ = 10, /* uid csum not correct */
-  MCAST_SYNC_REQ    = 11, /* mcast link_state_sum and sub_seqno_sum */
-  MCAST_SYNC_RES    = 12, /* mcast link_state_sum and sub_seqno_sum */
-  MAX_ADJ_REQ       = 13
+  DIJKSTRA_NULL_REQ = 4, /* missing link null result */
+  AUTH_SYNC_REQ     = 5, /* auth message with link state */
+  PEER_SYNC_REQ     = 6, /* sync message containing adjacency */
+  PEERDB_SYNC_REQ   = 7, /* peer db with link state */
+  ADJ_CHG_SYNC_REQ  = 8, /* adjacency change message with link state */
+  MISSING_SYNC_REQ  = 9, /* missing sub seqno */
+  REQUEST_SYNC_REQ  = 10, /* adjacency request bounce */
+  UID_CSUM_SYNC_REQ = 11, /* uid csum not correct */
+  MCAST_SYNC_REQ    = 12, /* mcast link_state_sum and sub_seqno_sum */
+  MCAST_SYNC_RES    = 13, /* mcast link_state_sum and sub_seqno_sum */
+  MAX_ADJ_REQ       = 14
 };
 enum InvalidReason {
   INVALID_NONE          = 0,
@@ -53,7 +53,9 @@ enum InvalidReason {
   ADJACENCY_UPDATE_INV  = 5, /* recvd an adjacency sync from peer */
   ADD_TRANSPORT_INV     = 6, /* added a new transport */
   ADVERTISED_COST_INV   = 7, /* transport advertised a different cost */
-  MAX_INVALIDATE        = 8
+  ADD_USER_INV          = 8, /* added a new user */
+  PATH_LIMIT_INV        = 9, /* changed path limit */
+  MAX_INVALIDATE        = 10
 };
 
 #ifdef INCLUDE_PEER_CONST
@@ -76,6 +78,7 @@ static const char *adjacency_request_str[] = {
   "ping_sync",
   "hb_sync",
   "dijk_sync",
+  "dijk_null",
   "auth_sync",
   "peer_sync",
   "pdb_sync",
@@ -94,7 +97,9 @@ static const char *invalid_reason_str[] = {
   "adj_change",
   "adj_update",
   "add_tport",
-  "adv_cost"
+  "adv_cost",
+  "add_user",
+  "path_limit"
 };
 #if __cplusplus >= 201103L
 static_assert( MAX_REASON_SYNC == ( sizeof( peer_sync_reason_str ) / sizeof( peer_sync_reason_str[ 0 ] ) ), "peer_sync_reason" );
@@ -104,35 +109,22 @@ static_assert( MAX_INVALIDATE == ( sizeof( invalid_reason_str ) / sizeof( invali
 #endif
 #endif
 
+struct UidSrcPath {
+  uint32_t tport,   /* tport index by uid */
+           src_uid, /* which uid tport routes to */
+           cost;    /* tport cost index by uid */
+};
+
 struct ForwardCache : public kv::UIntBitSet {
-  uint32_t tport_count, fwd_count;
-  uint64_t adjacency_cache_seqno;
-  uint64_t bits;
-  ForwardCache() : tport_count( 0 ), fwd_count( 0 ), adjacency_cache_seqno( 0 ),
-                   bits( 0 ) {
-    this->ptr = &this->bits;
-  }
-  ~ForwardCache() {
-    this->reset();
-  }
-  void init( uint32_t count,  uint64_t seqno ) {
-    uint32_t sz = this->size( count );
-    if ( sz > 1 ) {
-      if ( this->ptr == &this->bits )
-        this->ptr = NULL;
-      this->ptr = (uint64_t *) ::realloc( this->ptr, sz * sizeof( uint64_t ) );
-    }
+  uint32_t     tport_count;
+  uint64_t     adjacency_cache_seqno;
+  UidSrcPath * path; /* one for each uid */
+
+  ForwardCache() : tport_count( 0 ), adjacency_cache_seqno( 0 ), path( 0 ) {}
+  void init( uint32_t count,  uint64_t seqno,  uint64_t *p ) {
+    this->ptr = p;
     this->tport_count = count;
-    this->fwd_count = 0;
     this->adjacency_cache_seqno = seqno;
-    this->zero( count );
-  }
-  void reset( void ) {
-    if ( this->ptr != &this->bits )
-      ::free( this->ptr );
-    this->ptr = &this->bits;
-    this->tport_count = this->fwd_count = 0;
-    this->adjacency_cache_seqno = this->bits = 0;
   }
   bool first( uint32_t &tport_id ) const {
     return this->kv::UIntBitSet::first( tport_id, this->tport_count );
@@ -141,11 +133,14 @@ struct ForwardCache : public kv::UIntBitSet {
     return this->kv::UIntBitSet::next( tport_id, this->tport_count );
   }
 };
+typedef kv::ArrayCount< ForwardCache, 4 > ForwardCacheArray;
 
-static const uint32_t COST_MAXIMUM    = 0xffffffffU,
-                      COST_DEFAULT    = 1000,
-                      COST_BAD        = 1000 * 1000 * 1000; /* label bad path */
-static const uint8_t  COST_PATH_COUNT = 4;
+static const uint32_t COST_MAXIMUM       = 0xffffffffU,
+                      COST_DEFAULT       = 1000,
+                      COST_BAD           = 1000 * 1000 * 1000, /* label bad path */
+                      NO_PATH            = 0xffff,
+                      DEFAULT_PATH_LIMIT = 8,
+                      MAX_PATH_MASK      = 0xff; /* 1 byte in protocol packet */
 
 struct AdjacencySpace : public kv::BitSpace {
   AdjacencySpace * next_link; /* tenp list for equal paths calc */
@@ -153,26 +148,22 @@ struct AdjacencySpace : public kv::BitSpace {
                    tport_type;/* type of link (mesh, tcp, pgm, ipc) */
   uint32_t         uid,       /* uid owner of link */
                    tport_id,  /* tport owner of link */
-                   cost[ COST_PATH_COUNT ], /* cost of each path shard */
                    rem_uid,      /* uid rem_tport blongs to */
                    rem_tport_id; /* remote tport_id */
-  uint8_t          prune_path;
+  AdjCost          cost;
   bool             is_advertised; /* whether to publish cost in hb */
 
   void * operator new( size_t, void *ptr ) { return ptr; }
   void operator delete( void *ptr ) { ::free( ptr ); }
 
   AdjacencySpace() : next_link( 0 ), uid( 0 ), tport_id( 0 ),
-        rem_uid( 0 ), rem_tport_id( 0 ),
-        prune_path( 0 ), is_advertised( false ) {
-    for ( uint8_t i = 0; i < COST_PATH_COUNT; i++ )
-      this->cost[ i ] = COST_DEFAULT;
+        rem_uid( 0 ), rem_tport_id( 0 ), cost( COST_DEFAULT ),
+        is_advertised( false ) {
   }
 };
 
 struct AdjacencyTab : public kv::ArrayCount< AdjacencySpace *, 4 > {
-  AdjacencySpace *get( size_t n,  uint32_t uid,
-                       uint32_t cost[ COST_PATH_COUNT ] ) {
+  AdjacencySpace *get( size_t n,  uint32_t uid,  const AdjCost &cost ) {
     if ( n >= this->count ) {
       this->make( n + 1, true );
       this->count = n + 1;
@@ -182,9 +173,7 @@ struct AdjacencyTab : public kv::ArrayCount< AdjacencySpace *, 4 > {
         new ( ::malloc( sizeof( AdjacencySpace ) ) ) AdjacencySpace();
     this->ptr[ n ]->uid      = uid;
     this->ptr[ n ]->tport_id = n;
-
-    for ( uint8_t i = 0; i < COST_PATH_COUNT; i++ )
-      this->ptr[ n ]->cost[ i ] = cost[ i ];
+    this->ptr[ n ]->cost     = cost;
 
     return this->ptr[ n ];
   }
@@ -220,25 +209,6 @@ struct UserBridgeList : public kv::SLinkList<UserBridgeElem> {
   void add_zombie( UserDB &user_db,  md::MDMsgMem &mem ) noexcept;
 };
 
-struct UidSrcPath {
-  uint32_t tport,   /* tport index by uid */
-           src_uid, /* which uid tport routes to */
-           cost;    /* tport cost index by uid */
-  UidSrcPath() : tport( 0 ), src_uid( 0 ), cost( 0 ) {}
-  void copy( const UidSrcPath &p ) {
-    this->tport   = p.tport;
-    this->src_uid = p.src_uid;
-    this->cost    = p.cost;
-  }
-  void zero( void ) {
-    this->tport = this->src_uid = this->cost = 0;
-  }
-};
-
-struct PathSeqno {
-  UidSrcPath * path;
-  uint64_t     seqno;   /* cache update seqno */
-};
 struct UidDist {
   uint32_t uid, dist;
 };
@@ -248,35 +218,43 @@ struct UidMissing {
 struct AdjGraph;
 
 struct AdjDistance : public md::MDMsgMem {
-  UserDB       & user_db;
+  UserDB          & user_db;
+  UidDist         * stack;      /* stack of uids to check for distance */
+  uint32_t        * visit,      /* minimum distance to uid */
+                  * inc_list,   /* list of uids to be checked for links */
+                  * graph_idx_order; /* order of uid in start time ordered list */
+  AdjGraph        * graph;
+  kv::UIntHashTab * cache_ht;
 
-  UidDist      * stack;         /* stack of uids to check for distance */
-  uint32_t     * cache,         /* cache of uid distence via a tport */
-               * visit,         /* minimum distance to uid */
-               * inc_list,      /* list of uids to be checked for links */
-               * graph_idx_order; /* order of uid in start time ordered list */
-  AdjGraph     * graph;
-
-  PathSeqno      x[ COST_PATH_COUNT ]; /* x[ path_select ].port[ uid ]*/
-  kv::UIntBitSet inc_visit;     /* inconsistent check visit uid map */
+  kv::UIntBitSet inc_visit,     /* inconsistent check visit uid map */
+                 path_computed; /* path computed bools */
   kv::ArrayCount< UidMissing, 8 > missing;
 
   uint64_t       cache_seqno,   /* seqno of adjacency in cache */
-                 update_seqno,  /* seqno of current adjacency */
-                 prune_seqno;
-
+                 graph_seqno,   /* seqno of graph */
+                 update_seqno;  /* seqno of current adjacency */
   uint32_t       max_uid,       /* all uid < max_uid */
                  max_tport,     /* all tport < max_tport */
+                 path_count,    /* count of paths found in graph */
+                 path_limit,    /* limit of number of paths */
                  miss_tos,      /* number of missing uids in missing[] */
                  inc_hd,        /* list hd of uids in inc_list[] */
                  inc_tl,        /* list to of uids in inc_list[] */
-                 inc_run_count; /* count of inc_runs after adjacency change */
+                 inc_run_count, /* count of inc_runs after adjacency change */
+                 total_run_count;
   uint64_t       last_run_mono, /* timestamp of last adjacency update */
-                 invalid_mono; /* when cache was invalidated */
-  uint32_t       invalid_src_uid;
-  InvalidReason  invalid_reason; /* why cache was invalidated */
+                 invalid_mono,  /* when cache was invalidated */
+                 start_run_mono,
+                 total_run_time;
+  uint32_t       invalid_src_uid,
+                 graph_csum;
+  InvalidReason  invalid_reason;/* why cache was invalidated */
   bool           inc_running,   /* whether incomplete check is running */
-                 found_inconsistency; /* if current or last run inconsistent */
+                 found_inconsistency;  /* if current or last run inconsistent */
+  uint64_t       adjacency_run_time,   /* cpu time used to calculate */
+                 adjacency_this_time;  /* current time used for this adj */
+  uint32_t       adjacency_run_count,  /* count of calculations */
+                 adjacency_this_count; /* count of calculations for this adj */
 
   static void zero_mem( void *x,  void *y ) {
     ::memset( x, 0, (char *) y - (char *) x );
@@ -285,10 +263,28 @@ struct AdjDistance : public md::MDMsgMem {
     zero_mem( (void *) &this->stack, (void *) &this->inc_visit );
     zero_mem( (void *) &this->max_uid, (void *) &this[ 1 ] );
     this->cache_seqno  = 0;
+    this->graph_seqno  = 0;
     this->update_seqno = 1;
-    this->prune_seqno  = 0;
+    this->path_count   = 1;
+    this->path_limit   = DEFAULT_PATH_LIMIT; /* 8 */
   }
-
+  template<class AR>
+  AR *mkar( size_t elcnt ) {
+    size_t sz = sizeof( AR ) * elcnt;
+    void *p = this->make( sz );
+    ::memset( p, 0, sz );
+    return (AR *) p;
+  }
+  uint32_t get_path_count( void ) {
+    if ( this->graph_seqno != this->update_seqno )
+      return this->calc_path_count();
+    return this->path_count;
+  }
+  uint32_t calc_path_count( void ) noexcept;
+  void compute_path( uint16_t p ) noexcept;
+  uint32_t hash_to_path( uint32_t h ) {
+    return ( h & MAX_PATH_MASK ) % this->get_path_count();
+  }
   void invalidate( InvalidReason why,  uint32_t src_uid ) {
     if ( this->update_seqno++ == this->cache_seqno ) {
       if ( ! this->found_inconsistency ) {
@@ -311,19 +307,27 @@ struct AdjDistance : public md::MDMsgMem {
     return true;
   }
   void clear_cache( void ) noexcept;
-  void update_forward_cache( ForwardCache &fwd,  uint32_t src_uid,
-                             uint8_t path_select ) {
-    if ( this->is_valid( fwd.adjacency_cache_seqno ) )
-      return;
-    this->calc_forward_cache( fwd, src_uid, path_select );
+
+  /* update for my forwarding ports */
+  void update_path( ForwardCache &fwd,  uint16_t path_select ) {
+    if ( ! this->is_valid( fwd.adjacency_cache_seqno ) )
+      this->calc_path( fwd, path_select );
   }
-  void calc_forward_cache( ForwardCache &fwd,  uint32_t src_uid,
-                           uint8_t path_select ) noexcept;
+  void calc_path( ForwardCache &fwd,  uint16_t path_select ) noexcept;
+
+  /* update for src forwarding ports */
+  void update_source_path( ForwardCache &fwd,  uint32_t src_uid,
+                           uint16_t path_select ) {
+    if ( ! this->is_valid( fwd.adjacency_cache_seqno ) )
+      this->calc_source_path( fwd, src_uid, path_select );
+  }
+  void calc_source_path( ForwardCache &fwd,  uint32_t src_uid,
+                         uint16_t path_select ) noexcept;
+
   uint32_t adjacency_count( uint32_t uid ) const noexcept;
   AdjacencySpace * adjacency_set( uint32_t uid,  uint32_t i ) const noexcept;
-  /*uint64_t adjacency_start( uint32_t uid ) const noexcept;*/
   void push_inc_list( uint32_t uid ) noexcept;
-  /*bool find_inconsistent( UserBridge *&from,  UserBridge *&to ) noexcept;*/
+
   enum { CONSISTENT = 0, LINK_MISSING = 1, UID_ORPHANED = 2 };
   int find_inconsistent2( UserBridge *&from,  UserBridge *&to ) noexcept;
   bool match_target_set( uint32_t source_uid,  uint32_t target_uid,
@@ -333,46 +337,13 @@ struct AdjDistance : public md::MDMsgMem {
   uint32_t outbound_refs( uint32_t from ) noexcept;
 
   uint32_t calc_transport_cache( uint32_t dest_uid,  uint32_t tport_id,
-                                 uint8_t path_select ) {
-    this->clear_cache_if_dirty();
-    return this->calc_transport_cache2( dest_uid, tport_id, path_select );
-  }
-  uint32_t calc_transport_cache2( uint32_t dest_uid,  uint32_t tport_id,
-                                  uint8_t path_select ) {
-    size_t     off = tport_id * this->max_uid + dest_uid;
-    uint32_t & d   = this->cache[ off * (size_t) ( path_select + 1 ) ];
-    if ( d == 0 )
-      d = this->calc_transport_cost( dest_uid, tport_id, path_select ) + 1;
-    return d - 1;
-  }
+                                 uint16_t path_select ) noexcept;
   uint32_t calc_transport_cost( uint32_t dest_uid, uint32_t tport_id,
-                                uint8_t path_select ) noexcept;
+                                uint16_t path_select ) noexcept;
   uint32_t calc_cost( uint32_t src_id, uint32_t dest_uid,
-                      uint8_t path_select ) noexcept;
+                      uint16_t path_select ) noexcept;
   uint32_t search_cost( uint32_t dest_uid,  uint32_t tos,
-                        uint8_t path_select ) noexcept;
-
-  uint64_t get_start_time( uint32_t uid ) const noexcept;
-  bool is_older( uint32_t uid,  uint32_t uid2 ) const noexcept;
-  void prune_adjacency_sets( void ) noexcept;
-
-  void update_path( ForwardCache &fwd,  uint8_t path_select ) {
-    this->clear_cache_if_dirty();
-    if ( this->x[ path_select ].seqno != this->update_seqno )
-      this->calc_path( fwd, path_select );
-  }
-  void calc_path( ForwardCache &fwd,  uint8_t path_select ) noexcept;
-
-  bool get_path( ForwardCache &fwd,  uint32_t uid,  uint8_t path_select,
-                 UidSrcPath &path ) {
-    this->update_path( fwd, path_select );
-    if ( uid >= this->max_uid )
-      return false;
-    path = this->x[ path_select ].path[ uid ];
-    if ( path.cost == 0 )
-      return false;
-    return true;
-  }
+                        uint16_t path_select ) noexcept;
 
   const char * uid_name( uint32_t uid,  char *buf,  size_t buflen ) noexcept;
   const char * uid_name( uint32_t uid,  char *buf,  size_t &off,
@@ -381,7 +352,10 @@ struct AdjDistance : public md::MDMsgMem {
   const char * uid_set_names( kv::UIntBitSet &set,  char *buf,
                               size_t buflen ) noexcept;
   void message_graph_description( kv::ArrayOutput &out ) noexcept;
-  void update_graph( void ) noexcept;
+  void update_graph( bool all_paths ) noexcept;
+  bool compute_message_graph( const char *start,  const char *network,
+                              size_t network_len,
+                              kv::ArrayOutput &out ) noexcept;
 };
 }
 }

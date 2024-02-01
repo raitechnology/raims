@@ -552,7 +552,7 @@ UserDB::recv_peer_add( const MsgFramePublish &pub,  UserBridge &n,
                   (int) pub.subject_len, pub.subject,
                   user_n->peer.user.val, n.peer.user.val );
       this->add_user_route( *user_n, pub.rte, pub.src_route, dec,
-                            n.user_route_ptr( *this, pub.rte.tport_id ) );
+                            n.user_route_ptr( *this, pub.rte.tport_id, 14 ) );
       this->add_authenticated( *user_n, dec, stage, &n );
     }
     else if ( user_n != NULL && dec.test( FID_SESS_KEY ) ) {
@@ -925,7 +925,7 @@ UserDB::recv_ucast_db( const MsgFramePublish &pub,  UserBridge &n,
       if ( this->node_ht->find( rec.nonce, n_pos, uid ) ) {
         UserBridge * n = this->bridge_tab[ uid ];
         if ( n != NULL ) {
-          UserRoute * u_ptr = n->user_route_ptr( *this, rte->tport_id );
+          UserRoute * u_ptr = n->user_route_ptr( *this, rte->tport_id, 15 );
           this->set_ucast_url( *u_ptr, rec.ucast_url.val, rec.ucast_url.len,
                                "recv" );
         }
@@ -952,7 +952,7 @@ UserDB::ucast_db_size( TransportRoute &rte,  UrlDBFilter &filter ) noexcept
   for ( bool ok = rte.uid_connected.first( uid ); ok;
         ok = rte.uid_connected.next( uid ) ) {
     UserBridge * n     = this->bridge_tab.ptr[ uid ];
-    UserRoute  * u_ptr = n->user_route_ptr( *this, rte.tport_id );
+    UserRoute  * u_ptr = n->user_route_ptr( *this, rte.tport_id, 16 );
 
     if ( u_ptr != NULL && u_ptr->is_valid() &&
          u_ptr->is_set( UCAST_URL_STATE ) ) {
@@ -992,7 +992,7 @@ UserDB::ucast_db_submsg( TransportRoute &rte,  UrlDBFilter &filter,
       continue;
 
     UserBridge * n     = this->bridge_tab.ptr[ uid ];
-    UserRoute  * u_ptr = n->user_route_ptr( *this, rte.tport_id );
+    UserRoute  * u_ptr = n->user_route_ptr( *this, rte.tport_id, 17 );
 
     if ( u_ptr != NULL && u_ptr->is_valid() &&
          u_ptr->is_set( UCAST_URL_STATE ) ) {
@@ -1087,7 +1087,7 @@ UserDB::mesh_db_size( TransportRoute &rte,  UrlDBFilter &filter,
       for ( bool ok = rte2->uid_connected.first( uid ); ok;
             ok = rte2->uid_connected.next( uid ) ) {
         UserBridge * n     = this->bridge_tab.ptr[ uid ];
-        UserRoute  * u_ptr = n->user_route_ptr( *this, rte2->tport_id );
+        UserRoute  * u_ptr = n->user_route_ptr( *this, rte2->tport_id, 18 );
 
         if ( u_ptr != NULL && u_ptr->is_valid() &&
              u_ptr->is_set( MESH_URL_STATE ) ) {
@@ -1130,7 +1130,7 @@ UserDB::mesh_db_submsg( TransportRoute &rte,  UrlDBFilter &filter,
       for ( bool ok = rte2->uid_connected.first( uid ); ok;
             ok = rte2->uid_connected.next( uid ) ) {
         UserBridge * n     = this->bridge_tab.ptr[ uid ];
-        UserRoute  * u_ptr = n->user_route_ptr( *this, rte2->tport_id );
+        UserRoute  * u_ptr = n->user_route_ptr( *this, rte2->tport_id, 19 );
 
         if ( u_ptr != NULL && u_ptr->is_valid() &&
              u_ptr->is_set( MESH_URL_STATE ) ) {
@@ -1292,7 +1292,7 @@ UserDB::recv_mesh_result( const MsgFramePublish &pub,  UserBridge &n,
         rte = this->transport_tab.ptr[ tport_id ];
 
       if ( rte != NULL && rte->transport.tport.equals( tport ) ) {
-        u_ptr = n.user_route_ptr( *this, tport_id );
+        u_ptr = n.user_route_ptr( *this, tport_id, 20 );
 
         if ( rte->mesh_cache == NULL )
           rte->mesh_cache = new ( ::malloc( sizeof( MeshCsumCache ) ) )
@@ -1342,7 +1342,7 @@ UserDB::send_mesh_request( UserBridge &n,  MsgHdrDecoder &dec,
     for ( tport_id = 0; tport_id < tport_count; tport_id++ ) {
       if ( tport_id == rte.tport_id )
         continue;
-      u_ptr = mesh_n->user_route_ptr( *this, tport_id );
+      u_ptr = mesh_n->user_route_ptr( *this, tport_id, 21 );
       if ( u_ptr == NULL || ! u_ptr->is_valid() )
         continue;
       if ( u_ptr->is_set( MESH_URL_STATE ) &&
@@ -1386,7 +1386,7 @@ UserDB::send_mesh_request( UserBridge &n,  MsgHdrDecoder &dec,
       for ( tport_id = 0; tport_id < tport_count; tport_id++ ) {
         if ( tport_id == rte.tport_id )
           continue;
-        u_ptr = mesh_n->user_route_ptr( *this, tport_id );
+        u_ptr = mesh_n->user_route_ptr( *this, tport_id, 22 );
         if ( u_ptr == NULL || ! u_ptr->is_valid() )
           continue;
         if ( u_ptr->is_set( MESH_URL_STATE ) &&
@@ -1435,7 +1435,7 @@ UserDB::process_unknown_adjacency( uint64_t current_mono_time ) noexcept
            UserPendingRoute::pending_timeout_total >= current_mono_time )
       continue;
 
-    if ( p->request_count > 5 ) {
+    if ( p->request_count > 5 || p->rec_count == 0 ) {
       next = p->next;
       this->adjacency_unknown.pop( p );
       this->remove_pending_peer( NULL, p->pending_seqno );
@@ -1608,7 +1608,7 @@ UserDB::request_pending_peer( UserPendingRoute &p,
     p.pending_add_mono = current_mono_time;
   if ( n == NULL || ! n->is_set( AUTHENTICATED_STATE ) )
     return true;
-  UserRoute * u_ptr = n->user_route_ptr( *this, p.ptr->tport_id );
+  UserRoute * u_ptr = n->user_route_ptr( *this, p.ptr->tport_id, 23 );
   if ( u_ptr == NULL || ! u_ptr->is_valid() )
     return true;
   n->user_route = u_ptr;

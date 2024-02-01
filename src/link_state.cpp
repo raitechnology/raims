@@ -20,17 +20,8 @@ AdjacencyRec::set_field( uint32_t fid,  MDReference &mref ) noexcept
     case FID_TPORTID:
       cvt_number<uint32_t>( mref, this->tportid );
       break;
-    case FID_COST:
-      cvt_number<uint32_t>( mref, this->cost[ 0 ] );
-      break;
-    case FID_COST2:
-      cvt_number<uint32_t>( mref, this->cost[ 1 ] );
-      break;
-    case FID_COST3:
-      cvt_number<uint32_t>( mref, this->cost[ 2 ] );
-      break;
-    case FID_COST4:
-      cvt_number<uint32_t>( mref, this->cost[ 3 ] );
+    case FID_ADJ_COST:
+      this->cost.parse( (char *) mref.fptr, mref.fsize );
       break;
     case FID_TPORT:
       this->tport_name.val = (const char *) mref.fptr;
@@ -64,21 +55,20 @@ AdjacencyRec::set_field( uint32_t fid,  MDReference &mref ) noexcept
 void
 AdjacencyRec::print( void ) const noexcept
 {
-  char buf[ NONCE_B64_LEN + 1 ], buf2[ NONCE_B64_LEN + 1 ];
+  char buf[ NONCE_B64_LEN + 1 ], buf2[ NONCE_B64_LEN + 1 ], buf3[ 64 ];
   if ( this->test( FID_REM_BRIDGE ) )
     this->rem_bridge.to_base64_str( buf2 );
   else
     buf2[ 0 ] = '\0';
   printf( "  %cnonce[%s] %ctport_name[%.*s.%.*s], %cuser[%.*s], "
-          "%ctport[%u] %ccost[%u,%u,%u,%u], "
+          "%ctport[%u] %ccost[%s], "
           "%crem_bridge[%s], %crem_tportid[%u]\n",
     this->tchar( FID_BRIDGE ),     this->nonce.to_base64_str( buf ),
     this->tchar( FID_TPORT ),      this->tport_name.len, this->tport_name.val,
                                    this->tport_type.len, this->tport_type.val,
     this->tchar( FID_USER ),       this->user.len, this->user.val,
     this->tchar( FID_TPORTID ),    this->tportid,
-    this->tchar( FID_COST ),       this->cost[ 0 ], this->cost[ 1 ],
-                                   this->cost[ 2 ], this->cost[ 3 ],
+    this->tchar( FID_ADJ_COST ),   this->cost.str( buf3, sizeof( buf3 ) ),
     this->tchar( FID_REM_BRIDGE ), buf2,
     this->tchar( FID_REM_TPORTID ), this->rem_tportid );
 }
@@ -159,15 +149,20 @@ UserDB::save_unknown_adjacency( UserBridge &n,  TransportRoute &rte,
     p->uid              = n.uid;
     p->reason           = ADJ_RESULT_SYNC;
     p->pending_seqno    = ++this->adjacency_unknown.pending_seqno;
-    p->rec_list         = (AdjacencyRec *) (void *) &p[ 1 ];
     p->rec_count        = rec_count;
-    AdjacencyRec * cpy = p->rec_list;
-    for ( uint32_t i = 0; i < rec_count; i++ ) {
-      cpy[ i ].copy( *recs );
-      cpy[ i ].next = &cpy[ i + 1 ];
-      recs = recs->next;
+    if ( rec_count == 0 ) {
+      p->rec_list = NULL;
     }
-    cpy[ rec_count - 1 ].next = NULL;
+    else {
+      p->rec_list = (AdjacencyRec *) (void *) &p[ 1 ];
+      AdjacencyRec * cpy = p->rec_list;
+      for ( uint32_t i = 0; i < rec_count; i++ ) {
+        cpy[ i ].copy( *recs );
+        cpy[ i ].next = &cpy[ i + 1 ];
+        recs = recs->next;
+      }
+      cpy[ rec_count - 1 ].next = NULL;
+    }
   }
   else {
     p   = sav;
@@ -219,7 +214,8 @@ UserDB::add_unknown_adjacency( UserBridge *n,  Nonce *b_nonce ) noexcept
             discard_pending = true;
             break;
           }
-          if ( (changed |= this->add_adjacency_change( *m, *rec )) ) {
+          if ( this->add_adjacency_change( *m, *rec ) ) {
+            changed = true;
             p->rec_list = rec->next;
             fini_recs.push_tl( rec );
             applied_cnt++;
@@ -319,7 +315,7 @@ UserDB::push_source_route( UserBridge &n ) noexcept
   UserRoute * u_ptr;
   uint32_t    count = (uint32_t) this->transport_tab.count;
   for ( uint32_t i = 0; i < count; i++ ) {
-    if ( (u_ptr = n.user_route_ptr( *this, i )) == NULL )
+    if ( (u_ptr = n.user_route_ptr( *this, i, 24 )) == NULL )
       break;
     if ( u_ptr->is_valid() ) {
       if ( this->is_peer_sock_valid( u_ptr->mcast ) )
@@ -363,7 +359,7 @@ UserDB::pop_source_route( UserBridge &n ) noexcept
     n.printf( "pop_source_route\n" );
   uint32_t count = (uint32_t) this->transport_tab.count;
   for ( uint32_t i = 0; i < count; i++ ) {
-    UserRoute * u_ptr = n.user_route_ptr( *this, i );
+    UserRoute * u_ptr = n.user_route_ptr( *this, i, 25 );
     if ( u_ptr != NULL && u_ptr->is_valid() )
       this->pop_user_route( n, *u_ptr );
   }
@@ -465,9 +461,7 @@ UserDB::push_connected_user_route( UserBridge &n,  UserRoute &u_rte ) noexcept
     if ( debug_lnk )
       printf( "push sys_route %u\n", fd );
     rte.connected_auth.add( fd );
-    /*this->check_bloom_route( rte, fd );*/
-    if ( ! this->peer_bloom.has_link( fd ) )
-      rte.sub_route.create_bloom_route( fd, &this->peer_bloom, 0 );
+    rte.sub_route.create_bloom_route( fd, &this->peer_bloom, 0 );
   }
   if ( this->start_time > n.start_time ) {
     if ( n.start_time == 0 )
@@ -622,11 +616,13 @@ UserDB::close_source_route( uint32_t fd ) noexcept
     if ( this->bridge_tab.ptr[ uid ] == NULL )
       continue;
     UserBridge & n = *this->bridge_tab.ptr[ uid ];
-    for ( uint8_t i = 0; i < COST_PATH_COUNT; i++ ) {
-      if ( n.bloom_rt[ i ] != NULL && n.bloom_rt[ i ]->r == fd ) {
-        n.bloom_rt[ i ]->del_bloom_ref( &n.bloom );
-        n.bloom_rt[ i ]->remove_if_empty();
-        n.bloom_rt[ i ] = NULL;
+    for ( uint32_t path_select = 0; path_select < n.bloom_rt.count;
+          path_select++ ) {
+      BloomRoute * rt = n.bloom_rt[ path_select ];
+      if ( rt != NULL && rt->r == fd ) {
+        rt->del_bloom_ref( &n.bloom );
+        rt->remove_if_empty();
+        n.bloom_rt.ptr[ path_select ] = NULL;
       }
     }
   }
@@ -648,19 +644,19 @@ UserDB::send_adjacency_change( void ) noexcept
   TransportRoute * rte;
   UserBridge     * n, * rem;
   AdjChange      * p = this->adjacency_change.hd;
+  char             cost_buf[ 64 ];
+  size_t           cost_len;
   
   this->msg_send_counter[ U_ADJACENCY ]++;
   MsgEst adj;
   for ( ; p != NULL; p = p->next ) {
     rte = this->transport_tab.ptr[ p->tportid ];
     n   = this->bridge_tab.ptr[ p->uid ];
+    cost_len = rte->uid_connected.cost.str_size( cost_buf, sizeof( cost_buf ) );
 
     adj.tportid()
        .link_add()
-       .cost()
-       .cost2()
-       .cost3()
-       .cost4()
+       .adj_cost( cost_len )
        .tport( rte->transport.tport.len )
        .tport_type( rte->transport.type.len );
     if ( n != NULL )
@@ -671,10 +667,8 @@ UserDB::send_adjacency_change( void ) noexcept
        .rem_bridge()
        .rem_tportid();
 
-    d_lnk( "send chg: %s %s cost %u,%u,%u,%u\n", p->add ? "add" : "remove",
-      n != NULL ? n->peer.user.val : this->user.user.val,
-      rte->uid_connected.cost[ 0 ], rte->uid_connected.cost[ 1 ],
-      rte->uid_connected.cost[ 2 ], rte->uid_connected.cost[ 3 ] );
+    d_lnk( "send chg: %s %s cost %s\n", p->add ? "add" : "remove",
+      n != NULL ? n->peer.user.val : this->user.user.val, cost_buf );
   }
 
   MsgEst e( Z_ADJ_SZ );
@@ -701,12 +695,11 @@ UserDB::send_adjacency_change( void ) noexcept
     this->events.send_adjacency_change( p->uid, p->add );
     n   = this->bridge_tab.ptr[ p->uid ];
     rte = this->transport_tab.ptr[ p->tportid ];
-    s.tportid( p->tportid )
+    cost_len = rte->uid_connected.cost.str_size( cost_buf, sizeof( cost_buf ) );
+    s.tportid ( p->tportid )
      .link_add( p->add )
-     .cost   ( rte->uid_connected.cost[ 0 ] )
-     .cost2  ( rte->uid_connected.cost[ 1 ] )
-     .cost3  ( rte->uid_connected.cost[ 2 ] )
-     .cost4  ( rte->uid_connected.cost[ 3 ] );
+     .adj_cost( cost_buf, cost_len );
+
     if ( tport_changed( last, p->tportid ) ) {
       s.tport     ( rte->transport.tport.val, rte->transport.tport.len )
        .tport_type( rte->transport.type.val, rte->transport.type.len );
@@ -968,10 +961,15 @@ UserDB::send_adjacency_request( UserBridge &n, AdjacencyRequest reas ) noexcept
   m.reserve( e.sz );
 
   uint64_t ls_seqno = n.link_state_seqno;
-  if ( reas == DIJKSTRA_SYNC_REQ && n.null_sync_res > 5 ) {
+  if ( reas == DIJKSTRA_SYNC_REQ &&
+       ( n.null_sync_res > 5 || ( n.null_sync_res > 0 &&
+                                  n.last_req_seqno == ls_seqno ) ) ) {
     ls_seqno = 0;
-    n.printe( "restarting dijstra adjacency sync, null_sync_res > 5\n" );
+    reas = DIJKSTRA_NULL_REQ;
+    n.printe( "restarting dijstra adjacency sync, null_sync_res is %u\n",
+              n.null_sync_res );
   }
+  n.last_req_seqno = ls_seqno;
   m.open( this->bridge_id.nonce, ibx.len() )
    .seqno       ( n.inbox.next_send( U_INBOX_ADJ_REQ ) )
    .link_state  ( ls_seqno           )
@@ -985,7 +983,8 @@ UserDB::send_adjacency_request( UserBridge &n, AdjacencyRequest reas ) noexcept
   m.sign( ibx.buf, ibx.len(), *this->session_key );
 
   if ( debug_lnk )
-    n.printf( "*** send_adj_request ls=%" PRIu64 " %s for %s\n", n.link_state_seqno,
+    n.printf( "*** send_adj_request%s ls=%" PRIu64 " %s for %s\n",
+              ls_seqno == 0 ? "_restart" : "", n.link_state_seqno,
               adjacency_request_string( reas ), n.peer.user.val );
   if ( use_primary )
     return this->forward_to_primary_inbox( n, ibx, h, m.msg, m.len() );
@@ -1004,7 +1003,10 @@ UserDB::adjacency_size( UserBridge *sync ) noexcept
   last  = count;
   for ( i = 0; i < count; i++ ) {
     AdjacencySpace * set = this->peer_dist.adjacency_set( sync_uid, i );
+    char     cost_buf[ 64 ];
+    size_t   cost_len;
     uint32_t rem_cnt = 0;
+
     if ( set == NULL )
       continue;
     for ( bool ok = set->first( uid ); ok; ok = set->next( uid ) ) {
@@ -1013,11 +1015,9 @@ UserDB::adjacency_size( UserBridge *sync ) noexcept
         if ( n2 == NULL )
           continue;
       }
+      cost_len = set->cost.str_size( cost_buf, sizeof( cost_buf ) );
       e.tportid()
-       .cost()
-       .cost2()
-       .cost3()
-       .cost4();
+       .adj_cost( cost_len );
       if ( tport_changed( last, i ) ) {
         e.tport     ( set->tport.len )
          .tport_type( set->tport_type.len );
@@ -1054,6 +1054,8 @@ UserDB::adjacency_submsg( UserBridge *sync,  MsgCat &m ) noexcept
   last  = count;
   for ( i = 0; i < count; i++ ) {
     AdjacencySpace * set = this->peer_dist.adjacency_set( sync_uid, i );
+    char     cost_buf[ 64 ];
+    size_t   cost_len;
     uint32_t rem_cnt = 0;
     if ( set == NULL )
       continue;
@@ -1064,11 +1066,9 @@ UserDB::adjacency_submsg( UserBridge *sync,  MsgCat &m ) noexcept
         if ( n2 == NULL )
           continue;
       }
+      cost_len = set->cost.str_size( cost_buf, sizeof( cost_buf ) );
       s.tportid( i )
-       .cost   ( set->cost[ 0 ] )
-       .cost2  ( set->cost[ 1 ] )
-       .cost3  ( set->cost[ 2 ] )
-       .cost4  ( set->cost[ 3 ] );
+       .adj_cost( cost_buf, cost_len );
       if ( tport_changed( last, i ) ) {
         s.tport     ( set->tport.val, set->tport.len )
          .tport_type( set->tport_type.val, set->tport_type.len );
@@ -1375,13 +1375,15 @@ UserDB::recv_adjacency_result( const MsgFramePublish &pub,  UserBridge &n,
     reas = PEER_SYNC_REQ;
 
   if ( ( which & SYNC_LINK ) != 0 ) {
-    if ( sync->null_sync_res > 5 && link_state == sync->link_state_seqno )
+    if ( ( sync->null_sync_res > 5 && link_state == sync->link_state_seqno ) ||
+         reas == DIJKSTRA_NULL_REQ )
       which |= SYNC_NULL;
     if ( link_state > sync->link_state_seqno )
       n.adj_req_throttle.req_count = 0;
     if ( link_state <= sync->link_state_seqno ) {
       if ( debug_lnk )
-        n.printf( "sync link result already have seqno %" PRIu64 "\n", link_state );
+        n.printf( "sync link result already have seqno %" PRIu64 "\n",
+                  link_state );
     }
   }
   this->events.recv_adjacency_result( n.uid, pub.rte.tport_id,
@@ -1426,7 +1428,7 @@ UserDB::recv_adjacency_result( const MsgFramePublish &pub,  UserBridge &n,
     this->peer_dist.invalidate( ADJACENCY_UPDATE_INV, sync->uid );
     sync->null_sync_res = 0;
   }
-  else if ( reas == DIJKSTRA_SYNC_REQ ) {
+  else if ( reas == DIJKSTRA_SYNC_REQ || reas == DIJKSTRA_NULL_REQ ) {
     if ( this->last_auth_mono + sec_to_ns( 5 ) < this->poll.mono_ns )
       sync->null_sync_res++;
   }

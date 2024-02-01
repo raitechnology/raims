@@ -426,8 +426,10 @@ WebService::process_post( const HttpReq &hreq ) noexcept
              * end = &hreq.path[ hreq.path_len ];
   char         path[ 1024 ],
              * data_buf,
-             * start = NULL;
-  size_t       data_len;
+             * start = NULL,
+             * state = NULL;
+  size_t       data_len,
+               state_len = 0;
   WebReqData   data;
 
   data.path     = path;
@@ -439,24 +441,36 @@ WebService::process_post( const HttpReq &hreq ) noexcept
   data_len = HttpReq::decode_uri( hreq.data, &hreq.data[ hreq.content_length ],
                                   data_buf, data_len );
   for ( size_t i = data_len; i > 0; ) {
-    if ( data_buf[ --i ] == '&' &&
-         ::strncmp( &data_buf[ i + 1 ], "start=", 6 ) == 0 ) {
-      data_len = i;
+    char c = data_buf[ --i ];
+    if ( c == '&' && ::strncmp( &data_buf[ i + 1 ], "start=", 6 ) == 0 ) {
+      data_len  = i;
       data_buf[ i ] = '\0';
       start = &data_buf[ i + 7 ];
+    }
+    else if ( c == '&' && ::strncmp( &data_buf[ i + 1 ], "state=", 6 ) == 0 ) {
+      state_len = data_len - ( i + 7 );
+      data_len  = i;
+      data_buf[ i ] = '\0';
+      state = &data_buf[ i + 7 ];
+      char *p = this->console->graph_state.make( state_len );
+      ::memcpy( p, state, state_len );
+      this->console->graph_state.count = state_len;
     }
   }
 
   if ( ::strncmp( data_buf, "graph_data=", 11 ) == 0 ) {
+    AdjDistance & peer_dist = this->console->user_db.peer_dist;
     kv::ArrayOutput out;
 
     data_buf       = &data_buf[ 11 ];
     data_len       = data_len - 11;
 
-    compute_message_graph( start, data_buf, data_len, out );
+    peer_dist.compute_message_graph( start, data_buf, data_len, out );
 
-    data.graph     = out.ptr;
-    data.graph_len = out.count;
+    data.graph           = out.ptr;
+    data.graph_len       = out.count;
+    data.graph_state     = state;
+    data.graph_state_len = state_len;
 
     if ( start != NULL ) {
       if ( ::strncmp( data_buf, "start ", 6 ) == 0 ) {
@@ -651,7 +665,7 @@ WebOutput::make_graph_data( WebReqData &data ) noexcept
   kv::ArrayOutput out, out2;
 
   peer_dist.message_graph_description( out );
-  compute_message_graph( NULL, out.ptr, out.count, out2 );
+  peer_dist.compute_message_graph( NULL, out.ptr, out.count, out2 );
 
   char * src = this->strm.alloc_temp( out.count ),
        * gr  = this->strm.alloc_temp( out2.count );
@@ -659,6 +673,8 @@ WebOutput::make_graph_data( WebReqData &data ) noexcept
   data.graph_source_len = out.count;
   data.graph            = gr;
   data.graph_len        = out2.count;
+  data.graph_state      = this->svc.console->graph_state.ptr;
+  data.graph_state_len  = this->svc.console->graph_state.count;
 
   ::memcpy( src, out.ptr, out.count );
   ::memcpy( gr, out2.ptr, out2.count );
@@ -696,6 +712,13 @@ WebOutput::template_property( const char *var,  size_t varlen,
         if ( data.graph_source_len == 0 )
           this->make_graph_data( data );
         this->append_bytes( data.graph_source, data.graph_source_len );
+        return true;
+      }
+      if ( varlen == 11 && ::memcmp( "graph_state", var, 11 ) == 0 ) {
+        if ( data.graph_state_len != 0 )
+          this->append_bytes( data.graph_state, data.graph_state_len );
+        else
+          this->append_bytes( "null", 4 );
         return true;
       }
       break;

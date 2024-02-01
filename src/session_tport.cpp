@@ -29,15 +29,19 @@ using namespace md;
 bool
 SessionMgr::add_startup_transports( void ) noexcept
 {
-  if ( ! this->add_startup_transports( R_LISTEN, R_LISTEN_SZ, true ) )
-    return false;
-  if ( ! this->add_startup_transports( R_CONNECT, R_CONNECT_SZ, false ) )
-    return false;
-  return true;
+  return this->add_startup_transports( this->tree.startup, R_LISTEN,
+                                       R_LISTEN_SZ, true ) &&
+         this->add_startup_transports( this->user.startup, R_LISTEN,
+                                       R_LISTEN_SZ, true ) &&
+         this->add_startup_transports( this->tree.startup, R_CONNECT,
+                                       R_CONNECT_SZ, false ) &&
+         this->add_startup_transports( this->user.startup, R_CONNECT,
+                                       R_CONNECT_SZ, false );
 }
 
 bool
-SessionMgr::add_startup_transports( const char *name,  size_t name_sz,
+SessionMgr::add_startup_transports( ConfigTree::ParametersList &startup,
+                                    const char *name,  size_t name_sz,
                                     bool is_listen ) noexcept
 {
   ConfigTree::Parameters * p;
@@ -45,30 +49,29 @@ SessionMgr::add_startup_transports( const char *name,  size_t name_sz,
   ConfigTree::Transport  * tport;
   TransportRoute * rte;
   size_t len;
-  for ( p = this->tree.startup.hd; p != NULL; p = p->next ) {
+  for ( p = startup.hd; p != NULL; p = p->next ) {
     for ( sp = p->list.hd; sp != NULL; sp = sp->next ) {
       if ( sp->name.equals( name, name_sz ) ) {
         for ( len = sp->value.len; len > 0 && sp->value.val[ len - 1 ] == ' ';
           len-- ) ;
         tport = this->tree.find_transport( sp->value.val, len );
         rte   = this->user_db.transport_tab.find_transport( tport );
-        if ( rte != NULL ) {
-          if ( ! rte->is_shutdown() ) {
-            fprintf( stderr,
-                     "Startup %.*s transport \"%.*s\" already running\n",
+        if ( rte == NULL || rte->is_shutdown() ) {
+          if ( tport == NULL ) {
+            fprintf( stderr, "Startup %.*s transport \"%.*s\" not found\n",
                      (int) name_sz, name,
                      (int) len, sp->value.val );
-            return true;
+            return false;
           }
+          if ( ! this->add_transport( *tport, is_listen ) )
+            return false;
         }
-        if ( tport == NULL ) {
-          fprintf( stderr, "Startup %.*s transport \"%.*s\" not found\n",
+        else {
+          fprintf( stderr,
+                   "Startup %.*s transport \"%.*s\" already running\n",
                    (int) name_sz, name,
                    (int) len, sp->value.val );
-          return false;
         }
-        if ( ! this->add_transport( *tport, is_listen ) )
-          return false;
       }
     }
   }
@@ -538,8 +541,7 @@ SessionMgr::add_mesh_accept( TransportRoute &listen_rte,
   rte->mesh_id     = listen_rte.mesh_id;
   rte->uid_in_mesh = listen_rte.uid_in_mesh;
   rte->mesh_csum   = listen_rte.mesh_csum;
-  for ( uint8_t i = 0; i < COST_PATH_COUNT; i++ )
-    rte->uid_connected.cost[ i ] = listen_rte.uid_connected.cost[ i ];
+  rte->uid_connected.cost = listen_rte.uid_connected.cost;
 
   rte->set( TPORT_IS_MESH );
   rte->mesh_url.zero();
@@ -617,8 +619,7 @@ SessionMgr::add_tcp_accept( TransportRoute &listen_rte,
 
   if ( rte == NULL )
     return false;
-  for ( uint8_t i = 0; i < COST_PATH_COUNT; i++ )
-    rte->uid_connected.cost[ i ] = listen_rte.uid_connected.cost[ i ];
+  rte->uid_connected.cost = listen_rte.uid_connected.cost;
   rte->set( TPORT_IS_TCP );
 
   conn.rte      = rte;
@@ -807,8 +808,7 @@ SessionMgr::add_mesh_connect( TransportRoute &mesh_rte,  const char *url,
   rte->uid_in_mesh   = mesh_rte.uid_in_mesh;
   rte->mesh_csum     = mesh_rte.mesh_csum;
   rte->mesh_url_hash = url_hash;
-  for ( uint8_t i = 0; i < COST_PATH_COUNT; i++ )
-    rte->uid_connected.cost[ i ] = mesh_rte.uid_connected.cost[ i ];
+  rte->uid_connected.cost = mesh_rte.uid_connected.cost;
 
   rte->set( TPORT_IS_MESH | TPORT_IS_CONNECT );
   rte->printf(

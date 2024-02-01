@@ -639,6 +639,7 @@ struct Console : public md::MDOutput, public SubOnMsg,
                     log_rate_total,
                     max_terminal_log_rate;
   uint32_t          last_rate;
+  kv::ArrayCount<char, 256> graph_state;
 
   static const size_t TS_ERR_OFF = LastTimeStamp::TS_LEN,
                       TS_HDR_LEN = LastTimeStamp::TS_LEN + 2;
@@ -688,7 +689,8 @@ struct Console : public md::MDOutput, public SubOnMsg,
   void tab_string( const char *buf,  TabPrint &pr ) noexcept;
   void tab_concat( const char *s,  const char *s2,  TabPrint &pr ) noexcept;
   void tab_nonce( const Nonce &nonce,  TabPrint &pr ) noexcept;
-  UserBridge * find_user( const char *name,  size_t len ) noexcept;
+  UserBridge * find_user( const char *name,  size_t len ) const noexcept;
+  bool is_self( const char *name,  size_t len ) const noexcept;
   UserBridge * find_uid( const char *name,  size_t len ) noexcept;
   virtual bool on_input( ConsoleOutput *p,  const char *buf,
                          size_t buflen ) noexcept;
@@ -725,7 +727,7 @@ struct Console : public md::MDOutput, public SubOnMsg,
                             const char *cmd,  size_t cmdlen ) noexcept;
   bool recv_remote_request( const MsgFramePublish &pub,  UserBridge &n,
                             const MsgHdrDecoder &dec ) noexcept;
-  void mcast_ping( ConsoleOutput *p,  uint8_t path,  bool add_trace ) noexcept;
+  void mcast_ping( ConsoleOutput *p,  uint16_t path,  bool add_trace ) noexcept;
 
   void on_ping( ConsolePing &ping ) noexcept;
   bool print_json_table( ConsoleOutput *p,  const void * data,
@@ -746,11 +748,12 @@ struct Console : public md::MDOutput, public SubOnMsg,
   void show_hosts( ConsoleOutput *p ) noexcept;
   void show_rvsub( ConsoleOutput *p ) noexcept;
   void show_rpcs( ConsoleOutput *p ) noexcept;
-  void show_adjacency( ConsoleOutput *p,  const char *arg,
-                       size_t len ) noexcept;
+  void show_adjacency( ConsoleOutput *p,  const uint32_t *src_uid,
+                       uint16_t path_select,  bool has_path ) noexcept;
   void show_links( ConsoleOutput *p ) noexcept;
   void show_nodes( ConsoleOutput *p ) noexcept;
-  void show_routes( ConsoleOutput *p,  uint8_t path_select ) noexcept;
+  void show_routes( ConsoleOutput *p,  const UserBridge *src,
+                    uint16_t path_select ) noexcept;
   void show_urls( ConsoleOutput *p ) noexcept;
   void show_counters( ConsoleOutput *p ) noexcept;
   void show_sync( ConsoleOutput *p ) noexcept;
@@ -760,14 +763,14 @@ struct Console : public md::MDOutput, public SubOnMsg,
   void show_skew( ConsoleOutput *p ) noexcept;
   void show_reachable( ConsoleOutput *p ) noexcept;
   void show_tree( ConsoleOutput *p,  const UserBridge *src,
-                  uint8_t path_select ) noexcept;
-  void show_path( ConsoleOutput *p,  uint8_t path_select ) noexcept;
-  void show_forward( ConsoleOutput *p,  uint8_t path_select ) noexcept;
+                  uint16_t path_select ) noexcept;
+  void show_path( ConsoleOutput *p,  uint16_t path_select ) noexcept;
+  void show_forward( ConsoleOutput *p,  uint16_t path_select ) noexcept;
   void show_forward_all( ConsoleOutput *p ) noexcept;
   void show_fds( ConsoleOutput *p ) noexcept;
   void show_buffers( ConsoleOutput *p ) noexcept;
   void show_windows( ConsoleOutput *p ) noexcept;
-  void show_blooms( ConsoleOutput *p,  uint8_t path_select,  bool brief ) noexcept;
+  void show_blooms( ConsoleOutput *p,  uint16_t path_select,  bool brief ) noexcept;
   void show_match( ConsoleOutput *p,  const char *sub,  size_t len ) noexcept;
   void show_config( ConsoleOutput *p, bool is_start,  int which,  const char *name,
                     size_t len ) noexcept;

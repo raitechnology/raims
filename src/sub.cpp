@@ -12,6 +12,20 @@ using namespace ms;
 using namespace kv;
 using namespace md;
 
+static const char   inbox_1[]  = "_INBOX.",
+                    inbox_2[]  = "_INBOX",
+                    snap[]     = "_SNAP.",
+                    rvinfo[]   = "_RV.INFO.";
+static const size_t inbox_1_sz = sizeof( inbox_1 ) - 1,
+                    inbox_2_sz = sizeof( inbox_2 ) - 1,
+                    snap_sz    = sizeof( snap )    - 1,
+                    rvinfo_sz  = sizeof( rvinfo )  - 1;
+static const char *match_inbox_subj[ 2 ] = { inbox_1, inbox_2 };
+static size_t      match_inbox_len[ 2 ]  = { inbox_1_sz, inbox_2_sz };
+static const char *match_extra_subj[ 4 ] = { inbox_1, inbox_2, snap, rvinfo };
+static size_t      match_extra_len[ 4 ]  = { inbox_1_sz, inbox_2_sz, snap_sz,
+                                             rvinfo_sz };
+
 SubDB::SubDB( EvPoll &p,  UserDB &udb,  SessionMgr &smg ) noexcept
      : user_db( udb ), mgr( smg ), my_src( smg ), next_inbox( 0 ),
        sub_seqno( 0 ), sub_seqno_sum( 0 ), sub_update_mono_time( 0 ),
@@ -21,8 +35,30 @@ SubDB::SubDB( EvPoll &p,  UserDB &udb,  SessionMgr &smg ) noexcept
        console( (uint32_t) udb.rand.next(), "(console)", p.g_bloom_db ),
        ipc( (uint32_t) udb.rand.next(), "(ipc)", p.g_bloom_db ),
        queue_tab( this->sub_list ),
-       uid_route( p.sub_route.get_service( "(uid)", 0, -1 ) )
+       uid_route( p.sub_route.get_service( "(uid)", 0, -1 ) ),
+       ipc_sub_match( match_extra_subj, match_extra_len, 4 )
 {
+}
+
+void
+SubDB::set_msg_loss_mode( bool want_msg_loss_errors ) noexcept
+{
+  if ( want_msg_loss_errors ) {
+    this->ipc_sub_match.match_sub = match_extra_subj;
+    this->ipc_sub_match.match_len = match_extra_len;
+    this->ipc_sub_match.match_cnt = sizeof( match_extra_subj ) /
+                                    sizeof( match_extra_subj[ 0 ] );
+    this->ipc_sub_match.no_match_value = IPC_NO_MATCH;
+    this->ipc_sub_match.no_svc_value   = this->ipc_sub_match.match_cnt + 1;
+  }
+  else {
+    this->ipc_sub_match.match_sub = match_inbox_subj;
+    this->ipc_sub_match.match_len = match_inbox_len;
+    this->ipc_sub_match.match_cnt = sizeof( match_inbox_subj ) /
+                                    sizeof( match_inbox_subj[ 0 ] );
+    this->ipc_sub_match.no_match_value = this->ipc_sub_match.match_cnt + 1;
+    this->ipc_sub_match.no_svc_value   = this->ipc_sub_match.match_cnt + 1;
+  }
 }
 
 QueueSubTab *
@@ -784,7 +820,7 @@ SubDB::reseed_bloom( void ) noexcept
   ForwardCache & forward = this->user_db.forward_path[ 0 ];
   uint32_t       tport_id;
 
-  this->user_db.peer_dist.update_forward_cache( forward, 0, 0 );
+  this->user_db.peer_dist.update_path( forward, 0 );
   if ( forward.first( tport_id ) ) {
     do {
       TransportRoute *rte = this->user_db.transport_tab.ptr[ tport_id ];
@@ -854,7 +890,7 @@ SubDB::resize_bloom( void ) noexcept
     ForwardCache & forward = this->user_db.forward_path[ 0 ];
     uint32_t       tport_id;
 
-    this->user_db.peer_dist.update_forward_cache( forward, 0, 0 );
+    this->user_db.peer_dist.update_path( forward, 0 );
     if ( forward.first( tport_id ) ) {
       do {
         TransportRoute *rte = this->user_db.transport_tab.ptr[ tport_id ];
@@ -1476,97 +1512,73 @@ SubDB::clear_memo( uint64_t cur_mono ) noexcept
     this->reply.missing.release();
 }
 
-static const char   ipc_queue[] = "_QUEUE";
-static const char   ipc_inbox[] = "_INBOX";
-static const size_t match_len = sizeof( ipc_inbox ) - 1;
-
 int
-SubDB::match_ipc_subject( const char *str,  size_t str_len,
-                          const char *&pre,  size_t &pre_len,
-                          const char *&name,  size_t &name_len,
-                          const char *&subj,  size_t &subj_len,
-                          const int match_flag ) noexcept
+IpcSubjectMatch::match( const char *str,  size_t str_len ) noexcept
 {
-  const char * p;
-  /* check for _QUEUE.name.xx or _XYZ._QUEUE.name.xx */
-  pre_len = name_len = subj_len = 0;
-  if ( str_len < match_len + 1 || str[ 0 ] != '_' )
-    return IPC_NO_MATCH;
-  bool is_inbox = ( match_flag & IPC_IS_INBOX ) != 0 &&
-                  ::memcmp( str, ipc_inbox, match_len ) == 0,
-       is_queue = ( match_flag & IPC_IS_QUEUE ) != 0 &&
-                  ! is_inbox && ::memcmp( str, ipc_queue, match_len ) == 0;
-  if ( is_inbox || is_queue ) {
-    if ( str[ match_len ] == '.' ) {
-      name     = &str[ match_len + 1 ];
-      name_len = str_len - ( match_len + 1 );
+  const char * e = &str[ str_len ];
+  bool  has_svc  = false;
+
+  this->pre      = NULL;
+  this->name     = str;
+  this->subj     = NULL;
+  this->pre_len  = 0;
+  this->name_len = str_len;
+  this->subj_len = 0;
+
+  if ( str[ 0 ] == '_' ) {
+    const char * p;
+    size_t       digit_count = 0, non_digit_count = 0;
+
+    for ( p = &str[ 1 ]; p < e; p++ ) {
+      if ( p[ 0 ] == '.' )
+        break;
+      if ( p[ 0 ] >= '0' && p[ 0 ] <= '9' )
+        digit_count++;
+      else
+        non_digit_count++;
     }
-    else {
-      name     = &str[ match_len ];
-      name_len = str_len - match_len;
-      if ( is_inbox ) /* _INBOX without '.' */
-        return IPC_IS_INBOX_PREFIX;
-      return IPC_NO_MATCH;
-    }
-  }
-  else {
-    /* skip over service prefix _7500. */
-    p = (const char *) ::memchr( str, '.', str_len - match_len );
-    /* if no '.' or terminates with '.' or starts with '.' */
-    if ( p == NULL || &p[ 1 ] >= &str[ str_len ] || p == str )
-      return IPC_NO_MATCH;
-    pre      = str;
-    pre_len  = p - str;
-    str_len -= ( &p[ 1 ] - str );
-    str      = &p[ 1 ];
-    if ( str_len < match_len + 1 || str[ 0 ] != '_' )
-      return IPC_NO_MATCH;
-    is_inbox = ( match_flag & IPC_IS_INBOX ) != 0 &&
-               ::memcmp( str, ipc_inbox, match_len ) == 0;
-    is_queue = ( match_flag & IPC_IS_QUEUE ) != 0 &&
-               ! is_inbox && ::memcmp( str, ipc_queue, match_len ) == 0;
-    if ( ! is_inbox && ! is_queue ) /* not _INBOX or _QUEUE */
-      return IPC_NO_MATCH;
-    if ( str[ match_len ] == '.' ) { /* matched _INBOX. */
-      name     = &str[ match_len + 1 ];
-      name_len = str_len - ( match_len + 1 );
-    }
-    else { /* match _INBOX with non-'.' suffix */
-      name     = &str[ match_len ];
-      name_len = str_len - match_len;
-      subj_len = 0;
-      if ( is_inbox )
-        return IPC_IS_INBOX_PREFIX;
-      return IPC_NO_MATCH;
+    if ( p < e ) {
+      has_svc = ( non_digit_count == 0 && digit_count > 0 && digit_count <= 5 );
+      this->pre_len  = p - str;
+      this->name     = p + 1;
+      this->name_len = e - this->name;
     }
   }
-  p = (const char *) ::memchr( name, '.', name_len );
-  if ( p == NULL ) {
-    if ( is_inbox ) { /* _INBOX_xxx without host */
-      subj_len = 0;
-      return IPC_IS_INBOX_PREFIX;
+
+  for ( size_t k = 0; k < this->match_cnt; k++ ) {
+    size_t len = this->match_len[ k ];
+    if ( this->name_len >= len &&
+         ::memcmp( this->name, this->match_sub[ k ], len ) == 0 ) {
+      this->subj     = &this->name[ len ];
+      this->subj_len = e - this->subj;
+      this->name_len = len;
+      return k + 1;
     }
-    return IPC_NO_MATCH;
   }
-  subj = &p[ 1 ];
-  if ( subj >= &name[ name_len ] ) /* _INBOX. without anything */
-    return IPC_NO_MATCH;
-  subj_len = &name[ name_len ] - subj;
-  name_len = p - name;
-  if ( name_len == 0 ) /* _INBOX..subj ?? */
-    return IPC_NO_MATCH;
-  return is_inbox ? IPC_IS_INBOX : IPC_IS_QUEUE;
+  if ( ! has_svc )
+    return this->no_svc_value;
+  return this->no_match_value;
+}
+
+void
+IpcSubjectMatch::host( const char *&host,  size_t &host_len ) noexcept
+{
+  host     = this->subj;
+  host_len = this->subj_len;
+  if ( host_len > 0 ) {
+    const char * p = (const char *) ::memchr( host, '.', host_len );
+    if ( p != NULL )
+      host_len = p - host;
+  }
 }
 
 int
 SubDB::match_ipc_any( const char *str,  size_t str_len ) noexcept
 {
-  const char * pre, * subj, * name;
-  size_t pre_len, subj_len, name_len;
-  return match_ipc_subject( str, str_len, pre, pre_len, name, name_len,
-                            subj, subj_len, IPC_IS_QUEUE | IPC_IS_INBOX );
+  IpcSubjectMatch m( match_inbox_subj, match_inbox_len, 2 );
+  return m.match( str, str_len );
 }
-
+#if 0
 bool
 SubDB::match_queue( const char *str,  size_t str_len,
                     const char *&pre,  size_t &pre_len,
@@ -1576,15 +1588,23 @@ SubDB::match_queue( const char *str,  size_t str_len,
   return match_ipc_subject( str, str_len, pre, pre_len, name, name_len,
                             subj, subj_len, IPC_IS_QUEUE ) == IPC_IS_QUEUE;
 }
-
+#endif
 bool
 SubDB::match_inbox( const char *str,  size_t str_len,
                     const char *&host,  size_t &host_len ) noexcept
 {
-  const char * pre, * subj;
-  size_t pre_len, subj_len;
-  return match_ipc_subject( str, str_len, pre, pre_len, host, host_len,
-                            subj, subj_len, IPC_IS_INBOX ) >= IPC_IS_INBOX;
+  IpcSubjectMatch m( match_inbox_subj, match_inbox_len, 2 );
+  int x = m.match( str, str_len );
+  host     = m.subj;
+  host_len = m.subj_len;
+  if ( x >= IPC_IS_INBOX && host_len > 0 ) {
+    const char * p = (const char *) ::memchr( host, '.', host_len );
+    if ( p != NULL ) {
+      host_len = p - host;
+      return true;
+    }
+  }
+  return false;
 }
 
 void

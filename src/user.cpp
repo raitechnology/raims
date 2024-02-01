@@ -98,7 +98,10 @@ timestamp_now( char *time,  size_t maxlen ) noexcept
       break;
     }
   }
-  return stamp.get_string( time, maxlen );
+  size_t sz = stamp.get_string( time, maxlen );
+  if ( sz < maxlen )
+    time[ sz ] = '\0';
+  return sz;
 }
 
 static size_t
@@ -120,7 +123,10 @@ bootstamp( char *time,  size_t maxlen,  uint64_t off ) noexcept
   }
   stamp.stamp = boot + off;
   stamp.resolution = MD_RES_SECONDS;
-  return stamp.get_string( time, maxlen );
+  size_t sz = stamp.get_string( time, maxlen );
+  if ( sz < maxlen )
+    time[ sz ] = '\0';
+  return sz;
 }
 
 /* offset for AES ctr mode enc/dec */
@@ -193,7 +199,7 @@ UserBuf::gen_tmp_key( const char *usr_svc,  const char *num,
   UIntHashTab * host_ht = UIntHashTab::resize( NULL );
   for ( const ConfigTree::User *u = tree.users.hd; u != NULL;
         u = u->next ) {
-    if ( u->user_id < tree.user_cnt ) {
+    if ( ! u->is_temp ) {
       if ( u->svc.equals( svc.svc ) ) {
         host_ht->upsert_rsz( host_ht,
           UserBuf::make_host_id( u->user.val, u->user.len,
@@ -421,6 +427,13 @@ ServiceBuf::add_user( const ConfigTree::User &u ) noexcept
                           RevokeElem( this->users.tl ) );
 }
 
+void
+ServiceBuf::add_user( const char *user,  size_t user_len ) noexcept
+{
+  this->users.push_tl( new ( ::malloc( sizeof( UserElem ) ) )
+                 UserElem( user, user_len, this->service, this->service_len ) );
+}
+
 bool
 ServiceBuf::gen_key( const char *svc,  size_t slen,
                      const CryptPass &pwd ) noexcept
@@ -457,6 +470,14 @@ ServiceBuf::sign_users( DSA *dsa,  const CryptPass &pwd ) noexcept
   /* sort them so the order can be recreated */
   this->users.sort<cmp_user_elem>();
   this->revoke.sort<cmp_revoke_elem>();
+  for ( UserElem *u = this->users.hd; u != NULL; u = u->next ) {
+    if ( u->user.pub_len == 0 ) {
+      u->user.gen_key( u->user.user, u->user.user_len,
+                       u->user.service, u->user.service_len,
+                       u->user.expires, u->user.expires_len,
+                       false, pwd, NULL );
+    }
+  }
   /* get the hmacs and sign them */
   for ( UserElem *u = this->users.hd; u != NULL; u = u->next ) {
     DSA          u_dsa_buf;
@@ -533,7 +554,7 @@ ServiceBuf::load_service( const ConfigTree &tree,
   this->copy( s );
   for ( const ConfigTree::User *u = tree.users.hd; u != NULL;
         u = u->next ) {
-    if ( u->user_id < tree.user_cnt ) {
+    if ( ! u->is_temp ) {
       if ( u->svc.equals( s.svc ) ) {
         this->add_user( *u );
         user_cnt++;
@@ -546,39 +567,28 @@ ServiceBuf::load_service( const ConfigTree &tree,
   this->users.sort<cmp_user_elem>();
   this->revoke.sort<cmp_revoke_elem>();
   ConfigTree::StringPair * p = s.users.hd;
-  for ( UserElem *el = this->users.hd; el != NULL; el = el->next ) {
-    if ( p == NULL || cmp_bytes( p->name.val, p->name.len,
-                                 el->user.user, el->user.user_len ) != 0 ) {
+  for ( ; p != NULL; p = p->next ) {
+    UserElem * el = this->users.find( p->name.val, p->name.len );
+    if ( el == NULL ) {
       fprintf( stderr, "Missing user \"%.*s\" signature\n",
-               (int) el->user.user_len, el->user.user );
+               (int) p->name.len, p->name.val );
     }
     else {
       copy_max( el->sig, el->sig_len, DSA_CIPHER_SIGN_B64_LEN,
                 p->value.val, p->value.len );
-      p = p->next;
     }
   }
-  for ( ; p != NULL; p = p->next ) {
-    fprintf( stderr, "Missing service user \"%.*s\"\n",
-             (int) p->name.len, p->name.val );
-  }
   p = s.revoke.hd;
-  for ( RevokeElem *re = this->revoke.hd; re != NULL; re = re->next ) {
-    if ( p == NULL || cmp_bytes( p->name.val, p->name.len,
-                                 re->user->user.user,
-                                 re->user->user.user_len ) != 0 ) {
+  for ( ; p != NULL; p = p->next ) {
+    RevokeElem *re = this->revoke.find( p->name.val, p->name.len );
+    if ( re == NULL ) {
       fprintf( stderr, "Missing user \"%.*s\" revoke signature\n",
-               (int) re->user->user.user_len, re->user->user.user );
+               (int) p->name.len, p->name.val );
     }
     else {
       copy_max( re->sig, re->sig_len, DSA_CIPHER_SIGN_B64_LEN,
                 p->value.val, p->value.len );
-      p = p->next;
     }
-  }
-  for ( ; p != NULL; p = p->next ) {
-    fprintf( stderr, "Missing revoke user \"%.*s\"\n",
-             (int) p->name.len, p->name.val );
   }
 }
 

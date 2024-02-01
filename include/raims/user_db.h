@@ -157,16 +157,17 @@ struct UserRoute : public UserStateTest<UserRoute> {
 };
 
 struct InboxSeqno {
-  uint64_t recv_seqno[ COST_PATH_COUNT ], /* recv side inbox seqno */
-           send_seqno[ COST_PATH_COUNT ]; /* inbox seqnos for ptp links */
-  uint8_t  recv_type[ COST_PATH_COUNT ][ 32 ],
-           send_type[ COST_PATH_COUNT ][ 32 ];
+  typedef uint8_t TypeArray[ 32 ];
+  kv::ArrayCount<uint64_t, 4> recv_seqno,
+                              send_seqno;
+  kv::ArrayCount<TypeArray, 4> recv_type,
+                               send_type;
   uint32_t * send_counter;
   void init( uint32_t *ctr ) {
-    ::memset( this->recv_seqno, 0, sizeof( this->recv_seqno ) );
-    ::memset( this->send_seqno, 0, sizeof( this->send_seqno ) );
-    ::memset( this->recv_type, 0, sizeof( this->recv_type ) );
-    ::memset( this->send_type, 0, sizeof( this->send_type ) );
+    this->recv_seqno.clear();
+    this->send_seqno.clear();
+    this->recv_type.clear();
+    this->send_type.clear();
     this->send_counter = ctr;
   }
   void set_path_recv( uint8_t path_select, uint64_t seqno,  uint8_t pub_type ) {
@@ -186,6 +187,7 @@ struct InboxSeqno {
     return seqno;
   }
 };
+typedef kv::ArrayCount<uint64_t, 4> GlobSeqno;
 
 struct Rtt {
   uint64_t latency,
@@ -210,10 +212,9 @@ struct UserBridge : public UserStateTest<UserBridge> {
                      peer_hello;
   PeerEntry        & peer;                /* configuration entry */
   UserNonce          bridge_id;           /* the user hmac and nonce */
-  ForwardCache       forward_path[ COST_PATH_COUNT ]; /* which tports to fwd */
-  kv::BloomRoute   * bloom_rt[ COST_PATH_COUNT ],
-                   * bloom_uid;
-  UidSrcPath         src_path[ COST_PATH_COUNT ];
+  ForwardCacheArray  forward_path; /* which tports to fwd */
+  BloomRouteArray    bloom_rt;
+  kv::BloomRoute   * bloom_uid;
   kv::BloomRef       bloom;               /* the subs by this user */
   AdjacencyTab       adjacency;           /* what nonce routes are adjacent */
   Nonce              uid_csum,            /* current xor of adjacency */
@@ -235,7 +236,8 @@ struct UserBridge : public UserStateTest<UserBridge> {
                      hb_mono_time,        /* time hb recvd */
                      start_time,          /* start timestamp */
                      sub_seqno,           /* seqno used for start/stop sub */
-                     link_state_seqno;    /* seqno used for link state db */
+                     link_state_seqno,    /* seqno used for link state db */
+                     last_req_seqno;
   UserRoute        * u_buf[ 24 ];         /* indexes user_route */
   StageAuth          auth[ 2 ];           /* auth handshake state */
   uint32_t           ping_send_seqno,     /* seqnos for pings */
@@ -259,7 +261,8 @@ struct UserBridge : public UserStateTest<UserBridge> {
                      sync_sum_req_adj,
                      sync_sum_res,
                      sync_sum_res_adj,
-                     null_sync_res;
+                     null_sync_res,
+                     orphaned_count;
   AuthStage          last_auth_type;
   uint64_t           null_route_count,
                      null_route_time,
@@ -294,10 +297,12 @@ struct UserBridge : public UserStateTest<UserBridge> {
                      auth_mono_time,      /* when auth happens */
                      challenge_mono_time, /* time challenge sent */
                      remove_auth_time,
-                     remove_auth_mono;
+                     remove_auth_mono,
+                     orphaned_mono_time;
   kv::UIntHashTab  * inbound_svc_loss,    /* service msg loss map */
                    * inbound_svc_restart; /* service msg restart map */
   InboxSeqno         inbox;               /* track inbox sent/recv */
+  GlobSeqno          glob_recv_seqno;     /* seqno by path for mcast */
   RttHistory         rtt;
   ThrottleState      adj_req_throttle,
                      mesh_req_throttle;
@@ -310,8 +315,10 @@ struct UserBridge : public UserStateTest<UserBridge> {
       : peer( pentry ), bloom( seed, pentry.user.val, db ),
         adj_req_throttle( this->state, ADJACENCY_REQUEST_STATE ),
         mesh_req_throttle( this->state, MESH_REQUEST_STATE ) {
-    ::memset( this->bloom_rt, 0, sizeof( this->bloom_rt ) );
-    this->bloom_uid = NULL;
+    this->bloom_rt.count = 0;
+    this->bloom_rt.ptr   = NULL;
+    this->bloom_rt.size  = 0;
+    this->bloom_uid      = NULL;
     this->peer_key.zero();
     this->peer_hello.zero();
     this->uid_csum.zero();
@@ -326,7 +333,7 @@ struct UserBridge : public UserStateTest<UserBridge> {
   }
   static const uint32_t USER_ROUTE_SHIFT = 4,
                         USER_ROUTE_BASE  = ( 1U << USER_ROUTE_SHIFT );
-  UserRoute * user_route_ptr( UserDB &me,  uint32_t id ) {
+  UserRoute * user_route_ptr( UserDB &me,  uint32_t id,  int w ) {
     uint32_t i = 31 - kv_clzw( ( id >> USER_ROUTE_SHIFT ) + 1 ),
              j = id - ( ( ( 1 << i ) - 1 ) << USER_ROUTE_SHIFT );
     if ( this->u_buf[ i ] != NULL ) {
@@ -334,7 +341,7 @@ struct UserBridge : public UserStateTest<UserBridge> {
       if ( u_ptr->is_init() )
         return u_ptr;
     }
-    return this->init_user_route( me, i, j, id );
+    return this->init_user_route( me, i, j, id, w );
   }
   void user_route_reset( void ) {
     for ( uint32_t i = 0; i < 24; i++ ) {
@@ -349,9 +356,9 @@ struct UserBridge : public UserStateTest<UserBridge> {
     }
   }
   UserRoute * init_user_route( UserDB &me,  uint32_t i,  uint32_t j,
-                               uint32_t id ) noexcept;
+                               uint32_t id,  int w ) noexcept;
   UserRoute * primary( UserDB &me ) {
-    return this->user_route_ptr( me, this->primary_route );
+    return this->user_route_ptr( me, this->primary_route, 0 );
   }
   double rtt_us( void ) const {
     return (double) this->round_trip_time / 1000.0;
@@ -510,11 +517,11 @@ typedef kv::IntHashTabT< Hash128Elem, uint32_t > NodeHashTab;
 
 struct SubDB;
 struct StringTab;
+static const uint32_t MY_UID = 0;      /* bridge_tab[ 0 ] reserved for me */
 struct UserDB {
-  static const uint32_t MY_UID = 0;      /* bridge_tab[ 0 ] reserved for me */
   /* my transports */
   TransportTab          transport_tab;    /* transport array */
-  ForwardCache          forward_path[ COST_PATH_COUNT ];/* which tports fwd */
+  ForwardCacheArray     forward_path;/* which tports fwd */
   TransportRoute      * ipc_transport;    /* transport[ 0 ], internal routes */
   kv::EvPoll          & poll;
 
@@ -574,7 +581,8 @@ struct UserDB {
   const kv::PeerId    & my_src;
 
   /* counters, seqnos */
-  uint32_t              hb_interval,     /* seconds between _X.HB publish */
+  uint32_t              msg_send_counter[ MAX_PUB_TYPE ],
+                        hb_interval,     /* seconds between _X.HB publish */
                         reliability,     /* seconds of send/recv window */
                         next_uid,        /* next_uid available */
                         free_uid_count,  /* num uids freed */
@@ -583,7 +591,7 @@ struct UserDB {
                         uid_ping_count,
                         next_ping_uid,
                         host_id,
-                        msg_send_counter[ MAX_PUB_TYPE ];
+                        bloom_fail_cnt;
   uint64_t              send_peer_seqno, /* a unique seqno for peer multicast */
                         link_state_seqno,/* seqno of adjacency updates */
                         link_state_sum,  /* sum of all link state seqno */
@@ -592,14 +600,18 @@ struct UserDB {
                         hb_ival_mask,    /* ping ival = pow2 hb_ival * 1.5 */
                         next_ping_mono,  /* when next ping is sent */
                         last_auth_mono,  /* when last uid was authenticated */
+                        last_add_mono,
+                        last_rem_mono,
                         converge_time,   /* time of convergence */
                         converge_mono,   /* convergence mono time */
+                        consistent_mono,
                         net_converge_time, /* time that network agrees */
                         name_send_seqno,
                         name_send_time,
                         last_idle_check_ns,
                         route_check_mono,
                         bloom_check_mono;
+  GlobSeqno             glob_send_seqno; /* seqno by path mcast */
   kv::rand::xoroshiro128plus rand;       /* used to generate bloom seeds */
 
   /* memory buffers for keys and peer nodes */
@@ -840,6 +852,10 @@ struct UserDB {
                            uint64_t current_time ) noexcept;
   bool converge_network( uint64_t current_mono_time,
                          uint64_t current_time, bool req_timeout ) noexcept;
+  void finish_converge_network( uint64_t current_mono_time,
+                                uint64_t current_time ) noexcept;
+  void find_inconsistent( uint64_t current_mono_time,
+                          uint64_t current_time ) noexcept;
   UserBridge * lookup_bridge( MsgFramePublish &pub,
                               const MsgHdrDecoder &dec ) noexcept;
   UserBridge * lookup_user( MsgFramePublish &pub,

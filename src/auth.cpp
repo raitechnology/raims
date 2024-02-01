@@ -107,9 +107,8 @@ UserDB::on_inbox_auth( const MsgFramePublish &pub,  UserBridge &n,
   StageAuth tmp_auth;
   AuthStage stage = AUTH_NONE;
   uint32_t  stage_num = stage;
-  uint32_t  cost[ COST_PATH_COUNT ] = { COST_DEFAULT, COST_DEFAULT,
-                                        COST_DEFAULT, COST_DEFAULT },
-            rem_tport_id = 0;
+  AdjCost   cost( COST_DEFAULT );
+  uint32_t  rem_tport_id = 0;
 
   if ( ! dec.get_ival<uint32_t>( FID_AUTH_STAGE, stage_num ) )
     return true;
@@ -204,15 +203,13 @@ UserDB::on_inbox_auth( const MsgFramePublish &pub,  UserBridge &n,
       tport.len = dec.mref[ FID_TPORT ].fsize;
     }
     if ( dec.get_ival<uint32_t>( FID_TPORTID, rem_tport_id ) ) {
-      if ( dec.get_ival<uint32_t>( FID_COST, cost[ 0 ] ) ) {
-        dec.get_ival<uint32_t>( FID_COST2, cost[ 1 ] );
-        dec.get_ival<uint32_t>( FID_COST3, cost[ 2 ] );
-        dec.get_ival<uint32_t>( FID_COST4, cost[ 3 ] );
-        n.user_route->rte.update_cost( n, tport, cost, rem_tport_id, "i1" );
-      }
-      else {
+      AdjCost cost;
+      if ( dec.test( FID_ADJ_COST ) &&
+           cost.parse( (char *) dec.mref[ FID_ADJ_COST ].fptr,
+                       dec.mref[ FID_ADJ_COST ].fsize ) == AdjCost::COST_OK )
+        n.user_route->rte.update_cost( n, tport, &cost, rem_tport_id, "i1" );
+      else
         n.user_route->rte.update_cost( n, tport, NULL, rem_tport_id, "i2" );
-      }
     }
     if ( ! n.test_set( SENT_ZADD_STATE ) ) {
       this->send_peer_add( n );    /* broadcast _Z.ADD with new peer */
@@ -257,13 +254,16 @@ UserDB::send_challenge( UserBridge &n,  AuthStage stage ) noexcept
   if ( rte.mesh_id != NULL )
     mesh_url = rte.mesh_id->mesh_url;
   
-  this->events.send_challenge( n.uid, n.user_route->rte.tport_id, stage );
+  this->events.send_challenge( n.uid, rte.tport_id, stage );
   if ( debug_auth )
     n.printf( "send stage %u verify(%" PRIu64 ",%" PRIu64 ",0x%08" PRIx64 ")\n", stage,
               n.auth[ 0 ].seqno, n.auth[ 0 ].time,
               n.auth[ 0 ].cnonce.nonce[ 0 ] );
   const char * ver_str = ms_get_version();
   size_t       ver_len = ::strlen( ver_str );
+  char         cost_buf[ 64 ];
+  size_t       cost_len = rte.uid_connected.cost.str_size( cost_buf,
+                                                          sizeof( cost_buf ) );
 
   MsgEst e( ibx.len() );
   e.user_hmac  ()
@@ -286,10 +286,7 @@ UserDB::send_challenge( UserBridge &n,  AuthStage stage ) noexcept
    .start      ()
    .ucast_url  ( rte.ucast_url.len )
    .mesh_url   ( mesh_url.len )
-   .cost       ()
-   .cost2      ()
-   .cost3      ()
-   .cost4      ()
+   .adj_cost   ( cost_len )
    .tportid    ()
    .tport      ( rte.transport.tport.len )
    .host_id    ()
@@ -331,12 +328,8 @@ UserDB::send_challenge( UserBridge &n,  AuthStage stage ) noexcept
     m.ucast_url( rte.ucast_url.val, rte.ucast_url.len );
   if ( mesh_url.len != 0 )
     m.mesh_url( mesh_url.val, mesh_url.len );
-  if ( rte.uid_connected.is_advertised ) {
-    m.cost( rte.uid_connected.cost[ 0 ] );
-    m.cost2( rte.uid_connected.cost[ 1 ] );
-    m.cost3( rte.uid_connected.cost[ 2 ] );
-    m.cost4( rte.uid_connected.cost[ 3 ] );
-  }
+  if ( rte.uid_connected.is_advertised )
+    m.adj_cost( cost_buf, cost_len );
   m.tportid( rte.tport_id )
    .tport( rte.transport.tport.val, rte.transport.tport.len )
    .host_id( this->host_id );
@@ -417,12 +410,12 @@ UserDB::send_trusted( const MsgFramePublish &/*pub*/,  UserBridge &n,
                       MsgHdrDecoder & ) noexcept
 {
   InboxBuf ibx( n.bridge_id, _AUTH );
-  UserRoute      * u_ptr   = n.user_route;
-  TransportRoute & rte     = u_ptr->rte;
-  bool        in_mesh      = rte.uid_in_mesh->is_member( n.uid ),
-              is_mcast     = rte.is_mcast();
-  size_t      mesh_db_len  = 0,
-              ucast_db_len = 0;
+  UserRoute      * u_ptr    = n.user_route;
+  TransportRoute & rte      = u_ptr->rte;
+  bool        in_mesh       = rte.uid_in_mesh->is_member( n.uid ),
+              is_mcast      = rte.is_mcast();
+  size_t      mesh_db_len   = 0,
+              ucast_db_len  = 0;
   UrlDBFilter mesh_filter( n.uid, true ),
               ucast_filter( n.uid, false );
   Nonce       csum;
@@ -432,8 +425,12 @@ UserDB::send_trusted( const MsgFramePublish &/*pub*/,  UserBridge &n,
     mesh_db_len = this->mesh_db_size( rte, mesh_filter, csum );
   if ( is_mcast )
     ucast_db_len = this->ucast_db_size( rte, ucast_filter );
+
   this->events.send_trust( n.uid, n.user_route->rte.tport_id, in_mesh );
   uint64_t uptime = current_monotonic_time_ns() - this->start_mono_time;
+  char     cost_buf[ 64 ];
+  size_t   cost_len = rte.uid_connected.cost.str_size( cost_buf,
+                                                       sizeof( cost_buf ) );
 
   MsgEst e( ibx.len() );
   e.seqno     ()
@@ -444,10 +441,7 @@ UserDB::send_trusted( const MsgFramePublish &/*pub*/,  UserBridge &n,
    .link_state()
    .auth_stage()
    .start     ()
-   .cost      ()
-   .cost2     ()
-   .cost3     ()
-   .cost4     ()
+   .adj_cost  ( cost_len )
    .tportid   ()
    .tport     ( rte.transport.tport.len )
    .host_id   ()
@@ -467,12 +461,8 @@ UserDB::send_trusted( const MsgFramePublish &/*pub*/,  UserBridge &n,
    .link_state( this->link_state_seqno )
    .auth_stage( AUTH_TRUST         )
    .start     ( this->start_time   );
-  if ( rte.uid_connected.is_advertised ) {
-    m.cost( rte.uid_connected.cost[ 0 ] );
-    m.cost2( rte.uid_connected.cost[ 1 ] );
-    m.cost3( rte.uid_connected.cost[ 2 ] );
-    m.cost4( rte.uid_connected.cost[ 3 ] );
-  }
+  if ( rte.uid_connected.is_advertised )
+    m.adj_cost( cost_buf, cost_len );
   m.tportid( rte.tport_id )
    .tport   ( rte.transport.tport.val, rte.transport.tport.len )
    .host_id ( this->host_id );
@@ -497,80 +487,85 @@ UserDB::send_trusted( const MsgFramePublish &/*pub*/,  UserBridge &n,
     TransportRoute * rte = this->transport_tab.ptr[ tport_id ];
     if ( rte->is_set( TPORT_IS_SHUTDOWN ) )
       continue;
-    u_ptr = NULL;
+    if ( ! rte->uid_connected.is_member( n.uid ) )
+      continue;
+    u_ptr = n.user_route_ptr( *this, tport_id, 13 );
     if ( rte->is_mesh() ) {
-      u_ptr = n.user_route_ptr( *this, tport_id );
       if ( ! u_ptr->is_valid() || ! u_ptr->is_set( MESH_URL_STATE ) )
-        continue;
+        u_ptr = NULL;
     }
     else if ( rte->is_mcast() ) {
-      u_ptr = n.user_route_ptr( *this, tport_id );
       if ( ! u_ptr->is_valid() || ! u_ptr->is_set( UCAST_URL_STATE ) )
-        continue;
+        u_ptr = NULL;
     }
-    else {
+    else if ( ! u_ptr->is_valid() ) {
+      u_ptr = NULL;
+    }
+    if ( u_ptr == NULL )
       continue;
+    UrlDBFilter mesh_filter2( n.uid, true );
+    UrlDBFilter ucast_filter2( n.uid, false );
+    csum.zero();
+    size_t mesh_db_len   = 0,
+           ucast_db_len  = 0,
+           mesh_url_len  = 0,
+           ucast_url_len = 0;
+
+    if ( rte->is_mesh() ) {
+      mesh_db_len = this->mesh_db_size( *rte, mesh_filter2, csum );
+      mesh_url_len = u_ptr->mesh_url.len;
     }
-    if ( u_ptr != NULL ) {
-      UrlDBFilter mesh_filter2( n.uid, true );
-      UrlDBFilter ucast_filter2( n.uid, false );
+    else if ( rte->is_mcast() ) {
+      ucast_db_len = this->ucast_db_size( *rte, ucast_filter2 );
+      ucast_url_len = u_ptr->ucast_url.len;
+    }
+    /*if ( mesh_db_len + ucast_db_len != 0 )*/ {
+      MsgEst e( ibx.len() );
+      cost_len = rte->uid_connected.cost.str_size( cost_buf,
+                                                   sizeof( cost_buf ) );
+      if ( debug_auth )
+        n.printf( "send trust tport %s.%u mesh_db %u ucast_db %u cost %s (%s)\n",
+                  rte->transport.tport.val, tport_id,
+                  (uint32_t) mesh_db_len, (uint32_t) ucast_db_len, cost_buf,
+                  rte->uid_connected.is_advertised ? "adv" : "not" );
+      e.seqno     ()
+       .time      ()
+       .auth_stage()
+       .start     ()
+       .adj_cost  ( cost_len )
+       .tportid   ()
+       .tport     ( rte->transport.tport.len )
+       .mesh_url  ( mesh_url_len )
+       .mesh_db   ( mesh_db_len )
+       .ucast_url ( ucast_url_len )
+       .ucast_db  ( ucast_db_len );
 
-      csum.zero();
-      mesh_db_len  = 0;
-      ucast_db_len = 0;
-      if ( rte->is_mesh() )
-        mesh_db_len = this->mesh_db_size( *rte, mesh_filter2, csum );
-      else
-        ucast_db_len = this->ucast_db_size( *rte, ucast_filter2 );
-      if ( mesh_db_len + ucast_db_len != 0 ) {
-        MsgEst e( ibx.len() );
+      MsgCat m;
+      m.reserve( e.sz );
 
-        e.seqno     ()
-         .time      ()
-         .auth_stage()
-         .start     ()
-         .cost      ()
-         .cost2     ()
-         .cost3     ()
-         .cost4     ()
-         .tportid   ()
-         .tport     ( rte->transport.tport.len )
-         .mesh_url  ( u_ptr->mesh_url.len )
-         .mesh_db   ( mesh_db_len )
-         .ucast_url ( u_ptr->ucast_url.len )
-         .ucast_db  ( ucast_db_len );
+      m.open( this->bridge_id.nonce, ibx.len() )
+       .seqno     ( n.auth[ 1 ].seqno  )
+       .time      ( n.auth[ 1 ].time   )
+       .auth_stage( AUTH_TRUST         )
+       .start     ( this->start_time   );
 
-        MsgCat m;
-        m.reserve( e.sz );
+      if ( rte->uid_connected.is_advertised )
+        m.adj_cost( cost_buf, cost_len );
+      m.tportid( tport_id )
+       .tport( rte->transport.tport.val, rte->transport.tport.len )
+       .host_id( this->host_id );
 
-        m.open( this->bridge_id.nonce, ibx.len() )
-         .seqno     ( n.auth[ 1 ].seqno  )
-         .time      ( n.auth[ 1 ].time   )
-         .auth_stage( AUTH_TRUST         )
-         .start     ( this->start_time   );
-
-        if ( rte->uid_connected.is_advertised ) {
-          m.cost( rte->uid_connected.cost[ 0 ] );
-          m.cost2( rte->uid_connected.cost[ 1 ] );
-          m.cost3( rte->uid_connected.cost[ 2 ] );
-          m.cost4( rte->uid_connected.cost[ 3 ] );
-        }
-        m.tportid( tport_id )
-         .tport( rte->transport.tport.val, rte->transport.tport.len )
-         .host_id( this->host_id );
-
-        if ( mesh_db_len != 0 ) {
-          m.mesh_url( u_ptr->mesh_url.val, u_ptr->mesh_url.len );
-          this->mesh_db_submsg( *rte, mesh_filter2, m );
-        }
-        if ( ucast_db_len != 0 ) {
-          m.ucast_url( u_ptr->ucast_url.val, u_ptr->ucast_url.len );
-          this->ucast_db_submsg( *rte, ucast_filter2, m );
-        }
-        m.close( e.sz, h, CABA_INBOX );
-        m.sign( ibx.buf, ibx.len(), *this->session_key );
-        b |= this->forward_to( n, ibx.buf, ibx.len(), h, m.msg, m.len(), u_ptr);
+      if ( mesh_db_len != 0 && mesh_url_len != 0 ) {
+        m.mesh_url( u_ptr->mesh_url.val, u_ptr->mesh_url.len );
+        this->mesh_db_submsg( *rte, mesh_filter2, m );
       }
+      if ( ucast_db_len != 0 && ucast_url_len != 0 ) {
+        m.ucast_url( u_ptr->ucast_url.val, u_ptr->ucast_url.len );
+        this->ucast_db_submsg( *rte, ucast_filter2, m );
+      }
+      m.close( e.sz, h, CABA_INBOX );
+      m.sign( ibx.buf, ibx.len(), *this->session_key );
+      b |= this->forward_to( n, ibx.buf, ibx.len(), h, m.msg, m.len(), u_ptr );
     }
   }
   return b;

@@ -41,6 +41,9 @@ CONFIG_CONST( P_TCP_NOENCRYPT        , "tcp_noencrypt" )
 CONFIG_CONST( P_TCP_WRITE_TIMEOUT    , "tcp_write_timeout" )
 CONFIG_CONST( P_TCP_WRITE_HIGHWATER  , "tcp_write_highwater" )
 CONFIG_CONST( P_HOST_ID              , "host_id" )
+CONFIG_CONST( P_MSG_LOSS_ERRORS      , "msg_loss_errors" )
+CONFIG_CONST( P_PATH_LIMIT           , "path_limit" )
+CONFIG_CONST( P_BLOCKED_READ_RATE    , "blocked_read_rate" )
 
 /* T_: transport / networks */
 CONFIG_CONST( T_ANY          , "any" )

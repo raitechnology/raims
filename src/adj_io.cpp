@@ -31,7 +31,7 @@ AdjGraphOut::print( void ) noexcept
 }
 
 void
-AdjGraphOut::print_tree( uint8_t p,  bool print_unused ) noexcept
+AdjGraphOut::print_tree( uint16_t p,  bool print_unused ) noexcept
 {
   ArrayOutput & o        = this->out;
   AdjUserTab  & user_tab = this->graph.user_tab;
@@ -68,16 +68,17 @@ AdjGraphOut::print_tree( uint8_t p,  bool print_unused ) noexcept
 
 void
 AdjGraphOut::print_tree_link( uint32_t indent,  AdjFwdTab &fwd,  uint32_t src,
-                              uint32_t j,  uint8_t p ) noexcept
+                              uint32_t j,  uint16_t p ) noexcept
 {
   ArrayOutput & o = this->out;
   uint32_t      cost = fwd.cost.ptr[ j ];
   AdjLink     * link = fwd.links.ptr[ j ];
 
   uint32_t dest_idx = link->b.idx;
-  o.printf( "%*s[%u] %s -> %s %s(%c)\n", indent, "", cost,
-          link->a.user.val, link->b.user.val,
-          link->tport.val, link->dest[ p ].is_member( dest_idx ) ? '+' : '-' );
+  o.printf( "%*s[%u] %s -> %s %s(%c/%u)\n", indent, "", cost,
+          link->a.user.val, link->b.user.val, link->tport.val,
+          link->dest[ p ].is_member( dest_idx ) ? '+' : '-',
+          link->link_num );
 
   for ( uint32_t k = j + 1; k < fwd.links.count; k++ ) {
     if ( fwd.src.ptr[ k ] == src &&
@@ -91,19 +92,22 @@ void
 AdjGraphOut::print_web_paths( uint32_t start_idx ) noexcept
 {
   ArrayOutput & o = this->out;
+  uint32_t      path_count = this->graph.path_count;
   o.puts( "[\n" );
-  for ( uint8_t p = 0; p < 4; p++ ) {
+  for ( uint16_t p = 0; p < path_count; p++ ) {
     this->print_web_path( p, start_idx );
-    if ( p < 3 ) o.puts( ",\n" );
+    if ( p < path_count - 1 ) o.puts( ",\n" );
   }
   o.puts( "]\n" );
 }
 
 void
-AdjGraphOut::print_web_path( uint8_t p,  uint32_t start_idx ) noexcept
+AdjGraphOut::print_web_path( uint16_t p,  uint32_t start_idx ) noexcept
 {
   ArrayOutput  & o = this->out;
   AdjUserTab   & user_tab = this->graph.user_tab;
+  if ( start_idx >= user_tab.count )
+    return;
   AdjUser      * u        = user_tab.ptr[ start_idx ];
   AdjFwdTab    & fwd      = u->fwd[ p ];
   uint32_t       i, src;
@@ -126,10 +130,10 @@ AdjGraphOut::print_web_path( uint8_t p,  uint32_t start_idx ) noexcept
   }
   o.puts( "{\n\"nodes\": [\n" );
   for ( i = 0; i < user_tab.count; i++ ) {
-    u = user_tab.ptr[ i ];
+    AdjUser * n = user_tab.ptr[ i ];
     o.printf( "%s{\"user\": \"%s\", \"uid\": %u, \"step\": %d, \"cost\": %u}",
               ( i == 0 ? "" : ",\n" ),
-              u->user.val, i, path_step.ptr[ i ], path_cost.ptr[ i ] );
+              n->user.val, i, path_step.ptr[ i ], path_cost.ptr[ i ] );
   }
   o.puts( " ],\n\"links\": [\n" );
   bool first = true;
@@ -187,7 +191,23 @@ AdjGraphOut::print_web_path_link( uint32_t step,  AdjFwdTab &fwd,  uint32_t src,
 }
 
 void
-AdjGraphOut::print_fwd( uint8_t p ) noexcept
+AdjGraphOut::print_mask( uint16_t p ) noexcept
+{
+  ArrayOutput & o = this->out;
+  AdjUserTab & user_tab = this->graph.user_tab;
+  for ( uint32_t idx = 0; idx < user_tab.count; idx++ ) {
+    AdjUser   * u   = user_tab.ptr[ idx ];
+    AdjFwdTab & fwd = u->fwd[ p ];
+    o.printf( "(%s", u->user.val );
+    for ( uint32_t i = 0; i < fwd.links.count; i++ )
+      o.printf( ",%u", fwd.links.ptr[ i ]->link_num );
+    o.puts( ") " );
+  }
+  o.puts( "\n" );
+}
+
+void
+AdjGraphOut::print_fwd( uint16_t p ) noexcept
 {
   ArrayOutput & o = this->out;
   AdjUserTab & user_tab = this->graph.user_tab;
@@ -197,8 +217,9 @@ AdjGraphOut::print_fwd( uint8_t p ) noexcept
     for ( uint32_t j = 0; j < u->links.count; j++ ) {
       bool first = true;
       uint32_t idx = 0;
-      for ( bool b = u->links.ptr[ j ]->dest[ p ].first( idx ); b;
-            b = u->links.ptr[ j ]->dest[ p ].next( idx ) ) {
+      AdjLink  * link = u->links.ptr[ j ];
+      BitSpace & dest = link->dest[ p ];
+      for ( bool b = dest.first( idx ); b; b = dest.next( idx ) ) {
         if ( first ) {
           o.printf( "  %s ->", u->links.ptr[ j ]->tport.val );
           first = false;
@@ -255,39 +276,52 @@ AdjGraphOut::print_fwd( uint8_t p ) noexcept
   }
 }
 
+char *
+AdjCost::str( char *buf,  size_t len ) const noexcept
+{
+  this->str_size( buf, len );
+  return buf;
+}
+
+size_t
+AdjCost::str_size( char *buf,  size_t len ) const noexcept
+{
+  char op = this->op();
+  int n;
+  if ( op == ' ' )
+    n = ::snprintf( buf, len, "%u", this->max_cost );
+  else
+    n = ::snprintf( buf, len, "%u%c%u%c%u/%u", this->max_cost, op,
+                    this->min_cost, op, this->path.num, this->path.count );
+  return n;
+}
+
 void
 AdjGraphOut::print_cost( AdjLink &link ) noexcept
 {
   ArrayOutput & o = this->out;
-  if ( ! link.cost_equals( COST_DEFAULT ) ) {
-    if ( ! link.cost_equals( link.cost[ 0 ] ) ) {
-      if ( ! this->is_cfg )
-        o.printf( " : %u %u", link.cost[ 0 ], link.cost[ 1 ] );
-      else
-        o.printf( "      cost: [ %u, %u", link.cost[ 0 ], link.cost[ 1 ] );
-      if ( link.cost[ 0 ] != link.cost[ 2 ] ||
-           link.cost[ 1 ] != link.cost[ 3 ] ) {
-        if ( ! this->is_cfg )
-          o.printf( " %u %u", link.cost[ 2 ], link.cost[ 3 ] );
-        else
-          o.printf( ", %u, %u", link.cost[ 2 ], link.cost[ 3 ] );
-      }
-      if ( this->is_cfg )
-        o.puts( " ]\n" );
-    }
-    else {
-      if ( ! this->is_cfg )
-        o.printf( " : %u", link.cost[ 0 ] );
-      else
-        o.printf( "      cost: %u\n", link.cost[ 0 ] );
-    }
+  if ( ! link.cost.equals( COST_DEFAULT ) ) {
+    if ( ! this->is_cfg )
+      o.puts( " : " );
+    else
+      o.puts( "      cost: " );
+    char op = link.cost.op();
+    if ( op == ' ' )
+      o.printf( "%u\n", link.cost.max_cost );
+    else
+      o.printf( "%u%c%u%c%u/%u\n", link.cost.max_cost, op,
+            link.cost.min_cost, op, link.cost.path.num, link.cost.path.count );
+      /*o.printf( "%u%c%u/%u", link.cost.max_cost, link.cost.op(),
+                link.cost.path.num, link.cost.path.count );*/
   }
-  if ( ! this->is_cfg )
-    o.puts( "\n" );
+  else {
+    if ( ! this->is_cfg )
+      o.puts( "\n" );
+  }
 }
 
 void
-AdjGraphOut::print_graph( void ) noexcept
+AdjGraphOut::print_graph( uint32_t start_idx ) noexcept
 {
   ArrayOutput & o = this->out;
   AdjUserTab & user_tab = this->graph.user_tab;
@@ -295,8 +329,10 @@ AdjGraphOut::print_graph( void ) noexcept
             mesh_type( "mesh", 4 ),
             pgm_type( "pgm", 3 );
   AdjLinkTab tcp, mesh, pgm;
+  if ( user_tab.count == 0 )
+    return;
   if ( ! this->is_cfg ) {
-    o.printf( "start %s\n", user_tab.ptr[ 0 ]->user.val );
+    o.printf( "start %s\n", user_tab.ptr[ start_idx ]->user.val );
     o.puts( "node" );
     for ( uint32_t idx = 0; idx < user_tab.count; idx++ ) {
       AdjUser *u = user_tab.ptr[ idx ];
@@ -325,9 +361,16 @@ void
 AdjGraphOut::print_mesh( AdjLinkTab &mesh,  bool is_pgm ) noexcept
 {
   ArrayOutput & o = this->out;
-  while ( mesh.count > 0 ) {
-    AdjLink *link = mesh.first();
+  BitSpace unused;
+  uint32_t i, j, k;
+
+  for ( i = 0; i < mesh.count; i++ )
+    unused.add( i );
+
+  while ( unused.first( k ) ) {
+    AdjLink *link = mesh.ptr[ k ];
     BitSpace used;
+    unused.remove( k );
     if ( ! this->is_cfg )
       o.printf( "%s_%s", link->type.val, link->tport.val );
     else {
@@ -352,21 +395,17 @@ AdjGraphOut::print_mesh( AdjLinkTab &mesh,  bool is_pgm ) noexcept
                   this->tport_counter++ + 5000 );
       }
     }
-    for ( uint32_t j = 0; j < mesh.count; ) {
+    for ( bool b = unused.first( j ); b; b = unused.next( j ) ) {
       AdjLink *test = mesh.ptr[ j ];
       if ( test->tport.equals( link->tport ) ) {
         if ( ! used.test_set( test->a.idx ) ) {
           if ( ! this->is_cfg )
             o.printf( " %s", test->a.user.val );
         }
-        mesh.pop( j );
-      }
-      else {
-        j++;
+        unused.remove( j );
       }
     }
     if ( this->is_cfg ) {
-      uint32_t i;
       if ( ! this->use_loopback && ! is_pgm ) {
         o.puts( "      connect: " );
         if ( used.count() > 1 )
@@ -391,67 +430,76 @@ AdjGraphOut::print_mesh( AdjLinkTab &mesh,  bool is_pgm ) noexcept
 void
 AdjGraphOut::print_tcp( AdjLinkTab &tcp ) noexcept
 {
-  uint32_t i, j, k = 0;
-  bool eat_single_connections = false;
+  ArrayCount< BitSpace, 4 > queue;
+  BitSpace  unused,
+            used;
+  AdjLink * link,
+          * test;
+  uint32_t  i, j, k = 0;
 
-  while ( k < tcp.count ) {
-    AdjLink *link = tcp.ptr[ k ],
-            *test;
-    BitSpace used;
+  for ( i = 0; i < tcp.count; i++ )
+    unused.add( i );
 
-    for ( j = 0; j < tcp.count; ) {
-      test = tcp.ptr[ j ];
-      if ( test != link && &link->a == &test->a &&
-           link->tport.equals( test->tport ) ) {
-        used.add( test->b.idx );
-        tcp.pop( j );
+  /* find star connections */
+  for ( bool b = unused.first( k ); b; b = unused.next( k ) ) {
+    link = tcp.ptr[ k ];
+    used.zero();
+    for ( bool b = unused.first( j ); b; b = unused.next( j ) ) {
+      if ( j != k ) {
+        test = tcp.ptr[ j ];
+        if ( &link->a == &test->a && link->tport.equals( test->tport ) ) {
+          used.add( j );
+          unused.remove( j );
+        }
+      }
+    }
+    if ( ! used.is_empty() ) {
+      unused.remove( k );
+      used.add( k );
+      BitSpace &n = queue.push( NULL );
+      n.add( used );
+    }
+  }
+  /* star with multiple connections */
+  for ( size_t x = 0; x < queue.count; x++ ) {
+    BitSpace &n = queue[ x ];
+    link = NULL;
+    for ( bool b = n.first( k ); b; b = n.next( k ) ) {
+      AdjLink * cur = tcp.ptr[ k ];
+      if ( link == NULL ) {
+        link = cur;
+        this->print_link( *link );
       }
       else {
-        j++;
-      }
-    }
-    if ( used.is_empty() ) {
-      if ( ! eat_single_connections ) {
-        if ( ++k == tcp.count ) {
-          eat_single_connections = true;
-          k = 0;
-        }
-        continue;
-      }
-      this->print_link( *link );
-      tcp.pop( 0 );
-      for ( j = 0; j < tcp.count; j++ ) {
-        test = tcp.ptr[ j ];
-        if ( &test->a == &link->b && &test->b == &link->a ) {
-          tcp.pop( j );
-          break;
-        }
-      }
-    }
-    else {
-      this->print_link( *link );
-      for ( bool b = used.first( i ); b; b = used.next( i ) ) {
-        AdjUser * u = this->graph.user_tab.ptr[ i ];
+        AdjUser * u = &cur->b;
         this->print_connect( *link, *u );
       }
-      for ( j = 0; j < tcp.count; j++ ) {
-        if ( tcp.ptr[ j ] == link ) {
-          tcp.pop( j );
+      for ( bool c = unused.first( j ); c; c = unused.next( j ) ) {
+        test = tcp.ptr[ j ];
+        if ( &test->a == &cur->b && &test->b == &cur->a ) {
+          unused.remove( j );
           break;
         }
       }
-      used.add( link->b.idx );
-      for ( bool b = used.first( i ); b; b = used.next( i ) ) {
-        for ( j = 0; j < tcp.count; j++ ) {
-          test = tcp.ptr[ j ];
-          if ( &link->a == &test->b && test->a.idx == i ) {
-            tcp.pop( j );
-            break;
-          }
-        }
+    }
+    n.reset();
+    this->print_cost( *link );
+  }
+  /* single connections */
+  for ( bool b = unused.first( k ); b; b = unused.next( k ) ) {
+    link = tcp.ptr[ k ];
+
+    this->print_link( *link );
+    this->print_cost( *link );
+
+    unused.remove( k );
+    for ( bool b = unused.first( j ); b; b = unused.next( j ) ) {
+      test = tcp.ptr[ j ];
+      if ( &test->a == &link->b && &test->b == &link->a ) {
+        unused.remove( j );
+        break;
       }
     }
-    this->print_cost( *link );
   }
 }
 
@@ -510,45 +558,123 @@ split_args( char *buf, const char *args[ 500 ] ) noexcept
   }
 }
 
-static void
-parse_cost( const char **args,  int argc,  uint32_t *cost ) noexcept
+int
+AdjCost::parse( const char **args,  size_t argc ) noexcept
 {
-  int i = 0;
-  for ( ; i < 4 && i < argc; i++ ) {
-    int n = atoi( args[ i ] );
-    cost[ i ] = ( n == 0 ? COST_DEFAULT : n );
+  if ( argc == 1 )
+    return this->parse( args[ 0 ], ::strlen( args[ 0 ] ) );
+
+  this->set( COST_DEFAULT, COST_DEFAULT, 0, 1 );
+  UIntArrayCount cost_array;
+  for ( size_t i = 0; i < argc; i++ ) {
+    uint32_t n = atoi( args[ i ] );
+    if ( n != 0 )
+      cost_array.push( n );
   }
-  if ( i <= 1 ) {
-    if ( i == 0 ) cost[ 0 ] = COST_DEFAULT;
-    cost[ 1 ] = cost[ 2 ] = cost[ 3 ] = cost[ 0 ];
+  if ( cost_array.count > 0 )
+    this->set( cost_array.ptr, cost_array.count );
+  return COST_OK;
+}
+
+int
+AdjCost::parse( const char *str,  size_t len ) noexcept
+{
+  UIntArrayCount cost_array;
+  char     op    = 0;
+  uint32_t val   = 0,
+           cost  = 0,
+           cost1 = 0,
+           num   = 0;
+  int      x     = COST_OK;
+
+  this->set( COST_DEFAULT, COST_DEFAULT, 0, 1 );
+  for ( size_t i = 0; i < len; i++ ) {
+    if ( str[ i ] >= '0' && str[ i ] <= '9' )
+      val = val * 10 + (uint32_t) ( str[ i ] - '0' );
+    else if ( str[ i ] == '-' || str[ i ] == '_' || str[ i ] == '=' ||
+              str[ i ] == '^' ) {
+      cost1 = cost;
+      cost  = val;
+      val   = 0;
+      op    = str[ i ];
+    }
+    else if ( str[ i ] == '/' ) {
+      num  = val;
+      val  = 0;
+    }
+    else if ( str[ i ] == ' ' ) {
+      if ( val > 0 )
+        cost_array.push( val );
+      val = 0;
+    }
+    else if ( str[ i ] == 'X' || str[ i ] == 'N' ) {
+      x = COST_X;
+    }
+    else {
+      if ( str[ i ] < ' ' )
+        break;
+      return BAD_FMT;
+    }
   }
-  if ( i == 2 ) {
-    cost[ 2 ] = cost[ 0 ];
-    cost[ 3 ] = cost[ 1 ];
+  if ( op == 0 ) {
+    if ( val != 0 ) {
+      if ( cost_array.count > 0 ) {
+        cost_array.push( val );
+        this->set( cost_array.ptr, cost_array.count );
+        return 0;
+      }
+      this->max_cost = val;
+      this->min_cost = val;
+      return COST_OK;
+    }
+    return EMPTY_COST;
   }
-  if ( i == 3 )
-    cost[ 3 ] = cost[ 0 ];
+  if ( cost == 0 )
+    return EMPTY_COST;
+  if ( val == 0 || num >= val )
+    return EMPTY_PATH;
+  if ( cost1 != 0 && cost1 > cost && cost != 0 ) {
+    this->max_cost = cost1;
+    this->min_cost = cost;
+  }
+  else {
+    this->max_cost = cost;
+    switch ( op ) {
+      case '-': this->min_cost = cost - cost / 10; break;
+      case '_': this->min_cost = cost / 10; break;
+      case '=': this->min_cost = cost / 100; break;
+      case '^': this->min_cost = cost / 1000; break;
+      default:  this->min_cost = 0;
+    }
+  }
+  if ( this->min_cost == 0 || this->max_cost == 0 )
+    return BAD_COST;
+  this->path.num   = num;
+  this->path.count = val;
+  return x;
 }
 
 int
 AdjGraph::load_graph( StringTab &str_tab,  const char *p,
                       size_t size,  uint32_t &start_uid ) noexcept
 {
-  static uint32_t default_cost[ 4 ] =
-    { COST_DEFAULT, COST_DEFAULT, COST_DEFAULT, COST_DEFAULT };
-
-  const char * args[ 500 ];
-  int          argc, ln = 0;
+  const char * args[ 500 ], **argv;
+  int          argc, ln = 0, stmt;
   char         buf[ 8 * 1024 ],
                start[ 80 ];
-  uint32_t     cost_val[ 4 ],
-             * cost;
+  StringVal    tport, type;
+  UserArray    users;
+  AdjCost      default_cost( COST_DEFAULT ),
+               cost;
+  int          cstatus = AdjCost::COST_OK;
   const char * end = &p[ size ];
   size_t       start_len;
 
   start[ 0 ] = '\0';
   start_len  = 0;
   start_uid  = 0;
+  stmt       = G_NONE;
+  cost       = default_cost;
   while ( p < end ) {
     size_t       linelen = end - p;
     const char * eol     = (const char *) ::memchr( p, '\n', linelen );
@@ -569,81 +695,114 @@ AdjGraph::load_graph( StringTab &str_tab,  const char *p,
 
     ln++;
     argc = split_args( buf, args );
+    argv = args;
     if ( argc == 0 )
       continue;
-    if ( ::strcmp( args[ 0 ], "start" ) == 0 ) {
-      if ( argc > 1 ) {
-        start_len = ::strlen( args[ 1 ] );
-        if ( start_len > sizeof( start ) - 1 )
-          start_len = sizeof( start ) - 1;
-        ::memcpy( start, args[ 1 ], start_len );
-        start[ start_len ] = '\0';
+
+    if ( args[ 0 ] == (const char *) buf ) {
+
+      if ( ::strcmp( args[ 0 ], "start" ) == 0 ) {
+        stmt = G_START;
+        if ( argc > 1 ) {
+          start_len = ::strlen( args[ 1 ] );
+          if ( start_len > sizeof( start ) - 1 )
+            start_len = sizeof( start ) - 1;
+          ::memcpy( start, args[ 1 ], start_len );
+          start[ start_len ] = '\0';
+        }
+        continue;
       }
-      continue;
+
+      if ( ::strcmp( args[ 0 ], "node" ) == 0 ) {
+        stmt = G_NODE;
+        this->add_users( str_tab, &args[ 1 ], argc - 1 );
+        continue;
+      }
+
+      size_t len = ::strlen( args[ 0 ] );
+      bool   add_string = true;
+      if ( ( len > 4 && ::strncmp( args[ 0 ], "tcp_", 4 ) == 0 ) ||
+           ( len > 5 && ::strncmp( args[ 0 ], "link_", 5 ) == 0 ) ) {
+        if ( stmt >= G_LINK )
+          this->link_users( str_tab, users, tport, type, cost, cstatus, stmt );
+        stmt = G_LINK;
+        cost = default_cost;
+        cstatus = AdjCost::COST_OK;
+        if ( args[ 0 ][ 3 ] == '_' )
+          tport = StringVal( &args[ 0 ][ 4 ], len - 4 );
+        else
+          tport = StringVal( &args[ 0 ][ 5 ], len - 5 );
+        type = StringVal( "tcp", 3 );
+      }
+      else if ( len > 5 && ::strncmp( args[ 0 ], "mesh_", 5 ) == 0 ) {
+        if ( stmt >= G_LINK )
+          this->link_users( str_tab, users, tport, type, cost, cstatus, stmt );
+        stmt = G_MESH;
+        cost = default_cost;
+        cstatus = AdjCost::COST_OK;
+        type = StringVal( "mesh", 4 );
+        tport = StringVal( &args[ 0 ][ 5 ], len - 5 );
+      }
+      else if ( len > 5 && ::strncmp( args[ 0 ], "cube_", 5 ) == 0 ) {
+        if ( stmt >= G_CUBE )
+          this->link_users( str_tab, users, tport, type, cost, cstatus, stmt );
+        stmt = G_CUBE;
+        cost = default_cost;
+        cstatus = AdjCost::COST_OK;
+        type = StringVal( "tcp", 3 );
+        tport = StringVal( &args[ 0 ][ 5 ], len - 5 );
+      }
+      else if ( len > 4 && ::strncmp( args[ 0 ], "pgm_", 4 ) == 0 ) {
+        if ( stmt >= G_LINK )
+          this->link_users( str_tab, users, tport, type, cost, cstatus, stmt );
+        stmt = G_PGM;
+        cost = default_cost;
+        cstatus = AdjCost::COST_OK;
+        type = StringVal( "pgm", 3 );
+        tport = StringVal( &args[ 0 ][ 4 ], len - 4 );
+      }
+      else {
+        add_string = false;
+      }
+      if ( add_string ) {
+        str_tab.add_string( tport );
+        str_tab.add_string( type );
+        argv++;
+        argc--;
+      }
     }
-    if ( ::strcmp( args[ 0 ], "node" ) == 0 ) {
-      for ( int i = 1; i < argc; i++ ) {
-        StringVal a( args[ i ], ::strlen( args[ i ] ) );
-        str_tab.add_string( a );
-        this->add_user( a );
-      }
+    else if ( stmt == G_NODE ) {
+      this->add_users( str_tab, args, argc );
       continue;
     }
 
-    cost = default_cost;
-    for ( int k = 1; k < argc; k++ ) {
-      if ( args[ k ][ 0 ] == ':' ) {
-        parse_cost( &args[ k + 1 ], argc - ( k + 1 ), cost_val );
-        cost = cost_val;
+    int k;
+    for ( k = 0; k < argc; k++ ) {
+      if ( argv[ k ][ 0 ] == ':' ) {
+        cstatus = cost.parse( &argv[ k + 1 ], argc - ( k + 1 ) );
         argc = k;
         break;
       }
     }
-    char type[ 5 ];
-    int32_t i = 0;
-    const char * s = args[ 0 ], * name;
-    for ( ; *s != '\0' && *s != ' ' && *s != '_'; s++ ) {
-      if ( i < 4 )
-        type[ i++ ] = *s;
-    }
-    type[ i < 4 ? i : 4 ] = '\0';
-    if ( *s == '_' )
-      name = s + 1;
-    else
-      name = type;
 
-    if ( ::strcmp( type, "link" ) == 0 )
-      ::strcpy( type, "tcp" );
-
-    StringVal tp( name, ::strlen( name ) ),
-              ty( type, ::strlen( type ) );
-    str_tab.add_string( tp );
-    str_tab.add_string( ty );
-
-    if ( ::strcmp( type, "tcp" ) == 0 ) {
-      if ( argc < 3 )
-        continue;
-
-      StringVal a( args[ 1 ], ::strlen( args[ 1 ] ) ),
-                b( args[ 2 ], ::strlen( args[ 2 ] ) );
-      this->add_conn( str_tab.add( a ), str_tab.add( b ), tp, ty, cost, 4 );
-
-      for ( int i = 3; i < argc; i++ ) {
-        StringVal c( args[ i ], ::strlen( args[ i ] ) );
-        this->add_conn( a, str_tab.add( c ), tp, ty, cost, 4 );
-      }
-    }
-    else {
-      for ( int i = 1; i < argc; i++ ) {
-        StringVal a( args[ i ], ::strlen( args[ i ] ) );
-        str_tab.add_string( a );
-        for ( int j = i + 1; j < argc; j++ ) {
-          StringVal b( args[ j ], ::strlen( args[ j ] ) );
-          this->add_conn( a, str_tab.add( b ), tp, ty, cost, 4 );
+    switch ( stmt ) {
+      case G_LINK:
+      case G_MESH:
+      case G_PGM:
+      case G_CUBE:
+        for ( k = 0; k < argc; k++ ) {
+          StringVal v( argv[ k ], ::strlen( argv[ k ] ) );
+          str_tab.add_string( v );
+          users.push( v );
         }
-      }
+        break;
+      default:
+        fprintf( stderr, "unknown stmt on line %u\n", ln );
+        break;
     }
   }
+  if ( stmt >= G_LINK )
+    this->link_users( str_tab, users, tport, type, cost, cstatus, stmt );
   if ( start_len > 0 ) {
     StringVal a( start, start_len );
     str_tab.add_string( a );
@@ -653,6 +812,80 @@ AdjGraph::load_graph( StringTab &str_tab,  const char *p,
   return 0;
 }
 
+void
+AdjGraph::add_users( StringTab &str_tab,  const char **args,
+                     int argc ) noexcept
+{
+  for ( int i = 0; i < argc; i++ ) {
+    StringVal a( args[ i ], ::strlen( args[ i ] ) );
+    str_tab.add_string( a );
+    this->add_user( a );
+  }
+}
+
+void
+AdjGraph::link_users( StringTab &str_tab,  UserArray &users,  StringVal &tport,
+                      StringVal &type,  AdjCost &cost,  int cstatus,
+                      int stmt ) noexcept
+{
+  StringVal * tport_ptr = &tport;
+  StringVal   tport_tmp, tport_tmp2;
+  if ( users.count > 1 ) {
+    for (;;) {
+      if ( cstatus == AdjCost::COST_X ) {
+        char tmp[ 256 ];
+        CatPtr cat( tmp );
+        size_t n = cat.s( tport.val ).s( "_" ).i( cost.path.num + 1 ).end();
+        tport_tmp = StringVal( tmp, n );
+        str_tab.add_string( tport_tmp );
+        tport_ptr = &tport_tmp;
+      }
+      if ( stmt == G_LINK ) {
+        StringVal a( users.ptr[ 0 ] ),
+                  b( users.ptr[ 1 ] );
+        this->add_conn( a, b, *tport_ptr, type, cost );
+
+        for ( size_t i = 2; i < users.count; i++ ) {
+          StringVal c( users.ptr[ i ] );
+          this->add_conn( a, c, *tport_ptr, type, cost );
+        }
+      }
+      else if ( stmt == G_CUBE ) {
+        StringVal tport_base = *tport_ptr;
+        for ( size_t i = 0; i < users.count; i++ ) {
+          StringVal a( users.ptr[ i ] );
+          char tmp[ 256 ];
+          CatPtr cat( tmp );
+          size_t n = cat.s( tport_base.val ).s( "_v" ).u( i + 1 ).end();
+          tport_tmp2 = StringVal( tmp, n );
+          str_tab.add_string( tport_tmp2 );
+          for ( size_t j = 1; j < users.count; j *= 2 ) {
+            size_t k =  i ^ j;
+            if ( k < users.count ) {
+              StringVal b( users.ptr[ k ] );
+              this->add_conn( a, b, tport_tmp2, type, cost );
+            }
+          }
+        }
+      }
+      else {
+        for ( size_t i = 0; i < users.count; i++ ) {
+          StringVal a( users.ptr[ i ] );
+          for ( size_t j = i + 1; j < users.count; j++ ) {
+            StringVal b( users.ptr[ j ] );
+            this->add_conn( a, b, *tport_ptr, type, cost );
+          }
+        }
+      }
+      if ( cstatus != AdjCost::COST_X )
+        break;
+      if ( ++cost.path.num >= cost.path.count )
+        break;
+    }
+  }
+  users.count = 0;
+}
+
 namespace {
 struct AdjRec {
   char     user[ 256 ],
@@ -660,8 +893,7 @@ struct AdjRec {
            tport[ 256 ],
            type[ 16 ];
   uint32_t cost[ 4 ],
-           rem,
-           prune;
+           rem;
   size_t iter_map( MDIterMap mp[ 10 ] ) {
     size_t n = 0;
     ::memset( (void *) this, 0, sizeof( *this ) );
@@ -674,7 +906,6 @@ struct AdjRec {
     mp[ n++ ].uint  ( "cost3", &cost[2], sizeof( cost[2] ) );
     mp[ n++ ].uint  ( "cost4", &cost[3], sizeof( cost[3] ) );
     mp[ n++ ].uint  ( "rem"  , &rem    , sizeof( rem     ) );
-    mp[ n++ ].uint  ( "prune", &prune  , sizeof( prune   ) );
     return 10;
   }
   size_t iter_user( MDIterMap *mp ) {
@@ -694,6 +925,10 @@ strlen_dig( const char *s,  uint32_t &id ) noexcept
 {
   size_t len = ::strlen( s ), i = len;
   id = 0;
+  if ( i > 2 && s[ i - 1 ] == '*' && s[ i - 2 ] == '.' ) {
+    id = 0;
+    return i - 2;
+  }
   while ( i > 0 && s[ i - 1 ] >= '0' && s[ i - 1 ] <= '9' )
     id = id * 10 + ( s[ --i ] - '0' );
   if ( i > 0 && i < len && s[ i - 1 ] == '.' )
@@ -762,9 +997,9 @@ AdjGraph::load_json( StringTab &str_tab,  void *data,  size_t data_size,
         AdjUser * adj_user = this->add_user( adj, uid );
         str_tab.add_string( tp );
         str_tab.add_string( ty );
-        uint32_t cnt   = ( n == 10 ? 4 : 1 ),
-                 prune = ( n == 10 ? rec.prune : 0xff );
-        this->add_link( last_user, adj_user, tp, ty, rec.cost, cnt, prune );
+        uint32_t cnt   = ( n == 10 ? 4 : 1 );
+        AdjCost cost( rec.cost, cnt );
+        this->add_link( last_user, adj_user, tp, ty, cost );
       }
     }
   }
@@ -806,15 +1041,29 @@ AdjGraphOut::print_config( const char *fn ) noexcept
    .s( "    create: " ).s( svc.create ).s( "\n" )
    .s( "    pri: " ).s( svc.pri ).s( "\n" )
    .s( "    pub: " ).s( svc.pub ).s( "\n" )
-   .s( "parameters:\n" )
-   .s( "  salt_data: " ).s( (char *) salt ).s( "\n" )
-   .s( "  pass_data: " ).s( (char *) pass.pass ).s( "\n" )
-   .s( "transports:\n" );
-  this->print_graph();
+   .s( "    users:\n" );
 
   AdjUserTab & user_tab = this->graph.user_tab;
   for ( uint32_t i = 0; i < user_tab.count; i++ ) {
     AdjUser * u = user_tab.ptr[ i ];
+    svc.add_user( u->user.val, u->user.len );
+  }
+  svc.sign_users( NULL, pass );
+  for ( UserElem *e = svc.users.hd; e != NULL; e = e->next ) {
+    o.s( "      \"" ).b( e->user.user, e->user.user_len ).s( "\": \"" )
+     .b( e->sig, e->sig_len ).s( "\"\n" );
+  }
+
+  o.s( "parameters:\n" )
+   .s( "  salt_data: " ).b( (char *) salt, salt_len ).s( "\n" )
+   .s( "  pass_data: " ).b( (char *) pass.pass, pass.pass_len ).s( "\n" )
+   .s( "transports:\n" );
+  this->print_graph( 0 );
+
+  bool first_user = true;
+  for ( uint32_t i = 0; i < user_tab.count; i++ ) {
+    AdjUser  * u    = user_tab.ptr[ i ];
+    UserElem * elem = svc.users.find( u->user.val, u->user.len );
     o.printf( "# ms_server -d %.*s%s.yaml -u %s", (int) prefix_len, cfg, fn,
               u->user.val );
     uint32_t j, cnt = 0, connect_cnt = 0, listen_cnt = 0;
@@ -830,22 +1079,32 @@ AdjGraphOut::print_config( const char *fn ) noexcept
     }
     o.puts( "\n" );
     if ( cnt > 0 ) {
-      o.puts( "# startup:\n" );
+      if ( first_user ) {
+        o.s( "users:\n" );
+        first_user = false;
+      }
+      o.s( "  - user: "   ).s( u->user.val ).s( "\n" )
+       .s( "    svc: "    ).b( svc.service, svc.service_len ).s( "\n" )
+       .s( "    create: " ).b( elem->user.create, elem->user.create_len ).s( "\n" )
+       .s( "    pri: "    ).b( elem->user.pri, elem->user.pri_len ).s( "\n" )
+       .s( "    pub: "    ).b( elem->user.pub, elem->user.pub_len ).s( "\n" )
+       .s( "    startup:\n" );
+
       if ( listen_cnt > 0 ) {
-        o.puts( "#   listen:\n" );
+        o.puts( "      listen:\n" );
         for ( j = 0; j < this->args.count; j++ ) {
           TPortArg &arg = this->args.ptr[ j ];
           if ( arg.user == u && arg.op == LISTEN ) {
-            o.printf( "#     - %s\n", arg.link->tport.val );
+            o.printf( "        - %s\n", arg.link->tport.val );
           }
         }
       }
       if ( connect_cnt > 0 ) {
-        o.puts( "#   connect:\n" );
+        o.puts( "      connect:\n" );
         for ( j = 0; j < this->args.count; j++ ) {
           TPortArg &arg = this->args.ptr[ j ];
           if ( arg.user == u && arg.op == CONNECT ) {
-            o.printf( "#     - %s\n", arg.link->tport.val );
+            o.printf( "        - %s\n", arg.link->tport.val );
           }
         }
       }
@@ -853,35 +1112,3 @@ AdjGraphOut::print_config( const char *fn ) noexcept
   }
 }
 
-bool
-rai::ms::compute_message_graph( const char *start,  const char *network,
-                                size_t network_len,
-                                kv::ArrayOutput &out ) noexcept
-{
-  MDMsgMem  tmp_mem;
-  AdjGraph  graph( tmp_mem );
-  StringTab str_tab( tmp_mem );
-  uint32_t  start_uid = 0;
-  bool      ok = false;
-
-  if ( graph.load_graph( str_tab, network, network_len, start_uid ) == 0 ) {
-    for ( uint8_t p = 0; p < 4; p++ )
-      graph.compute_forward_set( p );
-    AdjGraphOut put( graph, out );
-    if ( start != NULL ) {
-      AdjUserTab & user_tab = graph.user_tab;
-      size_t len = ::strlen( start );
-      for ( uint32_t i = 0; i < user_tab.count; i++ ) {
-        AdjUser * u = user_tab.ptr[ i ];
-        if ( u->user.equals( start, len ) ) {
-          start_uid = u->idx;
-          break;
-        }
-      }
-    }
-    put.print_web_paths( start_uid );
-    ok = true;
-  }
-  graph.reset();
-  return ok;
-}

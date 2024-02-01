@@ -135,8 +135,8 @@ struct PubMcastData {
              * inbox;
   uint16_t     sublen,    /* subject length */
                inbox_len,
-               option;    /* message options for the opt field */
-  uint8_t      path,      /* path specified */
+               option,    /* message options for the opt field */
+               path,      /* path specified */
                path_select; /* path taken */
   uint32_t     fmt,       /* format of data */
                reply,     /* if rpc style point to point reply wanted */
@@ -153,7 +153,7 @@ struct PubMcastData {
   PubMcastData( const char *s,  size_t sl,  const void *d,  size_t dl,
                 uint32_t f,  uint32_t rep = 0 )
     : sub( s ), inbox( 0 ), sublen( (uint16_t) sl ), inbox_len( 0 ),
-      option( 0 ), path( 255 ), path_select( 0 ), fmt( f ), reply( rep ),
+      option( 0 ), path( NO_PATH ), path_select( 0 ), fmt( f ), reply( rep ),
       subj_hash( 0 ), seqno( 0 ), stamp( 0 ), token( 0 ),
       data( d ), datalen( dl ), fwd_cnt( 0 ) {}
   PubMcastData( const PubMcastData &mc )
@@ -313,6 +313,7 @@ struct SessionMgr : public kv::EvSocket, public kv::BPData {
   bool                  tcp_noencrypt,
                         tcp_ipv4,
                         tcp_ipv6,
+                        want_msg_loss_errors,
                         session_started;
   uint32_t              msg_recv_counter[ MAX_PUB_TYPE ],
                         idle_busy;
@@ -321,7 +322,12 @@ struct SessionMgr : public kv::EvSocket, public kv::BPData {
               ConfigTree::User &u,  ConfigTree::Service &s,
               StringTab &st,  ConfigStartup &start ) noexcept;
   int init_sock( void ) noexcept;
+  bool ld_bytes( const char *name,  uint64_t &val ) noexcept;
+  bool ld_nanos( const char *name,  uint64_t &val ) noexcept;
+  bool ld_secs( const char *name,  uint32_t &val ) noexcept;
+  bool ld_bool( const char *name,  bool &val ) noexcept;
   bool load_parameters( void ) noexcept;
+  bool reload_parameters( void ) noexcept;
   bool add_transport( ConfigTree::Transport &t,  bool is_listener ) noexcept;
   bool add_transport2( ConfigTree::Transport &t,  bool is_listener,
                        TransportRoute *&rte ) noexcept;
@@ -331,7 +337,8 @@ struct SessionMgr : public kv::EvSocket, public kv::BPData {
                     bool start_host ) noexcept;
   bool start_transport( TransportRoute &rte,  bool is_listener ) noexcept;
   bool add_startup_transports( void ) noexcept;
-  bool add_startup_transports( const char *name,  size_t name_sz,
+  bool add_startup_transports( ConfigTree::ParametersList &startup,
+                               const char *name,  size_t name_sz,
                                bool is_listen ) noexcept;
   bool add_rvd_transports( const char *listen,  const char *http,
                            int flags ) noexcept;

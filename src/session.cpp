@@ -74,8 +74,8 @@ SessionMgr::SessionMgr( EvPoll &p,  Logger &l,  ConfigTree &c,
              sub_window_ival( sec_to_ns( 10 ) ),
              last_autoscale( 0 ), msg_loss_count( 0 ), frame_loss_count( 0 ),
              tcp_connect_timeout( 10 ), tcp_noencrypt( false ),
-             tcp_ipv4( true ), tcp_ipv6( true ), session_started( false ),
-             idle_busy( 16 )
+             tcp_ipv4( true ), tcp_ipv6( true ), want_msg_loss_errors( true ),
+             session_started( false ), idle_busy( 16 )
 {
   this->sock_opts = OPT_NO_POLL;
   this->bp_flags  = BP_FORWARD | BP_NOTIFY;
@@ -115,52 +115,108 @@ SessionMgr::on_write_ready( void ) noexcept
 }
 
 bool
+SessionMgr::ld_bytes( const char *name,  uint64_t &val ) noexcept
+{
+  ConfigTree::ParametersList &plist = this->tree.parameters;
+  ConfigTree::ParametersList &ulist = this->user.parameters;
+  StringTab & st = this->user_db.string_tab;
+  uint64_t x;
+  if ( ulist.get_bytes( name, x ) ) { val = x; return true; }
+  return plist.getset_bytes( st, name, val );
+}
+
+bool
+SessionMgr::ld_nanos( const char *name,  uint64_t &val ) noexcept
+{
+  ConfigTree::ParametersList &plist = this->tree.parameters;
+  ConfigTree::ParametersList &ulist = this->user.parameters;
+  StringTab & st = this->user_db.string_tab;
+  uint64_t x;
+  if ( ulist.get_nanos( name, x ) ) { val = x; return true; }
+  return plist.getset_nanos( st, name, val );
+}
+
+bool
+SessionMgr::ld_secs( const char *name,  uint32_t &val ) noexcept
+{
+  ConfigTree::ParametersList &plist = this->tree.parameters;
+  ConfigTree::ParametersList &ulist = this->user.parameters;
+  StringTab & st = this->user_db.string_tab;
+  uint32_t x;
+  if ( ulist.get_secs( name, x ) ) { val = x; return true; }
+  return plist.getset_secs( st, name, val );
+}
+
+bool
+SessionMgr::ld_bool( const char *name,  bool &val ) noexcept
+{
+  ConfigTree::ParametersList &plist = this->tree.parameters;
+  ConfigTree::ParametersList &ulist = this->user.parameters;
+  StringTab & st = this->user_db.string_tab;
+  bool x;
+  if ( ulist.get_bool( name, x ) ) { val = x; return true; }
+  return plist.getset_bool( st, name, val );
+}
+
+bool
 SessionMgr::load_parameters( void ) noexcept
 {
   const char *s = "", *val = NULL;
   /*uint64_t hb_ival, rel_ival, time_val, bytes_val, host_id;*/
-  ConfigTree::ParametersList &plist = this->tree.parameters;
-  StringTab & st = this->user_db.string_tab;
-  uint64_t tcp_write_timeout = this->poll.wr_timeout_ns,
+  uint64_t tcp_write_timeout   = this->poll.wr_timeout_ns,
            tcp_write_highwater = this->poll.send_highwater,
-           idle = this->idle_busy;
-  uint32_t tcp_conn_timeout = this->tcp_connect_timeout;
-  bool ipv4_only = false, ipv6_only = false;
-  bool cache_hostid = true;
+           idle                = this->idle_busy,
+           limit               = this->user_db.peer_dist.path_limit,
+           rate                = this->poll.blocked_read_rate;
+  uint32_t tcp_conn_timeout    = this->tcp_connect_timeout;
+  bool ipv4_only     = false,
+       ipv6_only     = false,
+       want_msg_loss = true,
+       cache_hostid  = true;
 
-  if ( ! plist.getset_bytes( st, P_IDLE_BUSY, idle ) )
+  if ( ! this->ld_bytes( P_IDLE_BUSY, idle ) ||
+       ! this->ld_bytes( P_PUB_WINDOW_SIZE, this->pub_window_size ) ||
+       ! this->ld_bytes( P_SUB_WINDOW_SIZE, this->sub_window_size ) ||
+       ! this->ld_bytes( P_PUB_WINDOW_COUNT, this->pub_window_count ) ||
+       ! this->ld_bytes( P_PUB_WINDOW_AUTOSCALE, this->pub_window_autoscale ) ||
+       ! this->ld_bytes( P_SUB_WINDOW_COUNT, this->sub_window_count ) ||
+       ! this->ld_nanos( P_PUB_WINDOW_TIME, this->pub_window_ival ) ||
+       ! this->ld_nanos( P_SUB_WINDOW_TIME, this->sub_window_ival ) ||
+       ! this->ld_secs( P_HEARTBEAT, this->user_db.hb_interval ) ||
+       ! this->ld_secs( P_RELIABILITY, this->user_db.reliability ) ||
+       ! this->ld_bool( P_TCP_NOENCRYPT, this->tcp_noencrypt ) ||
+       ! this->ld_secs( P_TCP_CONNECT_TIMEOUT, tcp_conn_timeout ) ||
+       ! this->ld_nanos( P_TCP_WRITE_TIMEOUT, tcp_write_timeout ) ||
+       ! this->ld_bytes( P_TCP_WRITE_HIGHWATER, tcp_write_highwater ) ||
+       ! this->ld_bool( P_TCP_IPV4ONLY, ipv4_only ) ||
+       ! this->ld_bool( P_TCP_IPV6ONLY, ipv6_only ) ||
+       ! this->ld_bool( P_MSG_LOSS_ERRORS, want_msg_loss ) ||
+       ! this->ld_bytes( P_PATH_LIMIT, limit ) ||
+       ! this->ld_bytes( P_BLOCKED_READ_RATE, rate ) )
     return false;
-  this->idle_busy = (uint32_t) idle;
 
-  if ( ! plist.getset_bytes( st, P_PUB_WINDOW_SIZE, this->pub_window_size ) ||
-       ! plist.getset_bytes( st, P_SUB_WINDOW_SIZE, this->sub_window_size ) ||
-       ! plist.getset_bytes( st, P_PUB_WINDOW_COUNT, this->pub_window_count ) ||
-       ! plist.getset_bytes( st, P_PUB_WINDOW_AUTOSCALE, this->pub_window_autoscale ) ||
-       ! plist.getset_bytes( st, P_SUB_WINDOW_COUNT, this->sub_window_count ) ||
-       ! plist.getset_nanos( st, P_PUB_WINDOW_TIME, this->pub_window_ival ) ||
-       ! plist.getset_nanos( st, P_SUB_WINDOW_TIME, this->sub_window_ival ) ||
-       ! plist.getset_secs( st, P_HEARTBEAT, this->user_db.hb_interval ) ||
-       ! plist.getset_secs( st, P_RELIABILITY, this->user_db.reliability ) ||
-       ! plist.getset_bool( st, P_TCP_NOENCRYPT, this->tcp_noencrypt ) ||
-       ! plist.getset_secs( st, P_TCP_CONNECT_TIMEOUT, tcp_conn_timeout ) ||
-       ! plist.getset_nanos( st, P_TCP_WRITE_TIMEOUT, tcp_write_timeout ) ||
-       ! plist.getset_bytes( st, P_TCP_WRITE_HIGHWATER, tcp_write_highwater ) ||
-       ! plist.getset_bool( st, P_TCP_IPV4ONLY, ipv4_only ) ||
-       ! plist.getset_bool( st, P_TCP_IPV6ONLY, ipv6_only ) )
-    return false;
-
+  this->idle_busy            = (uint32_t) idle;
   this->poll.wr_timeout_ns   = tcp_write_timeout;
   this->poll.so_keepalive_ns = tcp_write_timeout;
   this->tcp_connect_timeout  = tcp_conn_timeout;
   this->poll.send_highwater  = tcp_write_highwater;
+  if ( limit > MAX_PATH_MASK )
+    limit = MAX_PATH_MASK + 1;
+  if ( limit > 0 )
+    this->user_db.peer_dist.path_limit = (uint32_t) limit;
+  this->poll.blocked_read_rate = rate;
 
-  if ( plist.find( s = P_TIMESTAMP, val, NULL ) ) {
+  ConfigTree::ParametersList &plist = this->tree.parameters;
+  ConfigTree::ParametersList &ulist = this->user.parameters;
+
+  s = P_TIMESTAMP;
+  if ( ulist.find( s, val, NULL ) || plist.find( s, val, NULL ) ) {
     if ( val != NULL &&
          ( ::strcmp( val, "gmt" ) == 0 || ::strcmp( val, "GMT" ) == 0 ) )
       tz_stamp_gmt = true;
   }
-
-  if ( plist.find( s = P_HOST_ID, val, NULL ) ) {
+  s = P_HOST_ID;
+  if ( ulist.find( s, val, NULL ) || plist.find( s, val, NULL ) ) {
     if ( val != NULL && ( val[ 0 ] == 'r' || val[ 0 ] == 'R' ) ) {
       this->user_db.host_id = this->user_db.rand.next();
       if ( val[ 1 ] != 'c' && val[ 1 ] != 'C' )
@@ -195,7 +251,129 @@ SessionMgr::load_parameters( void ) noexcept
     this->tcp_ipv6 = true;
     this->tcp_ipv4 = false;
   }
+  this->want_msg_loss_errors = want_msg_loss;
+  this->sub_db.set_msg_loss_mode( want_msg_loss );
   update_tz_stamp();
+  return true;
+}
+
+bool
+SessionMgr::reload_parameters( void ) noexcept
+{
+  uint64_t tmp_pub_window_size      = this->pub_window_size,
+           tmp_sub_window_size      = this->sub_window_size,
+           tmp_pub_window_count     = this->pub_window_count,
+           tmp_pub_window_autoscale = this->pub_window_autoscale,
+           tmp_sub_window_count     = this->sub_window_count,
+           tmp_pub_window_ival      = this->pub_window_ival,
+           tmp_sub_window_ival      = this->sub_window_ival;
+  uint32_t tmp_hb_interval          = this->user_db.hb_interval,
+           tmp_reliability          = this->user_db.reliability;
+  bool     tmp_tcp_noencrypt        = this->tcp_noencrypt;
+  uint64_t tmp_tcp_write_timeout    = this->poll.wr_timeout_ns,
+           tmp_tcp_write_highwater  = this->poll.send_highwater,
+           tmp_idle                 = this->idle_busy,
+           tmp_limit                = this->user_db.peer_dist.path_limit,
+           tmp_blocked_read_rate    = this->poll.blocked_read_rate;
+  uint32_t tmp_tcp_conn_timeout     = this->tcp_connect_timeout;
+  bool     tmp_want_msg_loss        = this->want_msg_loss_errors;
+
+  if ( ! this->ld_bytes( P_IDLE_BUSY, tmp_idle ) ||
+       ! this->ld_bytes( P_PUB_WINDOW_SIZE, tmp_pub_window_size ) ||
+       ! this->ld_bytes( P_SUB_WINDOW_SIZE, tmp_sub_window_size ) ||
+       ! this->ld_bytes( P_PUB_WINDOW_COUNT, tmp_pub_window_count ) ||
+       ! this->ld_bytes( P_PUB_WINDOW_AUTOSCALE, tmp_pub_window_autoscale ) ||
+       ! this->ld_bytes( P_SUB_WINDOW_COUNT, tmp_sub_window_count ) ||
+       ! this->ld_nanos( P_PUB_WINDOW_TIME, tmp_pub_window_ival ) ||
+       ! this->ld_nanos( P_SUB_WINDOW_TIME, tmp_sub_window_ival ) ||
+       ! this->ld_secs( P_HEARTBEAT, tmp_hb_interval ) ||
+       ! this->ld_secs( P_RELIABILITY, tmp_reliability ) ||
+       ! this->ld_bool( P_TCP_NOENCRYPT, tmp_tcp_noencrypt ) ||
+       ! this->ld_secs( P_TCP_CONNECT_TIMEOUT, tmp_tcp_conn_timeout ) ||
+       ! this->ld_nanos( P_TCP_WRITE_TIMEOUT, tmp_tcp_write_timeout ) ||
+       ! this->ld_bytes( P_TCP_WRITE_HIGHWATER, tmp_tcp_write_highwater ) ||
+       ! this->ld_bool( P_MSG_LOSS_ERRORS, tmp_want_msg_loss ) ||
+       ! this->ld_bytes( P_PATH_LIMIT, tmp_limit ) ||
+       ! this->ld_bytes( P_BLOCKED_READ_RATE, tmp_blocked_read_rate ) )
+    return false;
+
+  if ( tmp_pub_window_size      != this->pub_window_size ) {
+    this->pub_window_size = tmp_pub_window_size;
+    printf( "pub_window_size %lu\n", (long unsigned) tmp_pub_window_size );
+  }
+  if ( tmp_sub_window_size      != this->sub_window_size ) {
+    this->sub_window_size = tmp_sub_window_size;
+    printf( "sub_window_size %lu\n", (long unsigned) tmp_sub_window_size );
+  }
+  if ( tmp_pub_window_count     != this->pub_window_count ) {
+    this->pub_window_count = tmp_pub_window_count;
+    printf( "pub_window_count %lu\n", (long unsigned) tmp_pub_window_count );
+  }
+  if ( tmp_pub_window_autoscale != this->pub_window_autoscale ) {
+    this->pub_window_autoscale = tmp_pub_window_autoscale;
+    printf( "pub_window_autoscale %lu\n",
+            (long unsigned) tmp_pub_window_autoscale );
+  }
+  if ( tmp_sub_window_count     != this->sub_window_count ) {
+    this->sub_window_count = tmp_sub_window_count;
+    printf( "sub_window_count %lu\n", (long unsigned) tmp_sub_window_count );
+  }
+  if ( tmp_pub_window_ival      != this->pub_window_ival ) {
+    this->pub_window_ival = tmp_pub_window_ival;
+    printf( "pub_window_ival %lu\n", (long unsigned) tmp_pub_window_ival );
+  }
+  if ( tmp_sub_window_ival      != this->sub_window_ival ) {
+    this->sub_window_ival = tmp_sub_window_ival;
+    printf( "sub_window_ival %lu\n", (long unsigned) tmp_sub_window_ival );
+  }
+  if ( tmp_hb_interval          != this->user_db.hb_interval ) {
+    this->user_db.hb_interval = tmp_hb_interval;
+    printf( "hb_interval %u\n", tmp_hb_interval );
+  }
+  if ( tmp_reliability          != this->user_db.reliability ) {
+    this->user_db.reliability = tmp_reliability;
+    printf( "reliability %u\n", tmp_reliability );
+  }
+  if ( tmp_tcp_noencrypt        != this->tcp_noencrypt ) {
+    this->tcp_noencrypt = tmp_tcp_noencrypt;
+    printf( "tcp_noencrypt %s\n", tmp_tcp_noencrypt ? "true" : "false" );
+  }
+  if ( tmp_tcp_write_timeout    != this->poll.wr_timeout_ns ) {
+    this->poll.wr_timeout_ns = tmp_tcp_write_timeout;
+    this->poll.so_keepalive_ns = tmp_tcp_write_timeout;
+    printf( "tcp_write_timeout %lu\n", (long unsigned) tmp_tcp_write_timeout );
+  }
+  if ( tmp_tcp_write_highwater  != this->poll.send_highwater ) {
+    this->poll.send_highwater = tmp_tcp_write_highwater;
+    printf( "tcp_write_highwater %lu\n", (long unsigned) tmp_tcp_write_highwater );
+  }
+  if ( tmp_idle                 != this->idle_busy ) {
+    this->idle_busy = (uint32_t) tmp_idle;
+    printf( "idle_busy %lu\n", (long unsigned) tmp_idle );
+  }
+  if ( tmp_limit                != this->user_db.peer_dist.path_limit ) {
+    if ( tmp_limit > MAX_PATH_MASK )
+      tmp_limit = MAX_PATH_MASK + 1;
+    if ( tmp_limit > 0 ) {
+      this->user_db.peer_dist.path_limit = (uint32_t) tmp_limit;
+      printf( "path_limit %u\n", (uint32_t) tmp_limit );
+      this->user_db.peer_dist.invalidate( PATH_LIMIT_INV, 0 );
+    }
+  }
+  if ( tmp_tcp_conn_timeout     != (uint32_t) this->tcp_connect_timeout ) {
+    this->tcp_connect_timeout = tmp_tcp_conn_timeout;
+    printf( "tcp_connect_timeout %u\n", tmp_tcp_conn_timeout );
+  }
+  if ( tmp_want_msg_loss        != this->want_msg_loss_errors ) {
+    this->want_msg_loss_errors = tmp_want_msg_loss;
+    this->sub_db.set_msg_loss_mode( tmp_want_msg_loss );
+    printf( "msg_loss_errors %s\n", tmp_want_msg_loss ? "true" : "false" );
+  }
+  if ( tmp_blocked_read_rate != this->poll.blocked_read_rate ) {
+    this->poll.blocked_read_rate = tmp_blocked_read_rate;
+    printf( "blocked_read_rate %lu bytes\n", (long unsigned) tmp_blocked_read_rate );
+  }
+
   return true;
 }
 
@@ -456,6 +634,9 @@ SessionMgr::start( void ) noexcept
   printf( "%s: %s\n", P_TCP_IPV6ONLY, this->tcp_ipv4 &&
                                       ! this->tcp_ipv6 ? "true" : "false" );
   printf( "%s: %s\n", P_TCP_NOENCRYPT, this->tcp_noencrypt ? "true" : "false" );
+  printf( "%s: %s\n", P_MSG_LOSS_ERRORS, this->want_msg_loss_errors ? "true" : "false" );
+  printf( "%s: %u\n", P_PATH_LIMIT, this->user_db.peer_dist.path_limit );
+  printf( "%s: %" PRIu64 " bytes\n", P_BLOCKED_READ_RATE, this->poll.blocked_read_rate );
 
   char hstr[ 32 ], ipstr[ 32 ];
   TransportRvHost::ip4_hex_string( this->user_db.host_id, hstr );
@@ -687,12 +868,11 @@ SessionMgr::parse_msg_hdr( MsgFramePublish &fpub,  bool is_ipc ) noexcept
   if ( tflag != CABA_MCAST ) {
     if ( is_ipc )
       return FRAME_STATUS_MY_MSG;
-    uint8_t i;
     /* an inbox subject */
     if ( tflag == CABA_INBOX ) {
       if ( ( dec.msg->caba.get_opt() & CABA_OPT_ANY ) == 0 ) {
         /* match _I.Nonce. + hash( _I.Nonce. ) */
-        for ( i = 0; i < fpub.prefix_cnt; i++ ) {
+        for ( uint8_t i = 0; i < fpub.prefix_cnt; i++ ) {
           if ( fpub.hash[ i ] == this->ibx.hash &&
                fpub.prefix[ i ] == this->ibx.len ) {
             const char * num = &fpub.subject[ this->ibx.len ];
@@ -729,7 +909,7 @@ SessionMgr::parse_msg_hdr( MsgFramePublish &fpub,  bool is_ipc ) noexcept
       type = this->u_tab.lookup( fpub.subj_hash, fpub.subject_len );
       if ( type == U_NORMAL ) {
         /* control message: _S.JOIN. _S.LEAV. _P.PSUB. _P.PSTP. _M. */
-        for ( i = 0; i < fpub.prefix_cnt; i++ ) {
+        for ( uint8_t i = 0; i < fpub.prefix_cnt; i++ ) {
           /* match _M. + hash( _M. ) */
           if ( fpub.hash[ i ] == this->mch.hash &&
                fpub.prefix[ i ] == this->mch.len )
@@ -745,7 +925,7 @@ SessionMgr::parse_msg_hdr( MsgFramePublish &fpub,  bool is_ipc ) noexcept
       printf( "?? %.*s %s %s (%x)\n", (int) fpub.subject_len, fpub.subject,
               caba_type_flag_str( tflag ), publish_type_to_string( type ),
               fpub.subj_hash );
-      for ( i = 0; i < fpub.prefix_cnt; i++ ) {
+      for ( uint8_t i = 0; i < fpub.prefix_cnt; i++ ) {
         printf( "[%u] = %u.%x, type %s\n", i, fpub.prefix[ i ], fpub.hash[ i ],
                 publish_type_to_string( 
                   this->u_tab.lookup( fpub.hash[ i ], fpub.prefix[ i ] ) ) );
@@ -845,15 +1025,25 @@ IpcRoute::on_msg( EvPublish &pub ) noexcept
   }
   SeqnoArgs seq( this->mgr.timer_time );
   uint32_t  fmt = 0, hdr_len = 0, suf_len = 0;
+  uint16_t  path_select = dec.msg->caba.get_path(),
+            opt         = dec.msg->caba.get_opt();
 
   dec.get_ival<uint64_t>( FID_CHAIN_SEQNO, seq.chain_seqno );
   dec.get_ival<uint64_t>( FID_TIME, seq.time );
   dec.get_ival<uint32_t>( FID_FMT, fmt );
   dec.get_ival<uint32_t>( FID_HDR_LEN, hdr_len );
   dec.get_ival<uint32_t>( FID_SUF_LEN, suf_len );
-  SeqnoStatus status = this->sub_db.match_seqno( fpub, seq );
 
-  uint16_t opt = dec.msg->caba.get_opt();
+  SeqnoStatus status;
+  if ( ( opt & CABA_OPT_GLSNO ) == 0 )
+    status = this->sub_db.match_seqno( fpub, seq );
+  else if ( dec.seqno > n.glob_recv_seqno[ path_select ] ) {
+    n.glob_recv_seqno[ path_select ] = dec.seqno;
+    status = SEQNO_UID_NEXT;
+  }
+  else {
+    status = SEQNO_UID_REPEAT;
+  }
   if ( ( fpub.flags & MSG_FRAME_ACK_CONTROL ) == 0 ) {
     fpub.flags |= MSG_FRAME_ACK_CONTROL;
     if ( opt != CABA_OPT_NONE ) {
@@ -1336,7 +1526,7 @@ SessionMgr::on_msg( EvPublish &pub ) noexcept
     case U_INBOX_UCAST_RPY: /* _I.Nonce.ucast_rpy */
     case U_INBOX_ANY_RTE:   /* _I.Nonce.any, ipc_rt inbox */
     case U_INBOX_LOSS: {    /* _I.Nonce.loss      */
-      uint8_t  path_select = dec.msg->caba.get_path();
+      uint16_t path_select = dec.msg->caba.get_path();
       uint64_t recv_seqno  = n.inbox.next_path_recv( path_select );
       if ( dec.seqno > recv_seqno ) {
         if ( recv_seqno != 0 && dec.seqno != recv_seqno + 1 ) {
@@ -1444,7 +1634,7 @@ SessionMgr::dispatch_console( MsgFramePublish &fpub,  UserBridge &n,
 
   /* if _I.Nonce.<inbox_ret>, find the inbox_ret */
   if ( dec.inbox_ret != 0 || dec.type == U_INBOX_ANY ) {
-    uint8_t  path_select = dec.msg->caba.get_path();
+    uint16_t path_select = dec.msg->caba.get_path();
     uint64_t recv_seqno  = n.inbox.next_path_recv( path_select );
     if ( recv_seqno != 0 && dec.seqno != recv_seqno + 1 ) {
       n.printf(
@@ -1566,6 +1756,55 @@ SessionMgr::publish( PubMcastData &mc ) noexcept
     if ( caba_rtr_alert( mc.sub ) )
       fl.set_type( CABA_RTR_ALERT );
   }
+
+  if ( fl.get_type() == CABA_MCAST || is_mcast_prefix ) {
+    if ( mc.path == NO_PATH )
+      mc.path_select = this->user_db.peer_dist.hash_to_path( h );
+    else
+      mc.path_select = mc.path % this->user_db.peer_dist.get_path_count();
+    fl.set_path( mc.path_select );
+  }
+
+  if ( need_seqno ) {
+    RouteLoc loc;
+    Pub * p = this->sub_db.pub_tab.pub->find( h, mc.sub, mc.sublen, loc );
+
+    if ( p == NULL ) {
+      IpcSubjectMatch & sm = this->sub_db.ipc_sub_match;
+      switch ( sm.match( mc.sub, mc.sublen ) ) {
+        case IPC_NO_MATCH:
+          p = this->sub_db.pub_tab.upsert( h, mc.sub, mc.sublen, loc );
+          if ( p == NULL )
+            return false;
+          mc.seqno = p->next_seqno( loc.is_new, time, this->timer_time,
+                                    this->converge_seqno, chain_seqno );
+          this->user_db.msg_send_counter[ MCAST_SUBJECT ]++;
+          break;
+
+        case IPC_IS_INBOX:
+        case IPC_IS_INBOX_PREFIX: {
+          const char * host;
+          size_t       host_len;
+          sm.host( host, host_len );
+          uint32_t uid = this->sub_db.host_match( host, host_len );
+          dest_bridge_id = this->user_db.bridge_tab[ uid ];
+          if ( dest_bridge_id != NULL ) {
+            mc.seqno = dest_bridge_id->inbox.next_send( U_INBOX );
+            fl.set_type( CABA_INBOX );
+            break;
+          }
+        } /* FALLTHRU */
+        default:
+          mc.seqno   = ++this->user_db.glob_send_seqno[ mc.path_select ];
+          mc.option |= CABA_OPT_GLSNO;
+          time = 0;
+          chain_seqno = 0;
+          this->user_db.msg_send_counter[ MCAST_SUBJECT ]++;
+          break;
+      }
+    }
+  }
+#if 0
   if ( need_seqno ) {
     RouteLoc loc;
     Pub * p = this->sub_db.pub_tab.upsert( h, mc.sub, mc.sublen, loc );
@@ -1579,18 +1818,8 @@ SessionMgr::publish( PubMcastData &mc ) noexcept
       printf( "seqno frame jump\n" );
     }
   }
-
-  uint16_t option = mc.option;
-  option &= ~( CABA_OPT_MC_MASK << CABA_OPT_MC_SHIFT );
-  if ( fl.get_type() == CABA_MCAST ||
-       ( is_mcast_prefix && mc.path < COST_PATH_COUNT ) ) {
-    if ( mc.path >= COST_PATH_COUNT )
-      mc.path_select = caba_hash_to_path( h );
-    else
-      mc.path_select = mc.path;
-    option |= mc.path_select << CABA_OPT_MC_SHIFT;
-  }
-  fl.set_opt( option );
+#endif
+  fl.set_opt( mc.option );
 
   MsgEst e( mc.sublen );
   e.seqno       ()
@@ -1639,7 +1868,7 @@ SessionMgr::publish( PubMcastData &mc ) noexcept
   uint32_t         tport_id, rcnt;
   bool             b = true;
 
-  this->user_db.peer_dist.update_forward_cache( forward, 0, mc.path_select );
+  this->user_db.peer_dist.update_path( forward, mc.path_select );
   if ( forward.first( tport_id ) ) {
     do {
       rte = this->user_db.transport_tab.ptr[ tport_id ];
@@ -1684,12 +1913,15 @@ SessionMgr::forward_uid_inbox( TransportRoute &src_rte,  EvPublish &fwd,
   InboxBuf  ibx( n->bridge_id );
   CabaFlags fl( CABA_INBOX );
 
-  uint8_t path_select = 0;
+  uint16_t path_select = 0;
   UserRoute * u_ptr = NULL;
   if ( ! fwd.is_pub_type( PUB_TYPE_SERIAL ) ) {
-    path_select          = caba_hash_to_path( fwd.subj_hash );
-    UidSrcPath  & path   = n->src_path[ path_select ];
-    UserRoute   * u_path = n->user_route_ptr( this->user_db, path.tport );
+    path_select = this->user_db.peer_dist.hash_to_path( fwd.subj_hash );
+    ForwardCache & forward = this->user_db.forward_path[ path_select ];
+    this->user_db.peer_dist.update_path( forward, path_select );
+
+    UidSrcPath & path  = forward.path[ uid ];
+    UserRoute * u_path = n->user_route_ptr( this->user_db, path.tport, 1 );
     if ( u_path->is_valid() )
       u_ptr = u_path;
   }
@@ -1733,7 +1965,8 @@ SessionMgr::forward_uid_inbox( TransportRoute &src_rte,  EvPublish &fwd,
     m.hdr_len( fwd.hdr_len );
   if ( fwd.suf_len != 0 )
     m.suf_len( fwd.suf_len );
-  fl.set_opt_path( CABA_OPT_ANY, path_select );
+  fl.set_opt( CABA_OPT_ANY );
+  fl.set_path( path_select );
 
   uint32_t h = ibx.hash();
 
@@ -1813,26 +2046,40 @@ SessionMgr::forward_ipc( TransportRoute &src_rte,  EvPublish &pub ) noexcept
 {
   if ( pub.is_queue_pub() )
     return this->forward_ipc_queue( src_rte, pub );
-  CabaFlags fl( CABA_MCAST );
-  RouteLoc  loc;
-  Pub * p = this->sub_db.pub_tab.pub->find( pub.subj_hash, pub.subject,
-                                            pub.subject_len, loc );
-  if ( p == NULL ) {
+
+  IpcSubjectMatch & sm = this->sub_db.ipc_sub_match;
+  uint32_t x = sm.match( pub.subject, pub.subject_len );
+  if ( x == IPC_IS_INBOX || x == IPC_IS_INBOX_PREFIX ) {
     const char * host;
     size_t       host_len;
-    if ( SubDB::match_inbox( pub.subject, pub.subject_len, host, host_len ) )
-      return this->forward_inbox( src_rte, pub, host, host_len );
-    p = this->sub_db.pub_tab.upsert( pub.subj_hash, pub.subject,
-                                     pub.subject_len, loc );
+    sm.host( host, host_len );
+    return this->forward_inbox( src_rte, pub, host, host_len );
+  }
+
+  CabaFlags fl( CABA_MCAST );
+  RouteLoc  loc;
+  uint64_t  time, chain_seqno, seqno;
+  uint16_t  path_select = 0;
+
+  if ( ! pub.is_pub_type( PUB_TYPE_SERIAL ) ) {
+    path_select = this->user_db.peer_dist.hash_to_path( pub.subj_hash );
+    fl.set_path( path_select );
+  }
+  if ( x == IPC_NO_MATCH ) {
+    Pub * p = this->sub_db.pub_tab.upsert( pub.subj_hash, pub.subject,
+                                           pub.subject_len, loc );
     if ( p == NULL ) {
       fprintf( stderr, "error forward_ipc\n" );
       return true;
     }
+    seqno = p->next_seqno( loc.is_new, time, this->timer_time,
+                           this->converge_seqno, chain_seqno );
   }
-  uint64_t time, seqno, chain_seqno;
-  seqno = p->next_seqno( loc.is_new, time, this->timer_time,
-                         this->converge_seqno, chain_seqno );
-
+  else {
+    time = chain_seqno = 0;
+    seqno = ++this->user_db.glob_send_seqno[ path_select ];
+    fl.set_opt( CABA_OPT_GLSNO );
+  }
   d_sess( "-> fwd_ipc: %.*s seqno %" PRIu64 " reply %.*s "
           "(len=%u, from %s, fd %d, enc %x)\n",
           (int) pub.subject_len, pub.subject, seqno,
@@ -1841,11 +2088,6 @@ SessionMgr::forward_ipc( TransportRoute &src_rte,  EvPublish &pub ) noexcept
 
   const void * frag = NULL;
   size_t frag_sz = 0;
-  uint8_t path_select = 0;
-  if ( ! pub.is_pub_type( PUB_TYPE_SERIAL ) ) {
-    path_select = caba_hash_to_path( pub.subj_hash );
-    fl.set_opt_path( 0, path_select );
-  }
   MsgEst e( pub.subject_len );
   e.seqno       ()
    .chain_seqno ()
@@ -1901,7 +2143,7 @@ SessionMgr::forward_ipc( TransportRoute &src_rte,  EvPublish &pub ) noexcept
   bool             b = true;
 
   this->user_db.msg_send_counter[ MCAST_SUBJECT ]++;
-  this->user_db.peer_dist.update_forward_cache( forward, 0, path_select );
+  this->user_db.peer_dist.update_path( forward, path_select );
   if ( forward.first( tport_id ) ) {
     do {
       rte = this->user_db.transport_tab.ptr[ tport_id ];
@@ -2106,7 +2348,7 @@ SessionMgr::send_ack( const MsgFramePublish &pub,  UserBridge &n,
   dec.get_ival<uint64_t>( FID_SEQNO, ref_seqno );
   if ( ! dec.get_ival<uint64_t>( FID_STAMP, stamp ) || stamp == 0 )
     stamp = current_realtime_ns();
-  uint8_t  path_select = dec.msg->caba.get_path();
+  uint16_t  path_select = dec.msg->caba.get_path();
   d = this->user_db.peer_dist.calc_transport_cache( n.uid, pub.rte.tport_id,
                                                     path_select );
   MsgCat m;

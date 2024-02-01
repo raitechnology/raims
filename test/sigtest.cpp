@@ -28,10 +28,7 @@ msg_test( void )
   e.seqno()
    .tport( 5 )
    .tportid()
-   .cost()
-   .cost2()
-   .cost3()
-   .cost4()
+   .adj_cost( 6 )
    .pk_sig();
   MsgCat m;
   m.reserve( e.sz );
@@ -39,10 +36,7 @@ msg_test( void )
    .seqno( 1 )
    .tport( "tport", 5 )
    .tportid( 1 )
-   .cost( 1000 )
-   .cost2( 1000 )
-   .cost3( 1000 )
-   .cost4( 1000 )
+   .adj_cost( "hello", 6 )
    .pk_sig();
   m.close( e.sz, 0x1234, CABA_INBOX );
   m.sign_dsa( "test", 4, key, key2, dsa );

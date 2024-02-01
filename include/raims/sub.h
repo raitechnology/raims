@@ -498,12 +498,14 @@ struct SeqnoArgs {
              stamp,       /* last publish recvd */
              chain_seqno; /* previous seqno published */
   SubOnMsg * cb;          /* callback for subscription */
-  uint32_t   tport_mask;  /* tports matched */
+  uint32_t   tport_mask,  /* tports matched */
+             x_hash;
   uint16_t   msg_loss;
 
   SeqnoArgs( uint64_t time )
     : time( 0 ), last_seqno( 0 ), last_time( 0 ), start_seqno( 0 ),
-     stamp( time ), chain_seqno( 0 ), cb( 0 ), tport_mask( 0 ), msg_loss( 0 ) {}
+     stamp( time ), chain_seqno( 0 ), cb( 0 ), tport_mask( 0 ), x_hash( 0 ),
+     msg_loss( 0 ) {}
 };
 
 struct SubSeqno {
@@ -767,6 +769,30 @@ struct QueueSubTab {
                SubList &l ) noexcept;
 };
 
+enum {
+  /* match return values */
+  IPC_NO_MATCH = 0, IPC_IS_INBOX  = 1, IPC_IS_INBOX_PREFIX = 2
+};
+struct IpcSubjectMatch {
+  const char  * pre,
+              * name,
+              * subj;
+  size_t        pre_len,
+                name_len,
+                subj_len;
+  const char ** match_sub;
+  size_t      * match_len,
+                match_cnt;
+  uint32_t      no_match_value,
+                no_svc_value;
+  IpcSubjectMatch( const char **m, size_t *l,  size_t cnt,
+                   uint32_t n = IPC_NO_MATCH )
+    : match_sub( m ), match_len( l ), match_cnt( cnt ),
+      no_match_value( n ), no_svc_value( n ) {}
+  int match( const char *str,  size_t str_len ) noexcept;
+  void host( const char *&host,  size_t &host_len ) noexcept;
+};
+
 struct SubDB {
   UserDB           & user_db;
   SessionMgr       & mgr;
@@ -789,6 +815,7 @@ struct SubDB {
                      ipc;
   QueueSubArray      queue_tab;
   kv::RoutePublish & uid_route;
+  IpcSubjectMatch    ipc_sub_match;
 
   SubDB( kv::EvPoll &p,  UserDB &udb,  SessionMgr &smg ) noexcept;
 
@@ -803,6 +830,7 @@ struct SubDB {
     this->sub_seqno_sum += new_val;
     old_val = new_val;
   }
+  void set_msg_loss_mode( bool want_msg_loss_errors ) noexcept;
   uint64_t sub_start( SubArgs &ctx ) noexcept;
   uint64_t sub_stop( SubArgs &ctx ) noexcept;
   void update_bloom( SubArgs &ctx ) noexcept;
@@ -832,6 +860,7 @@ struct SubDB {
   uint64_t ipc_psub_start( kv::NotifyPattern &pat, uint32_t tport_id ) noexcept;
   uint64_t ipc_psub_stop( kv::NotifyPattern &pat, uint32_t tport_id ) noexcept;
   SeqnoStatus match_seqno( const MsgFramePublish &pub,SeqnoArgs &ctx ) noexcept;
+  SeqnoStatus match_xxx( const MsgFramePublish &pub, SeqnoArgs &ctx ) noexcept;
   bool match_subscription( const kv::EvPublish &pub,  SeqnoArgs &ctx ) noexcept;
 
   void resize_bloom( void ) noexcept;
@@ -898,22 +927,11 @@ struct SubDB {
     if ( this->reply.gc( cur_mono ) )
       this->clear_memo( cur_mono );
   }
-
-  enum {
-  IPC_NO_MATCH = 0, IPC_IS_QUEUE = 1, IPC_IS_INBOX = 2, IPC_IS_INBOX_PREFIX = 3
-  };
-  static int match_ipc_subject( const char *str,  size_t str_len,
-                                const char *&pre,  size_t &pre_len,
-                                const char *&name,  size_t &name_len,
-                                const char *&subj,  size_t &subj_len,
-              const int match_flag /* IPC_IS_QUEUE | IPC_IS_INBOX */ ) noexcept;
   static int match_ipc_any( const char *str,  size_t str_len ) noexcept;
+
   static bool match_inbox( const char *str,  size_t str_len,
                            const char *&host,  size_t &host_len ) noexcept;
-  static bool match_queue( const char *str,  size_t str_len,
-                           const char *&pre,  size_t &pre_len,
-                           const char *&name,  size_t &name_len,
-                           const char *&subj,  size_t &subj_len ) noexcept;
+
   void queue_sub_update( kv::NotifyQueue &sub,  uint32_t tport_id,
                          uint32_t refcnt ) noexcept;
   void queue_psub_update( kv::NotifyPatternQueue &pat,  uint32_t tport_id,

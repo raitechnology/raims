@@ -38,15 +38,15 @@ TransportRoute::TransportRoute( kv::EvPoll &p,  SessionMgr &m,
       mesh_csum( &this->mesh_csum2 ),
       hb_time( 0 ), hb_mono_time( 0 ), hb_seqno( 0 ),
       stats_seqno( 0 ), timer_id( ++m.next_timer ), delta_recv( 0 ),
-      tport_id( m.user_db.next_tport_id() ), hb_count( 0 ),
-      last_hb_count( 0 ), connect_count( 0 ), last_connect_count( 0 ),
+      tport_id( m.user_db.next_tport_id() ), hb_count( 0 ), hb_fast( 0 ),
+      connect_count( 0 ), last_connect_count( 0 ),
       state( f ), mesh_id( 0 ), dev_id( 0 ), listener( 0 ),
       connect_ctx( 0 ), notify_ctx( 0 ), pgm_tport( 0 ), ibx_tport( 0 ),
       rv_svc( 0 ), mesh_url_hash( 0 ),
       conn_hash( 0 ), ucast_url_hash( 0 ), oldest_uid( 0 ),
-      ext( 0 ), mesh_cache( 0 ), svc( s ), transport( t )
+      ext( 0 ), mesh_cache( 0 ), initial_cost( COST_DEFAULT ),
+      svc( s ), transport( t )
 {
-  uint8_t i;
   ::memset( &this->inbox, 0, sizeof( this->inbox ) );
   ::memset( &this->mcast, 0, sizeof( this->mcast ) );
   this->inbox.fd = -1;
@@ -54,26 +54,24 @@ TransportRoute::TransportRoute( kv::EvPoll &p,  SessionMgr &m,
   this->uid_connected.tport      = t.tport;
   this->uid_connected.tport_type = t.type;
   this->uid_connected.tport_id   = this->tport_id;
-  for ( i = 0; i < COST_PATH_COUNT; i++ )
-    this->router_rt[ i ] = NULL;
   /* parse config that has cost, cost2 ... */
   ConfigTree::StringPairArray el;
   t.get_route_pairs( R_COST, el );
   /* parse config that uses array of cost */
-  if ( el.count > 0 )
+  if ( el.count > 0 ) {
+    const char *args[ 128 ];
+    size_t argc;
+    for ( argc = 0; argc < 128 && argc < el.count; argc++ )
+      args[ argc ] = el[ argc ]->value.val;
     this->uid_connected.is_advertised = true;
-
-  int cost, j = 0;
-  for ( i = 0; i < COST_PATH_COUNT; i++ ) {
-    if ( i >= el.count || ! el[ i ]->value.get_int( cost ) || cost <= 0 )
-      cost = ( i == 0 ? COST_DEFAULT : this->uid_connected.cost[ j++ ] );
-    this->uid_connected.cost[ i ] = cost;
-    this->initial_cost[ i ] = cost;
+    this->initial_cost.parse( args, argc );
   }
-  if ( debug_tran )
-    printf( "transport.%u(%s) [%u,%u,%u,%u] created\n", this->tport_id, t.tport.val,
-             this->uid_connected.cost[ 0 ], this->uid_connected.cost[ 1 ],
-             this->uid_connected.cost[ 2 ], this->uid_connected.cost[ 3 ] );
+  this->uid_connected.cost = this->initial_cost;
+  if ( debug_tran ) {
+    char buf[ 80 ];
+    printf( "transport.%u(%s) [%s] created\n", this->tport_id, t.tport.val,
+             this->initial_cost.str( buf, sizeof( buf ) ) );
+  }
   this->sock_opts = OPT_NO_POLL;
   /* external tports do not have protocol for link state routing:
    *   _I.inbox, _X.HB, _Z.ADD, _Z.BLM, _Z.ADJ, _S.JOIN, _P.PSUB, etc */
@@ -145,8 +143,7 @@ TransportRoute::init( void ) noexcept
     return status;
   this->mgr.router_set.add( pfd );
   /* router_rt tport causes msgs to flow from tport -> routable user subs */
-  for ( uint8_t i = 0; i < COST_PATH_COUNT; i++ )
-    this->router_rt[ i ] = this->sub_route.create_bloom_route( pfd, NULL, i );
+  this->router_rt = this->sub_route.create_bloom_route( pfd, NULL, ANY_SHARD );
   /*this->user_db.check_bloom_route( *this, 0 );*/
   return 0;
 }
@@ -198,31 +195,20 @@ TransportRoute::printf( const char *fmt,  ... ) const noexcept
 }
 
 bool
-TransportRoute::update_cost( UserBridge &n,  StringVal &tport,  uint32_t *cost,
+TransportRoute::update_cost( UserBridge &n,  StringVal &tport,  AdjCost *cost,
                              uint32_t rem_tport_id,  const char *s ) noexcept
 {
-  uint8_t i, eq_count = 0;
-  uint32_t *cost2 = this->uid_connected.cost;
+  AdjCost &cost2 = this->uid_connected.cost;
   StringVal & my_tport = this->transport.tport;
   bool updated = false, cost_updated = false, ok = true;
-  uint32_t update_cost[ 4 ] = {0,0,0,0};
+  AdjCost update_cost( COST_DEFAULT );
+  char buf[ 64 ], buf2[ 64 ];
   if ( cost != NULL )
-    ::memcpy( update_cost, cost, sizeof( update_cost ) );
+    update_cost = *cost;
 
-  if ( this->uid_connected.cost[ 0 ] == COST_BAD ) {
-#if 0
-    if ( cost != NULL && this->uid_connected.is_advertised ) {
-      if ( ::memcmp( cost, this->initial_cost,
-                     sizeof( this->initial_cost ) ) == 0 ) {
-        if ( my_tport.equals( tport ) )
-          n.printf( "cost [%u,%u,%u,%u] is good again %s rem %u fd=%u (%s)\n",
-                     cost[ 0 ], cost[ 1 ], cost[ 2 ], cost[ 3 ], this->name,
-                     rem_tport_id, n.user_route->mcast.fd, s );
-      }
-    }
-#endif
+  if ( this->uid_connected.cost.max_cost == COST_BAD )
     return false;
-  }
+
   if ( this->uid_connected.rem_uid != 0 && ! this->is_mcast() ) {
     if ( n.uid != this->uid_connected.rem_uid ||
          rem_tport_id != this->uid_connected.rem_tport_id ) {
@@ -234,8 +220,10 @@ TransportRoute::update_cost( UserBridge &n,  StringVal &tport,  uint32_t *cost,
   }
   if ( ! my_tport.equals( tport ) ) {
     if ( this->is_mesh() ) {
-      ok = false;
-      goto invalid_cost;
+      if ( this->uid_connected.rem_uid != n.uid ||
+           this->uid_connected.rem_tport_id != rem_tport_id )
+        n.printe( "peer tport[%.*s] mesh name not the same [%.*s]\n",
+              tport.len, tport.val, my_tport.len, my_tport.val );
     }
   }
   if ( this->uid_connected.rem_uid == 0 ) {
@@ -266,45 +254,46 @@ TransportRoute::update_cost( UserBridge &n,  StringVal &tport,  uint32_t *cost,
           this->uid_connected.rem_tport_id, s );
   }
   if ( cost != NULL ) {
-    for ( i = 0; i < COST_PATH_COUNT; i++ ) {
-      if ( cost[ i ] == cost2[ i ] )
-        eq_count++;
-      else {
-        if ( this->uid_connected.is_advertised ) {
-          ok = false;
-          goto invalid_cost;
-        }
+    if ( ! cost2.equals( update_cost ) ) {
+      bool chg = true;
+      if ( this->uid_connected.is_advertised ) {
+        chg = ( n.start_time < this->user_db.start_time );
+        n.printe( "peer tport[%.*s] cost inconsistent, %s "
+                  "cost [%s] -> [%s] fd=%u (%s)\n",
+              tport.len, tport.val, chg ? "changing" : "ignoring",
+              update_cost.str( buf, sizeof( buf ) ),
+              cost2.str( buf2, sizeof( buf2 ) ), n.user_route->mcast.fd, s );
       }
-    }
-    if ( eq_count != COST_PATH_COUNT ) {
-      for ( i = 0; i < COST_PATH_COUNT; i++ )
-        this->uid_connected.cost[ i ] = cost[ i ];
-      updated = true;
-      cost_updated = true;
+      if ( chg ) {
+        this->uid_connected.cost = update_cost;
+        updated = true;
+        cost_updated = true;
+      }
     }
   }
   /* will update adjacency later if not authenticated */
   if ( ! updated )
     return true;
-  if ( debug_tran )
-    n.printf( "update cost [%u,%u,%u,%u] on %s (rem=%u) %s fd=%u (%s)\n",
-              update_cost[ 0 ], update_cost[ 1 ], update_cost[ 2 ],
-              update_cost[ 3 ], this->name, rem_tport_id,
+  if ( debug_tran ) {
+    n.printf( "update cost [%s] on %s (rem=%u) %s fd=%u (%s)\n",
+              update_cost.str( buf, sizeof( buf ) ), this->name, rem_tport_id,
               n.is_set( AUTHENTICATED_STATE ) ? "auth" : "not",
               n.user_route->mcast.fd, s );
 
+  }
+#if 0
   if ( 0 ) {
 invalid_cost:;
-    n.printe( "conflicting tport[%.*s] cost[%u,%u,%u,%u] (advert)"
-              " != tport[%.*s] [%u,%u,%u,%u] rte=%s remote=%u fd=%u (%s)\n",
+    n.printe( "conflicting tport[%.*s] cost[%s] (advert)"
+              " != tport[%.*s] [%s] rte=%s remote=%u fd=%u (%s)\n",
                 tport.len, tport.val,
-                update_cost[ 0 ], update_cost[ 1 ], update_cost[ 2 ],
-                update_cost[ 3 ], my_tport.len, my_tport.val,
-                cost2[ 0 ], cost2[ 1 ], cost2[ 2 ], cost2[ 3 ],
+                update_cost.str( buf, sizeof( buf ) ),
+                my_tport.len, my_tport.val,
+                cost2.str( buf2, sizeof( buf2 ) ),
                 this->name, rem_tport_id, n.user_route->mcast.fd, s );
-    for ( i = 0; i < COST_PATH_COUNT; i++ )
-      this->uid_connected.cost[ i ] = COST_BAD;
+    this->uid_connected.cost.max_cost = COST_BAD;
   }
+#endif
   this->user_db.peer_dist.invalidate( ADVERTISED_COST_INV, n.uid );
   this->user_db.adjacency_change.append( n.uid, this->tport_id,
                                   this->user_db.link_state_seqno + 1, true );
@@ -318,11 +307,8 @@ invalid_cost:;
           continue;
         TransportRoute *rte = this->user_db.transport_tab.ptr[ id ];
         if ( ! rte->is_shutdown() ) {
-          if ( rte->is_mesh() &&
-               rte->mesh_id == this->mesh_id ) {
-            for ( i = 0; i < COST_PATH_COUNT; i++ )
-              rte->uid_connected.cost[ i ] = cost[ i ];
-          }
+          if ( rte->is_mesh() && rte->mesh_id == this->mesh_id )
+            rte->uid_connected.cost = update_cost;
         }
       }
     }
@@ -436,18 +422,22 @@ TransportRoute::on_msg( EvPublish &pub ) noexcept
   if ( dec.msg->caba.get_type() == CABA_INBOX &&
        (dst = this->user_db.is_inbox_sub( pub.subject,
                                           pub.subject_len )) != NULL ) {
-    UidSrcPath & path = dst->src_path[ path_select ];
-    if ( path.tport != this->tport_id ) {
-      UserRoute * u_path = dst->user_route_ptr( this->user_db, path.tport );
-      if ( u_path->is_valid() ) {
-        d_tran( "transport_route: inbox (%.*s) -> %u\n",
-                (int) pub.subject_len, pub.subject, path.tport );
-        /*this->msgs_sent++;
-        this->bytes_sent += pub.msg_len;*/
-        bool b = this->user_db.forward_to_inbox(
-                   *dst, pub.subject, pub.subject_len, pub.subj_hash,
-                   pub.msg, pub.msg_len, this, NULL, 0, pub.src_route, u_path );
-        return this->check_flow_control( b );
+    ForwardCache & forward = this->user_db.forward_path[ path_select ];
+    this->user_db.peer_dist.update_path( forward, path_select );
+    if ( dst->uid < this->user_db.peer_dist.max_uid ) {
+      UidSrcPath & path = forward.path[ dst->uid ];
+      if ( path.tport != this->tport_id && path.cost != 0 ) {
+        UserRoute * u_path = dst->user_route_ptr( this->user_db, path.tport, 26 );
+        if ( u_path->is_valid() ) {
+          d_tran( "transport_route: inbox (%.*s) -> %u\n",
+                  (int) pub.subject_len, pub.subject, path.tport );
+          /*this->msgs_sent++;
+          this->bytes_sent += pub.msg_len;*/
+          bool b = this->user_db.forward_to_inbox(
+                     *dst, pub.subject, pub.subject_len, pub.subj_hash,
+                     pub.msg, pub.msg_len, this, NULL, 0, pub.src_route, u_path );
+          return this->check_flow_control( b );
+        }
       }
     }
   }
@@ -467,7 +457,7 @@ TransportRoute::on_msg( EvPublish &pub ) noexcept
                      total_rcnt = 0;
     bool             b = true;
     pub.shard = path_select;
-    this->user_db.peer_dist.update_forward_cache( forward, n.uid, path_select );
+    this->user_db.peer_dist.update_source_path( forward, n.uid, path_select );
     if ( forward.first( tport_id ) ) {
       do {
         rte = this->user_db.transport_tab.ptr[ tport_id ];
@@ -1053,9 +1043,9 @@ static inline int src_type_flag( NotifySub &sub ) {
     fl |= IS_QUEUE;
   switch ( SubDB::match_ipc_any( sub.subject, sub.subject_len ) ) {
     default: break;
-    case SubDB::IPC_IS_INBOX_PREFIX:
-    case SubDB::IPC_IS_INBOX: fl |= IS_INBOX; break;
-    case SubDB::IPC_IS_QUEUE: fl |= IS_QUEUE; break;
+    case IPC_IS_INBOX_PREFIX:
+    case IPC_IS_INBOX: fl |= IS_INBOX; break;
+    /*case IPC_IS_QUEUE: fl |= IS_QUEUE; break;*/
   }
   return fl;
 }
@@ -1065,9 +1055,9 @@ static inline int src_type_flag( NotifyPattern &pat ) {
     fl |= IS_QUEUE;
   switch ( SubDB::match_ipc_any( pat.pattern, pat.pattern_len ) ) {
     default: break;
-    case SubDB::IPC_IS_INBOX_PREFIX:
-    case SubDB::IPC_IS_INBOX: fl |= IS_INBOX; break;
-    case SubDB::IPC_IS_QUEUE: fl |= IS_QUEUE; break;
+    case IPC_IS_INBOX_PREFIX:
+    case IPC_IS_INBOX: fl |= IS_INBOX; break;
+    /*case IPC_IS_QUEUE: fl |= IS_QUEUE; break;*/
   }
   return fl;
 }

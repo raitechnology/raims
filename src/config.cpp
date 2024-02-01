@@ -61,7 +61,9 @@ static struct ArrayParse users_fields[] = {
   { "expires", &ConfigDB::parse_users_expires, MD_STRING },
   { "revoke",  &ConfigDB::parse_users_revoke,  MD_STRING },
   { "pri",     &ConfigDB::parse_users_pri,     MD_STRING },
-  { "pub",     &ConfigDB::parse_users_pub,     MD_STRING }
+  { "pub",     &ConfigDB::parse_users_pub,     MD_STRING },
+  { "parameters", &ConfigDB::parse_users_parameters, MD_MESSAGE },
+  { "startup", &ConfigDB::parse_users_startup, MD_MESSAGE }
 };
 static struct ObjectParse users_obj = {
   users_fields, ASZ( users_fields ), &ConfigDB::create_user
@@ -452,6 +454,11 @@ ConfigJson::copy( const ConfigTree::User &u ) noexcept
   this->push_field_s( user, revoke_s, u.revoke );
   this->push_field_s( user, pri_s, u.pri );
   this->push_field_s( user, pub_s, u.pub );
+
+  JsonObject * param = this->copy( u.parameters, false );
+  this->push_field( user, parameters_s, param );
+  JsonObject * startup = this->copy( u.startup, false );
+  this->push_field( user, startup_s, startup );
   return user;
 }
 
@@ -993,14 +1000,14 @@ ConfigTree::resolve( const char *us,  User *&usrp,  Service *&svc ) noexcept
   if ( sv != NULL )
     svc = this->find_service( sv, s_len ); /* us == service */
   if ( svc != NULL )
-    usrp = this->find_user( *svc, us, u_len ); /* user.service */
+    usrp = this->find_user( svc, us, u_len ); /* user.service */
   if ( svc != NULL && usrp != NULL )
     return true;
 
   if ( svc == NULL ) {
     svc = this->services.hd;
     if ( usrp == NULL ) {
-      usrp = this->find_user( *svc, sv, s_len ); /* us == user, service = default */
+      usrp = this->find_user( svc, sv, s_len ); /* us == user, service = default */
       if ( usrp != NULL )
         return true;
     }
@@ -1015,14 +1022,17 @@ ConfigTree::resolve( const char *us,  User *&usrp,  Service *&svc ) noexcept
 }
 
 ConfigTree::User *
-ConfigTree::find_user( ConfigTree::Service &svc,  const char *usr,
+ConfigTree::find_user( ConfigTree::Service *svc,  const char *usr,
                        size_t len ) noexcept
 {
   if ( usr == NULL || len == 0 )
     return NULL;
   for ( ConfigTree::User *u = this->users.hd; u != NULL; u = u->next ) {
-    if ( u->user.equals( usr, len ) && u->svc.equals( svc.svc ) )
-      return u;
+    if ( u->user.equals( usr, len ) ) {
+      if ( ( svc == NULL && u->svc.is_null() ) ||
+           ( svc != NULL && u->svc.equals( svc->svc ) ) )
+        return u;
+    }
   }
   return NULL;
 }
@@ -1487,6 +1497,18 @@ int ConfigDB::parse_users_pri( MDMsg &msg, MDName &, MDReference &mref ) noexcep
 int ConfigDB::parse_users_pub( MDMsg &msg, MDName &, MDReference &mref ) noexcept {
   return this->config_string( "user.pub", msg, mref, this->u->pub );
 }
+/* parse parameters : { parm list } */
+int
+ConfigDB::parse_users_parameters( MDMsg &msg,  MDName &name, MDReference &mref ) noexcept {
+  return this->parse_object_list( "user.parameters", msg, name, mref,
+                                  this->u->parameters );
+}
+/* parse startup : { parm list } */
+int
+ConfigDB::parse_users_startup( MDMsg &msg,  MDName &name, MDReference &mref ) noexcept {
+  return this->parse_object_list( "user.startup", msg, name, mref,
+                                  this->u->startup );
+}
 /* parse svc : name */
 int ConfigDB::parse_services_svc( MDMsg &msg, MDName &, MDReference &mref ) noexcept {
   return this->config_string( "service.svc", msg, mref, this->s->svc );
@@ -1805,10 +1827,17 @@ bool
 ConfigDB::check_strings( ConfigTree::User &u,  StringTab &str,
                          MDOutput &p ) noexcept
 {
+  ConfigTree::Parameters * pa;
   bool b = true;
   b &= this->check_string( u.user, str, "user.user", p );
-  b &= this->check_string( u.svc, str, "user.svc", p );
-  b &= this->check_string( u.create, str, "user.create", p );
+  if ( ! this->check_string( u.svc, str, NULL, p ) ) {
+    u.svc.val = NULL;
+    u.svc.len = 0;
+  }
+  if ( ! this->check_string( u.create, str, NULL, p ) ) {
+    u.create.val = NULL;
+    u.create.len = 0;
+  }
   if ( ! this->check_string( u.expires, str, NULL, p ) ) {
     u.expires.val = NULL;
     u.expires.len = 0;
@@ -1821,7 +1850,14 @@ ConfigDB::check_strings( ConfigTree::User &u,  StringTab &str,
     u.pri.val = NULL;
     u.pri.len = 0;
   }
-  b &= this->check_string( u.pub, str, "user.pub", p );
+  if ( ! this->check_string( u.pub, str, NULL, p ) ) {
+    u.pub.val = NULL;
+    u.pub.len = 0;
+  }
+  for ( pa = u.parameters.hd; pa != NULL; pa = pa->next )
+    b &= this->check_strings( *pa, this->str, p );
+  for ( pa = u.startup.hd; pa != NULL; pa = pa->next )
+    b &= this->check_strings( *pa, this->str, p );
   return b;
 }
 
@@ -2145,6 +2181,57 @@ ConfigTree::ParametersList::remove( StringTab &st,  const char *name ) noexcept
       last = sp;
       sp = sp->next;
     }
+  }
+  return false;
+}
+
+bool
+ConfigTree::ParametersList::get_bytes( const char *name,  uint64_t &n ) noexcept
+{
+  const char * val;
+  if ( this->find( name, val, NULL ) ) {
+    if ( ConfigTree::string_to_bytes( val, n ) )
+      return true;
+    fprintf( stderr, "bad config parameter %s, val: \"%s\"\n", name, val );
+  }
+  return false;
+}
+
+bool
+ConfigTree::ParametersList::get_nanos( const char *name,  uint64_t &n ) noexcept
+{
+  const char * val;
+  if ( this->find( name, val, NULL ) ) {
+    if ( ConfigTree::string_to_nanos( val, n ) )
+      return true;
+    fprintf( stderr, "bad config parameter %s, val: \"%s\"\n", name, val );
+  }
+  return false;
+}
+
+bool
+ConfigTree::ParametersList::get_secs( const char *name,  uint32_t &s ) noexcept
+{
+  const char * val;
+  uint64_t u;
+  if ( this->find( name, val, NULL ) ) {
+    if ( ConfigTree::string_to_secs( val, u ) ) {
+      s = (uint32_t) u;
+      return true;
+    }
+    fprintf( stderr, "bad config parameter %s, val: \"%s\"\n", name, val );
+  }
+  return false;
+}
+
+bool
+ConfigTree::ParametersList::get_bool( const char *name,  bool &b ) noexcept
+{
+  const char * val;
+  if ( this->find( name, val, NULL ) ) {
+    if ( ConfigTree::string_to_bool( val, b ) )
+      return true;
+    fprintf( stderr, "bad config parameter %s, val: \"%s\"\n", name, val );
   }
   return false;
 }

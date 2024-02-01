@@ -72,7 +72,10 @@
       numIter : 30000
     };
 
-    var cy = null;
+    var cy          = null;
+    var graphs      = @(graph_data);
+    var graph_state = @(graph_state);
+
     function init_graph( els ) {
       let container = document.getElementById( "cy" );
 
@@ -89,6 +92,8 @@
               'background-color': 'data(color)',
               'label': 'data(label)',
               'color': 'data(step)',
+              'text-outline-width': '1px',
+              'text-outline-color': 'white',
               'padding': '0px',
               'border-color': 'data(step)',
               'border-width': '1px',
@@ -110,6 +115,19 @@
 
         elements: els
       });
+      if ( graph_state != null ) {
+        document.getElementById("random_layout").checked = graph_state.rand;
+        if ( ! graph_state.rand ) {
+          cy.nodes().forEach( node => {
+            let p = graph_state.pos[ node.id() ];
+            if ( p ) {
+              node.position( p );
+            }
+          });
+          cy.zoom( graph_state.zoom );
+          cy.pan( graph_state.pan );
+        }
+      }
     };
 
     function node_data( node ) {
@@ -136,25 +154,57 @@
         }
       };
     };
-    var graphs = @(graph_data);
 
-    var max_uid = 0;
+    var max_uid  = 0;
     var cur_path = 0;
-    function reload_graph( n ) {
+
+    function get_cy_state() {
+      let saved_pos = {};
+      cy.nodes().forEach( node => {
+        saved_pos[ node.id() ] = node.position();
+      });
+      return {
+        pos: saved_pos,
+        zoom: cy.zoom(),
+        pan: cy.pan(),
+        rand: ( document.getElementById("random_layout").checked )
+      };
+    }
+    function reload_graph() {
+      let state;
+      let sel   = document.getElementById("showpath");
+      let n     = sel.selectedIndex;
+      if ( document.getElementById("random_layout").checked )
+        state = null;
+      else
+        state = get_cy_state();
       if ( graphs != null ) {
         cy.elements().remove();
         cy.add( transform( graphs[ n ] ) );
         seed = 0x7f4a7c13;
+        if ( state == null )
+          layout_opts.randomize = true;
+        else
+          layout_opts.randomize = false;
         cy.layout( layout_opts ).run();
+        if ( state != null ) {
+          cy.nodes().forEach( node => {
+            let p = state.pos[ node.id() ];
+            if ( p ) {
+              node.position( p );
+            }
+          });
+          cy.zoom( state.zoom );
+          cy.pan( state.pan );
+        }
       }
-      document.getElementById("p" + cur_path).checked = false;
       cur_path = n;
       document.getElementById("savesvg").value = "path" + ( n + 1 ) + ".svg";
     }
     function transform( graph ) {
       let elements = [];
-      let gn = graph.nodes,
-          gl = graph.links,
+      let gn  = graph.nodes,
+          gl  = graph.links,
           gl2 = null;
       let i, j;
       max_uid = gn.length;
@@ -171,31 +221,54 @@
       }
       return elements;
     };
-    function init_select( gn ) {
+    function init_select( gn, length ) {
       let sel = document.getElementById("select");
       let text = document.getElementById("text");
-      let found_start = false;
-      for ( i = 0; i < gn.length; i++ ) {
+      let found_start = 0, found_length = 0;
+      let i = 0;
+      for ( ; i < gn.length; i++ ) {
         let opt = document.createElement("option");
         opt.text  = gn[ i ].user;
         opt.value = gn[ i ].user;
-        if ( ! found_start ) {
-          if ( text.value.includes( "start " + opt.value ) ) {
-            opt.selected = true;
-            found_start = true;
+        let start = "start " + opt.value;
+        if ( start.length > found_length ) {
+          if ( text.value.includes( start ) ) {
+            found_start  = i + 1;
+            found_length = start.length;
           }
         }
+        sel.appendChild( opt );
+      }
+      if ( found_start != 0 )
+        sel.selectedIndex = found_start - 1;
+
+      sel = document.getElementById("showpath");
+      for ( i = 0; i < length; i++ ) {
+        let opt = document.createElement("option");
+        opt.text = i;
+        opt.value = i;
+        opt.selected = ( i == 0 ? true : false );
         sel.appendChild( opt );
       }
     }
 
     window.onload = function() {
       make_topbar( 3, false );
-      init_graph( graphs == null ? null : transform( graphs[ 0 ] ) );
-      init_select( graphs[ 0 ].nodes );
+      if ( graphs != null ) {
+        init_graph( transform( graphs[ 0 ] ) );
+        init_select( graphs[ 0 ].nodes, graphs.length );
+        document.getElementById("form").addEventListener("submit",
+          function(event) {
+            let hidden = document.createElement("input");
+            hidden.type = "hidden";
+            hidden.name = "state";
+            hidden.value = JSON.stringify( get_cy_state() );
+            this.appendChild( hidden );
+          });
+      }
     };
 
-    function saveAsSvg() {
+    function save_as_svg() {
       let svg_content = cy.svg({scale: 1, full: true, bg: '#ffffff'});
       let f = new Blob([svg_content], {type:"image/svg+xml;charset=utf-8"});
       let a = document.createElement("a");
@@ -204,7 +277,7 @@
       a.download = el.value;
       a.click();
     };
-    function saveText() {
+    function save_text() {
       let text_content = document.getElementById("text").value;
       let f = new Blob([text_content], {type:"text/plain;charset=utf-8"});
       let a = document.createElement("a");
@@ -213,11 +286,48 @@
       a.download = el.value;
       a.click();
     };
-    function getSvgUrl() {
-      var svgContent = cy.svg({scale: 1, full: true, bg: '#ffffff'});
-      var blob = new Blob([svgContent], {type:"image/svg+xml;charset=utf-8"});
-      var url = window.URL.createObjectURL(blob);
+    function get_svg_uri() {
+      let svg_content = cy.svg({scale: 1, full: true, bg: '#ffffff'});
+      let blob = new Blob([svg_content], {type:"image/svg+xml;charset=utf-8"});
+      let url = window.URL.createObjectURL(blob);
       return url;
+    };
+    function next_path() {
+      let sel = document.getElementById("showpath");
+      let n   = sel.selectedIndex + 1;
+      if ( n == graphs.length ) n = 0;
+      sel.selectedIndex = n;
+      reload_graph();
+    }
+    function prev_path() {
+      let sel = document.getElementById("showpath");
+      let n   = sel.selectedIndex;
+      if ( n == 0 ) n = graphs.length;
+      sel.selectedIndex = n - 1;
+      reload_graph();
+    }
+    function select_change() {
+      let hidden = document.createElement("input");
+      hidden.type = "hidden";
+      hidden.name = "state";
+      hidden.value = JSON.stringify( get_cy_state() );
+      let form = document.getElementById("form");
+      form.appendChild( hidden );
+      form.submit();
+    };
+    function next_peer() {
+      let sel = document.getElementById("select");
+      let n   = sel.selectedIndex + 1;
+      if ( n == sel.options.length ) n = 0;
+      sel.selectedIndex = n;
+      select_change();
+    };
+    function prev_peer() {
+      let sel = document.getElementById("select");
+      let n   = sel.selectedIndex;
+      if ( n == 0 ) n = sel.options.length;
+      sel.selectedIndex = n - 1;
+      select_change();
     };
   </script>
 </head>
@@ -228,23 +338,25 @@
       <div class="container">
         <div class="graph-row">
           <div>
-          <button style="color: white; background-color: #008CBA" onclick="saveText()">Save Text</button>
+          <button style="color: white; background-color: #008CBA" onclick="save_text()">Save Text</button>
           <input id="savetxt" type="text" value="nodes.txt"></input>
-          <button style="color: white; background-color: #008CBA" onclick="saveAsSvg()">Save SVG</button>
+          <button style="color: white; background-color: #008CBA" onclick="save_as_svg()">Save SVG</button>
           <input id="savesvg" type="text" value="path1.svg"></input>
-          <button style="color: white; background-color: #008CBA" onclick="window.location=getSvgUrl()">View SVG</button>
+          <button style="color: white; background-color: #008CBA" onclick="window.location=get_svg_uri()">View SVG</button>
           <p>
-          <input type="radio" id="p0" checked="true" style="color: white; background-color: #007070" onclick="reload_graph(0)">Path 1</input>
-          <input type="radio" id="p1" style="color: white; background-color: #007070" onclick="reload_graph(1)">Path 2</input>
-          <input type="radio" id="p2" style="color: white; background-color: #007070" onclick="reload_graph(2)">Path 3</input>
-          <input type="radio" id="p3" style="color: white; background-color: #007070" onclick="reload_graph(3)">Path 4</input>
+          Show path: <select style="color: white; background-color: #007070" id="showpath" onchange="reload_graph()"></select>
+          <button id="prev" style="color: white; background-color: #007070" onclick="prev_path()">&lt;-- Prev Path</button>
+          <button id="next" style="color: white; background-color: #007070" onclick="next_path()">Next Path --&gt;</button>
+          <input id="random_layout" type="checkbox" checked style="color: white; background-color: #007070">Random Layout</input>
           </p>
           </div>
           <div id="show">
           <form method="post" id="form" action="graph_nodes.html" spellcheck="false">
             <textarea id="text" name="graph_data" form="form" cols="70" rows="25">@(graph_source)</textarea>
-            <button style="color: white; background-color: #008CBA">Show Graph</button>
-            <select style="color: white; background-color: #008CBA" id="select" name="start" onchange="this.form.submit()"></select>
+            <button style="color: white; background-color: #8F3CBA">Show Graph</button>
+            <select style="color: white; background-color: #8F3CBA" id="select" name="start" onchange="select_change()"></select>
+            <button id="prev" style="color: white; background-color: #8F3CBA" onclick="prev_peer()">&lt;-- Prev Peer</button>
+            <button id="next" style="color: white; background-color: #8F3CBA" onclick="next_peer()">Next Peer --&gt;</button>
           </form>
           </div>
         </div>
