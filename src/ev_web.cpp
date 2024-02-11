@@ -431,15 +431,17 @@ WebService::process_post( const HttpReq &hreq ) noexcept
   size_t       data_len,
                state_len = 0;
   WebReqData   data;
+  static const size_t pad = 1024;
 
   data.path     = path;
   data.path_len = HttpReq::decode_uri( &obj[ 1 ], end, path, sizeof( path ) );
 
-  data_buf = (char *) mem.make( hreq.content_length );
+  data_buf = (char *) mem.make( hreq.content_length + pad );
   data_len = hreq.content_length;
 
   data_len = HttpReq::decode_uri( hreq.data, &hreq.data[ hreq.content_length ],
-                                  data_buf, data_len );
+                                  &data_buf[ pad ], data_len );
+  data_buf = &data_buf[ pad ];
   for ( size_t i = data_len; i > 0; ) {
     char c = data_buf[ --i ];
     if ( c == '&' && ::strncmp( &data_buf[ i + 1 ], "start=", 6 ) == 0 ) {
@@ -473,18 +475,27 @@ WebService::process_post( const HttpReq &hreq ) noexcept
     data.graph_state_len = state_len;
 
     if ( start != NULL ) {
-      if ( ::strncmp( data_buf, "start ", 6 ) == 0 ) {
-        size_t start_len = ::strlen( start );
-        char * eol       = (char *) ::memchr( &data_buf[ 6 ], '\n',
-                                              data_len - 6 ),
-             * end       = &data_buf[ data_len ],
-             * new_eol   = &data_buf[ 6 + start_len ];
+      size_t start_len = ::strlen( start );
+      char * eol, * end, * new_eol;
 
+      end = &data_buf[ data_len ];
+      if ( ::strncmp( data_buf, "start ", 6 ) == 0 ) {
+        eol     = (char *) ::memchr( &data_buf[ 6 ], '\n', data_len - 6 );
+        new_eol = &data_buf[ 6 + start_len ];
         if ( eol != NULL ) {
+          data_len = 6 + start_len + ( end - eol );
           ::memmove( new_eol, eol, end - eol );
           ::memcpy( &data_buf[ 6 ], start, start_len );
-          data_len = 6 + start_len + ( end - eol );
+          ::memcpy( data_buf, "start ", 6 );
         }
+      }
+      else if ( 8 + start_len <= pad ) {
+        data_len += 8 + start_len;
+        data_buf -= 8 + start_len;
+        ::memcpy( &data_buf[ 0 ], "start ", 6 );
+        ::memcpy( &data_buf[ 6 ], start, start_len );
+        data_buf[ 6 + start_len ] = '\r';
+        data_buf[ 6 + start_len + 1 ] = '\n';
       }
     }
     data.graph_source     = data_buf;

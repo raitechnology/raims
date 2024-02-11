@@ -622,18 +622,22 @@ SessionMgr::start( void ) noexcept
   printf( "%s: %" PRIu64 " bytes\n", P_PUB_WINDOW_SIZE, this->pub_window_size );
   printf( "%s: %" PRIu64 " bytes\n", P_SUB_WINDOW_SIZE, this->sub_window_size );
   printf( "%s: %" PRIu64 "\n", P_PUB_WINDOW_COUNT, this->pub_window_count );
+  printf( "%s: %" PRIu64 "\n", P_PUB_WINDOW_AUTOSCALE, this->pub_window_autoscale );
   printf( "%s: %" PRIu64 "\n", P_SUB_WINDOW_COUNT, this->sub_window_count );
   printf( "%s: %" PRIu64 " secs\n", P_PUB_WINDOW_TIME, ns_to_sec( this->pub_window_ival ) );
   printf( "%s: %" PRIu64 " secs\n", P_SUB_WINDOW_TIME, ns_to_sec( this->sub_window_ival ) );
   printf( "%s: %u secs\n", P_HEARTBEAT, this->user_db.hb_interval );
   printf( "%s: %u secs\n", P_RELIABILITY, this->user_db.reliability );
+
+  printf( "%s: %s\n", P_TCP_NOENCRYPT, this->tcp_noencrypt ? "true" : "false" );
+  printf( "%s: %u secs\n", P_TCP_CONNECT_TIMEOUT, this->tcp_connect_timeout );
   printf( "%s: %" PRIu64 " secs\n", P_TCP_WRITE_TIMEOUT, ns_to_sec( this->poll.wr_timeout_ns ) );
   printf( "%s: %u bytes\n", P_TCP_WRITE_HIGHWATER, this->poll.send_highwater );
+
   printf( "%s: %s\n", P_TCP_IPV4ONLY, this->tcp_ipv6 &&
                                       ! this->tcp_ipv4 ? "true" : "false" );
   printf( "%s: %s\n", P_TCP_IPV6ONLY, this->tcp_ipv4 &&
                                       ! this->tcp_ipv6 ? "true" : "false" );
-  printf( "%s: %s\n", P_TCP_NOENCRYPT, this->tcp_noencrypt ? "true" : "false" );
   printf( "%s: %s\n", P_MSG_LOSS_ERRORS, this->want_msg_loss_errors ? "true" : "false" );
   printf( "%s: %u\n", P_PATH_LIMIT, this->user_db.peer_dist.path_limit );
   printf( "%s: %" PRIu64 " bytes\n", P_BLOCKED_READ_RATE, this->poll.blocked_read_rate );
