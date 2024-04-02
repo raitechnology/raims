@@ -87,9 +87,8 @@ struct EvTcpTransportOpts {
 };
 
 struct HostPort {
-  char * host;
-  int    port;
-  char   buf[ MAX_TCP_HOST_LEN ];
+  int  port;
+  char host[ MAX_TCP_HOST_LEN ];
 };
 
 struct HostPortArray : public kv::ArrayCount<HostPort, 4> {
@@ -97,14 +96,13 @@ struct HostPortArray : public kv::ArrayCount<HostPort, 4> {
     HostPort & hp = this->push();
     hp.port = port;
     if ( host == NULL )
-      hp.host = NULL;
+      hp.host[ 0 ] = '\0';
     else {
       size_t len = ::strlen( host );
-      hp.host = hp.buf;
-      if ( len > sizeof( hp.buf ) )
-        len = sizeof( hp.buf ) - 1;
-      ::memcpy( hp.buf, host, len );
-      hp.buf[ len ] = '\0';
+      if ( len >= sizeof( hp.host ) )
+        len = sizeof( hp.host ) - 1;
+      ::memcpy( hp.host, host, len );
+      hp.host[ len ] = '\0';
     }
   }
 };
@@ -119,7 +117,7 @@ struct EvTcpTransportParameters : public EvTcpTransportOpts {
     return this->default_port;
   }
   const char * host( size_t n ) {
-    if ( n < this->hosts.count )
+    if ( n < this->hosts.count && this->hosts.ptr[ n ].host[ 0 ] != '\0' )
       return this->hosts.ptr[ n ].host;
     return NULL;
   }

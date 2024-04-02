@@ -6373,9 +6373,6 @@ Console::show_seqno( ConsoleOutput *p,  const char *arg,
 {
   static const uint32_t ncols = 5;
   TabOut out( this->table, this->tmp, ncols );
-  RouteLoc   loc;
-  Pub      * pub;
-  SubSeqno * sub;
   /*int        count = 0;*/
   bool       b;
 
@@ -6397,14 +6394,17 @@ Console::show_seqno( ConsoleOutput *p,  const char *arg,
   }
   if ( count == 0 ) {
 #endif
+    RouteLoc loc;
+    Pub * pub;
     for ( pub = this->sub_db.pub_tab.first( loc, b ); pub != NULL;
           pub = this->sub_db.pub_tab.next( loc, b ) ) {
       if ( arglen == 0 || kv_memmem( pub->value, pub->len, arg, arglen ) != NULL)
         this->tab_pub( pub, out );
     }
-
-    for ( sub = this->sub_db.seqno_tab.first( loc, b ); sub != NULL;
-          sub = this->sub_db.seqno_tab.next( loc, b ) ) {
+    SubSeqno * sub;
+    int which;
+    for ( sub = this->sub_db.seqno_tab.first( loc, which ); sub != NULL;
+          sub = this->sub_db.seqno_tab.next( loc, which ) ) {
       if ( arglen == 0 || kv_memmem( sub->value, sub->len, arg, arglen ) != NULL)
         this->tab_seqno( sub, out );
     }

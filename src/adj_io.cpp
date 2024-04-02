@@ -399,6 +399,10 @@ AdjGraphOut::print_mesh( AdjLinkTab &mesh,  bool is_pgm ) noexcept
       AdjLink *test = mesh.ptr[ j ];
       if ( test->tport.equals( link->tport ) ) {
         if ( ! used.test_set( test->a.idx ) ) {
+          if ( ! used.test_set( link->a.idx ) ) {
+            if ( ! this->is_cfg )
+              o.printf( " %s", link->a.user.val );
+          }
           if ( ! this->is_cfg )
             o.printf( " %s", test->a.user.val );
         }

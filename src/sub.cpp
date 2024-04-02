@@ -983,6 +983,25 @@ rai::ms::seqno_status_string( SeqnoStatus status ) noexcept
   }
 }
 
+static SeqnoStatus
+seqno_err( SeqnoUpsert &su,  SeqnoStatus status ) noexcept
+{
+  if ( debug_sub )
+    fprintf( stderr, "match %.*s status %s/%d\n",
+            su.sublen, su.sub,
+            seqno_status_string( status ), status );
+  return status;
+}
+
+static void
+repeat_err( const MsgFramePublish &pub ) noexcept
+{
+  if ( debug_sub )
+    fprintf( stderr, "repeat sequence(0x%x,0x%lx) %.*s\n",
+             pub.subj_hash, pub.dec.seqno,
+             (int) pub.subject_len, pub.subject );
+}
+
 SeqnoStatus
 SubDB::match_seqno( const MsgFramePublish &pub,  SeqnoArgs &ctx ) noexcept
 {
@@ -998,22 +1017,20 @@ SubDB::match_seqno( const MsgFramePublish &pub,  SeqnoArgs &ctx ) noexcept
             1000000000.0 ); */
   }
 
-  SubSeqno * seq;
-  RouteLoc   loc, loc2;
-  bool       is_old;
+  SubSeqno  * seq;
+  SeqnoUpsert su( pub.subj_hash, pub.subject, pub.subject_len );
 
   const uint64_t seqno = pub.dec.seqno,
                  time  = ( seqno_frame( seqno ) == time_frame( ctx.time ) ?
                            ctx.time : seqno_time( seqno ) );
 
-  seq = this->seqno_tab.upsert( pub.subj_hash, pub.subject, pub.subject_len,
-                                loc, loc2, is_old );
+  seq = this->seqno_tab.upsert( su );
   if ( seq == NULL )
-    return SEQNO_ERROR;
+    return seqno_err( su, SEQNO_ERROR );
   /* starting a new uid/seqno/time triplet */
-  if ( loc.is_new ) {
+  if ( su.loc.is_new ) {
     if ( ! this->match_subscription( pub, ctx ) ) {
-      this->seqno_tab.remove( loc, loc2, is_old );
+      this->seqno_tab.remove( su );
       return SEQNO_NOT_SUBSCR;
     }
     return seq->init( uid, seqno, ctx.start_seqno, time, ctx.stamp,
@@ -1031,7 +1048,7 @@ SubDB::match_seqno( const MsgFramePublish &pub,  SeqnoArgs &ctx ) noexcept
     /* otherwise, no sub matches */
     else {
       seq->release();
-      this->seqno_tab.remove( loc, loc2, is_old );
+      this->seqno_tab.remove( su );
       return SEQNO_NOT_SUBSCR;
     }
   }
@@ -1072,8 +1089,9 @@ SubDB::match_seqno( const MsgFramePublish &pub,  SeqnoArgs &ctx ) noexcept
       if ( seqno > last_seqno ) {
         seq->last_seqno = seqno;
         seq->last_stamp = ctx.stamp;
-        return SEQNO_UID_CYCLE; /* new subscription, can skip after resub */
+        return seqno_err( su, SEQNO_UID_CYCLE ); /* new subscription, can skip after resub */
       }
+      repeat_err( pub );
       return SEQNO_UID_REPEAT; /* already seen it */
     }
     if ( seqno > last_seqno ) {
@@ -1083,6 +1101,7 @@ SubDB::match_seqno( const MsgFramePublish &pub,  SeqnoArgs &ctx ) noexcept
       seq->last_stamp = ctx.stamp;
       return SEQNO_UID_SKIP; /* forward msg with loss notification */
     }
+    repeat_err( pub );
     return SEQNO_UID_REPEAT; /* already seen it */
   }
   /* time updated, resequence wanted */
@@ -1099,10 +1118,14 @@ SubDB::match_seqno( const MsgFramePublish &pub,  SeqnoArgs &ctx ) noexcept
         ctx.msg_loss = (uint32_t) min_int( ctx.chain_seqno - last_seqno,
                                            (uint64_t) MAX_MSG_LOSS );
       }
+      else if ( seqno_base( seqno ) == 1 ) { /* first seqno in frame */
+        /* pub restarted in new frame */
+        return SEQNO_UID_CYCLE;
+      }
       else { /* no reference frame */
         ctx.msg_loss = MSG_FRAME_LOSS; /* don't know how many */
       }
-      return SEQNO_UID_SKIP;
+      return seqno_err( su, SEQNO_UID_SKIP );
     }
     /* new sub can skip */
     return SEQNO_UID_CYCLE;
@@ -1112,8 +1135,10 @@ SubDB::match_seqno( const MsgFramePublish &pub,  SeqnoArgs &ctx ) noexcept
   seq->last_seqno = seqno;
   seq->last_stamp = ctx.stamp;
   if ( ! new_sub ) { /* if not joining w/new sub */
-    ctx.msg_loss = MSG_FRAME_LOSS; /* don't know how many */
-    return SEQNO_UID_SKIP;
+    if ( seqno_base( seqno ) != 1 ) { /* first seqno in frame */
+      ctx.msg_loss = MSG_FRAME_LOSS; /* don't know how many */
+      return seqno_err( su, SEQNO_UID_SKIP );
+    }
   }
   return SEQNO_UID_CYCLE; /* joined with a new sub */
 }
@@ -1637,8 +1662,9 @@ SeqnoTab::flip( size_t win_size,  size_t win_count,  uint64_t cur_time,
   size_t sz     = p->mem_size() + this->seqno_ht_size,
          old_sz = 0;
   if ( quad_time )
-    old_sz = this->tab_old->mem_size() + this->old_ht_size;
-  if ( old_sz > win_size || sz > win_size ) {
+    old_sz = this->tab_old->mem_size() + this->old_ht_size +
+             this->old_ht_size2;
+  if ( old_sz > win_size * 2 || sz > win_size ) {
     size_t count = p->pop_count();
     if ( double_time || count > win_count ) {
       if ( sz > this->max_size )
@@ -1647,16 +1673,18 @@ SeqnoTab::flip( size_t win_size,  size_t win_count,  uint64_t cur_time,
         this->max_count = count;
       this->wh.add( cur_time, sz, count );
       kv::RouteLoc loc;
-      if ( this->old_ht_size > 0 ) {
-        for ( SubSeqno *s = this->tab_old->first( loc ); s != NULL;
-              s = this->tab_old->next( loc ) )
+      if ( this->old_ht_size2 > 0 ) {
+        for ( SubSeqno *s = this->tab_old2->first( loc ); s != NULL;
+              s = this->tab_old2->next( loc ) )
           s->release();
       }
-      this->tab_old->release();
-      this->tab           = this->tab_old;
+      this->tab_old2->release();
+      this->tab           = this->tab_old2;
+      this->tab_old2      = this->tab_old;
+      this->tab_old       = p;
+      this->old_ht_size2  = this->old_ht_size;
       this->old_ht_size   = this->seqno_ht_size;
       this->seqno_ht_size = 0;
-      this->tab_old       = p;
       this->trailing_time = this->flip_time;
       this->flip_time     = cur_time;
       return true;

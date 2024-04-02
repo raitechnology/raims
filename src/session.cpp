@@ -55,7 +55,7 @@ SessionMgr::SessionMgr( EvPoll &p,  Logger &l,  ConfigTree &c,
            : EvSocket( p, p.register_type( "session_mgr" ) ),
              ipc_rt( p, *this ), console_rt( p, *this ),
              tree( c ), user( u ), svc( s ), startup( start ), timer_id( 0 ),
-             timer_mono_time( 0 ), timer_time( 0 ),
+             timer_mono_time( 0 ), timer_time( 0 ), trailing_time( 0 ),
              timer_converge_time( 0 ), converge_seqno( 0 ),
              timer_start_mono( 0 ), timer_start( 0 ), timer_ival( 0 ),
              user_db( p, u, s, *this, this->sub_db, st, this->events,
@@ -622,18 +622,22 @@ SessionMgr::start( void ) noexcept
   printf( "%s: %" PRIu64 " bytes\n", P_PUB_WINDOW_SIZE, this->pub_window_size );
   printf( "%s: %" PRIu64 " bytes\n", P_SUB_WINDOW_SIZE, this->sub_window_size );
   printf( "%s: %" PRIu64 "\n", P_PUB_WINDOW_COUNT, this->pub_window_count );
+  printf( "%s: %" PRIu64 "\n", P_PUB_WINDOW_AUTOSCALE, this->pub_window_autoscale );
   printf( "%s: %" PRIu64 "\n", P_SUB_WINDOW_COUNT, this->sub_window_count );
   printf( "%s: %" PRIu64 " secs\n", P_PUB_WINDOW_TIME, ns_to_sec( this->pub_window_ival ) );
   printf( "%s: %" PRIu64 " secs\n", P_SUB_WINDOW_TIME, ns_to_sec( this->sub_window_ival ) );
   printf( "%s: %u secs\n", P_HEARTBEAT, this->user_db.hb_interval );
   printf( "%s: %u secs\n", P_RELIABILITY, this->user_db.reliability );
+
+  printf( "%s: %s\n", P_TCP_NOENCRYPT, this->tcp_noencrypt ? "true" : "false" );
+  printf( "%s: %u secs\n", P_TCP_CONNECT_TIMEOUT, this->tcp_connect_timeout );
   printf( "%s: %" PRIu64 " secs\n", P_TCP_WRITE_TIMEOUT, ns_to_sec( this->poll.wr_timeout_ns ) );
   printf( "%s: %u bytes\n", P_TCP_WRITE_HIGHWATER, this->poll.send_highwater );
+
   printf( "%s: %s\n", P_TCP_IPV4ONLY, this->tcp_ipv6 &&
                                       ! this->tcp_ipv4 ? "true" : "false" );
   printf( "%s: %s\n", P_TCP_IPV6ONLY, this->tcp_ipv4 &&
                                       ! this->tcp_ipv6 ? "true" : "false" );
-  printf( "%s: %s\n", P_TCP_NOENCRYPT, this->tcp_noencrypt ? "true" : "false" );
   printf( "%s: %s\n", P_MSG_LOSS_ERRORS, this->want_msg_loss_errors ? "true" : "false" );
   printf( "%s: %u\n", P_PATH_LIMIT, this->user_db.peer_dist.path_limit );
   printf( "%s: %" PRIu64 " bytes\n", P_BLOCKED_READ_RATE, this->poll.blocked_read_rate );
@@ -651,6 +655,7 @@ SessionMgr::start( void ) noexcept
   this->timer_id             = ++this->next_timer;
   this->timer_mono_time      = cur_mono;
   this->timer_time           = cur_time;
+  this->trailing_time        = cur_time - this->pub_window_ival;
   this->timer_converge_time  = cur_time;
   this->converge_seqno       = seqno_init( cur_time );
   this->timer_start_mono     = cur_mono;
@@ -715,6 +720,7 @@ SessionMgr::timer_expire( uint64_t tid,  uint64_t ) noexcept
     return false;
   this->timer_mono_time = cur_mono;
   this->timer_time      = cur_time;
+  this->trailing_time   = cur_time - this->pub_window_ival;
   if ( this->user_db.net_converge_time > this->timer_converge_time &&
        cur_time >= this->user_db.net_converge_time ) {
     uint64_t seqno = seqno_init( cur_time );
@@ -1029,6 +1035,7 @@ IpcRoute::on_msg( EvPublish &pub ) noexcept
             opt         = dec.msg->caba.get_opt();
 
   dec.get_ival<uint64_t>( FID_CHAIN_SEQNO, seq.chain_seqno );
+  /*dec.get_ival<uint64_t>( FID_LAST_SEQNO, seq.peer_last_seqno );*/
   dec.get_ival<uint64_t>( FID_TIME, seq.time );
   dec.get_ival<uint32_t>( FID_FMT, fmt );
   dec.get_ival<uint32_t>( FID_HDR_LEN, hdr_len );
@@ -1130,7 +1137,7 @@ IpcRoute::on_msg( EvPublish &pub ) noexcept
       mask >>= 1;
       if ( is_set ) {
         TransportRoute *rte = this->user_db.transport_tab.ptr[ i ];
-        if ( &fpub.rte != rte && rte->is_set( TPORT_IS_IPC ) ) {
+        if ( &fpub.rte != rte && rte != NULL && rte->is_set( TPORT_IS_IPC ) ) {
           EvPublish pub( fpub.subject, fpub.subject_len, reply, replylen,
                          data, datalen, rte->sub_route, fpub.src_route,
                          fpub.subj_hash, fmt, PUB_TYPE_NORMAL, seq.msg_loss,
@@ -1147,7 +1154,7 @@ IpcRoute::on_msg( EvPublish &pub ) noexcept
   else {
     for ( i = 0; i < count; i++ ) {
       TransportRoute *rte = this->user_db.transport_tab.ptr[ i ];
-      if ( &fpub.rte != rte && rte->is_set( TPORT_IS_IPC ) ) {
+      if ( &fpub.rte != rte && rte != NULL && rte->is_set( TPORT_IS_IPC ) ) {
         EvPublish pub( fpub.subject, fpub.subject_len, reply, replylen,
                        data, datalen, rte->sub_route, fpub.src_route,
                        fpub.subj_hash, fmt, PUB_TYPE_NORMAL, seq.msg_loss,
@@ -1202,6 +1209,7 @@ ConsoleRoute::fwd_console( EvPublish &pub,  bool is_caba ) noexcept
     uint64_t  time        = 0,
               stamp       = 0,
               chain_seqno = 0,
+              /*last_seqno  = 0,*/
               ref_seqno   = 0;
     uint32_t  hdr_len     = 0,
               suf_len     = 0;
@@ -1215,13 +1223,15 @@ ConsoleRoute::fwd_console( EvPublish &pub,  bool is_caba ) noexcept
     fpub.dec.get_ival<uint64_t>( FID_SEQNO, fpub.dec.seqno );
     fpub.dec.get_ival<uint64_t>( FID_REF_SEQNO, ref_seqno );
     fpub.dec.get_ival<uint64_t>( FID_CHAIN_SEQNO, chain_seqno );
+    /*fpub.dec.get_ival<uint64_t>( FID_LAST_SEQNO, last_seqno );*/
     fpub.dec.get_ival<uint64_t>( FID_TIME, time );
     fpub.dec.get_ival<uint64_t>( FID_STAMP, stamp );
     fpub.dec.get_ival<uint32_t>( FID_HDR_LEN, hdr_len );
     fpub.dec.get_ival<uint32_t>( FID_SUF_LEN, suf_len );
 
-    seq.time        = time;
-    seq.chain_seqno = chain_seqno;
+    seq.time            = time;
+    seq.chain_seqno     = chain_seqno;
+    /*seq.peer_last_seqno = last_seqno;*/
     SeqnoStatus status = this->sub_db.match_seqno( fpub, seq );
 
     if ( status > SEQNO_UID_NEXT ) {
@@ -1295,7 +1305,7 @@ IpcRoute::on_inbox( MsgFramePublish &fpub,  UserBridge &n,
   uint32_t rcnt = 0;
   for ( i = 0; i < count; i++ ) {
     TransportRoute *rte = this->user_db.transport_tab.ptr[ i ];
-    if ( &fpub.rte != rte && rte->is_set( TPORT_IS_IPC ) ) {
+    if ( &fpub.rte != rte && rte != NULL && rte->is_set( TPORT_IS_IPC ) ) {
       EvPublish pub( subject, subjlen, reply, replylen,
                      data, datalen, rte->sub_route, fpub.src_route, h, fmt,
                      PUB_TYPE_NORMAL, 0, n.host_id, dec.seqno );
@@ -1624,6 +1634,7 @@ SessionMgr::dispatch_console( MsgFramePublish &fpub,  UserBridge &n,
 
   val.seqno = dec.seqno;
   dec.get_ival<uint64_t>( FID_CHAIN_SEQNO, seq.chain_seqno );
+  /*dec.get_ival<uint64_t>( FID_LAST_SEQNO,  seq.peer_last_seqno );*/
   dec.get_ival<uint64_t>( FID_STAMP,       val.stamp );
   dec.get_ival<uint64_t>( FID_TOKEN,       val.token );
   dec.get_ival<uint64_t>( FID_REF_SEQNO,   val.ref_seqno );
@@ -1728,6 +1739,7 @@ SessionMgr::publish( PubMcastData &mc ) noexcept
 
   UserBridge * dest_bridge_id  = NULL;
   uint64_t     chain_seqno     = 0,
+               last_seqno      = 0,
                time            = 0;
   uint32_t     h               = mc.subj_hash;
   CabaFlags    fl( CABA_MCAST );
@@ -1777,7 +1789,8 @@ SessionMgr::publish( PubMcastData &mc ) noexcept
           if ( p == NULL )
             return false;
           mc.seqno = p->next_seqno( loc.is_new, time, this->timer_time,
-                                    this->converge_seqno, chain_seqno );
+                                    this->trailing_time, chain_seqno,
+                                    last_seqno );
           this->user_db.msg_send_counter[ MCAST_SUBJECT ]++;
           break;
 
@@ -1824,6 +1837,7 @@ SessionMgr::publish( PubMcastData &mc ) noexcept
   MsgEst e( mc.sublen );
   e.seqno       ()
    .chain_seqno ()
+   /*.last_seqno  ()*/
    .ret         ()
    .reply       ( mc.inbox_len )
    .time        ()
@@ -1840,6 +1854,8 @@ SessionMgr::publish( PubMcastData &mc ) noexcept
 
   if ( chain_seqno != 0 )
     m.chain_seqno( chain_seqno );
+  /*if ( last_seqno != 0 )
+    m.last_seqno( last_seqno );*/
   if ( mc.reply != 0 )
     m.ret( mc.reply );
   if ( mc.inbox_len != 0 )
@@ -2058,7 +2074,7 @@ SessionMgr::forward_ipc( TransportRoute &src_rte,  EvPublish &pub ) noexcept
 
   CabaFlags fl( CABA_MCAST );
   RouteLoc  loc;
-  uint64_t  time, chain_seqno, seqno;
+  uint64_t  time, chain_seqno, last_seqno, seqno;
   uint16_t  path_select = 0;
 
   if ( ! pub.is_pub_type( PUB_TYPE_SERIAL ) ) {
@@ -2073,10 +2089,10 @@ SessionMgr::forward_ipc( TransportRoute &src_rte,  EvPublish &pub ) noexcept
       return true;
     }
     seqno = p->next_seqno( loc.is_new, time, this->timer_time,
-                           this->converge_seqno, chain_seqno );
+                           this->trailing_time, chain_seqno, last_seqno );
   }
   else {
-    time = chain_seqno = 0;
+    time = chain_seqno = last_seqno = 0;
     seqno = ++this->user_db.glob_send_seqno[ path_select ];
     fl.set_opt( CABA_OPT_GLSNO );
   }
@@ -2091,6 +2107,7 @@ SessionMgr::forward_ipc( TransportRoute &src_rte,  EvPublish &pub ) noexcept
   MsgEst e( pub.subject_len );
   e.seqno       ()
    .chain_seqno ()
+   /*.last_seqno  ()*/
    .time        ()
    .reply       ( pub.reply_len )
    .fmt         ()
@@ -2111,6 +2128,8 @@ SessionMgr::forward_ipc( TransportRoute &src_rte,  EvPublish &pub ) noexcept
 
   if ( chain_seqno != 0 )
     m.chain_seqno( chain_seqno );
+  /*if ( last_seqno != 0 )
+    m.last_seqno( last_seqno );*/
   if ( time != 0 )
     m.time( time );
   if ( pub.reply_len != 0 )
