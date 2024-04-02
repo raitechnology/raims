@@ -276,6 +276,7 @@ struct SessionMgr : public kv::EvSocket, public kv::BPData {
                         timer_id,       /* timer_id for this session */
                         timer_mono_time,/* mono updated at timer expire */
                         timer_time,     /* real updated at timer expire */
+                        trailing_time,  /* pub window trailing time */
                         timer_converge_time, /* when publishers convege */
                         converge_seqno, /* zero seqno of converge */
                         timer_start_mono,/* start mono */

@@ -340,34 +340,37 @@ struct Pub {
   uint16_t len;
   char     value[ 2 ]; /* prefix */
   
-  void init( uint64_t time ) {
+  uint64_t init( uint64_t time ) {
     this->seqno = seqno_init( time );
-    this->stamp = 0;
+    this->stamp = time;
+    return this->seqno;
   }
   void copy( Pub &p ) {
     this->seqno = p.seqno;
     this->stamp = p.stamp;
     p.stamp = 0;
   }
-  uint64_t next_seqno( bool next_timeframe,  uint64_t &time,
-                       uint64_t cur_frame,  uint64_t converge_seqno,
-                       uint64_t &last_frame_seqno ) {
-    uint64_t sequence;
+  uint64_t next_seqno( bool is_new,  uint64_t &time,
+                       uint64_t cur_frame,  uint64_t old_frame,
+                       uint64_t &chain_seqno,  uint64_t &last_seqno ) {
+    uint64_t last_frame = seqno_frame( this->seqno ),
+             sequence;
 
-    last_frame_seqno = 0;
+    chain_seqno = 0;
     time        = cur_frame;
+    last_seqno  = this->seqno;
     this->stamp = cur_frame;
 
-    if ( ! next_timeframe ) {
-      sequence = this->seqno + 1;
-      if ( sequence <= converge_seqno || seqno_base( sequence ) == 0 ) {
-        last_frame_seqno = this->seqno;
-        next_timeframe = true;
-      }
+    if ( is_new ) {
+      sequence = this->init( cur_frame ) + 1;
     }
-    if ( next_timeframe ) {
-      this->init( cur_frame );
+    else {
       sequence = this->seqno + 1;
+      if ( last_frame <= time_frame( old_frame ) ||
+           seqno_base( sequence ) == 0 ) {
+        chain_seqno = this->seqno;
+        sequence    = this->init( cur_frame ) + 1;
+      }
     }
     this->seqno = sequence;
     return sequence;
@@ -400,6 +403,7 @@ struct PubTab {
     Pub * p = this->pub->upsert( h, sub, sublen, loc ), * p2;
     if ( ! loc.is_new )
       return p;
+    p->init( 0 );
     kv::RouteLoc loc2;
     if ( (p2 = this->pub_old->find( h, sub, sublen, loc2 )) != NULL ) {
       p->copy( *p2 );
@@ -497,15 +501,15 @@ struct SeqnoArgs {
              start_seqno, /* subscription start */
              stamp,       /* last publish recvd */
              chain_seqno; /* previous seqno published */
+             /*peer_last_seqno;*/
   SubOnMsg * cb;          /* callback for subscription */
-  uint32_t   tport_mask,  /* tports matched */
-             x_hash;
+  uint32_t   tport_mask;  /* tports matched */
   uint16_t   msg_loss;
 
   SeqnoArgs( uint64_t time )
     : time( 0 ), last_seqno( 0 ), last_time( 0 ), start_seqno( 0 ),
-     stamp( time ), chain_seqno( 0 ), cb( 0 ), tport_mask( 0 ), x_hash( 0 ),
-     msg_loss( 0 ) {}
+     stamp( time ), chain_seqno( 0 ), /*peer_last_seqno( 0 ),*/ cb( 0 ),
+     tport_mask( 0 ), msg_loss( 0 ) {}
 };
 
 struct SubSeqno {
@@ -568,85 +572,141 @@ struct InboxSub {
 
 typedef kv::RouteVec<SubSeqno> SeqnoT;
 
+struct SeqnoUpsert {
+  uint32_t h;
+  const char *sub;
+  uint16_t sublen, which;
+  kv::RouteLoc loc, loc2, loc3;
+
+  SeqnoUpsert( uint32_t hsh,  const char *subject,  uint16_t len )
+    : h( hsh ), sub( subject ), sublen( len ), which( 0 ) {}
+};
+
 struct SeqnoTab {
   SeqnoT   tab1,
            tab2,
+           tab3,
          * tab,
-         * tab_old;
+         * tab_old,
+         * tab_old2;
   uint64_t flip_time,
            trailing_time;
   size_t   seqno_ht_size,
            old_ht_size,
+           old_ht_size2,
            max_size,
            max_count;
   WindowHistory wh;
 
   SeqnoTab() {
-    this->tab     = &this->tab1;
-    this->tab_old = &this->tab2;
+    this->tab      = &this->tab1;
+    this->tab_old  = &this->tab2;
+    this->tab_old2 = &this->tab3;
     this->flip_time     = 0;
     this->trailing_time = 0;
     this->seqno_ht_size = 0;
     this->old_ht_size   = 0;
+    this->old_ht_size2  = 0;
     this->max_size      = 0;
     this->max_count     = 0;
   }
-  SubSeqno *upsert( uint32_t h,  const char *sub,  uint16_t sublen,
-                    kv::RouteLoc &loc, kv::RouteLoc &loc2,
-                    bool &is_old ) {
-    loc2.init();
-    is_old = false;
+  SubSeqno *upsert( SeqnoUpsert &su ) {
+    su.loc2.init();
+    su.loc3.init();
+    su.which = 0;
 
-    SubSeqno * p = this->tab->upsert( h, sub, sublen, loc );
-    if ( ! loc.is_new )
+    SubSeqno * p = this->tab->upsert( su.h, su.sub, su.sublen, su.loc );
+    if ( ! su.loc.is_new )
       return p;
-
-    SubSeqno * p2 = this->tab_old->find( h, sub, sublen, loc2 );
+    SubSeqno * p2 = this->tab_old->find( su.h, su.sub, su.sublen, su.loc2 );
     if ( p2 != NULL ) {
       p->copy( *p2 );
-      loc.is_new = false;
-      is_old = true;
+      su.loc.is_new = false;
+      su.which = 1;
+    }
+    else {
+      SubSeqno * p3 = this->tab_old2->find( su.h, su.sub, su.sublen, su.loc3 );
+      if ( p3 != NULL ) {
+        p->copy( *p3 );
+        su.loc.is_new = false;
+        su.which = 2;
+      }
     }
     return p;
   }
   SubSeqno *find( uint32_t h,  const char *sub,  uint16_t sublen ) {
     SubSeqno * p = this->tab->find( h, sub, sublen );
-    if ( p == NULL )
+    if ( p == NULL ) {
       p = this->tab_old->find( h, sub, sublen );
+      if ( p == NULL )
+        p = this->tab_old2->find( h, sub, sublen );
+    }
     return p;
   }
-  SubSeqno *first( kv::RouteLoc &loc,  bool &is_old ) {
+  SubSeqno *first( kv::RouteLoc &loc,  int &which ) {
     SubSeqno *p = this->tab->first( loc );
-    if ( p != NULL )
-      is_old = false;
-    else {
+    which = 0;
+    if ( p == NULL ) {
+      which = 1;
       p = this->tab_old->first( loc );
-      is_old = true;
-      if ( p != NULL && p->last_stamp == 0 )
-        return this->next( loc, is_old );
+      while ( p != NULL && p->last_stamp == 0 )
+        p = this->tab_old->next( loc );
+      if ( p == NULL ) {
+        which = 2;
+        p = this->tab_old2->first( loc );
+        while ( p != NULL && p->last_stamp == 0 )
+          p = this->tab_old2->next( loc );
+      }
     }
     return p;
   }
-  SubSeqno *next( kv::RouteLoc &loc,  bool &is_old ) {
-    SubSeqno *p;
-    if ( ! is_old ) {
+  SubSeqno *next( kv::RouteLoc &loc,  int &which ) {
+    SubSeqno *p = NULL;
+    if ( which == 0 ) {
       p = this->tab->next( loc );
-      if ( p != NULL )
-        return p;
-      is_old = true;
-      p = this->tab_old->first( loc );
+      if ( p == NULL ) {
+        which = 1;
+        p = this->tab_old->first( loc );
+        if ( p != NULL && p->last_stamp != 0 )
+          return p;
+      }
     }
-    else {
+    if ( which == 1 ) {
       p = this->tab_old->next( loc );
+      while ( p != NULL && p->last_stamp == 0 )
+        p = this->tab_old->next( loc );
+      if ( p == NULL ) {
+        which = 2;
+        p = this->tab_old2->first( loc );
+        if ( p != NULL && p->last_stamp != 0 )
+          return p;
+      }
     }
-    while ( p != NULL && p->last_stamp == 0 )
-      p = this->tab_old->next( loc );
+    if ( which == 2 ) {
+      p = this->tab_old2->next( loc );
+      while ( p != NULL && p->last_stamp == 0 )
+        p = this->tab_old2->next( loc );
+    }
     return p;
   }
-  void remove( kv::RouteLoc &loc,  kv::RouteLoc &loc2,  bool is_old ) {
+  /*void remove( kv::RouteLoc &loc,  kv::RouteLoc &loc2,  bool is_old ) {
     this->tab->remove( loc );
     if ( is_old )
       this->tab_old->remove( loc2 );
+  }*/
+  void remove( SeqnoUpsert &su ) {
+    this->tab->remove( su.loc );
+    if ( su.which == 0 ) {
+      if ( this->tab_old->find( su.h, su.sub, su.sublen, su.loc2 ) != NULL )
+        su.which = 1;
+    }
+    if ( su.which == 1 ) {
+      this->tab_old->remove( su.loc2 );
+      if ( this->tab_old2->find( su.h, su.sub, su.sublen, su.loc3 ) != NULL )
+        su.which = 2;
+    }
+    if ( su.which == 2 )
+      this->tab_old2->remove( su.loc3 );
   }
   /* limit size of pub sequences */
   bool flip( size_t win_size,  size_t win_count,  uint64_t cur_time,
