@@ -202,17 +202,17 @@ dlnk_lib    += -llinecook
 endif
 
 ifneq (,$(h3_home))
-h3_lib      := $(h3_home)/$(libd)/libh3.a
-h3_dll      := $(h3_home)/$(libd)/libh3.$(dll)
+h3_lib      := $(h3_home)/$(libd)/libh3lib.a
+h3_dll      := $(h3_home)/$(libd)/libh3lib.$(dll)
 lnk_lib     += $(h3_lib)
 lnk_dep     += $(h3_lib)
-dlnk_lib    += -L$(h3_home)/$(libd) -lh3
+dlnk_lib    += -L$(h3_home)/$(libd) -lh3lib
 dlnk_dep    += $(h3_dll)
 rpath5       = ,-rpath,$(pwd)/$(h3_home)/$(libd)
 h3_includes  = -I$(h3_home)/src/h3lib/include
 else
-lnk_lib     += -lh3
-dlnk_lib    += -lh3
+lnk_lib     += -lh3lib
+dlnk_lib    += -lh3lib
 endif
 
 ifneq (,$(rdb_home))
@@ -760,8 +760,8 @@ CMakeLists.txt: .copr/Makefile
 	  endif ()
 	  if (NOT TARGET h3)
 	    add_library (h3 STATIC IMPORTED)
-	    set_property (TARGET h3 PROPERTY IMPORTED_LOCATION_DEBUG ../raids/h3/build/bin/Debug/h3.lib)
-	    set_property (TARGET h3 PROPERTY IMPORTED_LOCATION_RELEASE ../raids/h3/build/bin/Release/h3.lib)
+	    set_property (TARGET h3 PROPERTY IMPORTED_LOCATION_DEBUG ../raids/h3/build/bin/Debug/h3lib.lib)
+	    set_property (TARGET h3 PROPERTY IMPORTED_LOCATION_RELEASE ../raids/h3/build/bin/Release/h3lib.lib)
 	  else ()
 	    include_directories ($${CMAKE_BINARY_DIR}/src/h3lib/include)
 	  endif ()
@@ -819,7 +819,7 @@ CMakeLists.txt: .copr/Makefile
 	  endif ()
 	  if (NOT TARGET h3)
 	    add_library (h3 STATIC IMPORTED)
-	    set_property (TARGET h3 PROPERTY IMPORTED_LOCATION ../raids/h3/build/lib/libh3.a)
+	    set_property (TARGET h3 PROPERTY IMPORTED_LOCATION ../raids/h3/build/lib/libh3lib.a)
 	  else ()
 	    include_directories ($${CMAKE_BINARY_DIR}/src/h3lib/include)
 	  endif ()
@@ -846,7 +846,7 @@ CMakeLists.txt: .copr/Makefile
 	  set (ex_lib -lssl -lcrypto -lcares -lpthread -lrt)
 	endif ()
 	add_library (raims STATIC $(libraims_cfile))
-	link_libraries (raims raids raikv raimd natsmd sassrv decnumber rdbparser linecook h3 lzf openpgm_st $${pcre2lib} $${ex_lib})
+	link_libraries (raims raids raikv raimd natsmd sassrv decnumber rdbparser linecook h3lib lzf openpgm_st $${pcre2lib} $${ex_lib})
 	add_definitions(-DMS_VER=$(ver_build))
 	add_executable (ms_server $(ms_server_cfile))
 	add_executable (ms_gen_key $(ms_gen_key_cfile))
