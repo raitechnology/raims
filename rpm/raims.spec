@@ -17,7 +17,7 @@ BuildRequires:  openpgm_st
 BuildRequires:  raids
 BuildRequires:  natsmd
 BuildRequires:  sassrv
-BuildRequires:  h3
+BuildRequires:  h3lib
 BuildRequires:  rdbparser
 BuildRequires:  linecook
 BuildRequires:  libdecnumber
@@ -30,7 +30,7 @@ Requires:       pcre2
 Requires:       liblzf
 Requires:       c-ares
 Requires:       openssl
-Requires:       h3
+Requires:       h3lib
 Requires:       hdrhist
 Requires:       libdecnumber
 Requires:       linecook
