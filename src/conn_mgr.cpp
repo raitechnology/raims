@@ -30,18 +30,27 @@ TransportRoute::is_self_connect( kv::EvSocket &conn ) noexcept
       paddr.set_sock_addr( rte->connect_ctx->client->fd );
       if ( paddr.len() == conn.peer_address.len() &&
            ::memcmp( paddr.buf, conn.peer_address.buf, paddr.len() ) == 0 ) {
-        rte->printf( "connected to self, closing\n" );
-        conn.idle_push( EV_CLOSE );
-        rte->connect_ctx->client->idle_push( EV_CLOSE );
-        rte->connect_ctx->client->set_sock_err( EV_ERR_CONN_SELF, 0 );
-        rte->connect_ctx->state = ConnectCtx::CONN_SHUTDOWN;
-        rte->clear( TPORT_IS_INPROGRESS );
-        rte->set( TPORT_IS_SHUTDOWN );
+        this->close_self_connect( *rte, conn );
         return true;
       }
     }
   }
   return false;
+}
+
+void
+TransportRoute::close_self_connect( TransportRoute &rte,
+                                    kv::EvSocket &conn ) noexcept
+{
+  if ( rte.connect_ctx != NULL ) {
+    rte.printf( "connected to self, closing\n" );
+    conn.idle_push( EV_CLOSE );
+    rte.connect_ctx->client->idle_push( EV_CLOSE );
+    rte.connect_ctx->client->set_sock_err( EV_ERR_CONN_SELF, 0 );
+    rte.connect_ctx->state = ConnectCtx::CONN_SHUTDOWN;
+    rte.clear( TPORT_IS_INPROGRESS );
+    rte.set( TPORT_IS_SHUTDOWN );
+  }
 }
 
 static const char /*nats_kind[]  = "nats",

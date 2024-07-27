@@ -942,8 +942,11 @@ SessionMgr::parse_msg_hdr( MsgFramePublish &fpub,  bool is_ipc ) noexcept
   this->msg_recv_counter[ type & ( MAX_PUB_TYPE - 1 ) ]++;
 
   fpub.n = this->user_db.lookup_user( fpub, dec );
-  /*if ( fpub.status == FRAME_STATUS_MY_MSG )
-    return FRAME_STATUS_MY_MSG;*/
+  if ( fpub.status == FRAME_STATUS_MY_MSG ) {
+    if ( type == U_SESSION_HELLO || type == U_SESSION_HB )
+      fpub.rte.close_self_connect( fpub.rte, (kv::EvSocket &) fpub.src_route );
+    return FRAME_STATUS_MY_MSG;
+  }
   return fpub.status;
 }
 

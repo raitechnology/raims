@@ -347,6 +347,7 @@ struct TransportRoute : public kv::EvSocket, public kv::EvConnectionNotify,
   bool start_listener( kv::EvTcpListen *l,
                        ConfigTree::Transport &tport ) noexcept;
   bool is_self_connect( kv::EvSocket &conn ) noexcept;
+  void close_self_connect( TransportRoute &rte, kv::EvSocket &conn ) noexcept;
   /* a new connection */
   virtual void on_connect( kv::EvSocket &conn ) noexcept;
   /* a disconnect */

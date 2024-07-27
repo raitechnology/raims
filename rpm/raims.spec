@@ -26,6 +26,7 @@ BuildRequires:  liblzf-devel
 BuildRequires:  git-core
 BuildRequires:  c-ares-devel
 BuildRequires:  openssl-devel
+BuildRequires:  zlib-devel
 Requires:       pcre2
 Requires:       liblzf
 Requires:       c-ares
@@ -41,6 +42,7 @@ Requires:       raikv
 Requires:       raimd
 Requires:       rdbparser
 Requires:       sassrv
+Requires:       zlib
 Requires(post): /sbin/ldconfig
 Requires(postun): /sbin/ldconfig
 
