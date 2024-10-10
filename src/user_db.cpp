@@ -738,19 +738,26 @@ UserDB::finish_converge_network( uint64_t current_mono_time,
   uint64_t x = current_monotonic_time_ns();
   uint64_t t = ( x > this->peer_dist.invalid_mono ) ?
                ( x - this->peer_dist.invalid_mono ) : 0;
+  uint64_t n = this->peer_dist.update_seqno;
   const char * src_user = this->user.user.val;
   if ( src_uid != 0 )
     src_user = this->bridge_tab.ptr[ src_uid ]->peer.user.val;
   if ( t == x )
     t = 0;
-  printf(
-    "network converges %.3f secs, %u path%s, %u uids authenticated, "
-    "%s from %s.%u\n",
-          (double) t / SEC_TO_NS, p, p>1?"s":"", this->uid_auth_count,
-          invalidate_reason_string( this->peer_dist.invalid_reason ),
-          src_user, src_uid );
-
+  if ( n != this->peer_dist.converge_seqno ) {
+    this->peer_dist.converge_seqno = n;
+    printf(
+      "network converges %.3f secs, %u path%s, %u uids authenticated, "
+      "%s from %s.%u (seqno: %lu)\n",
+            (double) t / SEC_TO_NS, p, p>1?"s":"", this->uid_auth_count,
+            invalidate_reason_string( this->peer_dist.invalid_reason ),
+            src_user, src_uid, n );
+  }
   this->find_adjacent_routes();
+  if ( this->peer_dist.update_seqno == n ) {
+    this->peer_dist.invalid_reason = INVALID_NONE;
+    this->peer_dist.invalid_src_uid = 0;
+  }
 }
 
 void

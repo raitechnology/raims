@@ -330,6 +330,7 @@ struct SubsReply {
   uint32_t uid;
   uint16_t sub_len,
            queue_len;
+  uint8_t  fmt;
   bool     is_pattern;
 };
 

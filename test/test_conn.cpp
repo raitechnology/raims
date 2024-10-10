@@ -51,8 +51,8 @@ ConnectPing::connect( ConnectCtx &ctx ) noexcept
 {
   TcpPing *ping = this->poll.get_free_list<TcpPing>( this->sock_type );
   ping->notify = &ctx;
-  if ( EvTcpConnection::connect3( *ping, ctx.addr_info.addr_list,
-                                  ctx.opts, "tcp_ping", -1 ) == 0 ) {
+  EvConnectParam param( ctx.addr_info.addr_list, ctx.opts, "tcp_ping", -1 );
+  if ( EvTcpConnection::connect3( *ping, param ) == 0 ) {
     ctx.client = ping;
     ping->start();
     return true;

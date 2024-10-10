@@ -951,8 +951,9 @@ struct SubDB {
   /* reassert subscription forward */
   bool fwd_resub( UserBridge &n,  const char *sub,  size_t sublen,
                   uint64_t from_seqno,  uint64_t seqno,  bool is_psub,
-                  const char *suf,  uint64_t token,  const char *queue,
-                  uint16_t queue_len,  uint32_t queue_hash ) noexcept;
+                  uint8_t fmt, const char *suf,  uint64_t token,
+                  const char *queue, uint16_t queue_len,
+                  uint32_t queue_hash ) noexcept;
   bool find_fwd_sub( UserBridge &n,  uint32_t hash,  uint64_t &from_seqno,
                      uint64_t seqno,  const char *suf,  uint64_t token,
                      const char *match,  size_t match_len ) noexcept;

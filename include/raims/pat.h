@@ -58,6 +58,7 @@ struct PatRoute : public kv::BloomDetail {
   uint64_t                  start_seqno; /* sequence of the subscription start */
   SubOnMsg                * on_data;
   SubRefs                   ref;
+  kv::PatternFmt            fmt;
   pcre2_real_code_8       * re;    /* pcre match the subject, null if prefix */
   pcre2_real_match_data_8 * md;
   uint16_t                  len;

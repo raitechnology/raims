@@ -82,6 +82,8 @@ CONFIG_CONST( R_NO_MCAST           , "no_mcast" )
 CONFIG_CONST( R_NO_FAKEIP          , "no_fakeip" )
 CONFIG_CONST( R_SERVICE            , "service" )
 CONFIG_CONST( R_NETWORK            , "network" )
+CONFIG_CONST( R_DAEMON             , "daemon" )
+CONFIG_CONST( R_USER               , "user" )
 CONFIG_CONST( R_COST               , "cost" )         /* 2,3,4 */
 CONFIG_CONST( R_HTTP_DIR           , "http_dir" )
 CONFIG_CONST( R_HTTP_USERNAME      , "http_username" )
@@ -91,6 +93,9 @@ CONFIG_CONST( R_HTDIGEST           , "htdigest" )
 CONFIG_CONST( R_IPV4ONLY           , "ipv4only" )
 CONFIG_CONST( R_IPV6ONLY           , "ipv6only" )
 CONFIG_CONST( R_NOENCRYPT          , "noencrypt" )
+CONFIG_CONST( R_BROADCAST_FEED     , "broadcast_feed" )
+CONFIG_CONST( R_INTERACTIVE_FEED   , "interactive_feed" )
+CONFIG_CONST( R_SUBSCRIBER_LISTEN  , "subscriber_listen" )
 
 #undef CONFIG_CONST
 
@@ -115,17 +120,22 @@ CONFIG_CONST( R_NOENCRYPT          , "noencrypt" )
   CMD_TPORT_NO_FAKEIP          = CMD_TPORT_BASE+16,\
   CMD_TPORT_SERVICE            = CMD_TPORT_BASE+17,\
   CMD_TPORT_NETWORK            = CMD_TPORT_BASE+18,\
-  CMD_TPORT_COST               = CMD_TPORT_BASE+19,\
-  CMD_TPORT_HTTP_DIR           = CMD_TPORT_BASE+20,\
-  CMD_TPORT_HTTP_USERNAME      = CMD_TPORT_BASE+21,\
-  CMD_TPORT_HTTP_PASSWORD      = CMD_TPORT_BASE+22,\
-  CMD_TPORT_HTTP_REALM         = CMD_TPORT_BASE+23,\
-  CMD_TPORT_HTDIGEST           = CMD_TPORT_BASE+24,\
-  CMD_TPORT_IPV4ONLY           = CMD_TPORT_BASE+25,\
-  CMD_TPORT_IPV6ONLY           = CMD_TPORT_BASE+26,\
-  CMD_TPORT_NOENCRYPT          = CMD_TPORT_BASE+27,\
-  CMD_TPORT_SHOW               = CMD_TPORT_BASE+28,\
-  CMD_TPORT_QUIT               = CMD_TPORT_BASE+29
+  CMD_TPORT_DAEMON             = CMD_TPORT_BASE+19,\
+  CMD_TPORT_USER               = CMD_TPORT_BASE+20,\
+  CMD_TPORT_COST               = CMD_TPORT_BASE+21,\
+  CMD_TPORT_HTTP_DIR           = CMD_TPORT_BASE+22,\
+  CMD_TPORT_HTTP_USERNAME      = CMD_TPORT_BASE+23,\
+  CMD_TPORT_HTTP_PASSWORD      = CMD_TPORT_BASE+24,\
+  CMD_TPORT_HTTP_REALM         = CMD_TPORT_BASE+25,\
+  CMD_TPORT_HTDIGEST           = CMD_TPORT_BASE+26,\
+  CMD_TPORT_IPV4ONLY           = CMD_TPORT_BASE+27,\
+  CMD_TPORT_IPV6ONLY           = CMD_TPORT_BASE+28,\
+  CMD_TPORT_NOENCRYPT          = CMD_TPORT_BASE+29,\
+  CMD_TPORT_BROADCAST_FEED     = CMD_TPORT_BASE+29,\
+  CMD_TPORT_INTERACTIVE_FEED   = CMD_TPORT_BASE+30,\
+  CMD_TPORT_SUBSCRIBER_LISTEN  = CMD_TPORT_BASE+31,\
+  CMD_TPORT_SHOW               = CMD_TPORT_BASE+32,\
+  CMD_TPORT_QUIT               = CMD_TPORT_BASE+33
 
 /* configure transport route parameters */
 #define CMD_TPORT_CMD \
@@ -148,6 +158,8 @@ CONFIG_CONST( R_NOENCRYPT          , "noencrypt" )
   { CMD_TPORT_NO_FAKEIP         , R_NO_FAKEIP  ,0,0},\
   { CMD_TPORT_SERVICE           , R_SERVICE    ,0,0},\
   { CMD_TPORT_NETWORK           , R_NETWORK    ,0,0},\
+  { CMD_TPORT_DAEMON            , R_DAEMON     ,0,0},\
+  { CMD_TPORT_USER              , R_USER       ,0,0},\
   { CMD_TPORT_COST              , R_COST       ,0,0},\
   { CMD_TPORT_HTTP_DIR          , R_HTTP_DIR   ,0,0},\
   { CMD_TPORT_HTTP_USERNAME     , R_HTTP_USERNAME,0,0},\
@@ -157,42 +169,50 @@ CONFIG_CONST( R_NOENCRYPT          , "noencrypt" )
   { CMD_TPORT_IPV4ONLY          , R_IPV4ONLY   ,0,0},\
   { CMD_TPORT_IPV6ONLY          , R_IPV6ONLY   ,0,0},\
   { CMD_TPORT_NOENCRYPT         , R_NOENCRYPT  ,0,0},\
+  { CMD_TPORT_BROADCAST_FEED    , R_BROADCAST_FEED,0,0},\
+  { CMD_TPORT_INTERACTIVE_FEED  , R_INTERACTIVE_FEED,0,0},\
+  { CMD_TPORT_SUBSCRIBER_LISTEN , R_SUBSCRIBER_LISTEN,0,0},\
   { CMD_TPORT_SHOW              , "show"       ,0,0},\
   { CMD_TPORT_QUIT              , "quit"       ,0,0},\
   { CMD_TPORT_QUIT              , "exit"       ,0,0}
 
 /* configure transport route param help */
 #define CMD_TPORT_HELP \
-  { CMD_TPORT_TPORT      , R_TPORT,"N",    "Name of transport" },\
-  { CMD_TPORT_TYPE       , R_TYPE,"T",     "Type of transport" },\
-  { CMD_TPORT_LISTEN     , R_LISTEN,"A",   "Listen address for passive transport" },\
-  { CMD_TPORT_CONNECT    , R_CONNECT,"A",  "Connect address for active transport" },\
-  { CMD_TPORT_DEVICE     , R_DEVICE,"A",   "Device name or address" },\
-  { CMD_TPORT_PORT       , R_PORT,"N",     "Port for address" },\
-  { CMD_TPORT_TIMEOUT    , R_TIMEOUT,"N",  "Timeout for connect or accept" },\
-  { CMD_TPORT_MTU        , R_MTU,"N",      "MTU for pgm type transport, UDP datagram size" },\
-  { CMD_TPORT_TXW_SQNS   , R_TXW_SQNS,"N", "Transmit window in datagram sequences" },\
-  { CMD_TPORT_RXW_SQNS   , R_RXW_SQNS,"N", "Recieve window in datagram sequences" },\
-  { CMD_TPORT_TXW_SECS   , R_TXW_SECS,"N", "Transmit window in seconds" },\
-  { CMD_TPORT_MCAST_LOOP , R_MCAST_LOOP,"N", "Controls multicast loop: 0 - none, 2 - host loop and exclude sender" },\
-  { CMD_TPORT_EDGE       , R_EDGE,"B",     "When true, don't create a adjaceny and use existing" },\
+  { CMD_TPORT_TPORT             , R_TPORT      ,"N","Name of transport" },\
+  { CMD_TPORT_TYPE              , R_TYPE       ,"T","Type of transport" },\
+  { CMD_TPORT_LISTEN            , R_LISTEN     ,"A","Listen address for passive transport" },\
+  { CMD_TPORT_CONNECT           , R_CONNECT    ,"A","Connect address for active transport" },\
+  { CMD_TPORT_DEVICE            , R_DEVICE     ,"A","Device name or address" },\
+  { CMD_TPORT_PORT              , R_PORT       ,"N","Port for address" },\
+  { CMD_TPORT_TIMEOUT           , R_TIMEOUT    ,"N","Timeout for connect or accept" },\
+  { CMD_TPORT_MTU               , R_MTU        ,"N","MTU for pgm type transport, UDP datagram size" },\
+  { CMD_TPORT_TXW_SQNS          , R_TXW_SQNS   ,"N","Transmit window in datagram sequences" },\
+  { CMD_TPORT_RXW_SQNS          , R_RXW_SQNS   ,"N","Recieve window in datagram sequences" },\
+  { CMD_TPORT_TXW_SECS          , R_TXW_SECS   ,"N","Transmit window in seconds" },\
+  { CMD_TPORT_MCAST_LOOP        , R_MCAST_LOOP ,"N","Controls multicast loop: 0 - none, 2 - host loop and exclude sender" },\
+  { CMD_TPORT_EDGE              , R_EDGE       ,"B","When true, don't create a adjaceny and use existing" },\
   { CMD_TPORT_USE_SERVICE_PREFIX, R_USE_SERVICE_PREFIX,"B","When false, no service prefix" },\
-  { CMD_TPORT_NO_PERMANENT, R_NO_PERMANENT,"B","Quit when no connections for 2 minutes" },\
-  { CMD_TPORT_NO_MCAST   ,  R_NO_MCAST,"B","Disable multicast networks" },\
-  { CMD_TPORT_NO_FAKEIP  ,  R_NO_FAKEIP,"B","Disable fake host ip used in inbox subjects" },\
-  { CMD_TPORT_SERVICE    ,  R_SERVICE,"S", "Use service name" },\
-  { CMD_TPORT_NETWORK    ,  R_NETWORK,"A", "Connect to network" },\
-  { CMD_TPORT_COST       ,  R_COST,"N",    "Cost used for calculating routes" },\
-  { CMD_TPORT_HTTP_DIR   ,  R_HTTP_DIR,"D","Use this directory for serving files" },\
-  { CMD_TPORT_HTTP_USERNAME , R_HTTP_USERNAME,"N","Username for http auth" },\
-  { CMD_TPORT_HTTP_PASSWORD , R_HTTP_PASSWORD,"N","Password for http auth" },\
-  { CMD_TPORT_HTTP_REALM    , R_HTTP_REALM   ,"N","Realm for http auth" },\
-  { CMD_TPORT_HTDIGEST      , R_HTDIGEST     ,"N","File to load for http auth" },\
-  { CMD_TPORT_IPV4ONLY   ,  R_IPV4ONLY,"B","Only use IPv4 addresses" },\
-  { CMD_TPORT_IPV6ONLY   ,  R_IPV6ONLY,"B","Only use IPv6 addresses" },\
-  { CMD_TPORT_NOENCRYPT  ,  R_NOENCRYPT,"B","Do not use encryption" },\
-  { CMD_TPORT_SHOW       , "show","",      "Show tport config" },\
-  { CMD_TPORT_QUIT       , "quit/exit","", "Exit config" }
+  { CMD_TPORT_NO_PERMANENT      , R_NO_PERMANENT,"B","Quit when no connections for 2 minutes" },\
+  { CMD_TPORT_NO_MCAST          , R_NO_MCAST   ,"B","Disable multicast networks" },\
+  { CMD_TPORT_NO_FAKEIP         , R_NO_FAKEIP  ,"B","Disable fake host ip used in inbox subjects" },\
+  { CMD_TPORT_SERVICE           , R_SERVICE    ,"S","Use service name" },\
+  { CMD_TPORT_NETWORK           , R_NETWORK    ,"A","Connect to network" },\
+  { CMD_TPORT_DAEMON            , R_DAEMON     ,"A","Connect to daemon" },\
+  { CMD_TPORT_USER              , R_USER       ,"T","User parameter" },\
+  { CMD_TPORT_COST              , R_COST       ,"N","Cost used for calculating routes" },\
+  { CMD_TPORT_HTTP_DIR          , R_HTTP_DIR   ,"D","Use this directory for serving files" },\
+  { CMD_TPORT_HTTP_USERNAME     , R_HTTP_USERNAME,"N","Username for http auth" },\
+  { CMD_TPORT_HTTP_PASSWORD     , R_HTTP_PASSWORD,"N","Password for http auth" },\
+  { CMD_TPORT_HTTP_REALM        , R_HTTP_REALM ,"N","Realm for http auth" },\
+  { CMD_TPORT_HTDIGEST          , R_HTDIGEST   ,"N","File to load for http auth" },\
+  { CMD_TPORT_IPV4ONLY          , R_IPV4ONLY   ,"B","Only use IPv4 addresses" },\
+  { CMD_TPORT_IPV6ONLY          , R_IPV6ONLY   ,"B","Only use IPv6 addresses" },\
+  { CMD_TPORT_NOENCRYPT         , R_NOENCRYPT  ,"B","Do not use encryption" },\
+  { CMD_TPORT_BROADCAST_FEED    , R_BROADCAST_FEED,"T","Listen for messages on subject for forwarding" },\
+  { CMD_TPORT_INTERACTIVE_FEED  , R_INTERACTIVE_FEED,"T","Forward subscriptions for forwarding" },\
+  { CMD_TPORT_SUBSCRIBER_LISTEN , R_SUBSCRIBER_LISTEN,"T","Forward messages to subscriptions" },\
+  { CMD_TPORT_SHOW              , "show"       ,"" ,"Show tport config" },\
+  { CMD_TPORT_QUIT              , "quit/exit"  ,"" ,"Exit config" }
 
 /* which route params are valid for each of the transports 
  * listen: "127.0.0.1"
@@ -212,16 +232,19 @@ CONFIG_CONST( R_NOENCRYPT          , "noencrypt" )
                      CMD_TPORT_TXW_SECS, CMD_TPORT_MCAST_LOOP
 
 #define VALID_RV     CMD_TPORT_LISTEN, CMD_TPORT_DEVICE, CMD_TPORT_PORT, \
-                     CMD_TPORT_USE_SERVICE_PREFIX, \
-                     CMD_TPORT_NO_PERMANENT, CMD_TPORT_NO_MCAST, CMD_TPORT_NO_FAKEIP
+                     CMD_TPORT_USE_SERVICE_PREFIX, CMD_TPORT_CONNECT, CMD_TPORT_DAEMON, CMD_TPORT_USER, \
+                     CMD_TPORT_NO_PERMANENT, CMD_TPORT_NO_MCAST, CMD_TPORT_NO_FAKEIP, CMD_TPORT_BROADCAST_FEED, \
+                     CMD_TPORT_INTERACTIVE_FEED, CMD_TPORT_SUBSCRIBER_LISTEN
 
 #define VALID_NATS   CMD_TPORT_LISTEN, CMD_TPORT_DEVICE, CMD_TPORT_PORT, \
-                     CMD_TPORT_SERVICE, CMD_TPORT_NETWORK, \
-                     CMD_TPORT_IPV4ONLY, CMD_TPORT_IPV6ONLY
+                     CMD_TPORT_SERVICE, CMD_TPORT_NETWORK, CMD_TPORT_CONNECT, CMD_TPORT_DAEMON, CMD_TPORT_USER, \
+                     CMD_TPORT_IPV4ONLY, CMD_TPORT_IPV6ONLY, CMD_TPORT_BROADCAST_FEED, \
+                     CMD_TPORT_INTERACTIVE_FEED, CMD_TPORT_SUBSCRIBER_LISTEN
 
 #define VALID_REDIS  CMD_TPORT_LISTEN, CMD_TPORT_DEVICE, CMD_TPORT_PORT, \
-                     CMD_TPORT_SERVICE, CMD_TPORT_NETWORK, \
-                     CMD_TPORT_IPV4ONLY, CMD_TPORT_IPV6ONLY
+                     CMD_TPORT_SERVICE, CMD_TPORT_NETWORK, CMD_TPORT_CONNECT, CMD_TPORT_DAEMON, CMD_TPORT_USER, \
+                     CMD_TPORT_IPV4ONLY, CMD_TPORT_IPV6ONLY, CMD_TPORT_BROADCAST_FEED, \
+                     CMD_TPORT_INTERACTIVE_FEED, CMD_TPORT_SUBSCRIBER_LISTEN
 
 #define VALID_NAME   CMD_TPORT_LISTEN, CMD_TPORT_CONNECT, CMD_TPORT_PORT
 

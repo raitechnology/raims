@@ -425,8 +425,9 @@ PatRoute::start( PatternArgs &ctx ) noexcept
   size_t erroff;
   int    error;
   bool   pattern_success = false;
-  this->re = NULL;
-  this->md = NULL;
+  this->re  = NULL;
+  this->md  = NULL;
+  this->fmt = ctx.cvt.fmt;
   /* if prefix matches, no need for pcre2 */
   if ( ctx.cvt.prefixlen + 1 == ctx.patlen &&
        ( ( ctx.cvt.fmt == RV_PATTERN_FMT &&

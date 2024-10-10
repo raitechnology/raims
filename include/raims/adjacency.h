@@ -232,7 +232,8 @@ struct AdjDistance : public md::MDMsgMem {
 
   uint64_t       cache_seqno,   /* seqno of adjacency in cache */
                  graph_seqno,   /* seqno of graph */
-                 update_seqno;  /* seqno of current adjacency */
+                 update_seqno,  /* seqno of current adjacency */
+                 converge_seqno;/* seqno printed when converged */
   uint32_t       max_uid,       /* all uid < max_uid */
                  max_tport,     /* all tport < max_tport */
                  path_count,    /* count of paths found in graph */
@@ -262,11 +263,12 @@ struct AdjDistance : public md::MDMsgMem {
   AdjDistance( UserDB &u ) : user_db( u ) {
     zero_mem( (void *) &this->stack, (void *) &this->inc_visit );
     zero_mem( (void *) &this->max_uid, (void *) &this[ 1 ] );
-    this->cache_seqno  = 0;
-    this->graph_seqno  = 0;
-    this->update_seqno = 1;
-    this->path_count   = 1;
-    this->path_limit   = DEFAULT_PATH_LIMIT; /* 8 */
+    this->cache_seqno    = 0;
+    this->graph_seqno    = 0;
+    this->converge_seqno = 0;
+    this->update_seqno   = 1;
+    this->path_count     = 1;
+    this->path_limit     = DEFAULT_PATH_LIMIT; /* 8 */
   }
   template<class AR>
   AR *mkar( size_t elcnt ) {
@@ -287,10 +289,10 @@ struct AdjDistance : public md::MDMsgMem {
   }
   void invalidate( InvalidReason why,  uint32_t src_uid ) {
     if ( this->update_seqno++ == this->cache_seqno ) {
-      if ( ! this->found_inconsistency ) {
-        this->invalid_mono = kv::current_monotonic_time_ns();
+      if ( ! this->found_inconsistency ||
+           this->invalid_reason == INVALID_NONE )
         this->invalid_reason = why;
-      }
+      this->invalid_mono = kv::current_monotonic_time_ns();
       this->invalid_src_uid = src_uid;
     }
     this->inc_run_count = 0;

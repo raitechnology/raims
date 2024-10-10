@@ -3585,7 +3585,7 @@ Console::on_subs( ConsoleSubs &subs ) noexcept
               tab[ i++ ].set( q );
             else
               tab[ i++ ].set_null();
-            tab[ i++ ].set( "p" );
+            tab[ i++ ].set( pat->fmt == GLOB_PATTERN_FMT ? "g" : "p" );
             tab[ i++ ].set( pat->value, pat->len );
             tab[ i-1 ].typ |= PRINT_LEFT;
           }
@@ -3626,7 +3626,7 @@ Console::on_subs( ConsoleSubs &subs ) noexcept
         tab[ i++ ].set_null();
       }
       if ( reply.is_pattern )
-        tab[ i++ ].set( "p" );
+        tab[ i++ ].set( reply.fmt == GLOB_PATTERN_FMT ? "g" : "p" );
       else
         tab[ i++ ].set_null();
       tab[ i++ ].set( str, reply.sub_len );
@@ -6653,21 +6653,39 @@ Console::show_rvsub( ConsoleOutput *p ) noexcept
         PeerMatchArgs ka;
         PeerMatchIter iter( this->mgr, ka );
         EvSocket    * sock;
+        RouteSub    * s;
+        RouteLoc      loc;
 
+        SubRouteDB daemon;
+        if ( host.get_subscriptions( host.service_num, daemon ) > 0 ) {
+          if ( (s = daemon.first( loc )) != NULL ) {
+            tab = out.add_row_p();
+            tab[ 0 ].set( host.service, host.service_len )
+                    .set( host.session_ip, 8 )
+                    .set( "daemon", 6 )
+                    .set_null();
+            this->tab_string( s->value, s->len, tab[ 4 ] );
+            tab[ 4 ].typ |= PRINT_LEFT;
+          }
+        }
         for ( sock = iter.first(); sock != NULL; sock = iter.next() ) {
           char sess[ EvSocket::MAX_SESSION_LEN ];
           size_t n;
           if ( (n = sock->get_session( host.service_num, sess )) > 0 ) {
-            SubRouteDB subs, pats;
-            RouteSub * s;
-            RouteLoc   loc;
-            char       user[ EvSocket::MAX_USERID_LEN ];
-            size_t     subcnt, patcnt;
+            SubRouteDB   subs, pats;
+            char         user[ EvSocket::MAX_USERID_LEN ];
+            size_t       subcnt, patcnt;
+            const char * kind = "p";
 
             sock->get_userid( user );
             subcnt = sock->get_subscriptions( host.service_num, subs );
-            patcnt = sock->get_patterns( host.service_num, RV_PATTERN_FMT, pats );
-
+            patcnt = sock->get_patterns( host.service_num, RV_PATTERN_FMT,
+                                         pats );
+            if ( patcnt == 0 ) {
+              patcnt = sock->get_patterns( host.service_num, GLOB_PATTERN_FMT,
+                                           pats );
+              kind = "g";
+            }
             tab = out.add_row_p();
             i = 0;
             tab[ i++ ].set( host.service, host.service_len );
@@ -6692,7 +6710,7 @@ Console::show_rvsub( ConsoleOutput *p ) noexcept
                   i = 3;
                   tab[ 0 ].set_null().set_null().set_null();
                 }
-                tab[ i++ ].set( "p" );
+                tab[ i++ ].set( kind );
                 this->tab_string( s->value, s->len, tab[ i++ ] );
                 tab[ i-1 ].typ |= PRINT_LEFT;
               }
@@ -7048,6 +7066,7 @@ ConsoleSubs::on_data( const SubMsgData &val ) noexcept
   const char * str = NULL;
   size_t       len = 0;
   bool         is_pattern = false;
+  uint32_t     fmt = 0;
 
   if ( dec.test( FID_SUBJECT ) ) {
     len = dec.mref[ FID_SUBJECT ].fsize;
@@ -7057,6 +7076,7 @@ ConsoleSubs::on_data( const SubMsgData &val ) noexcept
     len = dec.mref[ FID_PATTERN ].fsize;
     str = (const char *) dec.mref[ FID_PATTERN ].fptr;
     is_pattern = true;
+    dec.get_ival<uint32_t>( FID_FMT, fmt );
   }
   if ( dec.test( FID_END ) ) {
     uint64_t end = 0;
@@ -7073,6 +7093,7 @@ ConsoleSubs::on_data( const SubMsgData &val ) noexcept
     reply.uid        = val.src_bridge->uid;
     reply.sub_off    = this->append_string( str, len );
     reply.sub_len    = (uint16_t) len;
+    reply.fmt        = fmt;
     reply.is_pattern = is_pattern;
 
     if ( dec.test( FID_QUEUE ) ) {

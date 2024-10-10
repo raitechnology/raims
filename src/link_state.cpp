@@ -452,6 +452,8 @@ UserDB::push_connected_user_route( UserBridge &n,  UserRoute &u_rte ) noexcept
     }
   }
   if ( ! rte.uid_connected.test_set( n.uid ) ) {
+    if ( debug_lnk )
+      rte.printf( "invalidate: add uid %u\n", n.uid );
     this->peer_dist.invalidate( PUSH_ROUTE_INV, n.uid );
     this->adjacency_change.append( n.uid, rte.tport_id,
                                    this->link_state_seqno + 1, true );
@@ -828,7 +830,8 @@ UserDB::add_adjacency_change( UserBridge &n,  AdjacencyRec &rec ) noexcept
 {
   AdjacencySpace * set        = NULL;
   uint32_t         tport_id   = 0,
-                   bridge_uid = 0;
+                   bridge_uid = 0,
+                   chng       = 0;
   size_t           pos;
 
   if ( rec.test( FID_TPORT ) )
@@ -869,21 +872,28 @@ UserDB::add_adjacency_change( UserBridge &n,  AdjacencyRec &rec ) noexcept
       (int) set->tport.len, set->tport.val, set->tport_id );
 
   if ( rec.add ) {
-    if ( ! set->test_set( bridge_uid ) )
+    if ( ! set->test_set( bridge_uid ) ) {
       n.uid_csum ^= rec.nonce;
-
+      chng |= 1;
+    }
     if ( rec.test( FID_REM_TPORTID ) ) {
       if ( rec.rem_tportid == 0 ) {
-        set->rem_uid = 0;
-        set->rem_tport_id = 0;
+        if ( set->rem_uid != 0 || set->rem_tport_id != 0 ) {
+          chng |= 2;
+          set->rem_uid = 0;
+          set->rem_tport_id = 0;
+        }
       }
       else if ( rec.test( FID_REM_BRIDGE ) ) {
         size_t   pos;
         uint32_t uid = 0;
         if ( this->node_ht->find( rec.rem_bridge, pos, uid ) ||
              this->zombie_ht->find( rec.rem_bridge, pos, uid ) ) {
-          set->rem_uid = uid;
-          set->rem_tport_id = rec.rem_tportid;
+          if ( set->rem_uid != uid || set->rem_tport_id != rec.rem_tportid ) {
+            chng |= 4;
+            set->rem_uid = uid;
+            set->rem_tport_id = rec.rem_tportid;
+          }
         }
         else {
           if ( debug_lnk )
@@ -896,13 +906,18 @@ UserDB::add_adjacency_change( UserBridge &n,  AdjacencyRec &rec ) noexcept
         }
       }
       else {
-        set->rem_uid = bridge_uid;
-        set->rem_tport_id = rec.rem_tportid;
+        if ( set->rem_uid != bridge_uid ||
+             set->rem_tport_id != rec.rem_tportid ) {
+          chng |= 8;
+          set->rem_uid = bridge_uid;
+          set->rem_tport_id = rec.rem_tportid;
+        }
       }
     }
   }
   else {
     if ( set->test_clear( bridge_uid ) ) {
+      chng |= 16;
       n.uid_csum ^= rec.nonce;
       if ( set->is_empty() ) {
         set->rem_uid = 0;
@@ -910,6 +925,7 @@ UserDB::add_adjacency_change( UserBridge &n,  AdjacencyRec &rec ) noexcept
       }
     }
   }
+  d_lnk( "add_adj_chg %x\n", chng );
   return true;
 }
 

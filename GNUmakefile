@@ -77,7 +77,7 @@ soflag      := -shared
 fpicflags   := -fPIC
 thread_lib  := -pthread -lrt
 sock_lib    := -lcares -lssl -lcrypto
-dynlink_lib := -lpcre2-8 -lpcre2-32 -lz
+dynlink_lib := -lpcre2-8 -lpcre2-32 -lz -ldl
 endif
 # make apple shared lib
 ifeq (Darwin,$(lsb_dist)) 
@@ -137,13 +137,13 @@ ifeq (,$(lzf_home))
 lzf_home    := $(call test_makefile,$(rdb_home)/lzf)
 endif
 
-lnk_lib     := -Wl,--push-state -Wl,-Bstatic
-lnk_lib     += $(libd)/libraims.a
-dlnk_lib    :=
-lnk_dep     := $(libd)/libraims.a
-dlnk_dep    :=
-ms_dlnk_lib := -L$(pwd)/$(libd) -lraims
-ms_dlnk_dep := $(libd)/libraims.$(dll)
+lnk_lib  := -Wl,--push-state -Wl,-Bstatic
+lnk_lib  += $(libd)/libraims.a
+lnk_dep  := $(libd)/libraims.a
+
+dlnk_lib := -L$(pwd)/$(libd) -lraims
+dlnk_dep := $(libd)/libraims.$(dll)
+ms_dlnk_dep :=
 
 ifneq (,$(ds_home))
 ds_lib      := $(ds_home)/$(libd)/libraids.a
@@ -151,7 +151,7 @@ ds_dll      := $(ds_home)/$(libd)/libraids.$(dll)
 lnk_lib     += $(ds_lib)
 lnk_dep     += $(ds_lib)
 dlnk_lib    += -L$(ds_home)/$(libd) -lraids
-dlnk_dep    += $(ds_dll)
+ms_dlnk_dep += $(ds_dll)
 rpath1       = ,-rpath,$(pwd)/$(ds_home)/$(libd)
 ds_includes  = -I$(ds_home)/include
 else
@@ -165,7 +165,7 @@ md_dll      := $(md_home)/$(libd)/libraimd.$(dll)
 lnk_lib     += $(md_lib)
 lnk_dep     += $(md_lib)
 dlnk_lib    += -L$(md_home)/$(libd) -lraimd
-dlnk_dep    += $(md_dll)
+ms_dlnk_dep += $(md_dll)
 rpath2       = ,-rpath,$(pwd)/$(md_home)/$(libd)
 includes    += -I$(md_home)/include
 else
@@ -179,7 +179,7 @@ dec_dll     := $(dec_home)/$(libd)/libdecnumber.$(dll)
 lnk_lib     += $(dec_lib)
 lnk_dep     += $(dec_lib)
 dlnk_lib    += -L$(dec_home)/$(libd) -ldecnumber
-dlnk_dep    += $(dec_dll)
+ms_dlnk_dep += $(dec_dll)
 rpath3       = ,-rpath,$(pwd)/$(dec_home)/$(libd)
 dec_includes = -I$(dec_home)/include
 else
@@ -193,7 +193,7 @@ lc_dll      := $(lc_home)/$(libd)/liblinecook.$(dll)
 lnk_lib     += $(lc_lib)
 lnk_dep     += $(lc_lib)
 dlnk_lib    += -L$(lc_home)/$(libd) -llinecook
-dlnk_dep    += $(lc_dll)
+ms_dlnk_dep += $(lc_dll)
 rpath4       = ,-rpath,$(pwd)/$(lc_home)/$(libd)
 lc_includes  = -I$(lc_home)/include
 else
@@ -207,7 +207,7 @@ h3_dll      := $(h3_home)/$(libd)/libh3lib.$(dll)
 lnk_lib     += $(h3_lib)
 lnk_dep     += $(h3_lib)
 dlnk_lib    += -L$(h3_home)/$(libd) -lh3lib
-dlnk_dep    += $(h3_dll)
+ms_dlnk_dep += $(h3_dll)
 rpath5       = ,-rpath,$(pwd)/$(h3_home)/$(libd)
 h3_includes  = -I$(h3_home)/src/h3lib/include
 else
@@ -221,7 +221,7 @@ rdb_dll     := $(rdb_home)/$(libd)/librdbparser.$(dll)
 lnk_lib     += $(rdb_lib)
 lnk_dep     += $(rdb_lib)
 dlnk_lib    += -L$(rdb_home)/$(libd) -lrdbparser
-dlnk_dep    += $(rdb_dll)
+ms_dlnk_dep += $(rdb_dll)
 rpath6       = ,-rpath,$(pwd)/$(rdb_home)/$(libd)
 rdb_includes = -I$(rdb_home)/include
 else
@@ -235,7 +235,7 @@ kv_dll      := $(kv_home)/$(libd)/libraikv.$(dll)
 lnk_lib     += $(kv_lib)
 lnk_dep     += $(kv_lib)
 dlnk_lib    += -L$(kv_home)/$(libd) -lraikv
-dlnk_dep    += $(kv_dll)
+ms_dlnk_dep += $(kv_dll)
 rpath7       = ,-rpath,$(pwd)/$(kv_home)/$(libd)
 includes    += -I$(kv_home)/include
 else
@@ -249,7 +249,7 @@ pgm_dll     := $(pgm_home)/$(libd)/libopenpgm_st.$(dll)
 lnk_lib     += $(pgm_lib)
 lnk_dep     += $(pgm_lib)
 dlnk_lib    += -L$(pgm_home)/$(libd) -lopenpgm_st
-dlnk_dep    += $(pgm_dll)
+ms_dlnk_dep += $(pgm_dll)
 rpath8       = ,-rpath,$(pwd)/$(pgm_home)/$(libd)
 pgm_includes = -I$(pgm_home)/openpgm/pgm/include
 else
@@ -263,7 +263,7 @@ sassrv_dll  := $(sassrv_home)/$(libd)/libsassrv.$(dll)
 lnk_lib     += $(sassrv_lib)
 lnk_dep     += $(sassrv_lib)
 dlnk_lib    += -L$(sassrv_home)/$(libd) -lsassrv
-dlnk_dep    += $(sassrv_dll)
+ms_dlnk_dep += $(sassrv_dll)
 rpath9       = ,-rpath,$(pwd)/$(sassrv_home)/$(libd)
 sassrv_includes = -I$(sassrv_home)/include
 else
@@ -277,7 +277,7 @@ natsmd_dll  := $(natsmd_home)/$(libd)/libnatsmd.$(dll)
 lnk_lib     += $(natsmd_lib)
 lnk_dep     += $(natsmd_lib)
 dlnk_lib    += -L$(natsmd_home)/$(libd) -lnatsmd
-dlnk_dep    += $(natsmd_dll)
+ms_dlnk_dep += $(natsmd_dll)
 rpath10      = ,-rpath,$(pwd)/$(natsmd_home)/$(libd)
 natsmd_includes = -I$(natsmd_home)/include
 else
@@ -293,7 +293,7 @@ lzf_dll     := $(lzf_home)/$(libd)/liblzf.$(dll)
 lnk_lib     += $(lzf_lib)
 lnk_dep     += $(lzf_lib)
 dlnk_lib    += -L$(lzf_home)/$(libd) -llzf
-dlnk_dep    += $(lzf_dll)
+ms_dlnk_dep += $(lzf_dll)
 rpath11      = ,-rpath,$(pwd)/$(lzf_home)/$(libd)
 lzf_includes = -I$(lzf_home)/include
 else
@@ -302,6 +302,7 @@ dlnk_lib    += -llzf
 includes    += -I/usr/include/liblzf
 endif
 
+dlnk_dep += $(ms_dlnk_dep)
 rpath := -Wl,-rpath,$(pwd)/$(libd)$(rpath1)$(rpath2)$(rpath3)$(rpath4)$(rpath5)$(rpath6)$(rpath7)$(rpath8)$(rpath9)$(rpath10)$(rpath11)
 
 .PHONY: everything
@@ -419,7 +420,6 @@ gen_files   :=
 session_includes            := $(ds_includes)
 heartbeat_includes          := $(sassrv_includes)
 ev_rv_transport_includes    := $(sassrv_includes) $(ds_includes)
-ev_nats_transport_includes  := $(natsmd_includes)
 transport_includes          := $(pgm_includes) $(natsmd_includes) $(sassrv_includes) $(ds_includes)
 session_tport_includes      := $(pgm_includes) $(natsmd_includes) $(sassrv_includes) $(ds_includes)
 conn_mgr_includes           := $(pgm_includes) $(natsmd_includes) $(sassrv_includes) $(ds_includes)
@@ -428,7 +428,6 @@ pgm_sock_includes           := $(pgm_includes)
 console_includes            := $(natsmd_includes) $(sassrv_includes) $(ds_includes) $(lc_includes)
 ev_telnet_includes          := $(ds_includes) $(lc_includes)
 ev_web_includes             := $(ds_includes)
-ev_redis_transport_includes := $(ds_includes)
 server_includes             := $(ds_includes) $(lc_includes)
 
 session_defines := -DMS_VER=$(ver_build)
@@ -438,7 +437,7 @@ libraims_files := session user_db heartbeat auth peer link_state adjacency \
 		  crypt poly1305 ec25519 ed25519 sha512 aes \
 		  ev_tcp_aes ev_tcp_transport ev_pgm_transport pgm_sock \
 		  ev_inbox_transport ev_telnet ev_web ev_rv_transport \
-		  ev_nats_transport ev_redis_transport ev_name_svc
+		  ev_name_svc
 libraims_files := $(libraims_files)
 libraims_cfile := $(addprefix src/, $(addsuffix .cpp, $(libraims_files)))
 libraims_objs  := $(addprefix $(objd)/, $(addsuffix .o, $(libraims_files)))
@@ -450,7 +449,7 @@ libraims_spec  := $(version)-$(build_num)_$(git_hash)
 libraims_ver   := $(major_num).$(minor_num)
 
 $(libd)/libraims.a: $(libraims_objs)
-$(libd)/libraims.$(dll): $(libraims_dbjs) $(dlnk_dep)
+$(libd)/libraims.$(dll): $(libraims_dbjs) $(ms_dlnk_dep)
 
 all_libs    += $(libd)/libraims.a $(libd)/libraims.$(dll)
 all_depends += $(libraims_deps)
@@ -471,9 +470,9 @@ ms_gen_key_cfile := src/gen_key.cpp
 ms_gen_key_objs  := $(addprefix $(objd)/, $(addsuffix .o, $(ms_gen_key_files)))
 ms_gen_key_deps  := $(addprefix $(dependd)/, $(addsuffix .d, $(ms_gen_key_files)))
 ms_gen_key_libs  :=
-ms_gen_key_lnk   := $(lnk_lib)
+ms_gen_key_lnk   := $(dlnk_lib)
 
-$(bind)/ms_gen_key$(exe): $(ms_gen_key_objs) $(ms_gen_key_libs) $(lnk_dep)
+$(bind)/ms_gen_key$(exe): $(ms_gen_key_objs) $(ms_gen_key_libs) $(dlnk_dep)
 
 all_exes    += $(bind)/ms_gen_key$(exe)
 all_depends += $(ms_gen_key_deps)
@@ -483,9 +482,9 @@ kdftest_cfile := test/kdftest.cpp
 kdftest_objs  := $(addprefix $(objd)/, $(addsuffix .o, $(kdftest_files)))
 kdftest_deps  := $(addprefix $(dependd)/, $(addsuffix .d, $(kdftest_files)))
 kdftest_libs  :=
-kdftest_lnk   := $(lnk_lib)
+kdftest_lnk   := $(dlnk_lib)
 
-$(bind)/kdftest$(exe): $(kdftest_objs) $(kdftest_libs) $(lnk_dep)
+$(bind)/kdftest$(exe): $(kdftest_objs) $(kdftest_libs) $(dlnk_dep)
 
 all_exes    += $(bind)/kdftest$(exe)
 all_depends += $(kdftest_deps)
@@ -495,9 +494,9 @@ mactest_cfile := test/mactest.cpp
 mactest_objs  := $(addprefix $(objd)/, $(addsuffix .o, $(mactest_files)))
 mactest_deps  := $(addprefix $(dependd)/, $(addsuffix .d, $(mactest_files)))
 mactest_libs  :=
-mactest_lnk   := $(lnk_lib)
+mactest_lnk   := $(dlnk_lib)
 
-$(bind)/mactest$(exe): $(mactest_objs) $(mactest_libs) $(lnk_dep)
+$(bind)/mactest$(exe): $(mactest_objs) $(mactest_libs) $(dlnk_dep)
 
 all_exes    += $(bind)/mactest$(exe)
 all_depends += $(mactest_deps)
@@ -507,9 +506,9 @@ polytest_cfile := test/polytest.cpp
 polytest_objs  := $(addprefix $(objd)/, $(addsuffix .o, $(polytest_files)))
 polytest_deps  := $(addprefix $(dependd)/, $(addsuffix .d, $(polytest_files)))
 polytest_libs  :=
-polytest_lnk   := $(lnk_lib)
+polytest_lnk   := $(dlnk_lib)
 
-$(bind)/polytest$(exe): $(polytest_objs) $(polytest_libs) $(lnk_dep)
+$(bind)/polytest$(exe): $(polytest_objs) $(polytest_libs) $(dlnk_dep)
 
 all_exes    += $(bind)/polytest$(exe)
 all_depends += $(polytest_deps)
@@ -530,9 +529,9 @@ curvetest_cfile := test/curvetest.cpp
 curvetest_objs  := $(addprefix $(objd)/, $(addsuffix .o, $(curvetest_files)))
 curvetest_deps  := $(addprefix $(dependd)/, $(addsuffix .d, $(curvetest_files)))
 curvetest_libs  :=
-curvetest_lnk   := $(lnk_lib)
+curvetest_lnk   := $(dlnk_lib)
 
-$(bind)/curvetest$(exe): $(curvetest_objs) $(curvetest_libs) $(lnk_dep)
+$(bind)/curvetest$(exe): $(curvetest_objs) $(curvetest_libs) $(dlnk_dep)
 
 all_exes    += $(bind)/curvetest$(exe)
 all_depends += $(curvetest_deps)
@@ -542,9 +541,9 @@ dsatest_cfile := test/dsatest.cpp
 dsatest_objs  := $(addprefix $(objd)/, $(addsuffix .o, $(dsatest_files)))
 dsatest_deps  := $(addprefix $(dependd)/, $(addsuffix .d, $(dsatest_files)))
 dsatest_libs  :=
-dsatest_lnk   := $(lnk_lib)
+dsatest_lnk   := $(dlnk_lib)
 
-$(bind)/dsatest$(exe): $(dsatest_objs) $(dsatest_libs) $(lnk_dep)
+$(bind)/dsatest$(exe): $(dsatest_objs) $(dsatest_libs) $(dlnk_dep)
 
 all_exes    += $(bind)/dsatest$(exe)
 all_depends += $(dsatest_deps)
@@ -554,9 +553,9 @@ sigtest_cfile := test/sigtest.cpp
 sigtest_objs  := $(addprefix $(objd)/, $(addsuffix .o, $(sigtest_files)))
 sigtest_deps  := $(addprefix $(dependd)/, $(addsuffix .d, $(sigtest_files)))
 sigtest_libs  :=
-sigtest_lnk   := $(lnk_lib)
+sigtest_lnk   := $(dlnk_lib)
 
-$(bind)/sigtest$(exe): $(sigtest_objs) $(sigtest_libs) $(lnk_dep)
+$(bind)/sigtest$(exe): $(sigtest_objs) $(sigtest_libs) $(dlnk_dep)
 
 all_exes    += $(bind)/sigtest$(exe)
 all_depends += $(sigtest_deps)
@@ -566,9 +565,9 @@ shatest_cfile := test/shatest.cpp
 shatest_objs  := $(addprefix $(objd)/, $(addsuffix .o, $(shatest_files)))
 shatest_deps  := $(addprefix $(dependd)/, $(addsuffix .d, $(shatest_files)))
 shatest_libs  :=
-shatest_lnk   := $(lnk_lib)
+shatest_lnk   := $(dlnk_lib)
 
-$(bind)/shatest$(exe): $(shatest_objs) $(shatest_libs) $(lnk_dep)
+$(bind)/shatest$(exe): $(shatest_objs) $(shatest_libs) $(dlnk_dep)
 
 all_exes    += $(bind)/shatest$(exe)
 all_depends += $(shatest_deps)
@@ -578,9 +577,9 @@ aestest_cfile := test/aestest.cpp
 aestest_objs  := $(addprefix $(objd)/, $(addsuffix .o, $(aestest_files)))
 aestest_deps  := $(addprefix $(dependd)/, $(addsuffix .d, $(aestest_files)))
 aestest_libs  :=
-aestest_lnk   := $(lnk_lib)
+aestest_lnk   := $(dlnk_lib)
 
-$(bind)/aestest$(exe): $(aestest_objs) $(aestest_libs) $(lnk_dep)
+$(bind)/aestest$(exe): $(aestest_objs) $(aestest_libs) $(dlnk_dep)
 
 all_exes    += $(bind)/aestest$(exe)
 all_depends += $(aestest_deps)
@@ -590,9 +589,9 @@ matchtest_cfile := test/matchtest.cpp
 matchtest_objs  := $(addprefix $(objd)/, $(addsuffix .o, $(matchtest_files)))
 matchtest_deps  := $(addprefix $(dependd)/, $(addsuffix .d, $(matchtest_files)))
 matchtest_libs  :=
-matchtest_lnk   := $(lnk_lib)
+matchtest_lnk   := $(dlnk_lib)
 
-$(bind)/matchtest$(exe): $(matchtest_objs) $(matchtest_libs) $(lnk_dep)
+$(bind)/matchtest$(exe): $(matchtest_objs) $(matchtest_libs) $(dlnk_dep)
 
 all_exes    += $(bind)/matchtest$(exe)
 all_depends += $(matchtest_deps)
@@ -601,9 +600,9 @@ ms_test_adj_files := g
 ms_test_adj_objs  := $(addprefix $(objd)/, $(addsuffix .o, $(ms_test_adj_files)))
 ms_test_adj_deps  := $(addprefix $(dependd)/, $(addsuffix .d, $(ms_test_adj_files)))
 ms_test_adj_libs  :=
-ms_test_adj_lnk   := $(lnk_lib)
+ms_test_adj_lnk   := $(dlnk_lib)
 
-$(bind)/ms_test_adj$(exe): $(ms_test_adj_objs) $(ms_test_adj_libs) $(lnk_dep)
+$(bind)/ms_test_adj$(exe): $(ms_test_adj_objs) $(ms_test_adj_libs) $(dlnk_dep)
 
 all_exes    += $(bind)/ms_test_adj$(exe)
 all_depends += $(ms_test_adj_deps)
@@ -613,9 +612,9 @@ parse_config_cfile := test/parse_config.cpp
 parse_config_objs  := $(addprefix $(objd)/, $(addsuffix .o, $(parse_config_files)))
 parse_config_deps  := $(addprefix $(dependd)/, $(addsuffix .d, $(parse_config_files)))
 parse_config_libs  :=
-parse_config_lnk   := $(lnk_lib)
+parse_config_lnk   := $(dlnk_lib)
 
-$(bind)/parse_config$(exe): $(parse_config_objs) $(parse_config_libs) $(lnk_dep)
+$(bind)/parse_config$(exe): $(parse_config_objs) $(parse_config_libs) $(dlnk_dep)
 
 all_exes    += $(bind)/parse_config$(exe)
 all_depends += $(parse_config_deps)
@@ -625,21 +624,21 @@ test_tcp_aes_cfile := test/test_tcp_aes.cpp
 test_tcp_aes_objs  := $(addprefix $(objd)/, $(addsuffix .o, $(test_tcp_aes_files)))
 test_tcp_aes_deps  := $(addprefix $(dependd)/, $(addsuffix .d, $(test_tcp_aes_files)))
 test_tcp_aes_libs  :=
-test_tcp_aes_lnk   := $(lnk_lib)
+test_tcp_aes_lnk   := $(dlnk_lib)
 
-$(bind)/test_tcp_aes$(exe): $(test_tcp_aes_objs) $(test_tcp_aes_libs) $(lnk_dep)
+$(bind)/test_tcp_aes$(exe): $(test_tcp_aes_objs) $(test_tcp_aes_libs) $(dlnk_dep)
 
-all_exes    += $(bind)/test_conn$(exe)
-all_depends += $(test_conn_deps)
+all_exes    += $(bind)/test_tcp_aes$(exe)
+all_depends += $(test_tcp_aes_deps)
 
 test_conn_files := test_conn
 test_conn_cfile := test/test_conn.cpp
 test_conn_objs  := $(addprefix $(objd)/, $(addsuffix .o, $(test_conn_files)))
 test_conn_deps  := $(addprefix $(dependd)/, $(addsuffix .d, $(test_conn_files)))
 test_conn_libs  :=
-test_conn_lnk   := $(lnk_lib)
+test_conn_lnk   := $(dlnk_lib)
 
-$(bind)/test_conn$(exe): $(test_conn_objs) $(test_conn_libs) $(lnk_dep)
+$(bind)/test_conn$(exe): $(test_conn_objs) $(test_conn_libs) $(dlnk_dep)
 
 all_exes    += $(bind)/test_conn$(exe)
 all_depends += $(test_conn_deps)
@@ -649,9 +648,9 @@ parse_pcap_cfile := test/parse_pcap.cpp
 parse_pcap_objs  := $(addprefix $(objd)/, $(addsuffix .o, $(parse_pcap_files)))
 parse_pcap_deps  := $(addprefix $(dependd)/, $(addsuffix .d, $(parse_pcap_files)))
 parse_pcap_libs  :=
-parse_pcap_lnk   := $(lnk_lib) -lpcap
+parse_pcap_lnk   := $(dlnk_lib) -lpcap
 
-$(bind)/parse_pcap$(exe): $(parse_pcap_objs) $(parse_pcap_libs) $(lnk_dep)
+$(bind)/parse_pcap$(exe): $(parse_pcap_objs) $(parse_pcap_libs) $(dlnk_dep)
 
 #all_exes    += $(bind)/parse_pcap$(exe)
 #all_depends += $(parse_pcap_deps)
@@ -660,15 +659,15 @@ ms_server_files := server
 ms_server_cfile := src/server.cpp
 ms_server_objs  := $(addprefix $(objd)/, $(addsuffix .o, $(ms_server_files)))
 ms_server_deps  := $(addprefix $(dependd)/, $(addsuffix .d, $(ms_server_files)))
-#ms_server_libs  :=
-#ms_server_lnk   := $(ms_dlnk_lib) $(dlnk_lib)
-
-#$(bind)/ms_server$(exe): $(ms_server_objs) $(ms_server_libs) $(dlnk_dep) $(ms_dlnk_dep)
-
 ms_server_libs  :=
-ms_server_lnk   := $(lnk_lib)
+ms_server_lnk   := $(dlnk_lib)
 
-$(bind)/ms_server$(exe): $(ms_server_objs) $(ms_server_libs) $(lnk_dep)
+$(bind)/ms_server$(exe): $(ms_server_objs) $(ms_server_libs) $(dlnk_dep)
+
+#ms_server_libs  :=
+#ms_server_lnk   := $(lnk_lib)
+
+#$(bind)/ms_server$(exe): $(ms_server_objs) $(ms_server_libs) $(lnk_dep)
 
 all_exes    += $(bind)/ms_server$(exe)
 all_depends += $(ms_server_deps)

@@ -8,15 +8,15 @@
 #include <raims/transport.h>
 #include <raims/session.h>
 #include <raims/ev_tcp_transport.h>
-#include <raims/ev_nats_transport.h>
-#include <raims/ev_redis_transport.h>
+/*#include <raims/ev_nats_transport.h>
+#include <raims/ev_redis_transport.h>*/
 #include <raims/ev_rv_transport.h>
 
 using namespace rai;
 using namespace ms;
 using namespace kv;
-using namespace ds;
-using namespace natsmd;
+/*using namespace ds;*/
+/*using namespace natsmd;*/
 using namespace sassrv;
 
 bool
@@ -47,7 +47,7 @@ TransportRoute::close_self_connect( TransportRoute &rte,
     conn.idle_push( EV_CLOSE );
     rte.connect_ctx->client->idle_push( EV_CLOSE );
     rte.connect_ctx->client->set_sock_err( EV_ERR_CONN_SELF, 0 );
-    rte.connect_ctx->state = ConnectCtx::CONN_SHUTDOWN;
+    rte.connect_ctx->set_state( ConnectCtx::CONN_SHUTDOWN, true );
     rte.clear( TPORT_IS_INPROGRESS );
     rte.set( TPORT_IS_SHUTDOWN );
   }
@@ -572,34 +572,51 @@ ConnectMgr::connect( ConnectCtx &ctx ) noexcept
     if ( debug_conn )
       rte->printf( "connect %s:%d stopped, accepted connection active\n",
                    host, ctx.addr_info.port );
-    ctx.state = ConnectCtx::CONN_SHUTDOWN;
+    ctx.set_state( ConnectCtx::CONN_SHUTDOWN, false );
     active_rte->notify_ctx = &ctx;
     return true;
   }
 
-  EvTcpTransportClient *cl =
-    this->poll.get_free_list<EvTcpTransportClient>( this->sock_type );
-  cl->rte      = rte;
-  cl->route_id = rte->sub_route.route_id;
-  cl->encrypt  = ( ( ctx.opts & TCP_OPT_ENCRYPT ) != 0 );
-  ctx.client   = cl;
-  if ( cl->connect( ctx.opts, &ctx, ai, ++this->next_timer ) ) {
-    if ( debug_conn ) {
-      uint32_t n = 0;
-      PeerAddrStr paddr;
-      char     url_buf[ 128 ];
-      paddr.set_addr( (struct sockaddr *) ai->ai_addr );
-      ::memcpy( url_buf, "tcp://", 6 );
-      ::memcpy( &url_buf[ 6 ], paddr.buf, paddr.len() );
-      n = 6 + paddr.len();
-      url_buf[ n ] = '\0';
-      rte->printf( "connect url %s\n", url_buf );
+  if ( ctx.ipc_rte == NULL ) {
+    EvTcpTransportClient *cl =
+      this->poll.get_free_list<EvTcpTransportClient>( this->sock_type );
+    cl->rte      = rte;
+    cl->route_id = rte->sub_route.route_id;
+    cl->encrypt  = ( ( ctx.opts & TCP_OPT_ENCRYPT ) != 0 );
+    ctx.client   = cl;
+    if ( cl->tcp_connect( ctx.opts, &ctx, ai, ++this->next_timer ) ) {
+      if ( debug_conn ) {
+        uint32_t n = 0;
+        PeerAddrStr paddr;
+        char     url_buf[ 128 ];
+        paddr.set_addr( (struct sockaddr *) ai->ai_addr );
+        ::memcpy( url_buf, "tcp://", 6 );
+        ::memcpy( &url_buf[ 6 ], paddr.buf, paddr.len() );
+        n = 6 + paddr.len();
+        url_buf[ n ] = '\0';
+        rte->printf( "connect url %s\n", url_buf );
+      }
+      return true;
     }
-    return true;
+    ctx.client = NULL;
+    rte->on_shutdown( *cl, NULL, 0 );
+    this->poll.push_free_list( cl );
   }
-  ctx.client = NULL;
-  rte->on_shutdown( *cl, NULL, 0 );
-  this->poll.push_free_list( cl );
+  else {
+    EvConnection * cl = ctx.ipc_rte->connection;
+    const char * argv[ 128 ];
+    int          argc = 0;
+    for ( ConfigTree::StringPair *p = ctx.ipc_rte->transport.route.hd; p != NULL; p = p->next ) {
+      argv[ argc++ ] = p->name.val;
+      argv[ argc++ ] = p->value.val;
+      if ( argc == 128 ) break;
+    }
+    EvConnectParam param( ai, ctx.opts, "ev_ipc_tport",
+                          rte->sub_route.route_id,
+                          argc, argv, &ctx );
+    if ( cl->connect( param ) == 0 )
+      return true;
+  }
   return false;
 }
 
@@ -610,14 +627,20 @@ ConnectMgr::on_dns( ConnectCtx &ctx,  const char *host,  int port,
   TransportRoute * rte = this->user_db.transport_tab.ptr[ ctx.event_id ];
   if ( debug_conn )
     rte->printf( "resolving %s:%d opts(%x)\n", host, port, opts );
-  rte->set( TPORT_IS_INPROGRESS );
+  if ( ctx.ipc_rte == NULL )
+    rte->set( TPORT_IS_INPROGRESS );
+  else
+    ctx.ipc_rte->set( TPORT_IS_INPROGRESS );
 }
 
 void
 ConnectMgr::on_connect( ConnectCtx &ctx ) noexcept
 {
   TransportRoute * rte = this->user_db.transport_tab.ptr[ ctx.event_id ];
-  rte->clear( TPORT_IS_INPROGRESS );
+  if ( ctx.ipc_rte == NULL )
+    rte->clear( TPORT_IS_INPROGRESS );
+  else
+    ctx.ipc_rte->clear( TPORT_IS_INPROGRESS );
   rte->on_connect( *ctx.client );
 }
 
@@ -630,8 +653,14 @@ ConnectMgr::on_shutdown( ConnectCtx &ctx,  const char *msg,
   if ( ctx.client->sock_err == EV_ERR_CONN_SELF )
     return false;
   if ( ctx.state != ConnectCtx::CONN_SHUTDOWN ) {
-    rte->set( TPORT_IS_INPROGRESS );
-    rte->clear( TPORT_IS_SHUTDOWN );
+    if ( ctx.ipc_rte == NULL ) {
+      rte->set( TPORT_IS_INPROGRESS );
+      rte->clear( TPORT_IS_SHUTDOWN );
+    }
+    else {
+      ctx.ipc_rte->set( TPORT_IS_INPROGRESS );
+      ctx.ipc_rte->clear( TPORT_IS_SHUTDOWN );
+    }
   }
   return true;
 }
@@ -640,9 +669,18 @@ void
 ConnectMgr::on_timeout( ConnectCtx &ctx ) noexcept
 {
   TransportRoute * rte = this->user_db.transport_tab.ptr[ ctx.event_id ];
-  rte->clear( TPORT_IS_INPROGRESS );
-  rte->on_timeout( ctx.connect_tries,
-                   current_monotonic_time_ns() - ctx.start_mono_time );
+  if ( ctx.ipc_rte == NULL ) {
+    rte->clear( TPORT_IS_INPROGRESS );
+    rte->on_timeout( ctx.connect_tries,
+                     current_monotonic_time_ns() - ctx.start_mono_time );
+  }
+  else {
+    ctx.ipc_rte->clear( TPORT_IS_INPROGRESS );
+    uint64_t nsecs = current_monotonic_time_ns() - ctx.start_mono_time;
+    printf( "%s: connect timeout, connect tries: %u, time used: %.1f secs\n",
+            ctx.ipc_rte->transport.tport.val,
+            ctx.connect_tries, (double) nsecs / 1000000000.0 );
+  }
 }
 
 ConnectCtx *
@@ -650,20 +688,49 @@ ConnectDB::create( uint64_t id ) noexcept
 {
   ConnectCtx * ctx = new ( ::malloc( sizeof( ConnectCtx ) ) )
     ConnectCtx( this->poll, *this, id );
+  ctx->ctx_id = ++this->ctx_count;
   this->ctx_array[ id ] = ctx;
   return ctx;
+}
+
+ConnectCtx *
+ConnectDB::create2( IpcRte *ipc ) noexcept
+{
+  ConnectCtx * ctx = new ( ::malloc( sizeof( ConnectCtx ) ) )
+    ConnectCtx( this->poll, *this, 0 );
+  ctx->ctx_id  = ++this->ctx_count;
+  ctx->ipc_rte = ipc;
+  return ctx;
+}
+
+void
+ConnectCtx::set_state( ConnectState new_state,  bool clear_timer ) noexcept
+{
+  static const char *state_str[] = {
+    "idle", "get_address", "active", "timer", "shutdown"
+  };
+  if ( debug_conn )
+    printf( "%u:%u. set state %s -> %s\n", this->ctx_id, (uint32_t) this->event_id,
+             state_str[ this->state ], state_str[ new_state ] );
+  if ( clear_timer && this->timer_active ) {
+    this->db.poll.timer.remove_timer_cb( *this, this->ctx_id, this->event_id );
+    this->timer_active = false;
+  }
+  this->state = new_state;
 }
 
 void
 ConnectCtx::connect( const char *host,  int port,  int opts,
                      int timeout ) noexcept
 {
+  if ( debug_conn )
+    printf( "connect %s:%d opts(%x)\n", host, port, opts );
   if ( this->db.poll.quit )
     return;
   this->timeout         = timeout;
   this->opts            = opts;
   this->connect_tries   = 0;
-  this->state           = CONN_GET_ADDRESS;
+  this->set_state( CONN_GET_ADDRESS, true );
   this->start_mono_time = current_monotonic_time_ns();
   this->addr_info.timeout_ms = this->next_timeout() / 4;
   this->db.on_dns( *this, host, port, opts );
@@ -680,7 +747,7 @@ ConnectCtx::reconnect( void ) noexcept
 void
 ConnectCtx::on_connect( kv::EvSocket & ) noexcept
 {
-  this->state = CONN_ACTIVE;
+  this->set_state( CONN_ACTIVE, true );
   this->db.on_connect( *this );
 }
 
@@ -701,9 +768,10 @@ ConnectCtx::on_shutdown( EvSocket &,  const char *msg,  size_t len ) noexcept
   bool was_connected = ( this->client->bytes_recv > 0 );
 
   if ( ! this->db.on_shutdown( *this, msg, len ) )
-    this->state = CONN_SHUTDOWN;
+    this->set_state( CONN_SHUTDOWN, true );
 
-  this->client = NULL;
+  if ( this->ipc_rte == NULL )
+    this->client = NULL;
   uint64_t cur_time = current_monotonic_time_ns();
   if ( was_connected || this->state == CONN_SHUTDOWN ) {
     this->start_mono_time = cur_time;
@@ -712,30 +780,33 @@ ConnectCtx::on_shutdown( EvSocket &,  const char *msg,  size_t len ) noexcept
 
   if ( this->state != CONN_SHUTDOWN ) {
     if ( ! this->expired( cur_time ) && ! this->db.poll.quit ) {
-      this->state = CONN_TIMER;
-      this->db.poll.timer.add_timer_millis( *this, this->next_timeout(), 0,
-                                            this->event_id );
+      this->set_state( CONN_TIMER, true );
+      this->db.poll.timer.add_timer_millis( *this, this->next_timeout(),
+                                            this->ctx_id, this->event_id );
+      this->timer_active = true;
     }
-    else {
-      this->state = CONN_IDLE;
+    else if ( this->state != CONN_IDLE ) {
+      this->set_state( CONN_IDLE, true );
       this->db.on_timeout( *this );
     }
   }
 }
 
 bool
-ConnectCtx::timer_cb( uint64_t, uint64_t eid ) noexcept
+ConnectCtx::timer_cb( uint64_t tid, uint64_t eid ) noexcept
 {
-  if ( eid == this->event_id && this->state != CONN_SHUTDOWN &&
-       ! this->db.poll.quit ) {
-    this->state = CONN_GET_ADDRESS;
-    this->addr_info.timeout_ms = this->next_timeout() / 4;
-    this->addr_info.free_addr_list();
-    this->addr_info.ipv6_prefer = ! this->addr_info.ipv6_prefer;
-    this->db.on_dns( *this, this->addr_info.host, this->addr_info.port,
-                     this->opts );
-    this->addr_info.get_address( this->addr_info.host, this->addr_info.port,
-                                 this->opts );
+  if ( tid == this->ctx_id && eid == this->event_id ) {
+    this->timer_active = false;
+    if ( this->state != CONN_SHUTDOWN && ! this->db.poll.quit ) {
+      this->set_state( CONN_GET_ADDRESS, false );
+      this->addr_info.timeout_ms = this->next_timeout() / 4;
+      this->addr_info.free_addr_list();
+      this->addr_info.ipv6_prefer = ! this->addr_info.ipv6_prefer;
+      this->db.on_dns( *this, this->addr_info.host, this->addr_info.port,
+                       this->opts );
+      this->addr_info.get_address( this->addr_info.host, this->addr_info.port,
+                                   this->opts );
+    }
   }
   return false;
 }
@@ -752,12 +823,13 @@ ConnectCtx::addr_resolve_cb( CaresAddrInfo & ) noexcept
   }
   if ( this->state != CONN_SHUTDOWN ) {
     if ( ! this->expired() && ! this->db.poll.quit ) {
-      this->state = CONN_TIMER;
-      this->db.poll.timer.add_timer_millis( *this, this->next_timeout(), 0,
-                                            this->event_id );
+      this->set_state( CONN_TIMER, true );
+      this->db.poll.timer.add_timer_millis( *this, this->next_timeout(),
+                                            this->ctx_id, this->event_id );
+      this->timer_active = true;
     }
     else {
-      this->state = CONN_IDLE;
+      this->set_state( CONN_IDLE, true );
       this->db.on_timeout( *this );
     }
   }

@@ -353,8 +353,9 @@ SubDB::send_subs_request( UserBridge &n,  uint64_t seqno ) noexcept
 bool
 SubDB::fwd_resub( UserBridge &n,  const char *sub,  size_t sublen,
                   uint64_t from_seqno,  uint64_t seqno,  bool is_psub,
-                  const char *suf,  uint64_t token,  const char *queue,
-                  uint16_t queue_len,  uint32_t queue_hash ) noexcept
+                  uint8_t fmt,  const char *suf,  uint64_t token,
+                  const char *queue, uint16_t queue_len,
+                  uint32_t queue_hash ) noexcept
 {
   InboxBuf ibx( n.bridge_id, suf );
 
@@ -363,7 +364,8 @@ SubDB::fwd_resub( UserBridge &n,  const char *sub,  size_t sublen,
   if ( ! is_psub )
     e.subject( sublen );
   else
-    e.pattern( sublen );
+    e.pattern( sublen )
+     .fmt    ();
   e.start      ()
    .end        ()
    .token      ()
@@ -376,8 +378,10 @@ SubDB::fwd_resub( UserBridge &n,  const char *sub,  size_t sublen,
    .seqno( n.inbox.next_send( U_INBOX_RESUB ) );
   if ( ! is_psub )
     m.subject( sub, sublen );
-  else
-    m.pattern( sub, sublen );
+  else {
+    m.pattern( sub, sublen )
+     .fmt( fmt );
+  }
   m.start ( from_seqno )
    .end   ( seqno      );
   if ( token != 0 )
@@ -419,7 +423,7 @@ SubDB::find_fwd_sub( UserBridge &n,  uint32_t hash,
   bool b = true;
   if ( match_len == 0 ||
        kv_memmem( sub->value, sub->len, match, match_len ) != NULL ) {
-    b &= this->fwd_resub( n, sub->value, sub->len, from_seqno, seqno, false,
+    b &= this->fwd_resub( n, sub->value, sub->len, from_seqno, seqno, false, 0,
                           suf ? suf : _RESUB, token, queue, queue_len,
                           queue_hash );
     from_seqno = seqno;
@@ -454,8 +458,8 @@ SubDB::find_fwd_psub( UserBridge &n,  uint32_t hash,
   if ( match_len == 0 ||
        kv_memmem( sub->value, sub->len, match, match_len ) != NULL ) {
     b &= this->fwd_resub( n, sub->value, sub->len, from_seqno, seqno, true,
-                          suf ? suf : _REPSUB, token, queue, queue_len,
-                          queue_hash );
+                          sub->fmt, suf ? suf : _REPSUB, token, queue,
+                          queue_len, queue_hash );
     from_seqno = seqno;
   }
   return b;

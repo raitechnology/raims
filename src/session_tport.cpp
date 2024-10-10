@@ -415,7 +415,23 @@ SessionMgr::add_transport2( ConfigTree::Transport &t,
     is_new = true;
   }
 
-  if ( rte->create_transport( t ) ) {
+  bool b;
+  if ( ( f & TPORT_IS_IPC ) != 0 ) {
+    if ( t.type.equals( T_RV, T_RV_SZ ) ) {
+      if ( is_listener )
+        b = rte->create_rv_listener( t );
+      else
+        b = rte->create_rv_connection( t );
+    }
+    else if ( is_listener )
+      b = rte->create_ipc_listener( t );
+    else
+      b = rte->create_ipc_connection( t );
+  }
+  else
+    b = rte->create_transport( t );
+
+  if ( b ) {
     if ( is_new )
       this->user_db.add_transport( *rte );
     uint32_t i;

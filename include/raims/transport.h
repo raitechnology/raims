@@ -28,6 +28,7 @@ struct RvTransportService;
 struct EvNatsTransportListen;
 struct NameSvc;
 struct ConnectDB;
+struct IpcRte;
 
 struct ConnectCtx : public kv::EvConnectionNotify,
                     public kv::EvTimerCallback,
@@ -48,18 +49,23 @@ struct ConnectCtx : public kv::EvConnectionNotify,
                      timeout;        /* config parameter timeout seconds */
   int                opts;           /* tcp connect sock options */
   ConnectState       state;          /* state enum above */
+  IpcRte           * ipc_rte;
+  uint32_t           ctx_id;
+  bool               timer_active;
 
   void * operator new( size_t, void *ptr ) { return ptr; }
   ConnectCtx( kv::EvPoll &poll,  ConnectDB &d,  uint64_t id )
     : db( d ), addr_info( &poll, this ), client( 0 ), event_id( id ),
       start_mono_time( 0 ), connect_tries( 0 ), timeout( 15 ),
-      state( CONN_SHUTDOWN ) {}
+      state( CONN_SHUTDOWN ), ipc_rte( 0 ), ctx_id( 0 ),
+      timer_active( false ) {}
 
   uint32_t next_timeout( void ) const {
     if ( this->connect_tries < 7 )
       return ( 100 << this->connect_tries );
     return 10000;
   }
+  void set_state( ConnectState new_state,  bool clear_timer ) noexcept;
   void connect( const char *host,  int port,  int opts,  int timeout ) noexcept;
   void reconnect( void ) noexcept;
   bool expired( uint64_t cur_time = 0 ) noexcept;
@@ -77,9 +83,12 @@ struct ConnectDB {
   kv::EvPoll & poll;
   kv::ArrayCount<ConnectCtx *, 16> ctx_array; /* tcp connect contexts */
   const uint8_t sock_type;                    /* the client sock type */
+  uint32_t ctx_count;
 
-  ConnectDB( kv::EvPoll &p,  uint8_t st ) : poll( p ), sock_type( st ) {}
+  ConnectDB( kv::EvPoll &p,  uint8_t st )
+    : poll( p ), sock_type( st ), ctx_count( 0 ) {}
   ConnectCtx *create( uint64_t id ) noexcept;
+  ConnectCtx *create2( IpcRte *ipc ) noexcept;
   virtual bool connect( ConnectCtx &ctx ) noexcept = 0;
   virtual void on_connect( ConnectCtx &ctx ) noexcept = 0;
   virtual bool on_shutdown( ConnectCtx &ctx,  const char *msg,
@@ -126,17 +135,24 @@ enum RvOptions {
   RV_NO_MCAST     = 4
 };
 
-struct IpcRte {
+struct IpcRte : public StateTest<IpcRte> {
   IpcRte                * next,
                         * back;
   ConfigTree::Transport & transport; /* the config for listener */
   kv::EvTcpListen       * listener;  /* the listener if ipc type (rv,nats,..) */
+  kv::EvConnection      * connection;
+  ConnectCtx            * connect_ctx;
+  uint32_t                state;
 
   void * operator new( size_t, void *ptr ) { return ptr; }
   void operator delete( void *ptr ) { ::free( ptr ); }
 
   IpcRte( ConfigTree::Transport &t,  kv::EvTcpListen *l )
-    : next( 0 ), back( 0 ), transport( t ), listener( l ) {}
+    : next( 0 ), back( 0 ), transport( t ), listener( l ), connection( 0 ),
+      connect_ctx( 0 ), state( 0 ) {}
+  IpcRte( ConfigTree::Transport &t,  kv::EvConnection *c )
+    : next( 0 ), back( 0 ), transport( t ), listener( 0 ), connection( c ),
+      connect_ctx( 0 ), state( 0 ) {}
 };
 
 struct IpcRteList : public kv::RouteNotify {
@@ -320,14 +336,14 @@ struct TransportRoute : public kv::EvSocket, public kv::EvConnectionNotify,
   void get_tport_service( ConfigTree::Transport &tport,
                           const char *&service,  size_t &service_len,
                           uint16_t &rv_svc ) noexcept;
+  void get_tport_service_host( ConfigTree::Transport &tport,
+                               const char *&service,  size_t &service_len,
+                               uint16_t &rv_svc,  void **rv_host ) noexcept;
   bool create_rv_listener( ConfigTree::Transport &tport ) noexcept;
-  bool create_rv_connect( ConfigTree::Transport &tport ) noexcept;
+  bool create_rv_connection( ConfigTree::Transport &tport ) noexcept;
 
-  bool create_nats_listener( ConfigTree::Transport &tport ) noexcept;
-  bool create_nats_connect( ConfigTree::Transport &tport ) noexcept;
-
-  bool create_redis_listener( ConfigTree::Transport &tport ) noexcept;
-  bool create_redis_connect( ConfigTree::Transport &tport ) noexcept;
+  bool create_ipc_listener( ConfigTree::Transport &tport ) noexcept;
+  bool create_ipc_connection( ConfigTree::Transport &tport ) noexcept;
 
   EvTcpTransportListen *create_mesh_listener(
                                         ConfigTree::Transport &tport ) noexcept;
@@ -356,6 +372,7 @@ struct TransportRoute : public kv::EvSocket, public kv::EvConnectionNotify,
   virtual void on_data_loss( kv::EvSocket &conn,  kv::EvPublish &pub ) noexcept;
   void on_timeout( uint32_t connect_tries,  uint64_t nsecs ) noexcept;
   int printf( const char *fmt, ... ) const noexcept __attribute__((format(printf,2,3)));
+  int printe( const char *fmt, ... ) const noexcept __attribute__((format(printf,2,3)));
 };
 
 struct TransportTab : public kv::ArrayCount<TransportRoute *, 4> {

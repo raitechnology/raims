@@ -101,8 +101,11 @@ EvTcpTransportParameters::parse_tport( ConfigTree::Transport &tport,
   bool is_device = false;
 
   ConfigTree::StringPairArray el;
-  if ( ( ptype & PARAM_LISTEN ) == 0 )
+  if ( ( ptype & PARAM_LISTEN ) == 0 ) {
     tport.get_route_pairs( R_CONNECT, el );
+    if ( el.count == 0 )
+      tport.get_route_pairs( R_DAEMON, el );
+  }
   else {
     tport.get_route_pairs( R_LISTEN, el );
     if ( el.count == 0 ) {
@@ -206,15 +209,16 @@ EvTcpTransportClient::connect( EvTcpTransportParameters &p,
 }
 #endif
 bool
-EvTcpTransportClient::connect( int opts,  EvConnectionNotify *n,
-                               struct addrinfo *addr_list,
-                               uint64_t timer_id ) noexcept
+EvTcpTransportClient::tcp_connect( int opts,  EvConnectionNotify *n,
+                                   struct addrinfo *addr_list,
+                                   uint64_t timer_id ) noexcept
 {
+  EvConnectParam param( addr_list, opts, "ev_tcp_tport",
+                        this->rte->sub_route.route_id );
   if ( this->fd != -1 )
     return false;
   this->is_connect = true;
-  if ( EvTcpConnection::connect3( *this, addr_list, opts, "ev_tcp_tport",
-                                  this->rte->sub_route.route_id ) != 0 )
+  if ( EvTcpConnection::connect3( *this, param ) != 0 )
     return false;
   this->notify = n;
   this->start( timer_id );

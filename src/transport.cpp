@@ -5,14 +5,15 @@
 #include <stdarg.h>
 #if ! defined( _MSC_VER ) && ! defined( __MINGW32__ )
 #include <unistd.h>
+#include <dlfcn.h>
 #else
 #include <raikv/win.h>
 #endif
 #include <raims/transport.h>
 #include <raims/session.h>
 #include <raims/ev_tcp_transport.h>
-#include <raims/ev_nats_transport.h>
-#include <raims/ev_redis_transport.h>
+/*#include <natsmd/ev_nats.h>*/
+/*#include <raims/ev_redis_transport.h>*/
 #include <raims/ev_pgm_transport.h>
 #include <raims/ev_inbox_transport.h>
 #include <raims/ev_rv_transport.h>
@@ -23,7 +24,6 @@ using namespace kv;
 using namespace md;
 using namespace ds;
 using namespace sassrv;
-using namespace natsmd;
 
 TransportRoute::TransportRoute( kv::EvPoll &p,  SessionMgr &m,
                                 ConfigTree::Service &s,
@@ -190,6 +190,19 @@ TransportRoute::printf( const char *fmt,  ... ) const noexcept
   n = fprintf( stdout, "%s.%u ", this->transport.tport.val, this->tport_id );
   va_start( ap, fmt );
   m = vfprintf( stdout, fmt, ap );
+  va_end( ap );
+  return ( n >= 0 && m >= 0 ) ? n + m : -1;
+}
+
+int
+TransportRoute::printe( const char *fmt,  ... ) const noexcept
+{
+  va_list ap;
+  int n, m;
+
+  n = fprintf( stderr, "%s.%u ", this->transport.tport.val, this->tport_id );
+  va_start( ap, fmt );
+  m = vfprintf( stderr, fmt, ap );
   va_end( ap );
   return ( n >= 0 && m >= 0 ) ? n + m : -1;
 }
@@ -545,15 +558,6 @@ TransportRoute::create_transport( ConfigTree::Transport &tport ) noexcept
   if ( tport.type.equals( T_ANY, T_ANY_SZ ) ) {
     return true;
   }
-  if ( tport.type.equals( T_RV, T_RV_SZ ) ) {
-    return this->create_rv_listener( tport );
-  }
-  if ( tport.type.equals( T_NATS, T_NATS_SZ ) ) {
-    return this->create_nats_listener( tport );
-  }
-  if ( tport.type.equals( T_REDIS, T_REDIS_SZ ) ) {
-    return this->create_redis_listener( tport );
-  }
   if ( tport.type.equals( T_TCP, T_TCP_SZ ) ) {
     if ( this->is_device() )
       this->dev_id = this;
@@ -658,9 +662,20 @@ TransportRoute::shutdown( ConfigTree::Transport &tport ) noexcept
   else if ( this->ext != NULL ) {
     for ( IpcRte *el = this->ext->list.hd; el != NULL; el = el->next ) {
       if ( &el->transport == &tport ) {
-        if ( el->listener->in_list( IN_ACTIVE_LIST ) ) {
+        if ( el->listener != NULL && el->listener->in_list( IN_ACTIVE_LIST ) ) {
           el->listener->idle_push( EV_SHUTDOWN );
           count++;
+        }
+        else if ( el->connection != NULL ) {
+          if ( el->connection->in_list( IN_ACTIVE_LIST ) ) {
+            el->connection->idle_push( EV_SHUTDOWN );
+            el->connect_ctx->set_state( ConnectCtx::CONN_SHUTDOWN, true );
+            count++;
+          }
+          else if ( el->connect_ctx->state != ConnectCtx::CONN_SHUTDOWN ) {
+            el->connect_ctx->set_state( ConnectCtx::CONN_SHUTDOWN, true );
+            count++;
+          }
         }
       }
     }
@@ -745,18 +760,68 @@ TransportRoute::create_rv_listener( ConfigTree::Transport &tport ) noexcept
   return this->start_listener( l, tport );
 }
 
+bool
+TransportRoute::create_rv_connection( ConfigTree::Transport &tport ) noexcept
+{
+  return this->create_ipc_connection( tport );
+#if 0
+  IpcRte *el = this->ext->find( tport );
+  if ( el != NULL && el->connection != NULL &&
+       el->connection->in_list( IN_ACTIVE_LIST ) )
+    return true;
+//#if 0
+  const char * service     = NULL;
+  size_t       service_len = 0;
+  void       * rv_host     = NULL;
+  uint16_t     rv_service  = 0;
+  const char * net  = NULL,
+             * user = NULL,
+             * addr = NULL;
+
+  this->get_tport_service( tport, service, service_len, rv_service );
+  tport.get_route_str( R_CONNECT, addr );
+  if ( addr == NULL )
+    tport.get_route_str( R_DAEMON, addr );
+  tport.get_route_str( R_NETWORK, net );
+  tport.get_route_str( R_USER, user );
+//#endif
+  EvRvClient * c;
+  if ( el == NULL ) {
+    c = new ( aligned_malloc( sizeof( EvRvClient ) ) )
+        EvRvClient( this->poll, *this );
+    el = new ( ::malloc( sizeof( IpcRte ) ) ) IpcRte( tport, c );
+    this->ext->list.push_tl( el );
+  }
+  else {
+    c = (EvRvClient *) el->connection;
+  }
+  if ( el->connect_ctx == NULL )
+    el->connect_ctx = this->mgr.connect_mgr.create2( el );
+
+  EvTcpTransportParameters parm;
+  parm.parse_tport( tport, PARAM_NB_CONNECT, this->mgr );
+  el->connect_ctx->client = c;
+  el->connect_ctx->connect( parm.host( 0 ), parm.port( 0 ), parm.opts,
+                            parm.timeout );
+  return true;
+#endif
+}
+
 void
 TransportRoute::get_tport_service( ConfigTree::Transport &tport,
-                                   const char *&service,  size_t &service_len,
+                                   const char *&service,
+                                   size_t &service_len,
                                    uint16_t &rv_service ) noexcept
 {
-  const char * tmp = NULL,
-             * net = NULL;
+  const char * tmp = NULL;
   rv_service = 0;
 
-  if ( ! tport.get_route_str( R_SERVICE, tmp ) || ::strlen( tmp ) == 0 )
-    tmp = tport.type.val;
-
+  if ( ! tport.get_route_str( R_SERVICE, tmp ) || ::strlen( tmp ) == 0 ) {
+    if ( tport.type.equals( "rv", 2 ) )
+      tmp = "7500";
+    else
+      tmp = tport.type.val;
+  }
   size_t tmplen = ::strlen( tmp );
   if ( tmp[ 0 ] != '_' || tmp[ tmplen - 1 ] != '.' ) {
     char * buf = (char *) ::malloc( tmplen + 3 );
@@ -779,18 +844,35 @@ TransportRoute::get_tport_service( ConfigTree::Transport &tport,
   service     = tmp;
   service_len = ::strlen( tmp );
 
-  if ( service_len > 0 ) {
+  if ( service_len > 0 )
     rv_service = SessionMgr::sub_has_rv_service( service, service_len );
+}
 
+void
+TransportRoute::get_tport_service_host( ConfigTree::Transport &tport,
+                                        const char *&service,
+                                        size_t &service_len,
+                                        uint16_t &rv_service,
+                                        void **host ) noexcept
+{
+  this->get_tport_service( tport, service, service_len, rv_service );
+
+  if ( service_len > 0 )
     this->printf( "%s.%s service: %.*s\n", tport.type.val, tport.tport.val,
                   (int) service_len - 2, &service[ 1 ] );
-    if ( rv_service != 0 ) {
-      if ( this->rv_svc == NULL )
-        this->rv_svc = new ( malloc( sizeof( RvTransportService ) ) )
-          RvTransportService( *this );
-    }
+
+  if ( rv_service != 0 ) {
+    if ( this->rv_svc == NULL )
+      this->rv_svc = new ( malloc( sizeof( RvTransportService ) ) )
+        RvTransportService( *this );
+    RvSvc *x = this->mgr.get_rv_session( rv_service, true );
+    if ( x != NULL )
+      *host = x->host;
+    else
+      this->printe( "unable to start host for service %u\n", rv_service );
   }
 
+  const char * net = NULL;
   if ( tport.get_route_str( R_NETWORK, net ) ) {
     this->mgr.add_network( net, ::strlen( net ), &service[ 1 ],
                            service_len - 2, false );
@@ -798,39 +880,54 @@ TransportRoute::get_tport_service( ConfigTree::Transport &tport,
 }
 
 bool
-TransportRoute::create_nats_listener( ConfigTree::Transport &tport ) noexcept
+TransportRoute::create_ipc_listener( ConfigTree::Transport &tport ) noexcept
 {
   IpcRte *el = this->ext->find( tport );
-  if ( el != NULL && el->listener->in_list( IN_ACTIVE_LIST ) )
+  if ( el != NULL && el->listener != NULL &&
+       el->listener->in_list( IN_ACTIVE_LIST ) )
     return true;
 
   const char * service     = NULL;
   size_t       service_len = 0;
+  void       * rv_host     = NULL;
   uint16_t     rv_service  = 0;
 
-  this->get_tport_service( tport, service, service_len, rv_service );
-
-  EvNatsTransportListen * l;
+  this->get_tport_service_host( tport, service, service_len, rv_service,
+                                &rv_host );
+  EvTcpListen * l = NULL;
   if ( el == NULL ) {
-    l = new ( aligned_malloc( sizeof( EvNatsTransportListen ) ) )
-      EvNatsTransportListen( this->poll, *this );
+    /*l = new ( aligned_malloc( sizeof( EvNatsTransportListen ) ) )
+      EvNatsTransportListen( this->poll, *this );*/
+    char func_name[ 256 ];
+    ::snprintf( func_name, sizeof( func_name ), "%s_create_listener",
+                tport.type.val );
+    void * f = dlsym( RTLD_DEFAULT, func_name );
+    if ( f != NULL ) {
+      l = ((EvTcpListen *(*)(EvPoll *, RoutePublish *, EvConnectionNotify *)) f)
+          ( &this->poll, &this->sub_route, this );
+
+    }
+    if ( l == NULL ) {
+      this->printe( "unable to find ipc listener function %s\n", func_name );
+      return false;
+    }
     el = new ( ::malloc( sizeof( IpcRte ) ) ) IpcRte( tport, l );
     this->ext->list.push_tl( el );
   }
   else {
-    l = (EvNatsTransportListen *) el->listener;
+    l = el->listener;
   }
-  l->service     = service;
-  l->service_len = service_len;
-  l->rv_service  = rv_service;
+  l->set_prefix( service, service_len );
+  l->set_service( rv_host, rv_service );
   return this->start_listener( l, tport );
 }
 
 bool
-TransportRoute::create_redis_listener( ConfigTree::Transport &tport ) noexcept
+TransportRoute::create_ipc_connection( ConfigTree::Transport &tport ) noexcept
 {
   IpcRte *el = this->ext->find( tport );
-  if ( el != NULL && el->listener->in_list( IN_ACTIVE_LIST ) )
+  if ( el != NULL && el->connection != NULL &&
+       el->connection->in_list( IN_ACTIVE_LIST ) )
     return true;
 
   const char * service     = NULL;
@@ -838,21 +935,41 @@ TransportRoute::create_redis_listener( ConfigTree::Transport &tport ) noexcept
   uint16_t     rv_service  = 0;
 
   this->get_tport_service( tport, service, service_len, rv_service );
-
-  EvRedisTransportListen * l;
+  EvConnection * c = NULL;
   if ( el == NULL ) {
-    l = new ( aligned_malloc( sizeof( EvRedisTransportListen ) ) )
-      EvRedisTransportListen( this->poll, *this );
-    el = new ( ::malloc( sizeof( IpcRte ) ) ) IpcRte( tport, l );
+    /*l = new ( aligned_malloc( sizeof( EvNatsTransportListen ) ) )
+      EvNatsTransportListen( this->poll, *this );*/
+    char func_name[ 256 ];
+    ::snprintf( func_name, sizeof( func_name ), "%s_create_connection",
+                tport.type.val );
+    void * f = dlsym( RTLD_DEFAULT, func_name );
+    if ( f != NULL ) {
+      c = ((EvConnection *(*)(EvPoll *, RoutePublish *, EvConnectionNotify *)) f)
+          ( &this->poll, &this->sub_route, this );
+
+    }
+    if ( c == NULL ) {
+      this->printe( "unable to find ipc connection function %s\n", func_name );
+      return false;
+    }
+    el = new ( ::malloc( sizeof( IpcRte ) ) ) IpcRte( tport, c );
     this->ext->list.push_tl( el );
   }
   else {
-    l = (EvRedisTransportListen *) el->listener;
+    c = el->connection;
   }
-  l->service     = service;
-  l->service_len = service_len;
-  l->rv_service  = rv_service;
-  return this->start_listener( l, tport );
+  bool b = false;
+  if ( ! tport.get_route_bool( R_USE_SERVICE_PREFIX, b ) || ! b )
+    c->set_prefix( service, service_len );
+  if ( el->connect_ctx == NULL )
+    el->connect_ctx = this->mgr.connect_mgr.create2( el );
+
+  EvTcpTransportParameters parm;
+  parm.parse_tport( tport, PARAM_NB_CONNECT, this->mgr );
+  el->connect_ctx->client = c;
+  el->connect_ctx->connect( parm.host( 0 ), parm.port( 0 ), parm.opts,
+                            parm.timeout );
+  return true;
 }
 
 bool
@@ -916,24 +1033,6 @@ TransportRoute::add_tcp_connect( const char *conn_url,
   rte->conn_hash = conn_hash;
   rte->connect_ctx->connect( host, port, opts.opts, opts.timeout );
   return true;
-}
-
-bool
-TransportRoute::create_rv_connect( ConfigTree::Transport & ) noexcept
-{
-  return /*this->create_tcp_connect();*/ false;
-}
-
-bool
-TransportRoute::create_nats_connect( ConfigTree::Transport & ) noexcept
-{
-  return /*this->create_tcp_connect();*/ false;
-}
-
-bool
-TransportRoute::create_redis_connect( ConfigTree::Transport & ) noexcept
-{
-  return /*this->create_tcp_connect();*/ false;
 }
 
 EvTcpTransportListen *

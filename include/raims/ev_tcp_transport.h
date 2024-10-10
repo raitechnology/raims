@@ -134,8 +134,8 @@ struct EvTcpTransportClient : public EvTcpTransport {
     /*this->host_buf[ 0 ] = '\0';*/
     this->fwd_all_msgs = false;
   }
-  bool connect( int opts, kv::EvConnectionNotify *n,
-                struct addrinfo *addr_list,  uint64_t timer_id ) noexcept;
+  bool tcp_connect( int opts,  kv::EvConnectionNotify *n,
+                    struct addrinfo *addr_list,  uint64_t timer_id ) noexcept;
 };
 
 struct EvTcpTransportService : public EvTcpTransport {
