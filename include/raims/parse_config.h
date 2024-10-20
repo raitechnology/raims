@@ -79,6 +79,7 @@ struct ConfigDB {
   int parse_parameters( md::MDMsg &, md::MDName &, md::MDReference & ) noexcept;
   int parse_startup( md::MDMsg &, md::MDName &, md::MDReference & ) noexcept;
   int parse_hosts( md::MDMsg &, md::MDName &, md::MDReference & ) noexcept;
+  int parse_library( md::MDMsg &, md::MDName &, md::MDReference & ) noexcept;
 
   int parse_users_user( md::MDMsg &, md::MDName &, md::MDReference & ) noexcept;
   int parse_users_svc( md::MDMsg &, md::MDName &, md::MDReference & ) noexcept;

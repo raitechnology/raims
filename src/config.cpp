@@ -32,6 +32,7 @@ static StringVal users_s     ( SZ( "users"      ) ),
                  parameters_s( SZ( "parameters" ) ),
                  startup_s   ( SZ( "startup"    ) ),
                  hosts_s     ( SZ( "hosts"      ) ),
+                 library_s   ( SZ( "library"    ) ),
                  listen_s    ( R_LISTEN, R_LISTEN_SZ ),
                  connect_s   ( R_CONNECT, R_CONNECT_SZ );
 static struct ArrayParse top_level[] = {
@@ -42,7 +43,8 @@ static struct ArrayParse top_level[] = {
   { "include",    &ConfigDB::parse_include,    MD_STRING },
   { "parameters", &ConfigDB::parse_parameters, MD_MESSAGE },
   { "startup",    &ConfigDB::parse_startup,    MD_MESSAGE },
-  { "hosts",      &ConfigDB::parse_hosts,      MD_MESSAGE }
+  { "hosts",      &ConfigDB::parse_hosts,      MD_MESSAGE },
+  { "library",    &ConfigDB::parse_library,    MD_ARRAY }
 };
 static ObjectParse top_obj = {
   top_level, ASZ( top_level ), NULL
@@ -304,6 +306,12 @@ ConfigStartup::copy( ConfigTree &tree,
     this->copy_pair_list( db, p->list, p_cp->list );
     cp->hosts.push_tl( p_cp );
   }
+  for ( ConfigTree::Parameters *p = tree.library.hd; p != NULL; p = p->next ) {
+    if ( p->list.hd == NULL ) continue;
+    ConfigTree::Parameters *p_cp = db.make<ConfigTree::Parameters>();
+    this->copy_pair_list( db, p->list, p_cp->list );
+    cp->library.push_tl( p_cp );
+  }
   cp->user_cnt      = tree.user_cnt;
   cp->service_cnt   = tree.service_cnt;
   cp->transport_cnt = tree.transport_cnt;
@@ -352,6 +360,7 @@ ConfigJson::copy( const ConfigTree *tree,  int which,  const StringVal *filter,
   JsonObject * parameters = NULL,
              * startup    = NULL,
              * hosts      = NULL,
+             * library    = NULL,
              * cfg        = NULL;
   this->mem.reuse();
 
@@ -417,10 +426,14 @@ ConfigJson::copy( const ConfigTree *tree,  int which,  const StringVal *filter,
   if ( ( which & PRINT_HOSTS ) != 0 ) {
     hosts = this->copy( tree->hosts, false );
   }
+  if ( ( which & PRINT_LIBRARY ) != 0 ) {
+    library = this->copy( tree->library, false );
+  }
   if ( parameters != NULL ) this->push_field( cfg, parameters_s, parameters );
   if ( services != NULL )   this->push_field( cfg, services_s, services );
   if ( users != NULL )      this->push_field( cfg, users_s, users );
   if ( hosts != NULL )      this->push_field( cfg, hosts_s, hosts );
+  if ( library != NULL )    this->push_field( cfg, library_s, library );
   if ( transports != NULL ) this->push_field( cfg, transports_s, transports );
   if ( groups != NULL )     this->push_field( cfg, groups_s, groups );
   if ( startup != NULL )    this->push_field( cfg, startup_s, startup );
@@ -1350,6 +1363,12 @@ int
 ConfigDB::parse_hosts( MDMsg &msg,  MDName &name, MDReference &mref ) noexcept
 {
   return this->parse_object_list( "hosts", msg, name, mref, this->cfg.hosts );
+}
+/* parse library : { parm list } */
+int
+ConfigDB::parse_library( MDMsg &msg,  MDName &name, MDReference &mref ) noexcept
+{
+  return this->parse_object_list( "library", msg, name, mref, this->cfg.library );
 }
 /* parse Route parameters { field : value, ... } */
 int

@@ -34,9 +34,10 @@ enum WhichYaml {
   PRINT_GROUPS            = 8,
   PRINT_PARAMETERS        = 16,
   PRINT_HOSTS             = 32,
-  PRINT_STARTUP           = 64,
+  PRINT_LIBRARY           = 64,
+  PRINT_STARTUP           = 128,
   PRINT_EXCLUDE_TEMPORARY = 512,
-  PRINT_NORMAL            = 1|2|4|8|16|32|64
+  PRINT_NORMAL            = 1|2|4|8|16|32|64|128
 };
 
 struct ConfigTree {
@@ -243,7 +244,8 @@ struct ConfigTree {
   GroupList      groups;        /* groups : [ Group array ] */
   ParametersList parameters,    /* parameters : { string list } */
                  startup,       /* startup : { string list } */
-                 hosts;         /* hosts : { string list } */
+                 hosts,         /* hosts : { string list } */
+                 library;       /* library : { string list } */
   uint32_t       user_cnt,      /* count of user[] */
                  service_cnt,   /* count of service[] */
                  transport_cnt, /* count of transport[] */

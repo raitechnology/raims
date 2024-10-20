@@ -8,6 +8,8 @@
 #include <errno.h>
 #if defined( _MSC_VER ) || defined( __MINGW32__ )
 #include <raikv/win.h>
+#else
+#include <dlfcn.h>
 #endif
 #include <raikv/logger.h>
 #include <raims/parse_config.h>
@@ -273,6 +275,18 @@ main( int argc, const char *argv[] )
   if ( tree == NULL || ! init_pass( tree, pwd, cfg ) )
     return 1;
 
+  bool dll_missing = false;
+  for ( ConfigTree::Parameters *p = tree->library.hd; p != NULL; p = p->next ) {
+    for ( ConfigTree::StringPair *l = p->list.hd; l != NULL; l = l->next ) {
+      if ( dlopen( l->value.val, RTLD_NOW | RTLD_GLOBAL ) == NULL ) {
+        const char *dlerr = dlerror();
+        fprintf( stderr, "dlopen %s: %s\n", l->value.val, dlerr );
+        dll_missing = true;
+      }
+    }
+  }
+  if ( dll_missing )
+    return 1;
   if ( log_file != NULL )
     tree->parameters.set( st, P_LOG_FILE, log_file );
   else
