@@ -995,7 +995,7 @@ UserDB::send_adjacency_request( UserBridge &n, AdjacencyRequest reas ) noexcept
     this->peer_db_submsg( n, m, true );
 
   uint32_t h = ibx.hash();
-  m.close( e.sz, h, CABA_INBOX );
+  m.close_zpath( e.sz, h, CABA_INBOX, U_INBOX_ADJ_REQ );
   m.sign( ibx.buf, ibx.len(), *this->session_key );
 
   if ( debug_lnk )
@@ -1319,7 +1319,7 @@ UserDB::send_adjacency( UserBridge &n,  UserBridge *sync,  InboxBuf &ibx,
   }
 
   uint32_t h = ibx.hash();
-  m.close( e.sz, h, CABA_INBOX );
+  m.close_zpath( e.sz, h, CABA_INBOX, U_INBOX_ADJ_RPY );
   m.sign( ibx.buf, ibx.len(), *this->session_key );
 
   return this->forward_to_inbox( n, ibx, h, m.msg, m.len() );

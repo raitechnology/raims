@@ -342,7 +342,7 @@ SubDB::send_subs_request( UserBridge &n,  uint64_t seqno ) noexcept
      .start ( n.sub_seqno )
      .end   ( seqno       );
     uint32_t h = ibx.hash();
-    m.close( e.sz, h, CABA_INBOX );
+    m.close_zpath( e.sz, h, CABA_INBOX, U_INBOX_SUBS );
     m.sign( ibx.buf, ibx.len(), *this->user_db.session_key );
 
     return this->user_db.forward_to_primary_inbox( n, ibx, h, m.msg, m.len() );
@@ -391,7 +391,7 @@ SubDB::fwd_resub( UserBridge &n,  const char *sub,  size_t sublen,
      .queue_hash ( queue_hash );
   }
   uint32_t h = ibx.hash();
-  m.close( e.sz, h, CABA_INBOX );
+  m.close_zpath( e.sz, h, CABA_INBOX, U_INBOX_RESUB );
   m.sign( ibx.buf, ibx.len(), *this->user_db.session_key );
 
   return this->user_db.forward_to_inbox( n, ibx, h, m.msg, m.len() );
@@ -522,7 +522,7 @@ SubDB::recv_subs_request( const MsgFramePublish &,  UserBridge &n,
     if ( token != 0 )
       m.token( token );
     uint32_t h = ibx.hash();
-    m.close( e.sz, h, CABA_INBOX );
+    m.close_zpath( e.sz, h, CABA_INBOX, U_INBOX_RESUB );
     m.sign( ibx.buf, ibx.len(), *this->user_db.session_key );
 
     b &= this->user_db.forward_to_inbox( n, ibx, h, m.msg, m.len() );
@@ -576,7 +576,7 @@ SubDB::send_bloom_request( UserBridge &n ) noexcept
     m.open( this->user_db.bridge_id.nonce, ibx.len() )
      .seqno( n.inbox.next_send( U_INBOX_BLOOM_REQ ) );
     uint32_t h = ibx.hash();
-    m.close( e.sz, h, CABA_INBOX );
+    m.close_zpath( e.sz, h, CABA_INBOX, U_INBOX_BLOOM_REQ );
     m.sign( ibx.buf, ibx.len(), *this->user_db.session_key );
 
     return this->user_db.forward_to_primary_inbox( n, ibx, h, m.msg, m.len() );
@@ -595,22 +595,30 @@ SubDB::recv_bloom_request( const MsgFramePublish &,  UserBridge &n,
   }
   this->bloom.encode( code );
 
-  char     ret_buf[ 16 ];
-  InboxBuf ibx( n.bridge_id, dec.get_return( ret_buf, _BLOOM_RPY ) );
+  char         ret_buf[ 16 ];
+  const char * suf = dec.get_return( ret_buf, _BLOOM_RPY );
+  InboxBuf     ibx( n.bridge_id, suf );
+  uint64_t     seqno;
+  PublishType  u_type;
 
   MsgEst e( ibx.len() );
   e.seqno    ()
    .sub_seqno()
    .bloom    ( code.code_sz * 4 );
 
+  if ( suf != ret_buf )
+    seqno = n.inbox.next_send( u_type = U_INBOX_BLOOM_RPY );
+  else
+    seqno = n.inbox.next_send( u_type = U_INBOX_CONSOLE );
+
   MsgCat m;
   m.reserve( e.sz );
   m.open( this->user_db.bridge_id.nonce, ibx.len() )
-   .seqno    ( n.inbox.next_send( U_INBOX_BLOOM_RPY ) )
+   .seqno    ( seqno                      )
    .sub_seqno( this->sub_seqno            )
    .bloom    ( code.ptr, code.code_sz * 4 );
   uint32_t h = ibx.hash();
-  m.close( e.sz, h, CABA_INBOX );
+  m.close_zpath( e.sz, h, CABA_INBOX, u_type );
   m.sign( ibx.buf, ibx.len(), *this->user_db.session_key );
 
   return this->user_db.forward_to_inbox( n, ibx, h, m.msg, m.len() );

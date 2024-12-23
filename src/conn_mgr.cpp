@@ -414,50 +414,57 @@ TransportRoute::on_data_loss( EvSocket &conn,  EvPublish &pub ) noexcept
     d_conn( "on_data_loss fd %d pub_status %d\n", conn.fd, pub.pub_status );
     TransportRvHost svc( *this, conn );
     if ( svc.rv_host != NULL ) {
-      RvHost  * host = *svc.rv_host;
-      size_t    pos;
-      uint32_t  uid;
-      StringVal user;
-      if ( this->user_db.host_ht->find( pub.pub_host, pos, uid ) ) {
-        if ( uid == 0 )
-          user = this->user_db.user.user;
-        else {
-          UserBridge * n = this->user_db.bridge_tab[ uid ];
-          if ( n != NULL ) {
-            uint32_t msg_loss = pub.pub_status;
-            UIntHashTab *&ht = ( msg_loss == EV_PUB_RESTART ?
-                                 n->inbound_svc_restart :
-                                 n->inbound_svc_loss );
-            if ( msg_loss == EV_PUB_RESTART )
-              msg_loss = 1;
-            user = n->peer.user;
-            if ( msg_loss <= EV_MAX_LOSS ) {
-              uint64_t cur_pub = pub.cnt ^ ( (uint64_t) pub.subj_hash << 32 );
-              if ( n->last_idl_pub != cur_pub ) {
-                n->last_idl_pub = cur_pub;
-                n->inbound_msg_loss += msg_loss;
-                if ( ht == NULL ) {
-                  ht = UIntHashTab::resize( NULL );
-                }
-                else {
-                  size_t   pos;
-                  uint32_t val;
-                  if ( ht->find( svc.rv_service, pos, val ) ) {
-                    uint64_t tmp = (uint64_t) val + (uint64_t) msg_loss;
-                    if ( tmp > 0xffffffffU )
-                      tmp = 0xffffffffU;
-                    msg_loss = (uint32_t) tmp;
-                  }
-                }
-                ht->upsert_rsz( ht, svc.rv_service, msg_loss );
-                if ( n->is_set( AUTHENTICATED_STATE ) )
-                  this->user_db.uid_rtt.add( n->uid );
+      UserBridge * n = NULL;
+      RvHost     * host = *svc.rv_host;
+      StringVal    user;
+
+      if ( pub.is_pub_type( PUB_TYPE_IPC ) ) {
+        n = &((IpcPublish &) pub).n;
+      }
+      else {
+        size_t   pos;
+        uint32_t uid;
+        if ( this->user_db.host_ht->find( pub.pub_host, pos, uid ) ) {
+          if ( uid == 0 )
+            user = this->user_db.user.user;
+          else
+            n = this->user_db.bridge_tab[ uid ];
+        }
+      }
+      if ( n != NULL ) {
+        uint32_t msg_loss = pub.pub_status;
+        UIntHashTab *&ht = ( msg_loss == EV_PUB_RESTART ?
+                             n->inbound_svc_restart :
+                             n->inbound_svc_loss );
+        if ( msg_loss == EV_PUB_RESTART )
+          msg_loss = 1;
+        user = n->peer.user;
+        if ( msg_loss <= EV_MAX_LOSS ) {
+          uint64_t cur_pub = pub.cnt ^ ( (uint64_t) pub.subj_hash << 32 );
+          if ( n->last_idl_pub != cur_pub ) {
+            n->last_idl_pub = cur_pub;
+            n->inbound_msg_loss += msg_loss;
+            if ( ht == NULL ) {
+              ht = UIntHashTab::resize( NULL );
+            }
+            else {
+              size_t   pos;
+              uint32_t val;
+              if ( ht->find( svc.rv_service, pos, val ) ) {
+                uint64_t tmp = (uint64_t) val + (uint64_t) msg_loss;
+                if ( tmp > 0xffffffffU )
+                  tmp = 0xffffffffU;
+                msg_loss = (uint32_t) tmp;
               }
             }
+            ht->upsert_rsz( ht, svc.rv_service, msg_loss );
+            if ( n->is_set( AUTHENTICATED_STATE ) )
+              this->user_db.uid_rtt.add( n->uid );
           }
         }
       }
-      host->inbound_data_loss( conn, pub, user.val );
+      if ( ! user.is_null() )
+        host->inbound_data_loss( conn, pub, user.val );
     }
   }
 }

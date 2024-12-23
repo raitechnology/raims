@@ -336,7 +336,7 @@ UserDB::send_challenge( UserBridge &n,  AuthStage stage ) noexcept
   m.pk_sig();
   uint32_t h = ibx.hash();
   DSA * dsa = ( ! this->svc_dsa->sk.is_zero() ? this->svc_dsa : this->user_dsa );
-  m.close( e.sz, h, CABA_INBOX );
+  m.close_zpath( e.sz, h, CABA_INBOX, U_INBOX_AUTH );
   m.sign_dsa( ibx.buf, ibx.len(), *this->session_key, *this->hello_key, *dsa );
   m.sign( ibx.buf, ibx.len(), *this->session_key );
   secret_hmac.zero();
@@ -475,7 +475,7 @@ UserDB::send_trusted( const MsgFramePublish &/*pub*/,  UserBridge &n,
     this->ucast_db_submsg( rte, ucast_filter, m );
   }
   uint32_t h = ibx.hash();
-  m.close( e.sz, h, CABA_INBOX );
+  m.close_zpath( e.sz, h, CABA_INBOX, U_INBOX_AUTH );
 
   m.sign( ibx.buf, ibx.len(), *this->session_key );
   bool b = this->forward_to_inbox( n, ibx, h, m.msg, m.len() );
@@ -563,7 +563,7 @@ UserDB::send_trusted( const MsgFramePublish &/*pub*/,  UserBridge &n,
         m.ucast_url( u_ptr->ucast_url.val, u_ptr->ucast_url.len );
         this->ucast_db_submsg( *rte, ucast_filter2, m );
       }
-      m.close( e.sz, h, CABA_INBOX );
+      m.close_zpath( e.sz, h, CABA_INBOX, U_INBOX_AUTH );
       m.sign( ibx.buf, ibx.len(), *this->session_key );
       b |= this->forward_to( n, ibx.buf, ibx.len(), h, m.msg, m.len(), u_ptr );
     }

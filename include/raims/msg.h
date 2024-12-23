@@ -78,10 +78,11 @@ enum CabaTypeFlag {
 };
 enum CabaOptFlag {
   CABA_OPT_NONE  = 0,
-  CABA_OPT_ACK   = 1,  /* recver ack messages */
-  CABA_OPT_TRACE = 2,  /* routers trace messages */
-  CABA_OPT_ANY   = 4,  /* any of many */
-  CABA_OPT_GLSNO = 8   /* global seqno */
+  CABA_OPT_ACK   = 1<<0,  /* recver ack messages */
+  CABA_OPT_TRACE = 1<<1,  /* routers trace messages */
+  CABA_OPT_ANY   = 1<<2,  /* any of many */
+  CABA_OPT_GLSNO = 1<<3,  /* global seqno */
+  CABA_OPT_ZPATH = 1<<4   /* inbox path_select=0 seqno */
 };
                       /* <ver:1><type:2><opt:5><path:8><length bits:16> */
 static const int      CABA_VER_BITS    = 1,
@@ -116,7 +117,7 @@ static inline bool caba_rtr_alert( const char *sub ) {
   return ( mask & ( 1U << ( sub[ 1 ] - 'M' ) ) ) != 0;
 }
 
-static const uint16_t CABA_MSG_VERSION = 0;
+static const uint16_t CABA_MSG_VERSION = 1;
 
 struct CabaFlags {
   uint16_t flags;
@@ -131,7 +132,11 @@ struct CabaFlags {
   CabaTypeFlag get_type( void ) const { return (CabaTypeFlag)
                                                rsh( this->flags, CABA_TYPE_SHIFT, CABA_TYPE_MASK ); }
   uint16_t get_opt( void ) const      { return rsh( this->flags, CABA_OPT_SHIFT , CABA_OPT_MASK  ); }
-  uint8_t  get_path( void ) const     { return rsh( this->flags, CABA_PATH_SHIFT, CABA_PATH_MASK ); }
+  uint8_t  get_path( void ) const     { return this->get_path( this->get_opt() ); }
+  uint8_t  get_path( uint16_t opt ) const { return ( opt & CABA_OPT_ZPATH ) != 0 ? 0 :
+                                               rsh( this->flags, CABA_PATH_SHIFT, CABA_PATH_MASK ); }
+  uint8_t  get_ztype( uint16_t opt ) const { return ( opt & CABA_OPT_ZPATH ) == 0 ? 0 :
+                                               rsh( this->flags, CABA_PATH_SHIFT, CABA_PATH_MASK ); }
 
   const char *type_str( void ) const  { return caba_type_flag_str( this->get_type() ); }
 
@@ -391,21 +396,24 @@ enum PublishType {
   U_INBOX_UCAST_RPY = 33, /* _I.Nonce.ucast_rpy */
   U_INBOX_TRACE     = 34, /* _I.Nonce.trace */
   U_INBOX_ACK       = 35, /* _I.Nonce.ack */
-  U_INBOX_ANY       = 36, /* _I.Nonce.any */
-  U_INBOX_SYNC      = 37, /* _I.Nonce.sync */
-  U_INBOX_LOSS      = 38, /* _I.Nonce.sync */
-  U_INBOX           = 39, /* _I.Nonce.X reply subject, X is integer */
+  U_INBOX_SYNC      = 36, /* _I.Nonce.sync */
+  U_INBOX_LOSS      = 37, /* _I.Nonce.sync */
+  U_INBOX_CONSOLE   = 38, /* _I.Nonce.X console rpc, X is integer */
+  U_INBOX_ANY_RTE   = 39, /* _I.Nonce.any, ipc inbox */
+  U_INBOX           = 40, /* _I.Nonce.any */
 
-  U_MCAST_PING      = 40, /* _M.ping */
-  U_MCAST_SYNC      = 41, /* _M.sync */
-  U_MCAST_STAT_MON  = 42, /* _M.stat_mon */
-  U_MCAST           = 43, /* _M.> */
+  U_MCAST_PING      = 41, /* _M.ping */
+  U_MCAST_SYNC      = 42, /* _M.sync */
+  U_MCAST_STAT_MON  = 43, /* _M.stat_mon */
+  U_MCAST           = 44, /* _M.> */
   /* other subject */
-  U_INBOX_ANY_RTE   = 44, /* _I.Nonce.any, ipc inbox */
   MCAST_SUBJECT     = 45, /* not _XX subject */
   UNKNOWN_SUBJECT   = 46, /* init, not resolved */
   MAX_PUB_TYPE      = 64
 };
+static inline bool is_u_inbox( PublishType t ) {
+  return ( t >= U_INBOX_AUTH && t <= U_INBOX_CONSOLE ) || t == U_INBOX_ANY_RTE;
+}
 #ifdef INCLUDE_MSG_CONST
 static const char *publish_type_str[] = {
   "u_normal",
@@ -442,15 +450,17 @@ static const char *publish_type_str[] = {
   "u_inbox_ucast_rpy",
   "u_inbox_trace",
   "u_inbox_ack",
-  "u_inbox_any",
   "u_inbox_sync",
   "u_inbox_loss",
+  "u_inbox_console",
+  "u_inbox_any_rte",
   "u_inbox",
+
   "u_mcast_ping",
   "u_mcast_sync",
   "u_mcast_stat_mon",
   "u_mcast",
-  "u_inbox_any_rte",
+
   "mcast_subject",
   "unknown_subject"
 };
@@ -662,6 +672,20 @@ struct MsgFragPublish : public kv::EvPublish {
     trail( tr ), trail_sz( tsz ) {}
 };
 
+struct IpcPublish : public kv::EvPublish {
+  UserBridge & n;
+
+  IpcPublish( UserBridge &src_b,  const char *subj,  size_t subj_len,
+              const void *repl,  size_t repl_len,
+              const void *mesg,  size_t mesg_len,
+              kv::RoutePublish &sub_rt,  const kv::PeerId &src,  uint32_t shash,
+              uint32_t msg_encoding,  uint16_t status,  uint32_t host,
+              uint64_t counter )
+    : EvPublish( subj, subj_len, repl, repl_len, mesg, mesg_len, sub_rt, src,
+                 shash, msg_encoding, kv::PUB_TYPE_IPC, status, host, counter ),
+      n( src_b ) {}
+};
+
 template <class T>
 struct MsgBufT {
   char * out, * msg;
@@ -726,6 +750,14 @@ struct MsgCat : public md::MDMsgMem, public MsgBufDigestT<MsgCat> {
     this->MsgBufDigestT<MsgCat>::close_frag( h, trail_sz, fl );
     if ( rsz < this->len() )
       this->reserve_error( rsz );
+  }
+  void close_zpath( size_t rsz,  uint32_t h,  CabaFlags fl,  PublishType t ) {
+    this->close_zpath_frag( rsz, 0, h, fl, t );
+  }
+  void close_zpath_frag( size_t rsz,  uint32_t trail_sz,  uint32_t h,  CabaFlags fl,  PublishType t ) {
+    fl.set_opt( fl.get_opt() | CABA_OPT_ZPATH );
+    fl.set_path( (uint8_t) t );
+    this->close_frag( rsz, trail_sz, h, fl );
   }
   void print( void ) noexcept;
   void print_hex( void ) noexcept;

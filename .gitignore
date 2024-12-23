@@ -10,10 +10,7 @@
 /tmp
 /config
 # Build temporaries
-/RH5_*
-/RH6_*
-/RH7_*
-/RH8_*
+/RH*
 /FC*
 /UB*
 /DEB*

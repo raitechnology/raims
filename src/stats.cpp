@@ -364,7 +364,8 @@ void
 SessionMgr::publish_stat_monitor( void ) noexcept
 {
   static const char m_stat[] = _MCAST "." _STAT_MON;
-  PubMcastData mc( m_stat, sizeof( m_stat ) - 1, NULL, 0, MD_NODATA );
+  PubMcastData mc( m_stat, sizeof( m_stat ) - 1, NULL, 0, MD_NODATA,
+                   U_MCAST_STAT_MON );
   mc.stamp = this->poll.now_ns;
   this->publish( mc );
 }

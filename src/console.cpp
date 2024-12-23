@@ -2430,7 +2430,7 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
         break;
       }
       PubMcastData mc( arg, len, data, datalen,
-                       datalen > 0 ? MD_STRING : MD_NODATA );
+                       datalen > 0 ? MD_STRING : MD_NODATA, UNKNOWN_SUBJECT );
       if ( cmd != CMD_PUBLISH ) {
         if ( this->inbox_num == 0 )
           this->inbox_num = this->sub_db.inbox_start( 0, this );
@@ -2479,7 +2479,7 @@ Console::do_snap( ConsoleOutput *p,  ConsoleOutput *sub_output,
   ibx = this->start_rv_inbox( svc, sub, inbox, inbox_len );
   sub->set_snap( arg, len, h, ibx );
 
-  PubMcastData mc( arg, len, NULL, 0, MD_NODATA );
+  PubMcastData mc( arg, len, NULL, 0, MD_NODATA, UNKNOWN_SUBJECT );
   mc.inbox = inbox;
   mc.inbox_len = inbox_len;
   this->mgr.publish( mc );
@@ -3224,7 +3224,8 @@ Console::show_subs( ConsoleOutput *p,  const char *arg,
           len = n->make_inbox_subject( isub, _SUBS );
 
           PubMcastData mc( isub, len, arg2, arglen2,
-                           arglen2 == 0 ? MD_NODATA : MD_STRING );
+                           arglen2 == 0 ? MD_NODATA : MD_STRING,
+                           U_INBOX_SUBS );
           mc.reply = rpc->inbox_num;
           mc.stamp = current_realtime_ns();
           mc.token = rpc->token;
@@ -3276,7 +3277,8 @@ Console::send_remote_request( ConsoleOutput *p,  const char *arg,
       len = n->make_inbox_subject( isub, _REM );
 
       PubMcastData mc( isub, len, cmd, cmdlen,
-                       cmdlen == 0 ? MD_NODATA : MD_STRING );
+                       cmdlen == 0 ? MD_NODATA : MD_STRING,
+                       U_INBOX_REM );
       mc.reply = rpc->inbox_num;
       mc.token = rpc->token;
       this->mgr.publish( mc );
@@ -3343,12 +3345,12 @@ Console::recv_remote_request( const MsgFramePublish &,  UserBridge &n,
   m.reserve( e.sz );
 
   m.open( this->user_db.bridge_id.nonce, ibx.len() )
-   .seqno( n.inbox.next_send( U_INBOX ) );
+   .seqno( n.inbox.next_send( U_INBOX_REM ) );
   if ( token != 0 )
     m.token( token );
   m.data( out.result.ptr, out.result.count );
   uint32_t h = ibx.hash();
-  m.close( e.sz, h, CABA_INBOX );
+  m.close_zpath( e.sz, h, CABA_INBOX, U_INBOX_REM );
   m.sign( ibx.buf, ibx.len(), *this->user_db.session_key );
   return this->user_db.forward_to_inbox( n, ibx, h, m.msg, m.len() );
 }
@@ -3374,7 +3376,7 @@ Console::ping_peer( ConsoleOutput *p,  const char *arg,
       }
       len = n->make_inbox_subject( isub, _PING );
 
-      PubMcastData mc( isub, len, NULL, 0, MD_NODATA );
+      PubMcastData mc( isub, len, NULL, 0, MD_NODATA, U_INBOX_CONSOLE );
       mc.reply = rpc->inbox_num;
       mc.stamp = current_realtime_ns();
       mc.token = rpc->token;
@@ -3411,7 +3413,8 @@ Console::mcast_ping( ConsoleOutput *p,  uint16_t path,  bool add_trace ) noexcep
   }
   else {
     static const char m_ping[] = _MCAST "." _PING;
-    PubMcastData mc( m_ping, sizeof( m_ping ) - 1, NULL, 0, MD_NODATA );
+    PubMcastData mc( m_ping, sizeof( m_ping ) - 1, NULL, 0, MD_NODATA,
+                     U_MCAST_PING );
     mc.reply = rpc->inbox_num;
     mc.stamp = current_realtime_ns();
     mc.token = rpc->token;
@@ -5287,7 +5290,7 @@ Console::show_urls( ConsoleOutput *p ) noexcept
 void
 Console::show_counters( ConsoleOutput *p ) noexcept
 {
-  static const uint32_t ncols = 16;
+  static const uint32_t ncols = 8;
   TabOut out( this->table, this->tmp, ncols );
 
   for ( uint32_t uid = 0; uid < this->user_db.next_uid; uid++ ) {
@@ -5310,22 +5313,13 @@ Console::show_counters( ConsoleOutput *p ) noexcept
        .set_time( n->start_time )             /* start */
        .set_long( n->hb_seqno )               /* hb */
        .set_time( n->hb_time )                /* hb_time */
-       .set_long( n->inbox.send_seqno[ 0 ] )  /* isnd */
-       .set_long( n->inbox.recv_seqno[ 0 ] )  /* ircv */
-       .set_long( n->inbox.send_seqno[ 1 ] )  /* isnd */
-       .set_long( n->inbox.recv_seqno[ 1 ] )  /* ircv */
-       .set_long( n->inbox.send_seqno[ 2 ] )  /* isnd */
-       .set_long( n->inbox.recv_seqno[ 2 ] )  /* ircv */
-       .set_long( n->inbox.send_seqno[ 3 ] )  /* isnd */
-       .set_long( n->inbox.recv_seqno[ 3 ] )  /* ircv */
        .set_long( n->ping_send_count )        /* pisnd */
        .set_time( n->ping_send_time )         /* ping_stime */
        .set_long( n->pong_recv_count )        /* porcv */
        .set_long( n->ping_recv_count );       /* pircv */
   }
   static const char *hdr[ ncols ] =
-    { "user", "start", "hb seqno", "hb time", "ibx snd0", "ibx rcv0",
-      "ibx snd1", "ibx rcv1", "ibx snd2", "ibx rcv2", "ibx snd3", "ibx rcv3",
+    { "user", "start", "hb seqno", "hb time",
       "ping snd", "ping stime", "pong rcv", "ping rcv" };
   this->print_table( p, hdr, ncols );
 }
@@ -5406,7 +5400,8 @@ Console::show_pubtype( ConsoleOutput *p ) noexcept
 }
 
 void
-Console::show_inbox( ConsoleOutput *p, const char *arg, size_t arglen ) noexcept
+Console::show_inbox( ConsoleOutput *p,  const char *arg,
+                     size_t arglen ) noexcept
 {
   static const uint32_t ncols = 5;
   TabOut out( this->table, this->tmp, ncols );
@@ -5420,53 +5415,56 @@ Console::show_inbox( ConsoleOutput *p, const char *arg, size_t arglen ) noexcept
 
     if ( out.table.count > 0 )
       out.row( ncols - 1 ).typ |= PRINT_SEP;
-    uint64_t send_seqno = n->inbox.send_seqno[ 0 ],
-             recv_seqno = n->inbox.recv_seqno[ 0 ];
-    if ( send_seqno > 32 )
-      send_seqno -= 32;
-    else
-      send_seqno = 1;
-    if ( recv_seqno > 32 )
-      recv_seqno -= 32;
-    else
-      recv_seqno = 1;
+
     bool first = true;
-    while ( send_seqno < n->inbox.send_seqno[ 0 ] ||
-            recv_seqno <= n->inbox.recv_seqno[ 0 ] ) {
-      TabPrint * tab = out.add_row_p();
-      uint32_t i = 0;
-      if ( first ) {
-        tab[ i++ ].set( n, PRINT_USER );    /* user */
-        first = false;
-      }
-      else
-        tab[ i++ ].set_null();
-      if ( send_seqno < n->inbox.send_seqno[ 0 ] ) {
-        tab[ i++ ].set_long( send_seqno );/* send seqno */
-        tab[ i++ ].set(
-          publish_type_to_string(
-            (PublishType) n->inbox.send_type[ 0 ][ send_seqno % 32 ] ) );
-      }
-      else {
-        tab[ i++ ].set_null();
-        tab[ i++ ].set_null();
-      }
-      if ( recv_seqno <= n->inbox.recv_seqno[ 0 ] ) {
-        tab[ i++ ].set_long( recv_seqno );/* recv seqno */
-        tab[ i++ ].set(
-          publish_type_to_string(
-            (PublishType) n->inbox.recv_type[ 0 ][ recv_seqno % 32 ] ) );
+    uint32_t u,
+             cnt = max_int( n->inbox.seqno.count, n->inbox_recv.seqno.count );
+
+    for ( u = U_INBOX_AUTH; u <= U_INBOX + cnt; u++ ) {
+      static const char * path_str[ MAX_PATH_MASK + 1 ];
+      uint64_t     recv_seqno,
+                   send_seqno,
+                   miss_seqno;
+      const char * type_str;
+
+      if ( u > U_INBOX ) {
+        uint32_t x = u - U_INBOX;
+        recv_seqno = n->inbox_recv.seqno[ x ];
+        miss_seqno = ( x < n->inbox_miss.seqno.count ? n->inbox_miss.seqno[ x ] : 0 );
+        send_seqno = n->inbox.seqno[ x ];
+        type_str   = path_str[ x ];
+        if ( type_str == NULL ) {
+          CatPtr p( (char *) ::malloc( 16 ) );
+          p.s( publish_type_to_string( U_INBOX ) ).s( "_" ).u( x ).end();
+          path_str[ x ] = type_str = p.start;
+        }
       }
       else {
-        tab[ i++ ].set_null();
-        tab[ i++ ].set_null();
+        recv_seqno = n->inbox_recv.zpath_seqno[ u ];
+        miss_seqno = ( u < n->inbox_miss.seqno.count ? n->inbox_miss.seqno[ u ] : 0 );
+        send_seqno = n->inbox.zpath_seqno[ u ];
+        type_str   = publish_type_to_string( (PublishType) u );
       }
-      send_seqno++;
-      recv_seqno++;
+
+      if ( send_seqno + recv_seqno + miss_seqno != 0 ) {
+        TabPrint * tab = out.add_row_p();
+        uint32_t i = 0;
+        if ( first ) {
+          tab[ i++ ].set( n, PRINT_USER );    /* user */
+          first = false;
+        }
+        else {
+          tab[ i++ ].set_null();
+        }
+        tab[ i++ ].set( type_str );
+        tab[ i++ ].set_long( recv_seqno );
+        tab[ i++ ].set_long( send_seqno );
+        tab[ i++ ].set_long( miss_seqno );
+      }
     }
   }
   static const char *hdr[ ncols ] =
-    { "user", "send seqno", "send type", "recv seqno", "recv type" };
+    { "user", "inbox type", "recv type", "send seqno", "loss" };
   this->print_table( p, hdr, ncols );
 }
 

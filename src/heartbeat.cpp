@@ -13,16 +13,20 @@
 
 using namespace rai;
 using namespace ms;
+using namespace sassrv;
 using namespace kv;
 using namespace md;
 
 void
-UserDB::make_hb( TransportRoute &rte,  const char *sub,  size_t sublen,
+UserDB::make_hb( TransportRoute &rte,  PublishType u_type,
                  uint32_t h,  MsgCat &m ) noexcept
 {
   static const char * ver_str;
   static size_t       ver_len;
-  StringVal mesh_url;
+  const char        * sub;
+  size_t              sublen;
+  StringVal           mesh_url;
+
   if ( rte.mesh_id != NULL )
     mesh_url = rte.mesh_id->mesh_url;
 
@@ -30,7 +34,15 @@ UserDB::make_hb( TransportRoute &rte,  const char *sub,  size_t sublen,
     ver_str = ms_get_version();
     ver_len = ::strlen( ver_str );
   }
-
+  if ( u_type == U_SESSION_HB ) {
+    sub = X_HB;    sublen = X_HB_SZ;
+  }
+  else if ( u_type == U_SESSION_HELLO ) {
+    sub = X_HELLO; sublen = X_HELLO_SZ;
+  }
+  else {
+    sub = X_BYE;   sublen = X_BYE_SZ;
+  }
   uint64_t uptime = rte.hb_mono_time - this->start_mono_time;
   char     cost_buf[ 64 ];
   size_t   cost_len = rte.uid_connected.cost.str_size( cost_buf,
@@ -126,7 +138,7 @@ UserDB::make_hb( TransportRoute &rte,  const char *sub,  size_t sublen,
     m.version( ver_str, ver_len );
   }
   m.pk_digest();
-  m.close( e.sz, h, CABA_HEARTBEAT );
+  m.close_zpath( e.sz, h, CABA_HEARTBEAT, u_type );
   m.sign_hb( sub, sublen, *this->session_key, *this->hello_key );
 }
 
@@ -164,7 +176,7 @@ UserDB::hello_hb( void ) noexcept
     if ( rte->connect_count > 0 && ! rte->is_set( TPORT_IS_IPC ) ) {
       MsgCat m;
       this->push_hb_time( *rte, this->start_time, this->start_mono_time );
-      this->make_hb( *rte, X_HELLO, X_HELLO_SZ, hello_h, m );
+      this->make_hb( *rte, U_SESSION_HELLO, hello_h, m );
 
       char buf[ HMAC_B64_LEN + 1 ], buf2[ NONCE_B64_LEN + 1 ];
       d_hb( "hello %s(%u): %s:%s -> %s\n", this->user.user.val, this->my_src.fd,
@@ -188,7 +200,7 @@ UserDB::bye_hb( void ) noexcept
     TransportRoute *rte = this->transport_tab.ptr[ i ];
     if ( rte->connect_count > 0 && ! rte->is_set( TPORT_IS_IPC ) ) {
       this->push_hb_time( *rte, cur_time, cur_mono );
-      this->make_hb( *rte, X_BYE, X_BYE_SZ, bye_h, m );
+      this->make_hb( *rte, U_SESSION_BYE, bye_h, m );
       d_hb( "bye\n" );
       EvPublish pub( X_BYE, X_BYE_SZ, NULL, 0, m.msg, m.len(),
                      rte->sub_route, this->my_src, bye_h, CABA_TYPE_ID );
@@ -222,7 +234,7 @@ UserDB::interval_hb( uint64_t cur_mono,  uint64_t cur_time ) noexcept
           printf( "send hb %s\n", rte->name );
         MsgCat m;
         this->push_hb_time( *rte, cur_time, cur_mono );
-        this->make_hb( *rte, X_HB, X_HB_SZ, hb_h, m );
+        this->make_hb( *rte, U_SESSION_HB, hb_h, m );
         EvPublish pub( X_HB, X_HB_SZ, NULL, 0, m.msg, m.len(),
                        rte->sub_route, this->my_src, hb_h, CABA_TYPE_ID );
         rte->forward_to_connected( pub );
@@ -647,14 +659,6 @@ UserDB::random_uid_walk( void ) noexcept
     this->next_ping_uid = (uint32_t) this->rand.next() % this->next_uid;
     this->uid_ping_count = 1;
   }
-/*
-  if ( serial_count == 0 )
-    return 0;
-  if ( serial_count > 8 )
-    serial_count /= 4;
-  if ( ( this->uid_ping_count++ % serial_count ) == 0 )
-    this->next_ping_uid = (uint32_t) this->rand.next() % this->next_uid;
-*/
   if ( this->uid_rtt.count() != 0 ) {
     if ( this->uid_rtt.next( this->next_ping_uid ) ||
          this->uid_rtt.first( this->next_ping_uid ) ) {
@@ -666,19 +670,10 @@ UserDB::random_uid_walk( void ) noexcept
       this->next_ping_uid = (uint32_t) this->rand.next() % this->next_uid;
     this->uid_ping_count = 1;
   }
-  /*printf( "uid auth %u [", this->next_ping_uid );
-  uint32_t i;
-  for ( bool b = this->uid_authenticated.first( i ); b;
-        b = this->uid_authenticated.next( i ) ) {
-    printf( "%u ", i );
-  }
-  printf( "] " );*/
   if ( this->uid_authenticated.next( this->next_ping_uid ) ) {
-    /*printf( "next %u\n", this->next_ping_uid );*/
     return this->next_ping_uid;
   }
   else if ( this->uid_authenticated.first( this->next_ping_uid ) ) {
-    /*printf( "first %u\n", this->next_ping_uid );*/
     return this->next_ping_uid;
   }
   return 0;
@@ -711,7 +706,7 @@ UserDB::send_ping_request( UserBridge &n ) noexcept
 {
   InboxBuf ibx( n.bridge_id, _PING );
   uint64_t stamp = current_realtime_ns();
-  this->msg_send_counter[ U_INBOX_PING ]++;
+
   n.ping_send_count++;
   n.ping_send_time = stamp;
 
@@ -722,13 +717,14 @@ UserDB::send_ping_request( UserBridge &n ) noexcept
    .link_state  ()
    .idl_service ()
    .idl_msg_loss()
-   .idl_restart ();
+   .idl_restart ()
+   .host_id     ();
 
   MsgCat m;
   m.reserve( e.sz );
 
   m.open( this->bridge_id.nonce, ibx.len() )
-   .seqno     ( ++n.ping_send_seqno )
+   .seqno     ( n.inbox.next_send( U_INBOX_PING ) )
    .stamp     ( stamp                  )
    .sub_seqno ( this->sub_db.sub_seqno )
    .link_state( this->link_state_seqno );
@@ -750,13 +746,24 @@ UserDB::send_ping_request( UserBridge &n ) noexcept
        .idl_msg_loss( loss );
       if ( is_restart )
         m.idl_restart( is_restart );
+
+      if ( this->ipc_transport != NULL ) {
+        RvTransportService * rv_svc = this->ipc_transport->rv_svc;
+        if ( rv_svc != NULL ) {
+          RvHost *host;
+          if ( rv_svc->db.get_service( host, svc ) ) {
+            if ( host->host_ip != this->host_id )
+              m.host_id( host->host_ip );
+          }
+        }
+      }
       if ( debug_hb )
         n.printf( "ping svc %u loss %u restart %s\n", svc, loss,
                   is_restart ? "true" : "false" );
     }
   }
   uint32_t h = ibx.hash();
-  m.close( e.sz, h, CABA_INBOX );
+  m.close_zpath( e.sz, h, CABA_INBOX, U_INBOX_PING );
   m.sign( ibx.buf, ibx.len(), *this->session_key );
 
   this->forward_to_primary_inbox( n, ibx, h, m.msg, m.len() );
@@ -832,16 +839,15 @@ UserDB::recv_mcast_sync_request( MsgFramePublish &pub,  UserBridge &n,
 {
   char         ret_buf[ 16 ];
   const char * suf = dec.get_return( ret_buf, _SYNC );
-  uint64_t     seqno;
 
   if ( dec.seqno != 0 ) {
-    seqno = n.mcast_recv_seqno;
-    if ( dec.seqno > seqno )
+    uint64_t recv_seqno = n.mcast_recv_seqno;
+    if ( dec.seqno > recv_seqno )
       n.mcast_recv_seqno = dec.seqno;
-    if ( dec.seqno <= seqno ) {
+    if ( dec.seqno <= recv_seqno ) {
       n.printf(
         "%.*s ignoring sync seqno replay %" PRIu64 " -> %" PRIu64 " (%s)\n",
-        (int) pub.subject_len, pub.subject, seqno, dec.seqno, pub.rte.name );
+        (int) pub.subject_len, pub.subject, recv_seqno, dec.seqno, pub.rte.name );
       pub.status = FRAME_STATUS_DUP_SEQNO;
       return true;
     }
@@ -869,6 +875,13 @@ UserDB::recv_mcast_sync_request( MsgFramePublish &pub,  UserBridge &n,
     if ( stamp == 0 )
       stamp = cur_time;
 
+    uint64_t seqno;
+    PublishType u_type;
+    if ( suf != ret_buf ) /* exclude manual pings */
+      seqno = n.inbox.next_send( u_type = U_INBOX_SYNC );
+    else
+      seqno = n.inbox.next_send( u_type = U_INBOX_CONSOLE );
+
     MsgEst e( ibx.len() );
     e.seqno         ()
      .stamp         ()
@@ -882,12 +895,6 @@ UserDB::recv_mcast_sync_request( MsgFramePublish &pub,  UserBridge &n,
     MsgCat m;
     m.reserve( e.sz );
 
-    if ( suf == ret_buf )
-      seqno = n.inbox.next_send( U_INBOX_SYNC );
-    else {
-      this->msg_send_counter[ U_INBOX_SYNC ]++;
-      seqno = ++n.sync_send_seqno;
-    }
     m.open( this->bridge_id.nonce, ibx.len() )
      .seqno       ( seqno    )
      .stamp       ( stamp    )
@@ -900,7 +907,7 @@ UserDB::recv_mcast_sync_request( MsgFramePublish &pub,  UserBridge &n,
      .link_state_sum( this->link_state_sum       );
 
     uint32_t h = ibx.hash();
-    m.close( e.sz, h, CABA_INBOX );
+    m.close_zpath( e.sz, h, CABA_INBOX, u_type );
     m.sign( ibx.buf, ibx.len(), *this->session_key );
     b = this->forward_to_primary_inbox( n, ibx, h, m.msg, m.len() );
     n.sync_sum_req++;
@@ -912,21 +919,9 @@ UserDB::recv_mcast_sync_request( MsgFramePublish &pub,  UserBridge &n,
 }
 
 bool
-UserDB::recv_mcast_sync_result( MsgFramePublish &pub,  UserBridge &n,
+UserDB::recv_mcast_sync_result( MsgFramePublish &,  UserBridge &n,
                                 const MsgHdrDecoder &dec ) noexcept
 {
-  if ( dec.seqno != 0 ) {
-    uint64_t seqno = n.sync_recv_seqno;
-    if ( dec.seqno > seqno )
-      n.sync_recv_seqno = dec.seqno;
-    if ( dec.seqno <= seqno ) {
-      n.printf(
-        "%.*s ignoring sync seqno replay %" PRIu64 " -> %" PRIu64 " (%s)\n",
-        (int) pub.subject_len, pub.subject, seqno, dec.seqno, pub.rte.name );
-      pub.status = FRAME_STATUS_DUP_SEQNO;
-      return true;
-    }
-  }
   n.sync_sum_res++;
   return this->hb_adjacency_request( n, dec, MCAST_SYNC_RES,
                                      n.sync_sum_res_adj );
@@ -939,33 +934,14 @@ UserDB::recv_ping_request( MsgFramePublish &pub,  UserBridge &n,
 {
   char         ret_buf[ 16 ];
   const char * suf = dec.get_return( ret_buf, _PONG );
-  uint64_t     seqno;
 
   if ( debug_hb )
     n.printf( "recv_ping request\n" );
   if ( dec.seqno != 0 ) {
     if ( is_mcast_ping ) {
-      seqno = n.mcast_recv_seqno;
+      uint64_t seqno = n.mcast_recv_seqno;
       if ( dec.seqno > seqno )
         n.mcast_recv_seqno = dec.seqno;
-    }
-    else if ( suf == ret_buf ) { /* when using _I.<bridge>.N, uses inbox seqno */
-      uint8_t  path_select = dec.msg->caba.get_path();
-      seqno = n.inbox.next_path_recv( path_select );
-      if ( dec.seqno > seqno )
-        n.inbox.set_path_recv( path_select, dec.seqno, U_INBOX_PING );
-    }
-    else { /* using _I.<bridge>.PING, uses ping seqno */
-      seqno = n.ping_recv_seqno;
-      if ( dec.seqno > seqno )
-        n.ping_recv_seqno = dec.seqno;
-    }
-    if ( dec.seqno <= seqno ) {
-      n.printf(
-        "%.*s ignoring ping seqno replay %" PRIu64 " -> %" PRIu64 " (%s)\n",
-        (int) pub.subject_len, pub.subject, seqno, dec.seqno, pub.rte.name );
-      pub.status = FRAME_STATUS_DUP_SEQNO;
-      return true;
     }
   }
   InboxBuf ibx( n.bridge_id, suf );
@@ -985,19 +961,28 @@ UserDB::recv_ping_request( MsgFramePublish &pub,  UserBridge &n,
       n.skew_upd++;
     }
   }
+  uint64_t seqno;
+  PublishType u_type;
   if ( suf != ret_buf ) { /* exclude manual pings */
     n.ping_recv_count++;
     n.ping_recv_time = stamp;
+    seqno = n.inbox.next_send( u_type = U_INBOX_PONG );
+  }
+  else {
+    seqno = n.inbox.next_send( u_type = U_INBOX_CONSOLE );
   }
 
   uint16_t idl_svc    = 0;
-  uint32_t idl_loss   = 0;
+  uint32_t idl_loss   = 0,
+           host_id    = n.host_id;
   bool     is_restart = false;
   if ( dec.test_2( FID_IDL_SERVICE, FID_IDL_MSG_LOSS ) ) {
     cvt_number<uint16_t>( dec.mref[ FID_IDL_SERVICE ], idl_svc );
     cvt_number<uint32_t>( dec.mref[ FID_IDL_MSG_LOSS ], idl_loss );
     if ( dec.test( FID_IDL_RESTART ) )
       cvt_number<bool>( dec.mref[ FID_IDL_RESTART ], is_restart );
+    if ( dec.test( FID_HOST_ID ) )
+      cvt_number<uint32_t>( dec.mref[ FID_HOST_ID ], host_id );
 
     if ( debug_hb )
       n.printf( "ping idl_svc %u idl_loss %u is_restart %s\n",
@@ -1017,12 +1002,6 @@ UserDB::recv_ping_request( MsgFramePublish &pub,  UserBridge &n,
   MsgCat m;
   m.reserve( e.sz );
 
-  if ( suf == ret_buf )
-    seqno = n.inbox.next_send( U_INBOX_PONG );
-  else {
-    this->msg_send_counter[ U_INBOX_PONG ]++;
-    seqno = ++n.pong_send_seqno;
-  }
   m.open( this->bridge_id.nonce, ibx.len() )
    .seqno       ( seqno    )
    .stamp       ( stamp    )
@@ -1037,7 +1016,7 @@ UserDB::recv_ping_request( MsgFramePublish &pub,  UserBridge &n,
       m.idl_restart( is_restart );
   }
   uint32_t h = ibx.hash();
-  m.close( e.sz, h, CABA_INBOX );
+  m.close_zpath( e.sz, h, CABA_INBOX, u_type );
   m.sign( ibx.buf, ibx.len(), *this->session_key );
   bool b;
   if ( dec.is_mcast_type() )
@@ -1053,7 +1032,7 @@ UserDB::recv_ping_request( MsgFramePublish &pub,  UserBridge &n,
       TransportRoute *rte = this->transport_tab.ptr[ i ];
       if ( rte->is_set( TPORT_IS_IPC ) && rte->rv_svc != NULL ) {
         rte->rv_svc->outbound_data_loss( idl_svc, idl_loss, is_restart,
-                                         n.host_id, n.peer.user.val );
+                                         host_id, n.peer.user.val );
         break;
       }
     }
@@ -1062,19 +1041,11 @@ UserDB::recv_ping_request( MsgFramePublish &pub,  UserBridge &n,
 }
 
 bool
-UserDB::recv_pong_result( MsgFramePublish &pub,  UserBridge &n,
+UserDB::recv_pong_result( MsgFramePublish &,  UserBridge &n,
                           const MsgHdrDecoder &dec ) noexcept
 {
   if ( debug_hb )
     n.printf( "recv_pong result\n" );
-  if ( dec.seqno <= n.pong_recv_seqno ) {
-    n.printf( "%.*s ignoring pong seqno replay %u -> %" PRIu64 " (%s)\n",
-              (int) pub.subject_len, pub.subject,
-              n.pong_recv_seqno, dec.seqno, pub.rte.name );
-    pub.status = FRAME_STATUS_DUP_SEQNO;
-    return true;
-  }
-  n.pong_recv_seqno = dec.seqno;
 
   uint64_t stamp = 0, reply_stamp = 0,
            cur_time = current_realtime_ns(),

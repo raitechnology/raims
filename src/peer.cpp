@@ -87,7 +87,7 @@ UserDB::make_peer_sync_msg( UserBridge &dest,  UserBridge &n,
    .bloom      ( code.ptr       , code.code_sz * 4 );
 
   this->adjacency_submsg( &n, m );
-  m.close( e.sz, h, CABA_INBOX );
+  m.close_zpath( e.sz, h, CABA_INBOX, U_INBOX_SYNC_RPY );
   m.sign( sub, sublen, *this->session_key );
 }
 
@@ -163,7 +163,7 @@ UserDB::recv_sync_request( const MsgFramePublish &pub,  UserBridge &n,
        .auth_stage ( user_n->last_auth_type );
 
       uint32_t h = ibx.hash();
-      m.close( e.sz, h, CABA_INBOX );
+      m.close_zpath( e.sz, h, CABA_INBOX, U_INBOX_SYNC_RPY );
       m.sign( ibx.buf, ibx.len(), *this->session_key );
 
       return this->forward_to_inbox( n, ibx, h, m.msg, m.len() );
@@ -475,7 +475,7 @@ UserDB::make_peer_db_msg( UserBridge &n,  const char *sub,  size_t sublen,
    .seqno( n.inbox.next_send( U_INBOX_ADD_RTE ) );
 
   this->peer_db_submsg( n, m );
-  m.close( e.sz, h, CABA_INBOX );
+  m.close_zpath( e.sz, h, CABA_INBOX, U_INBOX_ADD_RTE );
   m.sign( sub, sublen, *this->session_key );
 
   return true;
@@ -1260,7 +1260,7 @@ UserDB::recv_mesh_request( const MsgFramePublish &pub,  UserBridge &n,
       this->mesh_db_submsg( *rte, filter, m );
   }
   uint32_t h = ibx.hash();
-  m.close( e.sz, h, CABA_INBOX );
+  m.close_zpath( e.sz, h, CABA_INBOX, U_INBOX_MESH_RPY );
   m.sign( ibx.buf, ibx.len(), *this->session_key );
 
   return this->forward_to_inbox( n, ibx, h, m.msg, m.len() );
@@ -1416,7 +1416,7 @@ UserDB::send_mesh_request( UserBridge &n,  MsgHdrDecoder &dec,
   if ( url_count > 0 )
     m.mesh_filter( filter, url_count * 4 );
   uint32_t h = ibx.hash();
-  m.close( e.sz, h, CABA_INBOX );
+  m.close_zpath( e.sz, h, CABA_INBOX, U_INBOX_MESH_REQ );
   m.sign( ibx.buf, ibx.len(), *this->session_key );
 
   return this->forward_to_inbox( n, ibx, h, m.msg, m.len() );
@@ -1630,7 +1630,7 @@ UserDB::request_pending_peer( UserPendingRoute &p,
   if ( p.user_sv.len > 0 )
     m.user( p.user_sv.val, p.user_sv.len );
   uint32_t h = ibx.hash();
-  m.close( e.sz, h, CABA_INBOX );
+  m.close_zpath( e.sz, h, CABA_INBOX, U_INBOX_SYNC_REQ );
   m.sign( ibx.buf, ibx.len(), *this->session_key );
 
   if ( debug_peer ) {

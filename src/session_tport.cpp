@@ -377,8 +377,12 @@ SessionMgr::add_transport2( ConfigTree::Transport &t,
 
   ConfigTree::Transport * tptr = &t;
   CatMalloc svc_name( this->svc.svc.len + t.tport.len + 8 );
-  if ( t.type.equals( T_RV, T_RV_SZ ) || t.type.equals( T_NATS, T_NATS_SZ ) ||
-       t.type.equals( T_REDIS, T_REDIS_SZ ) ) {
+
+  if ( ! t.type.equals( T_ANY, T_ANY_SZ ) &&
+       ! t.type.equals( T_TCP, T_TCP_SZ ) &&
+       ! t.type.equals( T_PGM, T_PGM_SZ ) &&
+       ! t.type.equals( T_MESH, T_MESH_SZ ) ) {
+
     StringTab & stab = this->user_db.string_tab;
     f |= TPORT_IS_IPC;
     svc_name.s( this->svc.svc.val ).s( ".ipc" ).end();

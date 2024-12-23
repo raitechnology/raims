@@ -156,34 +156,56 @@ struct UserRoute : public UserStateTest<UserRoute> {
   char * inbox_route_str( char *buf,  size_t buflen ) noexcept;
 };
 
-struct InboxSeqno {
-  typedef uint8_t TypeArray[ 32 ];
-  kv::ArrayCount<uint64_t, 4> recv_seqno,
-                              send_seqno;
-  kv::ArrayCount<TypeArray, 4> recv_type,
-                               send_type;
+struct InboxRecvSeqno {
+  kv::ArrayCount<uint64_t, 4> seqno,
+                              zpath_seqno;
+  void init( void ) {
+    this->seqno.clear();
+    this->zpath_seqno.clear();
+  }
+  uint64_t & next_path_recv( uint8_t path_select,  PublishType pub_type ) {
+    return ( path_select != 0 ? this->seqno[ path_select ] :
+           this->zpath_seqno[ pub_type ] );
+  }
+  void set_next_recv( uint8_t path_select,  uint64_t seqno,
+                      PublishType pub_type ) {
+    this->next_path_recv( path_select, pub_type ) = seqno;
+  }
+  uint64_t max_path_recv( uint8_t path_select,  uint64_t seqno,
+                          PublishType pub_type ) {
+    uint64_t & ref = this->next_path_recv( path_select, pub_type );
+    if ( seqno > ref )
+      ref = seqno;
+    return ref;
+  }
+  void add_path_recv( uint8_t path_select,  uint64_t cnt,
+                      PublishType pub_type ) {
+    uint64_t & ref = this->next_path_recv( path_select, pub_type );
+    ref += cnt;
+  }
+};
+
+struct InboxSendSeqno {
+  kv::ArrayCount<uint64_t, 4> seqno,
+                              zpath_seqno;
   uint32_t * send_counter;
   void init( uint32_t *ctr ) {
-    this->recv_seqno.clear();
-    this->send_seqno.clear();
-    this->recv_type.clear();
-    this->send_type.clear();
+    this->seqno.clear();
+    this->zpath_seqno.clear();
     this->send_counter = ctr;
   }
-  void set_path_recv( uint8_t path_select, uint64_t seqno,  uint8_t pub_type ) {
-    this->recv_type[ path_select ][ seqno % 32 ] = pub_type;
-    this->recv_seqno[ path_select ] = seqno;
+  uint64_t next_send( PublishType pub_type ) {
+    uint64_t seqno = ++this->zpath_seqno[ pub_type ];
+    this->send_counter[ pub_type ]++;
+    return seqno;
   }
-  uint64_t next_path_recv( uint8_t path_select ) {
-    return this->recv_seqno[ path_select ];
-  }
-  uint64_t next_send( uint8_t pub_type ) {
-    return this->next_path_send( 0, pub_type );
-  }
-  uint64_t next_path_send( uint8_t path_select, uint8_t pub_type ) {
-    uint64_t seqno = ++this->send_seqno[ path_select ];
-    this->send_type[ path_select ][ seqno % 32 ] = pub_type;
-    this->send_counter[ pub_type & ( MAX_PUB_TYPE - 1 ) ]++;
+  uint64_t next_path_send( uint8_t path_select, PublishType pub_type ) {
+    uint64_t seqno;
+    if ( path_select != 0 )
+      seqno = ++this->seqno[ path_select ];
+    else
+      seqno = ++this->zpath_seqno[ pub_type ];
+    this->send_counter[ pub_type ]++;
     return seqno;
   }
 };
@@ -240,11 +262,7 @@ struct UserBridge : public UserStateTest<UserBridge> {
                      last_req_seqno;
   UserRoute        * u_buf[ 24 ];         /* indexes user_route */
   StageAuth          auth[ 2 ];           /* auth handshake state */
-  uint32_t           ping_send_seqno,     /* seqnos for pings */
-                     ping_recv_seqno,
-                     pong_send_seqno,
-                     pong_recv_seqno,
-                     ping_send_count,
+  uint32_t           ping_send_count,
                      ping_recv_count,
                      pong_recv_count,
                      ping_fail_count,     /* ping counters */
@@ -301,7 +319,9 @@ struct UserBridge : public UserStateTest<UserBridge> {
                      orphaned_mono_time;
   kv::UIntHashTab  * inbound_svc_loss,    /* service msg loss map */
                    * inbound_svc_restart; /* service msg restart map */
-  InboxSeqno         inbox;               /* track inbox sent/recv */
+  InboxSendSeqno     inbox;               /* track inbox sent/recv */
+  InboxRecvSeqno     inbox_recv,
+                     inbox_miss;          /* miss counters */
   GlobSeqno          glob_recv_seqno;     /* seqno by path for mcast */
   RttHistory         rtt;
   ThrottleState      adj_req_throttle,
@@ -325,6 +345,8 @@ struct UserBridge : public UserStateTest<UserBridge> {
     this->hb_cnonce.zero();
     this->hb_pubkey.zero();
     this->inbox.init( ctr );
+    this->inbox_recv.init();
+    this->inbox_miss.init();
     ::memset( &this->user_route , 0,
               (char *) (void *) &this->inbox -
               (char *) (void *) &this->user_route );
@@ -804,7 +826,7 @@ struct UserDB {
   void interval_hb( uint64_t cur_mono,  uint64_t cur_time ) noexcept;
   void push_hb_time( TransportRoute &rte,  uint64_t time,
                      uint64_t mono ) noexcept;
-  void make_hb( TransportRoute &rte,  const char *sub,  size_t sublen,
+  void make_hb( TransportRoute &rte,  PublishType u_type,
                 uint32_t h,  MsgCat &m ) noexcept;
   bool on_link( const MsgFramePublish &pub,  UserBridge &n,
                 MsgHdrDecoder &dec ) noexcept;

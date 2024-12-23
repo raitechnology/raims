@@ -178,6 +178,7 @@ struct MsgBufDigestT : public BMsgBufT<T> {
     this->out += /*fid:sz*/ 6;
     return (T &) *this;
   }
+#if 0
   void close_msg  ( uint32_t h,  CabaFlags caba ) {
     uint32_t sz = (uint32_t) ( this->len() - 8 ),
              fl = ( (uint32_t) caba.flags << CABA_LENGTH_BITS );
@@ -190,6 +191,7 @@ struct MsgBufDigestT : public BMsgBufT<T> {
     this->hdr[ 0 ] = kv_bswap32( sz );
     this->hdr[ 1 ] = kv_bswap32( h );
   }
+#endif
   void close_frag ( uint32_t h,  uint32_t trail_sz,  CabaFlags caba ) {
     if ( ( trail_sz & 1 ) == 1 )
       trail_sz++;

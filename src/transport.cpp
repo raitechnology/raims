@@ -431,7 +431,7 @@ TransportRoute::on_msg( EvPublish &pub ) noexcept
     }
   }
   UserBridge * dst;
-  uint8_t path_select = dec.msg->caba.get_path();
+  uint8_t path_select = dec.msg->caba.get_path( opt );
   if ( dec.msg->caba.get_type() == CABA_INBOX &&
        (dst = this->user_db.is_inbox_sub( pub.subject,
                                           pub.subject_len )) != NULL ) {

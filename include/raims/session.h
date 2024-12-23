@@ -102,8 +102,13 @@ struct HashPub {
   }
 };
 
-typedef HashPub< U_INBOX, U_INBOX_AUTH, InboxBuf > InboxHash;
+/*typedef HashPub< U_INBOX, U_INBOX_AUTH, InboxBuf > InboxHash;*/
 typedef HashPub< U_MCAST, U_MCAST_PING, McastBuf > McastHash;
+
+struct InboxHash {
+  uint32_t hash;
+  uint16_t len;
+};
 
 /* subscribed message recvd, either mcast or point to point */
 struct SubMsgData {
@@ -138,6 +143,7 @@ struct PubMcastData {
                option,    /* message options for the opt field */
                path,      /* path specified */
                path_select; /* path taken */
+  PublishType  u_type;
   uint32_t     fmt,       /* format of data */
                reply,     /* if rpc style point to point reply wanted */
                subj_hash;
@@ -151,27 +157,34 @@ struct PubMcastData {
                forward_tport[ MAX_FWD_CNT ];
 
   PubMcastData( const char *s,  size_t sl,  const void *d,  size_t dl,
-                uint32_t f,  uint32_t rep = 0 )
+                uint32_t f,  PublishType t )
     : sub( s ), inbox( 0 ), sublen( (uint16_t) sl ), inbox_len( 0 ),
-      option( 0 ), path( NO_PATH ), path_select( 0 ), fmt( f ), reply( rep ),
-      subj_hash( 0 ), seqno( 0 ), stamp( 0 ), token( 0 ),
+      option( 0 ), path( NO_PATH ), path_select( 0 ), u_type( t ), fmt( f ),
+      reply( 0 ), subj_hash( 0 ), seqno( 0 ), stamp( 0 ), token( 0 ),
       data( d ), datalen( dl ), fwd_cnt( 0 ) {}
+
   PubMcastData( const PubMcastData &mc )
     : sub( mc.sub ), inbox( mc.inbox ), sublen( mc.sublen ),
       inbox_len( mc.inbox_len ), option( mc.option ), path( mc.path ),
-      path_select( mc.path_select ), fmt( mc.fmt ), reply( mc.reply ),
-      subj_hash( mc.subj_hash ), seqno( mc.seqno ), stamp( mc.stamp ),
-      token( mc.token ), data( mc.data ), datalen( mc.datalen ),
-      fwd_cnt( 0 ) {}
+      path_select( mc.path_select ), u_type( mc.u_type ), fmt( mc.fmt ),
+      reply( mc.reply ), subj_hash( mc.subj_hash ), seqno( mc.seqno ),
+      stamp( mc.stamp ), token( mc.token ), data( mc.data ),
+      datalen( mc.datalen ), fwd_cnt( 0 ) {}
+
+  bool is_inbox_prefix( void ) const {
+    static const size_t sz = sizeof( _INBOX "." );
+    return this->sublen > sz && ::memcmp( this->sub, _INBOX ".", sz - 1 ) == 0;
+  }
+  bool is_mcast_prefix( void ) const {
+    static const size_t sz = sizeof( _MCAST "." );
+    return this->sublen > sz && ::memcmp( this->sub, _MCAST ".", sz - 1 ) == 0;
+  }
 };
 /* a publish sent point to point to an inbox */
 struct PubPtpData : public PubMcastData {
   UserBridge & peer;
   uint32_t     reply2;
 
-  PubPtpData( UserBridge &p,  uint32_t rep,  const void *d,  size_t dl,
-              uint32_t f )
-    : PubMcastData( NULL, 0, d, dl, f, rep ), peer( p ), reply2( 0 ) {}
   PubPtpData( UserBridge &p,  const PubMcastData &mc )
     : PubMcastData( mc ), peer( p ), reply2( mc.reply ) {
     this->reply = 0;
