@@ -177,10 +177,11 @@ RvMcast2::net_to_transport( const char *net,  size_t &net_len ) noexcept
 }
 
 int
-RvMcast2::parse_network2( const char *net,  size_t net_len ) noexcept
+RvMcast2::parse_network2( const char *net,  size_t net_len,
+                          bool verbose ) noexcept
 {
   this->type = net_to_transport( net, net_len );
-  return this->RvMcast::parse_network( net, net_len );
+  return this->RvMcast::parse_network( net, net_len, verbose );
 }
 
 static bool
@@ -352,10 +353,12 @@ RvTransportService::start_host( RvHost &host,  const RvHostNet &hn,
     if ( host.mcast.host_ip == 0 ||
          ! host.is_same_network( hn ) ) {
       RvMcast2 mc;
-      int status = mc.parse_network2( hn.network, hn.network_len );
+      int status = mc.parse_network2( hn.network, hn.network_len,
+                                      ! this->no_mcast  );
+      if ( status != HOST_OK && this->no_mcast )
+        status = mc.parse_network2( NULL, 0, false );
       if ( status != HOST_OK )
         return status;
-
       if ( mc.fake_ip == 0 && ! this->no_fakeip )
         mc.fake_ip = this->rte.mgr.user_db.host_id;
       host.host_id_len = (uint16_t)

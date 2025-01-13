@@ -121,9 +121,9 @@ SubDB::sub_start( SubArgs &ctx ) noexcept
   else
     status = this->queue_tab.start( ctx );
 
-  d_sub( "sub_start %.*s count %u queue_refs %u status %s\n",
-          (int) ctx.sublen, ctx.sub, ctx.sub_count, ctx.queue_refs,
-          sub_status_string( status ) );
+  d_sub( "sub_start %.*s seqno %u count %u queue_refs %u status %s\n",
+          (int) ctx.sublen, ctx.sub, (uint32_t) ctx.seqno, ctx.sub_count,
+          ctx.queue_refs, sub_status_string( status ) );
 
   if ( status == SUB_OK || status == SUB_UPDATED ) {
     this->update_bloom( ctx );
@@ -1048,24 +1048,29 @@ SubDB::match_seqno( const MsgFramePublish &pub,  SeqnoArgs &ctx ) noexcept
     return seq->init( uid, seqno, ctx.start_seqno, time, ctx.stamp,
                       this->update_seqno, ctx.cb, ctx.tport_mask );
   }
-  /* check if subscription modified */
-  const uint64_t old_start_seqno = seq->start_seqno;
+  /* check if subscription modified, sub tables updated */
   if ( seq->update_seqno != this->update_seqno ){
     if ( this->match_subscription( pub, ctx ) ) {
-      seq->start_seqno  = ctx.start_seqno;
-      seq->update_seqno = this->update_seqno;
-      seq->on_data      = ctx.cb;
-      seq->tport_mask   = ctx.tport_mask;
+      if ( seq->start_seqno != ctx.start_seqno ) {
+        d_sub( "subscripion %.*s restarted old=%" PRIu64 " new=%" PRIu64 "\n",
+               (int) pub.subject_len, pub.subject,
+               seq->start_seqno, ctx.start_seqno );
+        seq->release();
+        return seq->init( uid, seqno, ctx.start_seqno, time, ctx.stamp,
+                          this->update_seqno, ctx.cb, ctx.tport_mask );
+      }
+      else {
+        seq->update_seqno = this->update_seqno;
+      }
     }
     /* otherwise, no sub matches */
     else {
-      seq->release();
       this->seqno_tab.remove( su );
       return SEQNO_NOT_SUBSCR;
     }
   }
   else {
-    ctx.start_seqno = old_start_seqno;
+    ctx.start_seqno = seq->start_seqno;
     ctx.cb          = seq->on_data;
     ctx.tport_mask  = seq->tport_mask;
   }
@@ -1082,7 +1087,6 @@ SubDB::match_seqno( const MsgFramePublish &pub,  SeqnoArgs &ctx ) noexcept
       return SEQNO_UID_FIRST;
   }
 
-  const bool     new_sub    = ( ctx.start_seqno != old_start_seqno );
   const uint64_t last_seqno = seq->last_seqno;
   const uint64_t last_time  = seq->last_time;
 
@@ -1096,16 +1100,6 @@ SubDB::match_seqno( const MsgFramePublish &pub,  SeqnoArgs &ctx ) noexcept
   }
   /* if seqno is in the same time frame as last seqno */
   if ( seqno_frame( seqno ) == time_frame( last_time ) ) {
-    /* if new subscription */
-    if ( new_sub ) {
-      if ( seqno > last_seqno ) {
-        seq->last_seqno = seqno;
-        seq->last_stamp = ctx.stamp;
-        return seqno_err( su, SEQNO_UID_CYCLE ); /* new subscription, can skip after resub */
-      }
-      repeat_err( pub );
-      return SEQNO_UID_REPEAT; /* already seen it */
-    }
     if ( seqno > last_seqno ) {
       ctx.msg_loss    = (uint32_t) min_int( seqno - ( last_seqno + 1 ),
                                             (uint64_t) MAX_MSG_LOSS );
@@ -1124,33 +1118,27 @@ SubDB::match_seqno( const MsgFramePublish &pub,  SeqnoArgs &ctx ) noexcept
     seq->last_stamp = ctx.stamp;
     if ( chained ) /* sequentialy chained */
       return SEQNO_UID_NEXT;
-    if ( ! new_sub ) {
-      /* if last seqno was in the previous frame */
-      if ( seqno_frame( ctx.chain_seqno ) == seqno_frame( last_seqno ) ) {
-        ctx.msg_loss = (uint32_t) min_int( ctx.chain_seqno - last_seqno,
-                                           (uint64_t) MAX_MSG_LOSS );
-      }
-      else if ( seqno_base( seqno ) == 1 ) { /* first seqno in frame */
-        /* pub restarted in new frame */
-        return SEQNO_UID_CYCLE;
-      }
-      else { /* no reference frame */
-        ctx.msg_loss = MSG_FRAME_LOSS; /* don't know how many */
-      }
-      return seqno_err( su, SEQNO_UID_SKIP );
+    /* if last seqno was in the previous frame */
+    if ( seqno_frame( ctx.chain_seqno ) == seqno_frame( last_seqno ) ) {
+      ctx.msg_loss = (uint32_t) min_int( ctx.chain_seqno - last_seqno,
+                                         (uint64_t) MAX_MSG_LOSS );
     }
-    /* new sub can skip */
-    return SEQNO_UID_CYCLE;
+    else if ( seqno_base( seqno ) == 1 ) { /* first seqno in frame */
+      /* pub restarted in new frame */
+      return SEQNO_UID_CYCLE;
+    }
+    else { /* no reference frame */
+      ctx.msg_loss = MSG_FRAME_LOSS; /* don't know how many */
+    }
+    return seqno_err( su, SEQNO_UID_SKIP );
   }
   /* seqno not in last frame, no update time */
   seq->last_time  = time; /* fake a start time */
   seq->last_seqno = seqno;
   seq->last_stamp = ctx.stamp;
-  if ( ! new_sub ) { /* if not joining w/new sub */
-    if ( seqno_base( seqno ) != 1 ) { /* first seqno in frame */
-      ctx.msg_loss = MSG_FRAME_LOSS; /* don't know how many */
-      return seqno_err( su, SEQNO_UID_SKIP );
-    }
+  if ( seqno_base( seqno ) != 1 ) { /* first seqno in frame */
+    ctx.msg_loss = MSG_FRAME_LOSS; /* don't know how many */
+    return seqno_err( su, SEQNO_UID_SKIP );
   }
   return SEQNO_UID_CYCLE; /* joined with a new sub */
 }
@@ -1230,7 +1218,6 @@ SubSeqno::restore_uid( uint32_t uid,  uint64_t seqno,  uint64_t time,
   /*printf( "save %u %lu.%lu frame %lu\n",
           this->last_uid, seqno_frame( this->last_seqno ),
           seqno_base( this->last_seqno ), time_frame( this->last_time ) );*/
-
   /* find the uid which published */
   if ( ! this->seqno_ht->find( uid, id_pos, id_val ) ) {
     /*printf( "not found %u\n", uid );*/

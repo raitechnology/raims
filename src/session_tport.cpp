@@ -250,7 +250,7 @@ SessionMgr::add_network( const char *net,  size_t net_len,
   uint16_t     num;
   bool is_listener = true;
 
-  if ( mc.parse_network2( net, net_len ) != sassrv::HOST_OK )
+  if ( mc.parse_network2( net, net_len, true ) != sassrv::HOST_OK )
     return false;
   /*if ( mc.type == NET_NONE )
     return false;*/

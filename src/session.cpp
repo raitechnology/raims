@@ -75,6 +75,7 @@ SessionMgr::SessionMgr( EvPoll &p,  Logger &l,  ConfigTree &c,
              last_autoscale( 0 ), msg_loss_count( 0 ), frame_loss_count( 0 ),
              tcp_connect_timeout( 10 ), tcp_noencrypt( false ),
              tcp_ipv4( true ), tcp_ipv6( true ), want_msg_loss_errors( true ),
+             no_fakeip( false ), no_mcast( false ),
              session_started( false ), idle_busy( 16 )
 {
   this->sock_opts = OPT_NO_POLL;
@@ -192,7 +193,9 @@ SessionMgr::load_parameters( void ) noexcept
        ! this->ld_bool( P_TCP_IPV6ONLY, ipv6_only ) ||
        ! this->ld_bool( P_MSG_LOSS_ERRORS, want_msg_loss ) ||
        ! this->ld_bytes( P_PATH_LIMIT, limit ) ||
-       ! this->ld_bytes( P_BLOCKED_READ_RATE, rate ) )
+       ! this->ld_bytes( P_BLOCKED_READ_RATE, rate ) ||
+       ! this->ld_bool( R_NO_FAKEIP, this->no_fakeip ) ||
+       ! this->ld_bool( R_NO_MCAST, this->no_mcast ) )
     return false;
 
   this->idle_busy            = (uint32_t) idle;
@@ -276,7 +279,9 @@ SessionMgr::reload_parameters( void ) noexcept
            tmp_limit                = this->user_db.peer_dist.path_limit,
            tmp_blocked_read_rate    = this->poll.blocked_read_rate;
   uint32_t tmp_tcp_conn_timeout     = this->tcp_connect_timeout;
-  bool     tmp_want_msg_loss        = this->want_msg_loss_errors;
+  bool     tmp_want_msg_loss        = this->want_msg_loss_errors,
+           tmp_no_fakeip            = this->no_fakeip,
+           tmp_no_mcast             = this->no_mcast;
 
   if ( ! this->ld_bytes( P_IDLE_BUSY, tmp_idle ) ||
        ! this->ld_bytes( P_PUB_WINDOW_SIZE, tmp_pub_window_size ) ||
@@ -294,7 +299,9 @@ SessionMgr::reload_parameters( void ) noexcept
        ! this->ld_bytes( P_TCP_WRITE_HIGHWATER, tmp_tcp_write_highwater ) ||
        ! this->ld_bool( P_MSG_LOSS_ERRORS, tmp_want_msg_loss ) ||
        ! this->ld_bytes( P_PATH_LIMIT, tmp_limit ) ||
-       ! this->ld_bytes( P_BLOCKED_READ_RATE, tmp_blocked_read_rate ) )
+       ! this->ld_bytes( P_BLOCKED_READ_RATE, tmp_blocked_read_rate ) ||
+       ! this->ld_bool( R_NO_FAKEIP, tmp_no_fakeip ) ||
+       ! this->ld_bool( R_NO_MCAST, tmp_no_mcast ) )
     return false;
 
   if ( tmp_pub_window_size      != this->pub_window_size ) {
@@ -642,6 +649,8 @@ SessionMgr::start( void ) noexcept
   printf( "%s: %s\n", P_MSG_LOSS_ERRORS, this->want_msg_loss_errors ? "true" : "false" );
   printf( "%s: %u\n", P_PATH_LIMIT, this->user_db.peer_dist.path_limit );
   printf( "%s: %" PRIu64 " bytes\n", P_BLOCKED_READ_RATE, this->poll.blocked_read_rate );
+  printf( "%s: %s\n", R_NO_MCAST, this->no_mcast ? "true" : "false" );
+  printf( "%s: %s\n", R_NO_FAKEIP, this->no_fakeip ? "true" : "false" );
 
   char hstr[ 32 ], ipstr[ 32 ];
   TransportRvHost::ip4_hex_string( this->user_db.host_id, hstr );
@@ -685,7 +694,8 @@ SessionMgr::start( void ) noexcept
   count = this->rv_svc_db.count;
   for ( i = 0; i < count; i++ ) {
     RvSvc *rv_svc = this->get_rv_session( this->rv_svc_db.ptr[ i ].svc, true );
-    rv_svc->ref_count++;
+    if ( rv_svc != NULL )
+      rv_svc->ref_count++;
   }
 }
 
@@ -1075,10 +1085,12 @@ IpcRoute::on_msg( EvPublish &pub ) noexcept
         return true;
     }
   }
-  d_sess( "-> ipc_rte: %.*s seqno %" PRIu64 ".%" PRIu64 " (%s) reply %.*s "
-          "(len=%u, from %s, fd %d, msg_enc %x)\n",
+  d_sess( "-> ipc_rte: %.*s seqno %" PRIu64 ".%" PRIu64
+                           " last %" PRIu64 ".%" PRIu64 " (%s) reply %.*s "
+            "(len=%u, from %s, fd %d, msg_enc %x)\n",
           (int) fpub.subject_len, fpub.subject,
           seqno_frame( dec.seqno ), seqno_base( dec.seqno ),
+          seqno_frame( seq.last_seqno ), seqno_base( seq.last_seqno ),
           seqno_status_string( status ), (int) replylen, reply,
           fpub.msg_len, fpub.rte.name, fpub.src_route.fd, fmt );
 

@@ -103,7 +103,7 @@ Console::Console( SessionMgr &m ) noexcept
          log_max_size( 0 ), log_filename( 0 ), log_fd( -1 ), next_rotate( 1 ),
          log_status( 0 ), last_log_hash( 0 ), last_log_repeat_count( 0 ),
          mute_log( false ), log_rate_total( 0 ),
-         max_terminal_log_rate( 100 * 1024 )
+         max_terminal_log_rate( 256 * 1024 )
 {
   time_t t = update_tz_offset();
   t += 24 * 60 * 60;
@@ -5464,7 +5464,7 @@ Console::show_inbox( ConsoleOutput *p,  const char *arg,
     }
   }
   static const char *hdr[ ncols ] =
-    { "user", "inbox type", "recv type", "send seqno", "loss" };
+    { "user", "inbox type", "recv seqno", "send seqno", "loss" };
   this->print_table( p, hdr, ncols );
 }
 

@@ -328,6 +328,8 @@ struct SessionMgr : public kv::EvSocket, public kv::BPData {
                         tcp_ipv4,
                         tcp_ipv6,
                         want_msg_loss_errors,
+                        no_fakeip,
+                        no_mcast,
                         session_started;
   uint32_t              msg_recv_counter[ MAX_PUB_TYPE ],
                         idle_busy;

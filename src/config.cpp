@@ -998,7 +998,7 @@ ConfigTree::resolve( const char *us,  User *&usrp,  Service *&svc ) noexcept
   size_t       u_len = 0,
                s_len = 0;
   if ( us != NULL ) {
-    if ( (p = ::strchr( us, '.' )) != NULL ) {
+    if ( (p = ::strchr( us, '@' )) != NULL ) {
       sv    = &p[ 1 ];
       u_len = p - us;
       s_len = ::strlen( sv );

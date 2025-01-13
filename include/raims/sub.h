@@ -554,8 +554,10 @@ struct SubSeqno {
   SeqnoStatus restore_uid( uint32_t uid,  uint64_t seqno,
                            uint64_t time,  uint64_t stamp ) noexcept;
   void release( void ) {
-    if ( this->seqno_ht != NULL )
+    if ( this->seqno_ht != NULL ) {
       delete this->seqno_ht;
+      this->seqno_ht = NULL;
+    }
   }
 };
 

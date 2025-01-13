@@ -159,7 +159,7 @@ main( int argc, const char *argv[] )
   "\n" \
   "   -cfg               : config dir/file (default: exe_path/rv.yaml)\n" \
   "   -reliability       : seconds of reliability (default: 15)\n" \
-  "   -user user.svc     : user name (default: hostname)\n" \
+  "   -user user@svc     : user name (default: hostname)\n" \
   "   -log               : log file\n" \
   "   -log-rotate        : rotate file size limit\n" \
   "   -log-max-rotations : max log file rotations\n" \
@@ -176,9 +176,9 @@ main( int argc, const char *argv[] )
   "   -debug             : debug flags\n"
 
   #define MS_SERVER_HELP \
-  "[-d file/dir] -u user.svc -t tport.listen [...]\n" \
+  "[-d file/dir] -u user@svc -t tport.listen [...]\n" \
   "   -d dir         : config dir/file (default: config)\n" \
-  "   -u user.svc    : user name (default: hostname)\n" \
+  "   -u user@svc    : user name (default: hostname)\n" \
   "   -t tport.list  : transport name + listen or connect\n" \
   "   -n svc.network : service name + network spec\n" \
   "   -l file        : log to file\n" \
@@ -481,6 +481,12 @@ main( int argc, const char *argv[] )
     }
   }
   if ( status == 0 ) {
+    status = sess.init_session( pwd );
+    if ( status != 0 )
+      fprintf( stderr, "Init session status %d\n", status );
+  }
+  pwd.clear_pass(); /* no longer need pass */
+  if ( status == 0 ) {
     if ( ! sess.add_startup_transports() ) {
       fprintf( stderr, "Startup transports failed to start\n" );
       status = -1;
@@ -495,12 +501,6 @@ main( int argc, const char *argv[] )
       }
     }
   }
-  if ( status == 0 ) {
-    status = sess.init_session( pwd );
-    if ( status != 0 )
-      fprintf( stderr, "Init session status %d\n", status );
-  }
-  pwd.clear_pass(); /* no longer need pass */
   if ( status == 0 ) {
     if ( use_console != NULL ) {
       lc_tty_set_prompt( term.term.tty, TTYP_PROMPT1, sess.console.prompt );

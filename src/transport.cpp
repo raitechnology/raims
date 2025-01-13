@@ -755,8 +755,12 @@ TransportRoute::create_rv_listener( ConfigTree::Transport &tport ) noexcept
     this->rv_svc->no_permanent |= b;
   if ( tport.get_route_bool( R_NO_MCAST, b ) )
     this->rv_svc->no_mcast |= b;
+  else
+    this->rv_svc->no_mcast |= this->mgr.no_mcast;
   if ( tport.get_route_bool( R_NO_FAKEIP, b ) )
     this->rv_svc->no_fakeip |= b;
+  else
+    this->rv_svc->no_fakeip |= this->mgr.no_fakeip;
   return this->start_listener( l, tport );
 }
 
@@ -862,9 +866,19 @@ TransportRoute::get_tport_service_host( ConfigTree::Transport &tport,
                   (int) service_len - 2, &service[ 1 ] );
 
   if ( rv_service != 0 ) {
-    if ( this->rv_svc == NULL )
+    if ( this->rv_svc == NULL ) {
+      bool b;
       this->rv_svc = new ( malloc( sizeof( RvTransportService ) ) )
         RvTransportService( *this );
+      if ( tport.get_route_bool( R_NO_MCAST, b ) )
+        this->rv_svc->no_mcast |= b;
+      else
+        this->rv_svc->no_mcast |= this->mgr.no_mcast;
+      if ( tport.get_route_bool( R_NO_FAKEIP, b ) )
+        this->rv_svc->no_fakeip |= b;
+      else
+        this->rv_svc->no_fakeip |= this->mgr.no_fakeip;
+    }
     RvSvc *x = this->mgr.get_rv_session( rv_service, true );
     if ( x != NULL )
       *host = x->host;

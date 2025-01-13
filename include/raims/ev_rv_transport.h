@@ -27,7 +27,8 @@ enum NetTransport {
 struct RvMcast2 : public sassrv::RvMcast {
   NetTransport type;
   RvMcast2() : type( NET_NONE ) {}
-  int parse_network2( const char *net,  size_t net_len ) noexcept;
+  int parse_network2( const char *net,  size_t net_len,
+                      bool verbose ) noexcept;
   static NetTransport net_to_transport( const char *net,
                                         size_t &net_len ) noexcept;
 };
