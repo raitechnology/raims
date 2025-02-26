@@ -237,33 +237,13 @@ UserDB::interval_hb( uint64_t cur_mono,  uint64_t cur_time ) noexcept
         this->make_hb( *rte, U_SESSION_HB, hb_h, m );
         EvPublish pub( X_HB, X_HB_SZ, NULL, 0, m.msg, m.len(),
                        rte->sub_route, this->my_src, hb_h, CABA_TYPE_ID );
-        rte->forward_to_connected( pub );
-        hb_cnt++;
-#if 0
-        for ( bool b = rte->connected.first( fd ); b;
-              b = rte->connected.next( fd ) ) {
-          if ( (sock = this->poll.sock[ fd ]) != NULL ) {
-            if ( sock->route_id != rte->tport_id )
-              continue;
-            MsgEst e( X_LINK_SZ );
-            e.ms    ();
-
-            MsgCat m;
-            m.reserve( e.sz );
-            m.open( this->bridge_id.nonce, X_LINK_SZ )
-             .seqno( sock->msgs_sent );
-            m.close( e.sz, link_h, CABA_HEARTBEAT );
-            m.sign( X_LINK, X_LINK_SZ, *this->session_key );
-
-            EvPublish pub( X_LINK, X_LINK_SZ, NULL, 0, m.msg, m.len(),
-                           rte->sub_route, this->my_src, link_h, CABA_TYPE_ID );
-            sock->on_msg( pub );
-          }
+        if ( rte->skip_hb != 0 )
+          rte->printf( "skip hb %u\n", --rte->skip_hb );
+        else {
+          rte->forward_to_connected( pub );
+          hb_cnt++;
         }
-#endif
       }
-      if ( rte->is_mcast() )
-        continue;
     }
   }
   if ( hb_cnt > 0 )

@@ -933,10 +933,12 @@ enum ConsoleCmd {
   CMD_MUTE_LOG          = 81, /* mute                       */
   CMD_UNMUTE_LOG        = 82, /* unmute                     */
   CMD_WEVENTS           = 83, /* write events to file       */
-  CMD_FDCLOSE           = 84, /* clsoe an arbitrary socket  */
-  CMD_UIDREMOVE         = 85, /* deauth a user              */
-  CMD_DIE               = 86, /* die, exit 1                */
-  CMD_QUIT              = 87, /* quit/exit                  */
+  CMD_FDCLOSE           = 84, /* close an arbitrary socket  */
+  CMD_HBSKIP            = 85, /* skip a hb on a link        */
+  CMD_UIDREMOVE         = 86, /* deauth a user              */
+  CMD_DIE               = 87, /* die, exit 1                */
+  CMD_SLEEP             = 88, /* sleep secs                 */
+  CMD_QUIT              = 89, /* quit/exit                  */
 
 #define CMD_TPORT_BASE ( (int) CMD_QUIT + 1 )
   CMD_TPORT_ENUM /* config_const.h */
@@ -1048,8 +1050,10 @@ static const ConsoleCmdString console_cmd[] = {
   { CMD_UNMUTE_LOG , "unmute"       ,0,0}, /* unmute log */
   { CMD_WEVENTS    , "wevents"      ,0,0}, /* write events to file */
   { CMD_FDCLOSE    , "fdclose"      ,0,0}, /* close an arbitrary socket */
+  { CMD_HBSKIP     , "hbskip"       ,0,0}, /* skip some heartbeats */
   { CMD_UIDREMOVE  , "uidremove"    ,0,0}, /* deauth a user  */
   { CMD_DIE        , "die"          ,0,0}, /* die exit 1 */
+  { CMD_SLEEP      , "sleep"        ,0,0}, /* sleep secs  */
   { CMD_QUIT       , "quit"         ,0,0},
   { CMD_QUIT       , "exit"         ,0,0}
 };
@@ -1195,9 +1199,11 @@ static const ConsoleCmdString help_cmd[] = {
   { CMD_DEBUG            , "debug","I",          "Set debug flags to ival I, a comination of:\n"
                            DEBUG_STRING_LIST ", dist,  kvpub,  kvps,  rv, host, nats"                },
   { CMD_WEVENTS          , "wevents","F",        "Write events to file"                              },
-  { CMD_FDCLOSE          , "fdclose","N",        "Close fd, disconnect without transport shutdown"   },
+  { CMD_FDCLOSE          , "fdclose","I",        "Close fd, disconnect without transport shutdown"   },
+  { CMD_HBSKIP           , "hbskip","I",         "Skip heartbeats on transport N, testing"           },
   { CMD_UIDREMOVE        , "uidremove","U",      "Deauth a user"                                     },
   { CMD_DIE              , "die","[I]",          "Exit without cleanup, with status 1 or I"          },
+  { CMD_SLEEP            , "sleep","[I]",        "Sleep for N seconds, testing"                      },
   { CMD_QUIT             , "quit/exit","",       "Exit console"                                      }
 };
 

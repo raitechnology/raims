@@ -239,11 +239,12 @@ struct TransportRoute : public kv::EvSocket, public kv::EvConnectionNotify,
                           hb_seqno,       /* last hb seqno */
                           stats_seqno,    /* seqno for _N.PORT msgs */
                           timer_id;       /* unique timer id serial */
-  int64_t                 delta_recv;
+  int64_t                 delta_recv;     /* track msgs sent over a link */
   StageAuth               auth[ 3 ];      /* history of last 3 hb */
   uint32_t                tport_id,       /* index in transport_tab[] */
                           hb_count,       /* count of new hb recvd */
                           hb_fast,        /* sends hb after initial connect */
+                          skip_hb,        /* skip hb for debug */
                           connect_count,  /* count of connections */
                           last_connect_count, /* sends hb when new conn */
                           state;          /* TPORT_IS_... */
@@ -266,7 +267,7 @@ struct TransportRoute : public kv::EvSocket, public kv::EvConnectionNotify,
                           oldest_uid;     /* which uid is oldest connect */
   IpcRteList            * ext;            /* list of ipc listeners */
   MeshCsumCache         * mesh_cache;     /* cache of hb mesh csum */
-  AdjCost                 initial_cost;
+  AdjCost                 initial_cost;   /* cost parsed from config file */
   ConfigTree::Service   & svc;            /* service definition */
   ConfigTree::Transport & transport;      /* transport definition */
 

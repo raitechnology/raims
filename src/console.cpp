@@ -2115,6 +2115,13 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
         status = (int) int_arg( arg, len );
       ::exit( status );
     }
+    case CMD_SLEEP: {
+      int secs = 60;
+      if ( len > 0 )
+        secs = (int) int_arg( arg, len );
+      ::sleep( secs );
+      break;
+    }
     case CMD_QUIT: {
       bool b = this->flush_output( p );
       p->on_quit();
@@ -2142,6 +2149,21 @@ Console::on_input( ConsoleOutput *p,  const char *buf,
       }
       else {
         this->outf( p, "fd (%.*s) not a socket", (int) len, arg );
+      }
+      break;
+    }
+    case CMD_HBSKIP : {
+      uint32_t n;
+      TransportRoute * rte;
+      if ( (n = int_arg( arg, len )) != 0 &&
+            n < this->user_db.transport_tab.count &&
+            (rte = this->user_db.transport_tab.ptr[ n ]) != NULL ) {
+        if ( (n = int_arg( args[ 2 ], arglen[ 2 ] )) == 0 )
+          n = 3;
+        rte->skip_hb = n;
+      }
+      else {
+        this->outf( p, "n (%.*s) not a transport", (int) len, arg );
       }
       break;
     }

@@ -521,6 +521,7 @@ main( int argc, const char *argv[] )
 #endif
     }
     sess.start();
+    fflush( stdout ); fflush( stderr );
     uint32_t idle = 0;
     while ( sess.loop( idle ) ) {
       if ( sighndl.signaled ) {
@@ -534,6 +535,7 @@ main( int argc, const char *argv[] )
   }
   else {
     uint64_t timeout_ns = current_monotonic_time_ns() + sec_to_ns( 1 );
+    fflush( stdout ); fflush( stderr );
     while ( poll.quit < 5 ) {
       poll.dispatch();
       poll.wait( 10 );
