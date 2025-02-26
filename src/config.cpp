@@ -1023,6 +1023,12 @@ ConfigTree::resolve( const char *us,  User *&usrp,  Service *&svc ) noexcept
       usrp = this->find_user( svc, sv, s_len ); /* us == user, service = default */
       if ( usrp != NULL )
         return true;
+      /* if hostname has a domain, strip the domain */
+      if ( (p = (const char *) ::memchr( sv, '.', s_len )) != NULL ) {
+        usrp = this->find_user( svc, sv, p - sv );
+        if ( usrp != NULL )
+          return true;
+      }
     }
   }
   if ( svc == NULL )
