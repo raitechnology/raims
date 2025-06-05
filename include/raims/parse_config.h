@@ -128,11 +128,11 @@ struct ConfigDB {
 struct ArrayParse {
   const md::MDName name;
   int ( ConfigDB::*parse )( md::MDMsg &, md::MDName &, md::MDReference & );
-  const md::MDType type;
+  const MDType type;
 
   ArrayParse( const char *n,
            int ( ConfigDB::*p )( md::MDMsg &, md::MDName &, md::MDReference & ),
-               md::MDType t ) :
+                 MDType t ) :
     name( n ), parse( p ), type( t ) {}
 };
 

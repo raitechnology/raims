@@ -326,17 +326,17 @@ enum FldTypeClass {
   LONG_OPAQUE_CLASS  = 8  /* veriable, 0 -> 4G */
 };
 #ifdef INCLUDE_MSG_CONST
-static inline md::MDType cls_to_md( FldTypeClass cl ) {
+static inline MDType cls_to_md( FldTypeClass cl ) {
   #define X( x, y ) ( (uint64_t) x << ( y * 4 ) )
   static const uint64_t bits =
-  X( md::MD_BOOLEAN, BOOL_CLASS      ) | X( md::MD_UINT, U_SHORT_CLASS     ) |
-  X( md::MD_UINT,    U_INT_CLASS     ) | X( md::MD_UINT, U_LONG_CLASS      ) |
-  X( md::MD_OPAQUE,  OPAQUE_16_CLASS ) | X( md::MD_OPAQUE, OPAQUE_32_CLASS ) |
-  X( md::MD_OPAQUE,  OPAQUE_64_CLASS ) |
-  X( md::MD_STRING,  SHORT_STRING_CLASS ) |
-  X( md::MD_OPAQUE,  LONG_OPAQUE_CLASS );
+  X( MD_BOOLEAN, BOOL_CLASS      ) | X( MD_UINT, U_SHORT_CLASS     ) |
+  X( MD_UINT,    U_INT_CLASS     ) | X( MD_UINT, U_LONG_CLASS      ) |
+  X( MD_OPAQUE,  OPAQUE_16_CLASS ) | X( MD_OPAQUE, OPAQUE_32_CLASS ) |
+  X( MD_OPAQUE,  OPAQUE_64_CLASS ) |
+  X( MD_STRING,  SHORT_STRING_CLASS ) |
+  X( MD_OPAQUE,  LONG_OPAQUE_CLASS );
   #undef X
-  return (md::MDType) ( ( bits >> ( (int) cl * 4 ) ) & 0xf );
+  return (MDType) ( ( bits >> ( (int) cl * 4 ) ) & 0xf );
 };
 static inline FldTypeClass fid_type( uint16_t fid ) {
   return (FldTypeClass) ( ( fid >> FID_TYPE_SHIFT ) & 0xf );
