@@ -559,7 +559,7 @@ WebService::process_get_file2( WebReqData &data ) noexcept
       data.data_len     = map.map_size;
       data.is_immutable = false;
 
-      this->process_get( data );
+      this->process_get2( data );
       return true;
     }
     num = errno;
@@ -580,7 +580,7 @@ WebService::process_get_file2( WebReqData &data ) noexcept
         data.data_len     = entry[ i ].size;
         data.is_immutable = true;
 
-        this->process_get( data );
+        this->process_get2( data );
         return true;
       }
     }
@@ -596,7 +596,7 @@ WebService::process_get_file2( WebReqData &data ) noexcept
 }
 
 void
-WebService::process_get( WebReqData &data ) noexcept
+WebService::process_get2( WebReqData &data ) noexcept
 {
   static const char fmt_gzip[]    = "\r\nContent-Encoding: gzip\r\n\r\n",
                     fmt_immutab[] = "Cache-Control: immutable\r\n",

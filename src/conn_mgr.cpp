@@ -207,7 +207,7 @@ SessionMgr::stop_rv_session( RvSvc *rv_svc ) noexcept
 }
 /* get session name */
 size_t
-TransportRoute::get_userid( char userid[ MAX_USERID_LEN ] ) noexcept
+TransportRoute::get_userid( char userid[ MAX_USERID_LEN ] ) const noexcept
 {
   if ( ! this->is_ipc() )
     return 0;
@@ -221,7 +221,7 @@ TransportRoute::get_userid( char userid[ MAX_USERID_LEN ] ) noexcept
 /* get session name */
 size_t
 TransportRoute::get_session( uint16_t svc,
-                             char session[ MAX_SESSION_LEN ] ) noexcept
+                             char session[ MAX_SESSION_LEN ] ) const noexcept
 {
   if ( ! this->is_ipc() )
     return 0;
