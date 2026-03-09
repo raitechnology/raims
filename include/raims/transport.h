@@ -310,9 +310,9 @@ struct TransportRoute : public kv::EvSocket, public kv::EvConnectionNotify,
   virtual void process( void ) noexcept;
   virtual void release( void ) noexcept;
   virtual bool on_msg( kv::EvPublish &pub ) noexcept;
-  virtual size_t get_userid( char userid[ MAX_USERID_LEN ] ) noexcept;
+  virtual size_t get_userid( char userid[ MAX_USERID_LEN ] ) const noexcept;
   virtual size_t get_session( uint16_t svc,
-                              char session[ MAX_SESSION_LEN ] ) noexcept;
+                              char session[ MAX_SESSION_LEN ] ) const noexcept;
   virtual size_t get_subscriptions( uint16_t svc,
                                     kv::SubRouteDB &subs ) noexcept;
   virtual size_t get_patterns( uint16_t svc,  int pat_fmt,  

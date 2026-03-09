@@ -141,7 +141,7 @@ struct WebService : public ds::EvHttpConnection {
       http_dir( 0 ), http_dir_len( 0 )/*, debug_fd( -1 )*/ {}
 
   uint32_t tar_entry_count( void ) noexcept;
-  void process_get( WebReqData &data ) noexcept;
+  void process_get2( WebReqData &data ) noexcept;
   virtual bool process_post( const ds::HttpReq &hreq ) noexcept;
   virtual bool process_get_file( const char *path,  size_t len ) noexcept;
   bool process_get_file2( WebReqData &data ) noexcept;
