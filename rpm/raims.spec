@@ -11,16 +11,16 @@ BuildRoot:	${_tmppath}
 Prefix:	        /usr
 BuildRequires:  gcc-c++
 BuildRequires:  chrpath
-BuildRequires:  raikv
-BuildRequires:  raimd
-BuildRequires:  openpgm_st
-BuildRequires:  raids
-BuildRequires:  natsmd
-BuildRequires:  sassrv
-BuildRequires:  h3lib
-BuildRequires:  rdbparser
-BuildRequires:  linecook
-BuildRequires:  libdecnumber
+BuildRequires:  raikv _raikv_dep
+BuildRequires:  raimd _raimd_dep
+BuildRequires:  openpgm_st _openpgm_st_dep
+BuildRequires:  raids _raids_dep
+BuildRequires:  natsmd _natsmd_dep
+BuildRequires:  sassrv _sassrv_dep
+BuildRequires:  h3lib _h3lib_dep
+BuildRequires:  rdbparser _rdbparser_dep
+BuildRequires:  linecook _linecook_dep
+BuildRequires:  libdecnumber _libdecnumber_dep
 BuildRequires:  pcre2-devel
 BuildRequires:  liblzf-devel
 BuildRequires:  git-core
