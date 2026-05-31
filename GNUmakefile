@@ -405,7 +405,6 @@ endif
 # copr/fedora build (with version env vars)
 # copr uses this to generate a source rpm with the srpm target
 -include .copr/Makefile
-
 # debian build (debuild)
 # target for building installable deb: dist_dpkg
 -include deb/Makefile
