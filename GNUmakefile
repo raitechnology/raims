@@ -402,8 +402,6 @@ clean_lzf:
 clean_subs += clean_lzf
 endif
 
-# build depends for rpm spec file
--include build_depends.mak
 # copr/fedora build (with version env vars)
 # copr uses this to generate a source rpm with the srpm target
 -include .copr/Makefile
