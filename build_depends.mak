@@ -1,8 +1,8 @@
 openpgm_st_dep := 5.5
-sassrv_dep := 1.46
-natsmd_dep := 1.35
-raids_dep := 1.35
-raikv_dep := 1.44
+sassrv_dep := 1.47
+natsmd_dep := 1.36
+raids_dep := 1.36
+raikv_dep := 1.45
 h3lib_dep := 4.1
 linecook_dep := 1.6
 raimd_dep := 1.33
