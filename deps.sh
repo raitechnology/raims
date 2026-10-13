@@ -12,6 +12,8 @@
 #   ./deps.sh -n       dry run (show what would happen)
 #   ./deps.sh -b port_extra=-mingw   extra args are passed to every make
 #                                    (mingw-w64 cross build for Windows)
+#   ./deps.sh -s       print the source revision of this repo and every
+#                      sibling (dist_win puts it in SOURCES.txt)
 #
 # Versions in build_depends.mak are rpm BuildRequires minimums; master of
 # each dep normally satisfies them.  To pin exactly, check out matching
@@ -37,10 +39,11 @@ DEPFILE="$HERE/build_depends.mak"
 TOPO="libdecnumber raikv raimd h3 linecook rdbparser HdrHistogram_c openpgm
       sassrv natsmd raids omm raims raimdapi"
 
-build=0; dry=0
-while getopts "bnh" o; do case "$o" in
+build=0; dry=0; sources=0
+while getopts "bnsh" o; do case "$o" in
   b) build=1 ;;
   n) dry=1 ;;
+  s) sources=1 ;;
   *) sed -n '2,20p' "$0"; exit 0 ;;
 esac; done
 shift $((OPTIND-1))   # remaining args go to make (e.g. port_extra=-mingw)
@@ -61,6 +64,19 @@ for r in $deps; do
     echo "warn: $r not in TOPO order list, building last" >&2 ;;
   esac
 done
+
+if [ "$sources" = 1 ]; then
+  # repo  describe  commit  origin   (describe is a tag if one is reachable,
+  # else the short hash; -dirty marks uncommitted changes)
+  for d in "$HERE" $(for r in $ordered; do echo "$PARENT/$r"; done); do
+    [ -d "$d/.git" ] || { printf '%-14s %s\n' "$(basename "$d")" "MISSING"; continue; }
+    printf '%-14s %-28s %s  %s\n' "$(basename "$d")" \
+      "$(git -C "$d" describe --always --dirty --tags 2>/dev/null)" \
+      "$(git -C "$d" rev-parse HEAD)" \
+      "$(git -C "$d" remote get-url origin 2>/dev/null)"
+  done
+  exit 0
+fi
 
 echo "deps (build order):$ordered"
 

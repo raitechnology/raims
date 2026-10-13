@@ -750,19 +750,25 @@ mingw_rtdll := libcares-2.dll libcrypto-3-x64.dll libssl-3-x64.dll libpcre2-8-0.
                libpcre2-32-0.dll libwinpthread-1.dll zlib1.dll
 dist_name   := $(name)-$(ver_build)-win64
 distd       := $(build_dir)/dist/$(dist_name)
-dist_strip  := x86_64-w64-mingw32-strip
+dist_strip  := win/dist-strip.sh
+dist_dbgd   := $(build_dir)/dist/$(dist_name)-debug
 
 $(bind)/raisvc$(exe): win/raisvc.c
 	$(CC) -O2 -Wall -Wextra -o $@ $< -ladvapi32
 
 .PHONY: dist_win
 dist_win: all $(bind)/raisvc$(exe)
-	rm -rf $(distd) && mkdir -p $(distd)/bin $(distd)/config $(distd)/log
-	for f in ms_server ms_gen_key ms_test_adj raisvc ; do $(dist_strip) -o $(distd)/bin/$$f.exe $(bind)/$$f.exe ; done
+	rm -rf $(distd) $(dist_dbgd) && mkdir -p $(distd)/bin $(distd)/config $(distd)/log $(dist_dbgd)
+	for f in ms_server ms_gen_key ms_test_adj raisvc ; do $(dist_strip) $(bind)/$$f.exe $(distd)/bin/$$f.exe $(dist_dbgd) ; done
 	for d in $(mingw_rtdll) ; do cp -f $(mingw_bin)/$$d $(distd)/bin/ ; done
 	cp -f win/config/*.yaml $(distd)/config/
 	cp -f win/README-windows.md $(distd)/README.md
-	( cd $(build_dir)/dist && rm -f $(dist_name).zip && zip -qr $(dist_name).zip $(dist_name) )
+	# which source built this: this repo and every sibling, plus the toolchain
+	{ echo "# $(dist_name) built $$(date -u +%Y-%m-%dT%H:%MZ) on $$(hostname) with $$(x86_64-w64-mingw32-gcc --version | head -1)" ; \
+	  echo "# repo  describe  commit  origin   (debug symbols: $(dist_name)-debug.zip, unpack into bin/)" ; \
+	  ./deps.sh -s ; } > $(distd)/SOURCES.txt
+	cp -f $(distd)/SOURCES.txt $(dist_dbgd)/
+	( cd $(build_dir)/dist && rm -f $(dist_name).zip $(dist_name)-debug.zip && zip -qr $(dist_name).zip $(dist_name) && zip -qr $(dist_name)-debug.zip $(dist_name)-debug )
 	@if command -v makensis >/dev/null 2>&1 ; then \
 	  makensis -V2 -DNAME=$(name) -DVERSION=$(version) -DVER_BUILD=$(ver_build) -DSRC=$(abspath $(distd)) \
 	           -DOUT=$(abspath $(build_dir)/dist/$(dist_name)-setup.exe) win/raims.nsi ; \
