@@ -737,6 +737,32 @@ dist_bins: $(all_libs) $(bind)/ms_server $(bind)/ms_gen_key $(bind)/ms_test_adj
 	$(remove_rpath) $(bind)/ms_gen_key$(exe)
 	$(remove_rpath) $(bind)/ms_test_adj$(exe)
 
+# --- code signing (Authenticode + NuGet) ------------------------------------
+# Signs when a key is present: SIGN_PFX defaults to ~/.rai-codesign/rai-codesign.pfx
+# (self-signed 10y cert, public half rai-codesign.cer next to it; the private key
+# never goes in a repo or package).  Without a key dist_win says "unsigned" and
+# carries on, so COPR/CI builds are unaffected.  jsign (github.com/ebourg/jsign)
+# signs the PE files; the same step moves to Azure Trusted Signing later by
+# changing only its arguments (--storetype TRUSTEDSIGNING ...).  The nupkg is
+# signed with dotnet nuget sign and the same cert (customers pin its SHA-256
+# fingerprint with <trustedSigners>).  RFC 3161 timestamps keep the signatures
+# valid after the cert expires.
+SIGN_PFX       ?= $(wildcard $(HOME)/.rai-codesign/rai-codesign.pfx)
+SIGN_PASS_FILE ?= $(dir $(SIGN_PFX))pass.txt
+SIGN_CER       ?= $(dir $(SIGN_PFX))rai-codesign.cer
+SIGN_TSA       ?= http://timestamp.digicert.com
+ifneq (,$(SIGN_PFX))
+sign_pe    = jsign --keystore $(SIGN_PFX) --storepass file:$(SIGN_PASS_FILE) --alias rai-codesign \
+               --alg SHA-256 --tsaurl $(SIGN_TSA) --tsmode RFC3161 $(1)
+sign_nupkg = dotnet nuget sign $(1) --certificate-path $(SIGN_PFX) \
+               --certificate-password "$$(cat $(SIGN_PASS_FILE))" --timestamper $(SIGN_TSA)
+sign_note  = echo "\# signed: $$(openssl x509 -in $(SIGN_CER) -noout -subject -fingerprint -sha256 | tr '\n' ' ')"
+else
+sign_pe    = echo "unsigned (no SIGN_PFX): $(1)"
+sign_nupkg = echo "unsigned (no SIGN_PFX): $(1)"
+sign_note  = echo "\# unsigned"
+endif
+
 # --- windows distribution (make port_extra=-mingw dist_win) ------------------
 # ms_server.exe + ms_gen_key.exe (statically linked against the sibling libs),
 # the mingw runtime dlls (openssl, pcre2, c-ares, zlib, winpthread), raisvc.exe
@@ -763,15 +789,18 @@ dist_win: all $(bind)/raisvc$(exe)
 	for d in $(mingw_rtdll) ; do cp -f $(mingw_bin)/$$d $(distd)/bin/ ; done
 	cp -f win/config/*.yaml $(distd)/config/
 	cp -f win/README-windows.md $(distd)/README.md
+	$(call sign_pe,$(distd)/bin/*.exe $(distd)/bin/*.dll)
 	# which source built this: this repo and every sibling, plus the toolchain
 	{ echo "# $(dist_name) built $$(date -u +%Y-%m-%dT%H:%MZ) on $$(hostname) with $$(x86_64-w64-mingw32-gcc --version | head -1)" ; \
 	  echo "# repo  describe  commit  origin   (debug symbols: $(dist_name)-debug.zip, unpack into bin/)" ; \
+	  $(sign_note) ; \
 	  ./deps.sh -s ; } > $(distd)/SOURCES.txt
 	cp -f $(distd)/SOURCES.txt $(dist_dbgd)/
 	( cd $(build_dir)/dist && rm -f $(dist_name).zip $(dist_name)-debug.zip && zip -qr $(dist_name).zip $(dist_name) && zip -qr $(dist_name)-debug.zip $(dist_name)-debug )
 	@if command -v makensis >/dev/null 2>&1 ; then \
 	  makensis -V2 -DNAME=$(name) -DVERSION=$(version) -DVER_BUILD=$(ver_build) -DSRC=$(abspath $(distd)) \
-	           -DOUT=$(abspath $(build_dir)/dist/$(dist_name)-setup.exe) win/raims.nsi ; \
+	           -DOUT=$(abspath $(build_dir)/dist/$(dist_name)-setup.exe) win/raims.nsi && \
+	  $(call sign_pe,$(build_dir)/dist/$(dist_name)-setup.exe) ; \
 	else echo "makensis not found (dnf install mingw32-nsis), zip only" ; fi
 	@ls -la $(build_dir)/dist/*.zip $(build_dir)/dist/*.exe 2>/dev/null
 
