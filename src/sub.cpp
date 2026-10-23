@@ -301,7 +301,9 @@ SubDB::fwd_sub( SubArgs &ctx ) noexcept
     m.bloom_upd( ctx.bloom_updated );
   uint32_t h = s.hash();
   m.close( e.sz, h, CABA_RTR_ALERT );
-  m.sign( s.msg, s.len(), *this->user_db.session_key );
+  /* if sub started before session initialized (host daemon inbox) */
+  if ( this->user_db.session_key != NULL )
+    m.sign( s.msg, s.len(), *this->user_db.session_key );
 
   this->user_db.msg_send_counter[ ctx.is_start() ? U_SUB_JOIN : U_SUB_LEAVE ]++;
   if ( ( ctx.flags & CONSOLE_SUB ) != 0 ) {
@@ -315,9 +317,11 @@ SubDB::fwd_sub( SubArgs &ctx ) noexcept
         rte->sub_route.do_notify_unsub( nsub );
     }
   }
-  EvPublish pub( s.msg, s.len(), NULL, 0, m.msg, m.len(),
-                 rte->sub_route, this->my_src, h, CABA_TYPE_ID );
-  this->user_db.mcast_send( pub, 0 );
+  if ( this->user_db.session_key != NULL ) {
+    EvPublish pub( s.msg, s.len(), NULL, 0, m.msg, m.len(),
+                   rte->sub_route, this->my_src, h, CABA_TYPE_ID );
+    this->user_db.mcast_send( pub, 0 );
+  }
 }
 /* request subs from peer */
 bool
