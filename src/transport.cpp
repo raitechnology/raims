@@ -959,7 +959,14 @@ TransportRoute::create_ipc_listener( ConfigTree::Transport &tport ) noexcept
   else {
     l = el->listener;
   }
-  l->set_prefix( service, service_len );
+  /* use_service_prefix: false puts the transport in the global namespace,
+   * the same sense as the rv listener; absent or true keeps the service
+   * prefix (_nats. or the configured service) */
+  bool b = true;
+  if ( ! tport.get_route_bool( R_USE_SERVICE_PREFIX, b ) || b )
+    l->set_prefix( service, service_len );
+  else
+    l->set_prefix( "", 0 );
   l->set_service( rv_host, rv_service );
   return this->start_listener( l, tport );
 }
@@ -1000,9 +1007,13 @@ TransportRoute::create_ipc_connection( ConfigTree::Transport &tport ) noexcept
   else {
     c = el->connection;
   }
-  bool b = false;
-  if ( ! tport.get_route_bool( R_USE_SERVICE_PREFIX, b ) || ! b )
+  /* same sense as the listener: false = global namespace, absent or true
+   * = the service prefix (this was inverted, true meant no prefix) */
+  bool b = true;
+  if ( ! tport.get_route_bool( R_USE_SERVICE_PREFIX, b ) || b )
     c->set_prefix( service, service_len );
+  else
+    c->set_prefix( "", 0 );
   if ( el->connect_ctx == NULL )
     el->connect_ctx = this->mgr.connect_mgr.create2( el );
 

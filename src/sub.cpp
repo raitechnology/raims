@@ -1553,6 +1553,23 @@ IpcSubjectMatch::match( const char *str,  size_t str_len ) noexcept
   this->name_len = str_len;
   this->subj_len = 0;
 
+  /* a subject in the global namespace (no service prefix, eg. a transport
+   * with use_service_prefix: false) starts with the known name itself:
+   * _INBOX.<host>.<n> must not have _INBOX taken as the service prefix.
+   * The name has to end on a token boundary, _INBOXES.x is not _INBOX */
+  if ( str[ 0 ] == '_' ) {
+    for ( size_t k = 0; k < this->match_cnt; k++ ) {
+      size_t len = this->match_len[ k ];
+      if ( str_len >= len &&
+           ::memcmp( str, this->match_sub[ k ], len ) == 0 &&
+           ( str[ len - 1 ] == '.' || str_len == len || str[ len ] == '.' ) ) {
+        this->subj     = &str[ len ];
+        this->subj_len = e - this->subj;
+        this->name_len = len;
+        return k + 1;
+      }
+    }
+  }
   if ( str[ 0 ] == '_' ) {
     const char * p;
     size_t       digit_count = 0, non_digit_count = 0;

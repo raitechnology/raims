@@ -129,7 +129,9 @@ rdbparser, libdecnumber.
 ## Running
 
 - `ms_server -d <config.yaml> -u <user> -t <tport>.<listen|connect> …`
-  (`-t` repeats; `-c` opens the console). Single-node rv daemon for tests:
+  (one `-t` followed by space-separated transports: `-t a.listen b.listen`;
+  a second `-t` or a comma list starts only the first; `-c` opens the
+  console). Single-node rv daemon for tests:
   `ms_server -d con.yaml -t rv.listen` (RV on 7500, see `con.yaml`).
 - `ms_gen_key` creates service/user key pairs for a config;
   `parse_config` validates a yaml file.
@@ -137,6 +139,17 @@ rdbparser, libdecnumber.
   `FC38_x86_64`; adjust or symlink. <!-- TODO: fix or document -->
 
 ## Contracts and gotchas
+
+- **Service prefix and inboxes (2026-11-01).** `get_tport_service` names the
+  namespace (`service`, default `_<type>.`; rv `_7500.`). `use_service_prefix`
+  (default true) now has one sense on the rv listener, the nats/redis ipc
+  listener (`create_ipc_listener`) and the ipc connection
+  (`create_ipc_connection`, was inverted): false = global namespace
+  (`set_prefix( "", 0 )`). `IpcSubjectMatch::match` (`sub.cpp`) first tries
+  the whole subject on a token boundary, so a bare `_INBOX.<host>.<n>`
+  (global namespace) is an inbox too, not `_INBOX` taken as the prefix.
+  Only an 8-hex host token resolves through `host_match`; NATS inboxes
+  route via the reply memo / bloom (`reply_memo`, `forward_inbox`).
 
 - The interesting structure is runtime, not static: which transport a
   message leaves on is decided by the forwarding set computed from the

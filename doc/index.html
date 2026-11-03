@@ -2652,6 +2652,11 @@ functionality.</p>
 <td class="tableblock halign-left valign-top"><p class="tableblock">Service namespace</p></td>
 </tr>
 <tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">use_service_prefix</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">true</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Use a service namespace</p></td>
+</tr>
+<tr>
 <td class="tableblock halign-left valign-top"><p class="tableblock">network</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">none</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">Join a network</p></td>
@@ -2660,7 +2665,13 @@ functionality.</p>
 </table>
 <div class="paragraph">
 <p>If the network is specified, then starting the NATS service will also join
-the network.  A network format is as described in <a href="#service_and_networks">Services and Networks</a>.</p>
+the network.  The NATS clients' subjects are carried in the <code>_nats</code>
+namespace (or the <code>service</code> configured, <code>7500</code> shares the RV service 7500
+namespace) unless <code>use_service_prefix</code> is false, which puts them in the
+global namespace shared with the other transports that have it false.  The
+same applies to a NATS <code>connect</code> to an external nats-server.  Inboxes are
+recognized in either form, <code>_nats._INBOX.&lt;session&gt;.&lt;n&gt;</code> or
+<code>_INBOX.&lt;session&gt;.&lt;n&gt;</code>, for reply routing.  A network format is as described in <a href="#service_and_networks">Services and Networks</a>.</p>
 </div>
 </div>
 <div class="sect2">

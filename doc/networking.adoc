@@ -458,11 +458,18 @@ Example `tport_mynats.yaml`:
 | listen     | *            | Passive listener  
 | port       | random       | Listener port     
 | service    | _nats        | Service namespace
+| use_service_prefix | true | Use a service namespace
 | network    | none         | Join a network
 |======================================================
 
 If the network is specified, then starting the NATS service will also join
-the network.  A network format is as described in <<service_and_networks>>.
+the network.  The NATS clients' subjects are carried in the `_nats`
+namespace (or the `service` configured, `7500` shares the RV service 7500
+namespace) unless `use_service_prefix` is false, which puts them in the
+global namespace shared with the other transports that have it false.  The
+same applies to a NATS `connect` to an external nats-server.  Inboxes are
+recognized in either form, `_nats._INBOX.<session>.<n>` or
+`_INBOX.<session>.<n>`, for reply routing.  A network format is as described in <<service_and_networks>>.
 
 Redis
 ~~~~~
