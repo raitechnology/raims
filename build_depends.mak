@@ -1,4 +1,4 @@
-openpgm_dep := 5.6
+openpgm_st_dep := 5.6
 sassrv_dep := 1.49
 natsmd_dep := 1.38
 raids_dep := 1.38
