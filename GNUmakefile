@@ -738,29 +738,50 @@ dist_bins: $(all_libs) $(bind)/ms_server $(bind)/ms_gen_key $(bind)/ms_test_adj
 	$(remove_rpath) $(bind)/ms_test_adj$(exe)
 
 # --- code signing (Authenticode + NuGet) ------------------------------------
-# Signs when a key is present: SIGN_PFX defaults to ~/.rai-codesign/rai-codesign.pfx
-# (self-signed 10y cert, public half rai-codesign.cer next to it; the private key
-# never goes in a repo or package).  Without a key dist_win says "unsigned" and
-# carries on, so COPR/CI builds are unaffected.  jsign (github.com/ebourg/jsign)
-# signs the PE files; the same step moves to Azure Trusted Signing later by
-# changing only its arguments (--storetype TRUSTEDSIGNING ...).  The nupkg is
-# signed with dotnet nuget sign and the same cert (customers pin its SHA-256
-# fingerprint with <trustedSigners>).  RFC 3161 timestamps keep the signatures
-# valid after the cert expires.
+# Signs when a key is present; the private key never goes in a repo or package.
+# Without one dist_win says "unsigned" and carries on, so COPR/CI builds are
+# unaffected.  jsign (github.com/ebourg/jsign) signs the PE files (exe, dll,
+# setup.exe) from one of two key sources, in this order:
+#  - SIGN_KV: a CA-issued certificate in Azure Key Vault.  The key stays in the
+#    vault: jsign sends the digest and the vault signs it.  SIGN_KV is the vault
+#    name, SIGN_KV_CERT the certificate name in it, SIGN_KV_CHAIN a PEM file
+#    with that certificate followed by the issuing CA (embedded in the
+#    signature).  The access token comes from the az CLI login when the recipe
+#    runs (az login first); a failed token fails the build, it does not fall
+#    back to unsigned.
+#  - SIGN_PFX: a local PKCS#12, default ~/.rai-codesign/rai-codesign.pfx (the
+#    self-signed 10y cert, public half rai-codesign.cer next to it).
+# These are site settings: put them in ~/.rai-codesign/sign.mk (included below
+# when present) or pass them on the make command line.
+# The nupkg is signed with dotnet nuget sign, which needs a PKCS#12 with the
+# key, so it stays on SIGN_PFX (customers pin its SHA-256 fingerprint with
+# <trustedSigners>).  RFC 3161 timestamps keep the signatures valid after the
+# cert expires.
+-include $(HOME)/.rai-codesign/sign.mk
 SIGN_PFX       ?= $(wildcard $(HOME)/.rai-codesign/rai-codesign.pfx)
 SIGN_PASS_FILE ?= $(dir $(SIGN_PFX))pass.txt
 SIGN_CER       ?= $(dir $(SIGN_PFX))rai-codesign.cer
 SIGN_TSA       ?= http://timestamp.digicert.com
-ifneq (,$(SIGN_PFX))
+sign_cert_note = echo "\# signed: $$(openssl x509 -in $(1) -noout -subject -fingerprint -sha256 | tr '\n' ' ')"
+ifneq (,$(SIGN_KV))
+sign_pe    = AZ_TOKEN="$$(az account get-access-token --resource https://vault.azure.net --query accessToken -o tsv)" \
+               jsign --storetype AZUREKEYVAULT --keystore $(SIGN_KV) --storepass env:AZ_TOKEN \
+               --alias $(SIGN_KV_CERT) --certfile $(SIGN_KV_CHAIN) --replace \
+               --alg SHA-256 --tsaurl $(SIGN_TSA) --tsmode RFC3161 $(1)
+sign_note  = $(call sign_cert_note,$(SIGN_KV_CHAIN))
+else ifneq (,$(SIGN_PFX))
 sign_pe    = jsign --keystore $(SIGN_PFX) --storepass file:$(SIGN_PASS_FILE) --alias rai-codesign \
                --alg SHA-256 --tsaurl $(SIGN_TSA) --tsmode RFC3161 $(1)
+sign_note  = $(call sign_cert_note,$(SIGN_CER))
+else
+sign_pe    = echo "unsigned (no SIGN_KV or SIGN_PFX): $(1)"
+sign_note  = echo "\# unsigned"
+endif
+ifneq (,$(SIGN_PFX))
 sign_nupkg = dotnet nuget sign $(1) --certificate-path $(SIGN_PFX) \
                --certificate-password "$$(cat $(SIGN_PASS_FILE))" --timestamper $(SIGN_TSA)
-sign_note  = echo "\# signed: $$(openssl x509 -in $(SIGN_CER) -noout -subject -fingerprint -sha256 | tr '\n' ' ')"
 else
-sign_pe    = echo "unsigned (no SIGN_PFX): $(1)"
 sign_nupkg = echo "unsigned (no SIGN_PFX): $(1)"
-sign_note  = echo "\# unsigned"
 endif
 
 # --- windows distribution (make port_extra=-mingw dist_win) ------------------
