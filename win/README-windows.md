@@ -77,15 +77,15 @@ terminates it after 20 s if it has not exited.
 
 ## Signatures
 
-The exes, dlls, the installer and the RaiApi2 NuGet package are Authenticode-signed with the
-Rai Technology code-signing certificate (self-signed; SHA-256 fingerprint
-`E9:19:03:48:61:9A:C6:FB:8B:EE:3D:08:2A:F0:24:4E:1D:2B:52:50:E0:76:FA:E9:7D:80:C3:BC:37:92:51:B7`,
-also recorded in `SOURCES.txt`).  Windows reports the signature as valid once the certificate
-`rai-codesign.cer` from https://www.raitechnology.com/ is imported into *Trusted Root Certification
-Authorities* and *Trusted Publishers*:
+The exes, dlls and the installer are Authenticode-signed by Rai Technology Incorporated with a
+code-signing certificate issued by DigiCert.  Windows verifies them as they are, nothing has to
+be imported:
 
-    Import-Certificate -FilePath rai-codesign.cer -CertStoreLocation Cert:\CurrentUser\Root
-    Import-Certificate -FilePath rai-codesign.cer -CertStoreLocation Cert:\CurrentUser\TrustedPublisher
     Get-AuthenticodeSignature bin\*.exe
+
+The status is `Valid` and the signer is `CN=Rai Technology Incorporated`.  The certificate is
+renewed from time to time; the SHA-256 fingerprint of the one that signed this build is in the
+`# signed:` line of `SOURCES.txt`.  `uninstall.exe` is written by the installer when it runs and
+is not signed.
 
 The signatures carry RFC 3161 timestamps and stay valid after the certificate expires.

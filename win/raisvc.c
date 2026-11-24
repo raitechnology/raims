@@ -312,7 +312,18 @@ do_control( const char *op,  const char *name )
   }
   else if ( strcmp( op, "stop" ) == 0 ) {
     if ( ! ControlService( svc, SERVICE_CONTROL_STOP, &st ) ) { win_error( "ControlService" ); r = 1; }
-    else printf( "%s stopping\n", name );
+    else {
+      int i;
+      /* wait for STOPPED, the exe and dlls of the program stay locked until
+       * it is gone and an installer that overwrites them next skips them */
+      for ( i = 0; i < 300; i++ ) {          /* up to 30s */
+        if ( ! QueryServiceStatus( svc, &st ) || st.dwCurrentState == SERVICE_STOPPED )
+          break;
+        Sleep( 100 );
+      }
+      if ( st.dwCurrentState == SERVICE_STOPPED ) printf( "%s stopped\n", name );
+      else { printf( "%s still stopping\n", name ); r = 1; }
+    }
   }
   else if ( strcmp( op, "status" ) == 0 ) {
     if ( ! QueryServiceStatus( svc, &st ) ) { win_error( "QueryServiceStatus" ); r = 1; }

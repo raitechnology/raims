@@ -31,6 +31,26 @@ Section "RaiMS server (ms_server, ms_gen_key, raisvc, dlls)" SecMain
   ; stop a previous instance before overwriting the exe
   IfFileExists "$INSTDIR\bin\raisvc.exe" 0 +2
     nsExec::ExecToLog '"$INSTDIR\bin\raisvc.exe" stop ${SVC}'
+  ; the stop of an installed raisvc may return while ms_server is still
+  ; exiting.  its exe and dlls stay locked until the process is gone, and a
+  ; silent install skips a locked file without an error, which left old dlls
+  ; behind.  wait until both exes can be opened for writing, up to 30s
+  IfFileExists "$INSTDIR\bin\ms_server.exe" 0 stop_done
+  StrCpy $1 0
+  stop_wait:
+    ClearErrors
+    FileOpen $0 "$INSTDIR\bin\ms_server.exe" a
+    IfErrors stop_locked
+    FileClose $0
+    FileOpen $0 "$INSTDIR\bin\raisvc.exe" a
+    IfErrors stop_locked
+    FileClose $0
+    Goto stop_done
+  stop_locked:
+    Sleep 100
+    IntOp $1 $1 + 1
+    IntCmp $1 300 stop_done stop_wait stop_done
+  stop_done:
   SetOutPath "$INSTDIR"
   File /r /x config "${SRC}\*.*"
   ; config: generate the keys only when there is no config.yaml yet (that is
